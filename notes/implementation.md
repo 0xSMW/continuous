@@ -36,6 +36,7 @@
 | Strategy breadth versus current runtime | The running app is still a narrow persisted core demo; the updated strategy and docs now define the broader product surface that implementation should grow toward |
 | Worker runtime mode | First worker run is a deterministic simulation that writes the durable loop without external sends or money movement |
 | Worker selection | Runtime selection now accepts tenant or worker selectors and falls back only when a single active Revenue Worker exists |
+| Worker run lifecycle | `worker_runs` is now the idempotent lifecycle boundary for Revenue Worker runs, with events kept as the audit log |
 | Codex app-server boundary | The local app-server CLI exists, but the standalone control socket was unavailable; use the Next.js MCP bridge for worker build visibility |
 
 ### Current State
@@ -44,7 +45,8 @@ The DigitalOcean stack is running on `45.55.53.92`. `continuoushq.com` and
 `getcontinuous.app` both serve the app over HTTPS with Let's Encrypt
 certificates. Continuous Core now has
 persisted graph, task, capability, event, evidence, budget, adapter, and
-generated UI primitives plus `/`, `/api/health`, and `/api/core`. Local
+generated UI primitives plus worker run lifecycle records and `/`,
+`/api/health`, and `/api/core`. Local
 Node-side validation passes; the real Bun path is verified in the droplet
 containers and GitHub CI.
 
@@ -56,7 +58,8 @@ define the platform boundaries.
 ### Revenue Worker Runtime
 
 The first Revenue Worker slice uses the existing worker, task, event, evidence,
-budget, inference, usage, adapter, and UI-contract primitives. Each run requires
-an idempotency key, enforces the worker budget before spend, creates durable budget/evidence/event records, marks the
-quote task as `approval_required`, and leaves external execution disabled until
-real auth and adapter approvals are in place.
+budget, inference, usage, adapter, worker-run, and UI-contract primitives. Each
+run requires an idempotency key, writes a `worker_runs` lifecycle record,
+enforces the worker budget before spend, creates durable budget/evidence/event
+records, marks the quote task as `approval_required`, and leaves external
+execution disabled until real auth and adapter approvals are in place.

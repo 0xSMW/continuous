@@ -2,15 +2,16 @@
 
 The current Revenue Worker is a deterministic persisted simulation. It proves
 worker identity, capability grants, task ownership, budget reservation, usage,
-inference logging, event emission, evidence capture, adapter receipts, approval
-state, and object versioning without external sends or money movement.
+inference logging, worker run lifecycle, event emission, evidence capture,
+adapter receipts, approval state, and object versioning without external sends
+or money movement.
 
 ## Current Runtime
 
 | Area | Current state |
 |---|---|
 | Worker identity | `Revenue Operations Worker`, autonomy level 2, owner-managed |
-| Core loop | One operator run creates budget, inference, usage, event, evidence, adapter action, task update, and object version records |
+| Core loop | One operator run creates worker run, budget, inference, usage, event, evidence, adapter action, task update, and object version records |
 | Operator read API | `GET /api/revenue-worker`, bearer-token required |
 | Run API | `POST /api/revenue-worker/run`, disabled by default and bearer-token gated when enabled |
 | Operator run | `bun run worker:revenue -- --idempotency-key=<key>` |
@@ -24,7 +25,7 @@ smoke test.
 | Gate | Required proof |
 |---|---|
 | Auth | Operator/user identity on every side-effecting run |
-| Idempotency | Worker-run boundary table or equivalent event-enforced key |
+| Idempotency | `worker_runs` owns first-class run lifecycle state, with event idempotency kept as a compatibility guard |
 | Budget | Reservation before model/tool work and usage attribution after |
 | Evidence | Source snapshot, prompt/result trace, approval, and adapter receipt |
 | Approval | Generated UI contract for approve, revise, reject, and escalate |
@@ -76,11 +77,10 @@ smoke test.
 
 ## Milestones
 
-1. Add a worker-run table for first-class run lifecycle state.
-2. Add authenticated operator identity to run requests.
-3. Convert the deterministic run into a small state machine.
-4. Add read-only real lead intake.
-5. Add quote approval UI backed by `ui_contracts`.
-6. Add dry-run adapter execution with reconciliation.
-7. Add eval fixtures and CI checks for lead classification and quote decisions.
-8. Raise autonomy only for read, classify, draft, and owner brief capabilities.
+1. Capture authenticated operator identity on run requests.
+2. Convert the deterministic run into a small state machine.
+3. Add read-only real lead intake.
+4. Add quote approval UI backed by `ui_contracts`.
+5. Add dry-run adapter execution with reconciliation.
+6. Add eval fixtures and CI checks for lead classification and quote decisions.
+7. Raise autonomy only for read, classify, draft, and owner brief capabilities.

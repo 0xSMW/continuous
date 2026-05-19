@@ -25,6 +25,7 @@ import {
   tenants,
   usageEvents,
   users,
+  workerRuns,
   workers,
   type JsonObject,
 } from "../db/schema";
@@ -96,15 +97,20 @@ export type RevenueWorkerSnapshot = {
   }>;
   latestRun: {
     id: string;
+    workerRunId: string | null;
+    eventId: string | null;
     idempotencyKey: string | null;
     occurredAt: string;
+    state: string;
+    mode: string;
   } | null;
 };
 
 export type RevenueWorkerRunResult = {
   created: boolean;
   idempotencyKey: string;
-  eventId: string;
+  workerRunId: string | null;
+  eventId: string | null;
   taskId: string | null;
   evidenceId: string | null;
   reservationId: string | null;
@@ -162,6 +168,14 @@ function nextWorkerKpis(current: JsonObject, now: Date) {
 
 function traceHash(idempotencyKey: string, eventType: string) {
   return createHash("sha256").update(`${source}:${eventType}:${idempotencyKey}`).digest("hex");
+}
+
+function stringData(data: JsonObject, key: string) {
+  const output = data.output;
+  const nested =
+    output && typeof output === "object" && !Array.isArray(output) ? (output as JsonObject) : null;
+  const value = nested?.[key] ?? data[key];
+  return typeof value === "string" ? value : null;
 }
 
 function workerWhere(selector: RevenueWorkerSelector) {
@@ -378,7 +392,8 @@ export async function getRevenueWorkerSnapshot(
     reservations,
     workerTasks,
     workerEvents,
-    latestRun,
+    latestWorkerRun,
+    latestEventRun,
   ] = await Promise.all([
     db
       .select({ value: count() })
@@ -461,6 +476,19 @@ export async function getRevenueWorkerSnapshot(
       .limit(6),
     db
       .select({
+        id: workerRuns.id,
+        eventId: workerRuns.eventId,
+        idempotencyKey: workerRuns.idempotencyKey,
+        state: workerRuns.state,
+        mode: workerRuns.mode,
+        startedAt: workerRuns.startedAt,
+      })
+      .from(workerRuns)
+      .where(and(eq(workerRuns.tenantId, workerRow.tenantId), eq(workerRuns.workerId, workerRow.id)))
+      .orderBy(desc(workerRuns.startedAt))
+      .limit(1),
+    db
+      .select({
         id: events.id,
         idempotencyKey: events.idempotencyKey,
         occurredAt: events.occurredAt,
@@ -519,15 +547,29 @@ export async function getRevenueWorkerSnapshot(
       occurredAt: event.occurredAt.toISOString(),
       data: event.data,
     })),
-	    latestRun: latestRun[0]
-	      ? {
-	          id: latestRun[0].id,
-	          idempotencyKey: latestRun[0].idempotencyKey,
-	          occurredAt: latestRun[0].occurredAt.toISOString(),
-	        }
-	      : null,
-	  };
-	}
+    latestRun: latestWorkerRun[0]
+      ? {
+          id: latestWorkerRun[0].id,
+          workerRunId: latestWorkerRun[0].id,
+          eventId: latestWorkerRun[0].eventId,
+          idempotencyKey: latestWorkerRun[0].idempotencyKey,
+          occurredAt: latestWorkerRun[0].startedAt.toISOString(),
+          state: latestWorkerRun[0].state,
+          mode: latestWorkerRun[0].mode,
+        }
+      : latestEventRun[0]
+        ? {
+            id: latestEventRun[0].id,
+            workerRunId: null,
+            eventId: latestEventRun[0].id,
+            idempotencyKey: latestEventRun[0].idempotencyKey,
+            occurredAt: latestEventRun[0].occurredAt.toISOString(),
+            state: "done",
+            mode: "legacy_event",
+          }
+        : null,
+  };
+}
 
 export async function getRevenueWorkerSnapshotSafe(selector: RevenueWorkerSelector = {}): Promise<
   | { ok: true; snapshot: RevenueWorkerSnapshot; error: null }
@@ -553,7 +595,7 @@ export async function getRevenueWorkerSnapshotSafe(selector: RevenueWorkerSelect
       },
       error: error instanceof Error ? error.message : "Unknown Revenue Worker error",
     };
-		}
+  }
 }
 
 export async function runRevenueWorker(input: {
@@ -569,12 +611,43 @@ export async function runRevenueWorker(input: {
   };
   const context = await loadWorkerContext(db, selector);
 
-	  const result = await db.transaction(async (tx) => {
-	    await tx.execute(
-	      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${source}:${input.idempotencyKey}`}))`,
-	    );
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${source}:${input.idempotencyKey}`}))`,
+    );
 
-    const [existing] = await tx
+    const [existingRun] = await tx
+      .select({
+        id: workerRuns.id,
+        taskId: workerRuns.taskId,
+        eventId: workerRuns.eventId,
+        data: workerRuns.data,
+      })
+      .from(workerRuns)
+      .where(
+        and(
+          eq(workerRuns.tenantId, context.worker.tenantId),
+          eq(workerRuns.source, source),
+          eq(workerRuns.idempotencyKey, input.idempotencyKey),
+        ),
+      )
+      .limit(1);
+
+    if (existingRun) {
+      return {
+        created: false as const,
+        workerRunId: existingRun.id,
+        eventId: existingRun.eventId ?? stringData(existingRun.data, "eventId"),
+        taskId: existingRun.taskId ?? stringData(existingRun.data, "taskId") ?? context.task?.id ?? null,
+        evidenceId: stringData(existingRun.data, "evidenceId"),
+        reservationId: stringData(existingRun.data, "reservationId"),
+        inferenceId: stringData(existingRun.data, "inferenceId"),
+        usageEventId: stringData(existingRun.data, "usageEventId"),
+        adapterActionId: stringData(existingRun.data, "adapterActionId"),
+      };
+    }
+
+    const [existingEvent] = await tx
       .select({
         id: events.id,
         taskId: events.taskId,
@@ -590,50 +663,85 @@ export async function runRevenueWorker(input: {
       )
       .limit(1);
 
-	    if (existing) {
-	      return {
+    if (existingEvent) {
+      const eventOutput = {
+        eventId: existingEvent.id,
+        taskId: existingEvent.taskId ?? context.task?.id ?? null,
+        evidenceId: stringData(existingEvent.data, "evidenceId"),
+        reservationId: stringData(existingEvent.data, "reservationId"),
+        inferenceId: stringData(existingEvent.data, "inferenceId"),
+        usageEventId: stringData(existingEvent.data, "usageEventId"),
+        adapterActionId: stringData(existingEvent.data, "adapterActionId"),
+      };
+      const [adoptedRun] = await tx
+        .insert(workerRuns)
+        .values({
+          tenantId: context.worker.tenantId,
+          workerId: context.worker.id,
+          taskId: existingEvent.taskId ?? context.task?.id ?? null,
+          eventId: existingEvent.id,
+          capabilityId: context.task?.capabilityId ?? context.quoteCapabilityId ?? context.briefCapabilityId,
+          connectionId: context.connectionId,
+          budgetAccountId: context.budgetAccountId,
+          source,
+          idempotencyKey: input.idempotencyKey,
+          state: "done",
+          mode: "legacy_event",
+          data: {
+            input: {
+              idempotencyKey: input.idempotencyKey,
+              adoptedFromEvent: existingEvent.id,
+            },
+            output: eventOutput,
+          },
+          endedAt: new Date(),
+        })
+        .returning({ id: workerRuns.id });
+
+      return {
         created: false as const,
-        eventId: existing.id,
-        taskId: existing.taskId ?? context.task?.id ?? null,
-        evidenceId: typeof existing.data.evidenceId === "string" ? existing.data.evidenceId : null,
-        reservationId: typeof existing.data.reservationId === "string" ? existing.data.reservationId : null,
-        inferenceId: typeof existing.data.inferenceId === "string" ? existing.data.inferenceId : null,
-        usageEventId: typeof existing.data.usageEventId === "string" ? existing.data.usageEventId : null,
-        adapterActionId: typeof existing.data.adapterActionId === "string" ? existing.data.adapterActionId : null,
-	      };
-	    }
+        workerRunId: adoptedRun.id,
+        eventId: existingEvent.id,
+        taskId: existingEvent.taskId ?? context.task?.id ?? null,
+        evidenceId: stringData(existingEvent.data, "evidenceId"),
+        reservationId: stringData(existingEvent.data, "reservationId"),
+        inferenceId: stringData(existingEvent.data, "inferenceId"),
+        usageEventId: stringData(existingEvent.data, "usageEventId"),
+        adapterActionId: stringData(existingEvent.data, "adapterActionId"),
+      };
+    }
 
-	    const now = new Date();
-	    await tx.execute(sql`select id from budget_accounts where id = ${context.budgetAccountId} for update`);
+    const now = new Date();
+    await tx.execute(sql`select id from budget_accounts where id = ${context.budgetAccountId} for update`);
 
-	    const [budgetState] = await tx
-	      .select({
-	        policyId: budgetAccounts.policyId,
-	        policyActive: budgetPolicies.active,
-	        monthlyUnits: budgetPolicies.monthlyUnits,
-	        perTaskUnits: budgetPolicies.perTaskUnits,
-	        hardLimit: budgetPolicies.hardLimit,
-	      })
-	      .from(budgetAccounts)
-	      .leftJoin(budgetPolicies, eq(budgetAccounts.policyId, budgetPolicies.id))
-	      .where(and(eq(budgetAccounts.id, context.budgetAccountId), eq(budgetAccounts.active, true)))
-	      .limit(1);
+    const [budgetState] = await tx
+      .select({
+        policyId: budgetAccounts.policyId,
+        policyActive: budgetPolicies.active,
+        monthlyUnits: budgetPolicies.monthlyUnits,
+        perTaskUnits: budgetPolicies.perTaskUnits,
+        hardLimit: budgetPolicies.hardLimit,
+      })
+      .from(budgetAccounts)
+      .leftJoin(budgetPolicies, eq(budgetAccounts.policyId, budgetPolicies.id))
+      .where(and(eq(budgetAccounts.id, context.budgetAccountId), eq(budgetAccounts.active, true)))
+      .limit(1);
 
-	    if (!budgetState?.policyId || !budgetState.policyActive) {
-	      throw new RevenueWorkerUnavailableError(
-	        "worker_budget_policy_missing",
-	        "Revenue Worker budget account has no active policy.",
-	      );
-	    }
+    if (!budgetState?.policyId || !budgetState.policyActive) {
+      throw new RevenueWorkerUnavailableError(
+        "worker_budget_policy_missing",
+        "Revenue Worker budget account has no active policy.",
+      );
+    }
 
-	    const perTaskUnits =
-	      budgetState.perTaskUnits === null ? null : numberValue(budgetState.perTaskUnits);
+    const perTaskUnits =
+      budgetState.perTaskUnits === null ? null : numberValue(budgetState.perTaskUnits);
 
-	    if (perTaskUnits !== null && runUnits > perTaskUnits) {
-	      throw new RevenueWorkerUnavailableError(
-	        "worker_budget_per_task_exceeded",
-	        `Revenue Worker run requires ${runUnits} units, above the per-task limit of ${perTaskUnits}.`,
-	      );
+    if (perTaskUnits !== null && runUnits > perTaskUnits) {
+      throw new RevenueWorkerUnavailableError(
+        "worker_budget_per_task_exceeded",
+        `Revenue Worker run requires ${runUnits} units, above the per-task limit of ${perTaskUnits}.`,
+      );
 	    }
 
 	    const [allocation] = await tx
@@ -693,8 +801,41 @@ export async function runRevenueWorker(input: {
 	      );
 	    }
 
-	    const task = context.task;
-	    const capabilityId = task?.capabilityId ?? context.quoteCapabilityId ?? context.briefCapabilityId;
+    const task = context.task;
+    const capabilityId = task?.capabilityId ?? context.quoteCapabilityId ?? context.briefCapabilityId;
+
+    const runInput = {
+      idempotencyKey: input.idempotencyKey,
+      taskId: task?.id ?? null,
+      capabilityId,
+      connectionId: context.connectionId,
+      budgetAccountId: context.budgetAccountId,
+      routeId: context.routeId,
+      units: runUnits,
+      mode: "simulation",
+    };
+
+    const [workerRun] = await tx
+      .insert(workerRuns)
+      .values({
+        tenantId: context.worker.tenantId,
+        workerId: context.worker.id,
+        taskId: task?.id ?? null,
+        capabilityId,
+        connectionId: context.connectionId,
+        budgetAccountId: context.budgetAccountId,
+        source,
+        idempotencyKey: input.idempotencyKey,
+        state: "running",
+        mode: "simulation",
+        data: {
+          input: runInput,
+          output: {},
+        },
+        startedAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: workerRuns.id });
 
     const [reservation] = await tx
       .insert(budgetReservations)
@@ -708,7 +849,7 @@ export async function runRevenueWorker(input: {
       })
       .returning({ id: budgetReservations.id });
 
-    const [run] = await tx
+    const [adapterRun] = await tx
       .insert(adapterRuns)
       .values({
         tenantId: context.worker.tenantId,
@@ -771,7 +912,8 @@ export async function runRevenueWorker(input: {
         data: {
           route: "low_cost_fast",
           mode: "simulation",
-          adapterRunId: run.id,
+          workerRunId: workerRun.id,
+          adapterRunId: adapterRun.id,
         },
       })
       .returning({ id: usageEvents.id });
@@ -797,6 +939,7 @@ export async function runRevenueWorker(input: {
           budgetUnits: runUnits,
           externalExecution: "blocked",
           requiresApproval: true,
+          workerRunId: workerRun.id,
           taskId: task?.id ?? null,
         },
         occurredAt: now,
@@ -818,6 +961,7 @@ export async function runRevenueWorker(input: {
         hash: traceHash(input.idempotencyKey, "trace"),
         data: {
           idempotencyKey: input.idempotencyKey,
+          workerRunId: workerRun.id,
           inferenceId: inference.id,
           usageEventId: usage.id,
           reservationId: reservation.id,
@@ -841,6 +985,7 @@ export async function runRevenueWorker(input: {
         decision: "request_owner_approval",
         rationale: "External communication and money movement are blocked until owner approval.",
         data: {
+          workerRunId: workerRun.id,
           idempotencyKey: input.idempotencyKey,
           classification: "quote_ready_for_owner_approval",
           autonomyLevel: 2,
@@ -859,6 +1004,7 @@ export async function runRevenueWorker(input: {
         state: "done",
         request: {
           action: "draft_customer_response",
+          workerRunId: workerRun.id,
           externalSend: false,
         },
         response: {
@@ -867,6 +1013,7 @@ export async function runRevenueWorker(input: {
         },
         receipt: {
           mode: "simulation",
+          workerRunId: workerRun.id,
           externalMutation: false,
         },
       })
@@ -880,6 +1027,7 @@ export async function runRevenueWorker(input: {
       kind: "simulation_quality",
       score: "0.860",
       data: {
+        workerRunId: workerRun.id,
         idempotencyKey: input.idempotencyKey,
         dimensions: {
           evidence_complete: true,
@@ -897,6 +1045,7 @@ export async function runRevenueWorker(input: {
           state: "approval_required",
           outcome: {
             status: "quote_ready_for_owner_approval",
+            workerRunId: workerRun.id,
             runEventId: event.id,
             adapterActionId: action.id,
           },
@@ -933,6 +1082,7 @@ export async function runRevenueWorker(input: {
         version: numberValue(version?.value),
         data: {
           state: "approval_required",
+          workerRunId: workerRun.id,
           sourceEventId: event.id,
           approvalRequired: true,
         },
@@ -961,6 +1111,7 @@ export async function runRevenueWorker(input: {
           budgetUnits: runUnits,
           externalExecution: "blocked",
           requiresApproval: true,
+          workerRunId: workerRun.id,
           taskId: task?.id ?? null,
           evidenceId: workerEvidence.id,
           reservationId: reservation.id,
@@ -971,8 +1122,42 @@ export async function runRevenueWorker(input: {
       })
       .where(eq(events.id, event.id));
 
+    const runOutput = {
+      worker: context.worker.name,
+      tenant: context.tenantName,
+      classification: "quote_ready_for_owner_approval",
+      budgetUnits: runUnits,
+      externalExecution: "blocked",
+      requiresApproval: true,
+      taskId: task?.id ?? null,
+      eventId: event.id,
+      evidenceId: workerEvidence.id,
+      reservationId: reservation.id,
+      inferenceId: inference.id,
+      usageEventId: usage.id,
+      adapterRunId: adapterRun.id,
+      adapterActionId: action.id,
+    };
+
+    await tx
+      .update(workerRuns)
+      .set({
+        eventId: event.id,
+        taskId: task?.id,
+        capabilityId,
+        state: "done",
+        endedAt: now,
+        updatedAt: now,
+        data: {
+          input: runInput,
+          output: runOutput,
+        },
+      })
+      .where(eq(workerRuns.id, workerRun.id));
+
     return {
       created: true as const,
+      workerRunId: workerRun.id,
       eventId: event.id,
       taskId: task?.id ?? null,
       evidenceId: workerEvidence.id,

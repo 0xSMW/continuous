@@ -1,27 +1,43 @@
-import { count, eq, sql } from "drizzle-orm";
+import { count, sql } from "drizzle-orm";
 import type { AnyPgTable } from "drizzle-orm/pg-core";
 
 import {
+  adapterActions,
+  adapterRuns,
   adapters,
   bankAccounts,
   budgetAccounts,
+  budgetAllocations,
+  budgetPolicies,
+  budgetPools,
+  budgetReservations,
   capabilities,
+  capabilityGrants,
   compensationAgreements,
+  connections,
   customers,
   decisions,
   documents,
   employments,
+  entityIdentifiers,
   evidence,
   evaluations,
   events,
   filingDrafts,
   filingRequirements,
   generatedViews,
+  inferences,
   invoices,
   jobs,
   legalEntities,
   leads,
+  modelProviders,
+  modelRoutes,
+  objectLinks,
+  objectVersions,
+  objects,
   obligations,
+  offers,
   paySchedules,
   paymentInstructions,
   payments,
@@ -34,6 +50,7 @@ import {
   usageEvents,
   workflowDefinitions,
   workflowRuns,
+  workerRuns,
   workers,
 } from "../db/schema";
 
@@ -57,11 +74,17 @@ export type CoreSummary = {
     paymentInstructions: number;
     workflowDefinitions: number;
     workflowRuns: number;
+    workerRuns: number;
+    objects: number;
+    objectLinks: number;
+    objectVersions: number;
     documents: number;
     decisions: number;
     evaluations: number;
+    entityIdentifiers: number;
     customers: number;
     leads: number;
+    offers: number;
     quotes: number;
     jobs: number;
     invoices: number;
@@ -70,11 +93,22 @@ export type CoreSummary = {
     evidence: number;
     events: number;
     capabilities: number;
+    capabilityGrants: number;
     workers: number;
+    modelProviders: number;
+    modelRoutes: number;
+    budgetPolicies: number;
+    budgetPools: number;
     budgetAccounts: number;
+    budgetAllocations: number;
+    budgetReservations: number;
     usageEvents: number;
     generatedViews: number;
     adapters: number;
+    connections: number;
+    adapterRuns: number;
+    adapterActions: number;
+    inferences: number;
   };
   activeTasks: Array<{
     id: string;
@@ -121,11 +155,17 @@ export async function getCoreSummary(): Promise<CoreSummary> {
     paymentInstructionCount,
     workflowDefinitionCount,
     workflowRunCount,
+    workerRunCount,
+    objectCount,
+    objectLinkCount,
+    objectVersionCount,
     documentCount,
     decisionCount,
     evaluationCount,
+    entityIdentifierCount,
     customerCount,
     leadCount,
+    offerCount,
     quoteCount,
     jobCount,
     invoiceCount,
@@ -134,11 +174,22 @@ export async function getCoreSummary(): Promise<CoreSummary> {
     evidenceCount,
     eventCount,
     capabilityCount,
+    capabilityGrantCount,
     workerCount,
+    modelProviderCount,
+    modelRouteCount,
+    budgetPolicyCount,
+    budgetPoolCount,
     budgetCount,
+    budgetAllocationCount,
+    budgetReservationCount,
     usageCount,
     viewCount,
     adapterCount,
+    connectionCount,
+    adapterRunCount,
+    adapterActionCount,
+    inferenceCount,
     activeTasks,
     recentEvents,
   ] = await Promise.all([
@@ -158,11 +209,17 @@ export async function getCoreSummary(): Promise<CoreSummary> {
     tableCount(db, paymentInstructions),
     tableCount(db, workflowDefinitions),
     tableCount(db, workflowRuns),
+    tableCount(db, workerRuns),
+    tableCount(db, objects),
+    tableCount(db, objectLinks),
+    tableCount(db, objectVersions),
     tableCount(db, documents),
     tableCount(db, decisions),
     tableCount(db, evaluations),
+    tableCount(db, entityIdentifiers),
     tableCount(db, customers),
     tableCount(db, leads),
+    tableCount(db, offers),
     tableCount(db, quotes),
     tableCount(db, jobs),
     tableCount(db, invoices),
@@ -171,11 +228,22 @@ export async function getCoreSummary(): Promise<CoreSummary> {
     tableCount(db, evidence),
     tableCount(db, events),
     tableCount(db, capabilities),
+    tableCount(db, capabilityGrants),
     tableCount(db, workers),
+    tableCount(db, modelProviders),
+    tableCount(db, modelRoutes),
+    tableCount(db, budgetPolicies),
+    tableCount(db, budgetPools),
     tableCount(db, budgetAccounts),
+    tableCount(db, budgetAllocations),
+    tableCount(db, budgetReservations),
     tableCount(db, usageEvents),
     tableCount(db, generatedViews),
     tableCount(db, adapters),
+    tableCount(db, connections),
+    tableCount(db, adapterRuns),
+    tableCount(db, adapterActions),
+    tableCount(db, inferences),
     db
       .select({
         id: tasks.id,
@@ -185,8 +253,8 @@ export async function getCoreSummary(): Promise<CoreSummary> {
         ownerRef: tasks.ownerRef,
       })
       .from(tasks)
-      .where(eq(tasks.state, "active"))
-      .orderBy(sql`${tasks.createdAt} desc`)
+      .where(sql`${tasks.state} in ('active', 'waiting', 'approval_required', 'blocked')`)
+      .orderBy(sql`${tasks.updatedAt} desc`)
       .limit(5),
     db
       .select({
@@ -219,11 +287,17 @@ export async function getCoreSummary(): Promise<CoreSummary> {
       paymentInstructions: paymentInstructionCount,
       workflowDefinitions: workflowDefinitionCount,
       workflowRuns: workflowRunCount,
+      workerRuns: workerRunCount,
+      objects: objectCount,
+      objectLinks: objectLinkCount,
+      objectVersions: objectVersionCount,
       documents: documentCount,
       decisions: decisionCount,
       evaluations: evaluationCount,
+      entityIdentifiers: entityIdentifierCount,
       customers: customerCount,
       leads: leadCount,
+      offers: offerCount,
       quotes: quoteCount,
       jobs: jobCount,
       invoices: invoiceCount,
@@ -232,11 +306,22 @@ export async function getCoreSummary(): Promise<CoreSummary> {
       evidence: evidenceCount,
       events: eventCount,
       capabilities: capabilityCount,
+      capabilityGrants: capabilityGrantCount,
       workers: workerCount,
+      modelProviders: modelProviderCount,
+      modelRoutes: modelRouteCount,
+      budgetPolicies: budgetPolicyCount,
+      budgetPools: budgetPoolCount,
       budgetAccounts: budgetCount,
+      budgetAllocations: budgetAllocationCount,
+      budgetReservations: budgetReservationCount,
       usageEvents: usageCount,
       generatedViews: viewCount,
       adapters: adapterCount,
+      connections: connectionCount,
+      adapterRuns: adapterRunCount,
+      adapterActions: adapterActionCount,
+      inferences: inferenceCount,
     },
     activeTasks: activeTasks.map((task) => ({
       id: task.id,
@@ -282,11 +367,17 @@ export async function getCoreSummarySafe(): Promise<
           paymentInstructions: 0,
           workflowDefinitions: 0,
           workflowRuns: 0,
+          workerRuns: 0,
+          objects: 0,
+          objectLinks: 0,
+          objectVersions: 0,
           documents: 0,
           decisions: 0,
           evaluations: 0,
+          entityIdentifiers: 0,
           customers: 0,
           leads: 0,
+          offers: 0,
           quotes: 0,
           jobs: 0,
           invoices: 0,
@@ -295,11 +386,22 @@ export async function getCoreSummarySafe(): Promise<
           evidence: 0,
           events: 0,
           capabilities: 0,
+          capabilityGrants: 0,
           workers: 0,
+          modelProviders: 0,
+          modelRoutes: 0,
+          budgetPolicies: 0,
+          budgetPools: 0,
           budgetAccounts: 0,
+          budgetAllocations: 0,
+          budgetReservations: 0,
           usageEvents: 0,
           generatedViews: 0,
           adapters: 0,
+          connections: 0,
+          adapterRuns: 0,
+          adapterActions: 0,
+          inferences: 0,
         },
         activeTasks: [],
         recentEvents: [],
@@ -311,8 +413,10 @@ export async function getCoreSummarySafe(): Promise<
 
 export function summarizeCoreReadiness(summary: CoreSummary) {
   const persistedObjects =
+    summary.counts.objects +
     summary.counts.customers +
     summary.counts.leads +
+    summary.counts.offers +
     summary.counts.quotes +
     summary.counts.jobs +
     summary.counts.invoices +
@@ -321,16 +425,26 @@ export function summarizeCoreReadiness(summary: CoreSummary) {
   return {
     hasTenant: summary.counts.tenants > 0,
     hasGraph: persistedObjects > 0,
+    hasObjectSpine: summary.counts.objects > 0 && summary.counts.objectVersions > 0,
     hasTaskLedger: summary.counts.tasks > 0,
     hasCapabilities: summary.counts.capabilities > 0,
     hasEvidence: summary.counts.evidence > 0,
-    hasBudgets: summary.counts.budgetAccounts > 0,
+    hasBudgets:
+      summary.counts.budgetPolicies > 0 &&
+      summary.counts.budgetAllocations > 0 &&
+      summary.counts.budgetAccounts > 0,
+    hasAiGateway:
+      summary.counts.modelProviders > 0 &&
+      summary.counts.modelRoutes > 0 &&
+      summary.counts.budgetAccounts > 0,
+    hasAdapterLedger: summary.counts.adapters > 0 && summary.counts.connections > 0,
     hasEntity: summary.counts.legalEntities > 0 && summary.counts.bankAccounts > 0,
     hasWorkforce: summary.counts.people > 0 && summary.counts.employments > 0,
     hasPayroll: summary.counts.paySchedules > 0 && summary.counts.payrollRuns > 0,
     hasCompliance: summary.counts.rulePacks > 0 && summary.counts.obligations > 0,
     hasFilings: summary.counts.filingRequirements > 0 && summary.counts.filingDrafts > 0,
     hasWorkflows: summary.counts.workflowDefinitions > 0 && summary.counts.workflowRuns > 0,
+    hasWorkerRuns: summary.counts.workerRuns > 0,
     hasDocuments: summary.counts.documents > 0,
     hasEvaluations: summary.counts.evaluations > 0,
   };

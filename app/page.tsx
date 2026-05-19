@@ -21,11 +21,17 @@ const countLabels = {
   paymentInstructions: "Payment instructions",
   workflowDefinitions: "Workflow definitions",
   workflowRuns: "Workflow runs",
+  workerRuns: "Worker runs",
+  objects: "Objects",
+  objectLinks: "Object links",
+  objectVersions: "Object versions",
   documents: "Documents",
   decisions: "Decisions",
   evaluations: "Evaluations",
+  entityIdentifiers: "Entity identifiers",
   customers: "Customers",
   leads: "Leads",
+  offers: "Offers",
   quotes: "Quotes",
   jobs: "Jobs",
   invoices: "Invoices",
@@ -34,11 +40,22 @@ const countLabels = {
   evidence: "Evidence",
   events: "Events",
   capabilities: "Capabilities",
+  capabilityGrants: "Capability grants",
   workers: "Workers",
+  modelProviders: "Model providers",
+  modelRoutes: "Model routes",
+  budgetPolicies: "Budget policies",
+  budgetPools: "Budget pools",
   budgetAccounts: "Budget accounts",
+  budgetAllocations: "Budget allocations",
+  budgetReservations: "Budget reservations",
   usageEvents: "Usage events",
   generatedViews: "Generated views",
   adapters: "Adapters",
+  connections: "Connections",
+  adapterRuns: "Adapter runs",
+  adapterActions: "Adapter actions",
+  inferences: "Inferences",
 };
 
 const primitives = [
@@ -87,7 +104,13 @@ export default async function AdminPage() {
     summary.counts.workers > 0 &&
     summary.counts.capabilities > 0 &&
     summary.counts.budgetAccounts > 0 &&
-    summary.counts.events > 0;
+    summary.counts.workerRuns > 0 &&
+    summary.counts.tasks > 0 &&
+    summary.counts.evidence > 0 &&
+    summary.counts.events > 0 &&
+    summary.counts.adapters > 0 &&
+    summary.counts.connections > 0 &&
+    summary.counts.generatedViews > 0;
 
   return (
     <main className="shell">
@@ -148,7 +171,7 @@ export default async function AdminPage() {
                   <span className="label">Runtime</span>
                   <h3>Revenue Worker installed</h3>
                   <p>
-                    The first worker is backed by persisted worker, task, budget, event, evidence, and adapter records.
+                    The first worker is backed by persisted worker, run, task, budget, event, evidence, and adapter records.
                   </p>
                 </div>
               </article>
@@ -172,12 +195,12 @@ export default async function AdminPage() {
               <article className="worker-card">
                 <span className="label">Budget ledger</span>
                 <strong>{summary.counts.budgetAccounts.toLocaleString()}</strong>
-                <p>{summary.counts.usageEvents.toLocaleString()} usage events recorded across worker accounts.</p>
+                <p>{summary.counts.budgetReservations.toLocaleString()} reservations and {summary.counts.usageEvents.toLocaleString()} usage events recorded across worker accounts.</p>
               </article>
               <article className="worker-card">
                 <span className="label">Governance</span>
                 <strong>{summary.counts.capabilities.toLocaleString()}</strong>
-                <p>{summary.counts.tasks.toLocaleString()} tasks, {summary.counts.evidence.toLocaleString()} evidence records, and operator-only worker snapshots.</p>
+                <p>{summary.counts.workerRuns.toLocaleString()} worker runs, {summary.counts.tasks.toLocaleString()} tasks, and {summary.counts.evidence.toLocaleString()} evidence records.</p>
               </article>
             </div>
           ) : (

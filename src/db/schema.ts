@@ -1480,6 +1480,65 @@ export const events = pgTable(
   ],
 );
 
+export const workerRuns = pgTable(
+  "worker_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    workerId: uuid("worker_id")
+      .notNull()
+      .references(() => workers.id, { onDelete: "cascade" }),
+    taskId: uuid("task_id").references(() => tasks.id, {
+      onDelete: "set null",
+    }),
+    eventId: uuid("event_id").references(() => events.id, {
+      onDelete: "set null",
+    }),
+    capabilityId: uuid("capability_id").references(() => capabilities.id, {
+      onDelete: "set null",
+    }),
+    connectionId: uuid("connection_id").references(() => connections.id, {
+      onDelete: "set null",
+    }),
+    budgetAccountId: uuid("budget_account_id").references(
+      () => budgetAccounts.id,
+      { onDelete: "set null" },
+    ),
+    source: text("source").notNull().default("continuous.worker"),
+    idempotencyKey: text("idempotency_key").notNull(),
+    state: runState("state").notNull().default("queued"),
+    mode: text("mode").notNull().default("simulation"),
+    data: jsonb("data")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    startedAt: timestamp("started_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("worker_runs_tenant_idx").on(table.tenantId),
+    index("worker_runs_worker_idx").on(table.workerId),
+    index("worker_runs_task_idx").on(table.taskId),
+    index("worker_runs_event_idx").on(table.eventId),
+    index("worker_runs_state_idx").on(table.tenantId, table.state),
+    uniqueIndex("worker_runs_idempotency_idx").on(
+      table.tenantId,
+      table.source,
+      table.idempotencyKey,
+    ),
+  ],
+);
+
 export const evidence = pgTable(
   "evidence",
   {
@@ -1984,6 +2043,7 @@ export const tenantsRelations = relations(tenants, ({ many }) => ({
   objects: many(objects),
   tasks: many(tasks),
   events: many(events),
+  workerRuns: many(workerRuns),
 }));
 
 export const usersRelations = relations(users, ({ one, many }) => ({
@@ -1994,7 +2054,7 @@ export const usersRelations = relations(users, ({ one, many }) => ({
   managedWorkers: many(workers),
 }));
 
-export const workersRelations = relations(workers, ({ one }) => ({
+export const workersRelations = relations(workers, ({ one, many }) => ({
   tenant: one(tenants, {
     fields: [workers.tenantId],
     references: [tenants.id],
@@ -2003,6 +2063,7 @@ export const workersRelations = relations(workers, ({ one }) => ({
     fields: [workers.managerUserId],
     references: [users.id],
   }),
+  runs: many(workerRuns),
 }));
 
 export const capabilitiesRelations = relations(capabilities, ({ many }) => ({
@@ -2188,6 +2249,7 @@ export const tasksRelations = relations(tasks, ({ one, many }) => ({
   events: many(events),
   evidence: many(evidence),
   usageEvents: many(usageEvents),
+  workerRuns: many(workerRuns),
 }));
 
 export const eventsRelations = relations(events, ({ one, many }) => ({
@@ -2216,6 +2278,38 @@ export const eventsRelations = relations(events, ({ one, many }) => ({
     references: [connections.id],
   }),
   evidence: many(evidence),
+  workerRuns: many(workerRuns),
+}));
+
+export const workerRunsRelations = relations(workerRuns, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [workerRuns.tenantId],
+    references: [tenants.id],
+  }),
+  worker: one(workers, {
+    fields: [workerRuns.workerId],
+    references: [workers.id],
+  }),
+  task: one(tasks, {
+    fields: [workerRuns.taskId],
+    references: [tasks.id],
+  }),
+  event: one(events, {
+    fields: [workerRuns.eventId],
+    references: [events.id],
+  }),
+  capability: one(capabilities, {
+    fields: [workerRuns.capabilityId],
+    references: [capabilities.id],
+  }),
+  connection: one(connections, {
+    fields: [workerRuns.connectionId],
+    references: [connections.id],
+  }),
+  budgetAccount: one(budgetAccounts, {
+    fields: [workerRuns.budgetAccountId],
+    references: [budgetAccounts.id],
+  }),
 }));
 
 export const evidenceRelations = relations(evidence, ({ one }) => ({

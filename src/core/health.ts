@@ -1,3 +1,5 @@
+import type { CoreSummary } from "./summary";
+
 export type CheckState = "pass" | "warn" | "fail";
 
 export type Check = {
@@ -15,15 +17,20 @@ export type Health = {
   summary: {
     tenants: number;
     graphObjects: number;
+    objectSpine: number;
     operatingObjects: number;
     workflows: number;
+    workerRuns: number;
     tasks: number;
     events: number;
     evidence: number;
     capabilities: number;
     workers: number;
+    aiGateway: number;
     budgets: number;
+    budgetLedger: number;
     adapters: number;
+    adapterLedger: number;
   };
   checks: Check[];
 };
@@ -31,51 +38,24 @@ export type Health = {
 export type HealthInput = {
   dbOk: boolean;
   dbError?: string | null;
-  counts: {
-    tenants: number;
-    legalEntities: number;
-    people: number;
-    employments: number;
-    compensationAgreements: number;
-    paySchedules: number;
-    payrollRuns: number;
-    rulePacks: number;
-    obligations: number;
-    filingRequirements: number;
-    filingDrafts: number;
-    bankAccounts: number;
-    paymentInstructions: number;
-    workflowDefinitions: number;
-    workflowRuns: number;
-    documents: number;
-    decisions: number;
-    evaluations: number;
-    customers: number;
-    leads: number;
-    quotes: number;
-    jobs: number;
-    invoices: number;
-    payments: number;
-    tasks: number;
-    evidence: number;
-    events: number;
-    capabilities: number;
-    workers: number;
-    budgetAccounts: number;
-    adapters: number;
-  };
+  counts: CoreSummary["counts"];
 };
 
 export function getHealth(input: HealthInput): Health {
   const graphObjects =
+    input.counts.objects +
     input.counts.customers +
     input.counts.leads +
+    input.counts.offers +
     input.counts.quotes +
     input.counts.jobs +
     input.counts.invoices +
     input.counts.payments;
+  const objectSpine =
+    input.counts.objects + input.counts.objectLinks + input.counts.objectVersions;
   const operatingObjects =
     input.counts.legalEntities +
+    input.counts.entityIdentifiers +
     input.counts.people +
     input.counts.employments +
     input.counts.compensationAgreements +
@@ -87,19 +67,40 @@ export function getHealth(input: HealthInput): Health {
     input.counts.filingDrafts +
     input.counts.bankAccounts +
     input.counts.paymentInstructions;
+  const aiGateway =
+    input.counts.modelProviders +
+    input.counts.modelRoutes +
+    input.counts.inferences +
+    input.counts.usageEvents;
+  const budgetLedger =
+    input.counts.budgetPolicies +
+    input.counts.budgetPools +
+    input.counts.budgetAccounts +
+    input.counts.budgetAllocations +
+    input.counts.budgetReservations;
+  const adapterLedger =
+    input.counts.adapters +
+    input.counts.connections +
+    input.counts.adapterRuns +
+    input.counts.adapterActions;
 
   const summary = {
     tenants: input.counts.tenants,
     graphObjects,
+    objectSpine,
     operatingObjects,
     workflows: input.counts.workflowRuns,
+    workerRuns: input.counts.workerRuns,
     tasks: input.counts.tasks,
     events: input.counts.events,
     evidence: input.counts.evidence,
     capabilities: input.counts.capabilities,
     workers: input.counts.workers,
+    aiGateway,
     budgets: input.counts.budgetAccounts,
+    budgetLedger,
     adapters: input.counts.adapters,
+    adapterLedger,
   };
 
   const checks: Check[] = [
@@ -119,6 +120,11 @@ export function getHealth(input: HealthInput): Health {
       detail: `${input.counts.tasks} persisted tasks visible`,
     },
     {
+      id: "object_spine",
+      state: input.counts.objects > 0 && input.counts.objectVersions > 0 ? "pass" : "warn",
+      detail: `${input.counts.objects} objects, ${input.counts.objectLinks} links, and ${input.counts.objectVersions} versions visible`,
+    },
+    {
       id: "business_graph",
       state: graphObjects > 0 ? "pass" : "warn",
       detail: `${graphObjects} persisted graph objects visible`,
@@ -134,18 +140,47 @@ export function getHealth(input: HealthInput): Health {
       detail: `${input.counts.workflowDefinitions} workflow definitions and ${input.counts.workflowRuns} workflow runs visible`,
     },
     {
+      id: "worker_run_ledger",
+      state: input.counts.workerRuns > 0 ? "pass" : "warn",
+      detail: `${input.counts.workerRuns} worker run lifecycle records visible`,
+    },
+    {
       id: "evidence",
       state: input.counts.evidence > 0 && input.counts.documents > 0 ? "pass" : "warn",
       detail: `${input.counts.evidence} evidence records and ${input.counts.documents} document packets visible`,
     },
     {
+      id: "ai_gateway",
+      state:
+        input.counts.modelProviders > 0 &&
+        input.counts.modelRoutes > 0 &&
+        input.counts.budgetAccounts > 0
+          ? "pass"
+          : "warn",
+      detail: `${input.counts.modelProviders} providers, ${input.counts.modelRoutes} routes, ${input.counts.inferences} inferences, and ${input.counts.usageEvents} usage records visible`,
+    },
+    {
+      id: "budget_ledger",
+      state:
+        input.counts.budgetPolicies > 0 &&
+        input.counts.budgetAllocations > 0 &&
+        input.counts.budgetAccounts > 0
+          ? "pass"
+          : "warn",
+      detail: `${input.counts.budgetPolicies} policies, ${input.counts.budgetAllocations} allocations, ${input.counts.budgetReservations} reservations, and ${input.counts.usageEvents} usage records visible`,
+    },
+    {
       id: "adapter_runtime",
-      state: "warn",
-      detail: `${input.counts.adapters} adapter records visible; external execution is not enabled yet`,
+      state: input.counts.adapters > 0 && input.counts.connections > 0 ? "pass" : "warn",
+      detail: `${input.counts.adapters} adapters, ${input.counts.connections} connections, ${input.counts.adapterRuns} runs, and ${input.counts.adapterActions} actions visible; external execution is not enabled yet`,
     },
   ];
 
-  const status = checks.some((check) => check.state === "fail") ? "down" : "ok";
+  const status = checks.some((check) => check.state === "fail")
+    ? "down"
+    : checks.some((check) => check.state === "warn")
+      ? "degraded"
+      : "ok";
 
   return {
     service: "Continuous Core",

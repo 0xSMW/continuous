@@ -97,6 +97,7 @@ Every worker action should become one or more durable records:
 | Record | Required when |
 |---|---|
 | Task | Work is created, assigned, blocked, approved, completed, canceled, or escalated |
+| WorkerRun | A worker is invoked by an operator, workflow, schedule, adapter, or policy trigger |
 | Event | Something meaningful happened in Continuous or an external system |
 | Decision | A human, worker, rule, or model selected one action over alternatives |
 | Evidence | Proof is needed for trust, audit, support, evals, or reconstruction |

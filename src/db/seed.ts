@@ -45,6 +45,7 @@ import {
   users,
   workflowDefinitions,
   workflowRuns,
+  workerRuns,
   workers,
 } from "./schema";
 
@@ -86,6 +87,7 @@ const ids = {
   eventQuote: "cccccccc-cccc-4ccc-8ccc-000000000002",
   taskQuote: "dddddddd-dddd-4ddd-8ddd-000000000001",
   taskInvoice: "dddddddd-dddd-4ddd-8ddd-000000000002",
+  workerRunSeed: "dddddddd-dddd-4ddd-8ddd-000000000003",
   evidenceLead: "eeeeeeee-eeee-4eee-8eee-000000000001",
   evidenceQuote: "eeeeeeee-eeee-4eee-8eee-000000000002",
   usage: "12121212-1212-4121-8121-121212121212",
@@ -1112,6 +1114,40 @@ async function seed() {
         kpi: { invoices_prepared: 1 },
       },
     ])
+    .onConflictDoNothing();
+
+  await db
+    .insert(workerRuns)
+    .values({
+      id: ids.workerRunSeed,
+      tenantId: ids.tenant,
+      workerId: ids.worker,
+      taskId: ids.taskQuote,
+      eventId: ids.eventQuote,
+      capabilityId: capIds.quotePrepare,
+      connectionId: ids.connection,
+      budgetAccountId: ids.budgetAccount,
+      source: "continuous.revenue_worker",
+      idempotencyKey: "seed-revenue-worker-run",
+      state: "done",
+      mode: "simulation",
+      data: {
+        input: {
+          trigger: "seed",
+          taskId: ids.taskQuote,
+          capabilityId: capIds.quotePrepare,
+        },
+        output: {
+          eventId: ids.eventQuote,
+          taskId: ids.taskQuote,
+          evidenceId: ids.evidenceQuote,
+          classification: "quote_ready_for_owner_approval",
+          externalExecution: "blocked",
+          requiresApproval: true,
+        },
+      },
+      endedAt: now,
+    })
     .onConflictDoNothing();
 
   await db
