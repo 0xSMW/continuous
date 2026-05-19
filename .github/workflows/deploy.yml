@@ -240,7 +240,7 @@ jobs:
           }
 
           SCHEMA="$(docker compose --profile tools run --rm migrate bun run worker:tool schema </dev/null)"
-          echo "$SCHEMA" | /usr/bin/jq -c '{commands:.registry.commands, views:.registry.views, tools:[.tools[].name]}'
+          echo "$SCHEMA" | /usr/bin/jq -c '{commands:.registry.commands, views:.registry.views, planned:[.registry.plannedContracts[].role], plannedCommandCount:(.registry.plannedCommands|length), plannedViewCount:(.registry.plannedViews|length), tools:[.tools[].name]}'
           echo "$SCHEMA" | /usr/bin/jq -e '
             (.registry.commands | map(.name) | index("run")) != null and
             (.registry.commands | map(.name) | index("continue")) != null and
@@ -248,6 +248,9 @@ jobs:
             (.registry.commands | map(.name) | index("adapters.reconcile")) != null and
             (.registry.views | map(.name) | index("snapshot")) != null and
             (.registry.views | map(.name) | index("approvals")) != null and
+            (.registry.plannedContracts | map(.role) == ["owner_chief_of_staff","dispatch_operations","finance_operations","workforce_operations","compliance_operations","systems_operations"]) and
+            (.registry.plannedCommands | length) == 33 and
+            (.registry.plannedViews | length) == 16 and
             (.registry.commands | any(.name == "run" and .idempotency == "required")) and
             (.registry.commands | any(.name == "continue" and .idempotency == "required")) and
             (.registry.commands | any(.name == "adapters.reconcile" and .requiresTenant == true)) and
