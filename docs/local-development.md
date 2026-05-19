@@ -47,6 +47,38 @@ bun run dev
 
 Open `http://localhost:3000`, `/api/health`, and `/api/core`.
 
+The repo also includes `.mcp.json` for the Next.js MCP bridge. With `bun run dev`
+running, compatible coding agents can inspect routes, runtime errors, metadata,
+and logs through `next-devtools-mcp`.
+
+## Revenue Worker
+
+The seed data includes the Continuous Revenue Worker for a service-SMB
+lead-to-cash slice. Detailed snapshots are operator-only and require the worker
+token:
+
+```sh
+REVENUE_WORKER_RUN_TOKEN=local-worker-token bun run dev
+curl http://localhost:3000/api/revenue-worker \
+  -H 'authorization: Bearer local-worker-token'
+```
+
+The run API is a guarded side-effecting `POST` and is disabled by default. For
+local-only testing, start the app with:
+
+```sh
+REVENUE_WORKER_RUN_ENABLED=true REVENUE_WORKER_RUN_TOKEN=local-worker-token bun run dev
+curl -X POST http://localhost:3000/api/revenue-worker/run \
+  -H 'authorization: Bearer local-worker-token' \
+  -H 'idempotency-key: local-revenue-run-001'
+```
+
+The same persisted loop can run without exposing HTTP:
+
+```sh
+IDEMPOTENCY_KEY=local-revenue-run-002 bun run worker:revenue
+```
+
 ## Notes
 
 The app is intentionally server-rendered and database-backed. If Postgres is

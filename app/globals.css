@@ -219,6 +219,48 @@ dd,
   font-size: 28px;
 }
 
+.worker-grid {
+  display: grid;
+  grid-template-columns: 1.6fr repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.worker-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfa;
+  padding: 16px;
+}
+
+.worker-card.primary {
+  display: flex;
+  gap: 14px;
+}
+
+.worker-card svg {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+.worker-card strong {
+  display: block;
+  margin: 10px 0 6px;
+  font-size: 28px;
+}
+
+.worker-card p {
+  margin-bottom: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.worker-card dl {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
 .task-list,
 .checks,
 .events {
@@ -332,7 +374,8 @@ dd {
   .layout,
   .readiness,
   .count-grid,
-  .primitive-grid {
+  .primitive-grid,
+  .worker-grid {
     grid-template-columns: 1fr;
   }
 

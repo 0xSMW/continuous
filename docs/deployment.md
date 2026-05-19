@@ -21,7 +21,7 @@ commands.
 | `app` | Next.js server for the core dashboard and APIs |
 | `db` | Postgres for graph, task, capability, evidence, budget, adapter, event, and UI-contract records |
 | `migrate` | Drizzle migration/seed runner |
-| `caddy` | HTTP now, automatic HTTPS after DNS points at the droplet |
+| `caddy` | Automatic HTTPS, HTTP redirects, and certificate renewal |
 
 ## First Deploy
 
@@ -32,17 +32,23 @@ HOST=45.55.53.92 ./scripts/deploy.sh
 
 The deploy script waits for cloud-init, syncs the repo to `/opt/continuous`,
 creates a remote `.env` with a random Postgres password, runs migrations, seeds
-bootstrap records, builds the app image, and starts the stack.
+bootstrap records, builds the app image, and starts the stack. After DNS is
+pointed, `scripts/configure-domain.sh` switches the site host to
+`continuoushq.com` and the app URL to `https://continuoushq.com`.
 
 ## DNS Cutover
 
-After `continuoushq.com` and `www.continuoushq.com` point at `45.55.53.92`:
+After `continuoushq.com` points at `45.55.53.92`:
 
 ```sh
 HOST=45.55.53.92 ./scripts/configure-domain.sh
 ```
 
-Caddy will then request certificates and serve the same app on HTTPS.
+Caddy requests a publicly trusted certificate through Let's Encrypt, persists
+the ACME account and certificates in the `caddy_data` Docker volume, redirects
+HTTP to HTTPS, and renews certificates automatically before they expire. If
+`www` records are added later, include them in `SITE_HOSTS` before rerunning
+`scripts/configure-domain.sh` or the deploy workflow.
 
 ## GitHub Deploy
 
@@ -60,3 +66,30 @@ temporary `/32` SSH source on `continuous-fw`, then removes that rule after the
 deploy job finishes.
 
 CI is separate and runs on pushes to `main`, pull requests, and manual dispatch.
+
+## Post-Deploy Verification
+
+```sh
+curl -fsS http://45.55.53.92/api/health
+curl -fsS http://45.55.53.92/api/core
+```
+
+After DNS cutover:
+
+```sh
+curl -fsS https://continuoushq.com/api/health
+curl -fsS https://continuoushq.com/api/core
+openssl s_client -connect 45.55.53.92:443 -servername continuoushq.com </dev/null 2>/dev/null | openssl x509 -noout -subject -issuer -dates
+```
+
+The deploy path enables the Revenue Worker run endpoint with a generated bearer
+token in `/opt/continuous/.env`. Use the CLI path over SSH for direct
+operator-controlled smoke runs:
+
+```sh
+ssh root@45.55.53.92 'cd /opt/continuous && docker compose --profile tools run --rm migrate bun run worker:revenue -- --idempotency-key=deploy-revenue-run-001'
+```
+
+For the HTTPS app-server path, call `POST /api/revenue-worker/run` with an
+`idempotency-key` header and the bearer token from `/opt/continuous/.env`.
+`GET /api/revenue-worker` uses the same bearer token for operator-only snapshots.

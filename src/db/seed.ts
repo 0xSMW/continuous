@@ -9,24 +9,42 @@ import {
   capabilityGrants,
   connections,
   customers,
+  bankAccounts,
+  compensationAgreements,
+  decisions,
+  documents,
+  employments,
+  entityIdentifiers,
   evidence,
+  evaluations,
   events,
+  filingDrafts,
+  filingRequirements,
   generatedViews,
   invoices,
   jobs,
+  legalEntities,
   leads,
   modelProviders,
   modelRoutes,
   objectLinks,
   objectVersions,
   objects,
+  obligations,
   offers,
+  paySchedules,
+  paymentInstructions,
   payments,
+  payrollRuns,
+  people,
   quotes,
+  rulePacks,
   tasks,
   tenants,
   usageEvents,
   users,
+  workflowDefinitions,
+  workflowRuns,
   workers,
 } from "./schema";
 
@@ -42,6 +60,14 @@ const ids = {
   budgetPool: "bbbbbbbb-bbbb-4bbb-8bbb-000000000002",
   budgetAccount: "bbbbbbbb-bbbb-4bbb-8bbb-000000000003",
   budgetAllocation: "bbbbbbbb-bbbb-4bbb-8bbb-000000000004",
+  legalEntityObject: "33333333-3333-4333-8333-000000000101",
+  workLocationObject: "33333333-3333-4333-8333-000000000102",
+  personObject: "33333333-3333-4333-8333-000000000103",
+  employmentObject: "33333333-3333-4333-8333-000000000104",
+  payrollObject: "33333333-3333-4333-8333-000000000105",
+  filingObject: "33333333-3333-4333-8333-000000000106",
+  bankObject: "33333333-3333-4333-8333-000000000107",
+  obligationObject: "33333333-3333-4333-8333-000000000108",
   customerObject: "33333333-3333-4333-8333-000000000001",
   leadObject: "33333333-3333-4333-8333-000000000002",
   offerObject: "33333333-3333-4333-8333-000000000003",
@@ -64,6 +90,31 @@ const ids = {
   evidenceQuote: "eeeeeeee-eeee-4eee-8eee-000000000002",
   usage: "12121212-1212-4121-8121-121212121212",
   view: "34343434-3434-4343-8343-343434343434",
+  legalEntity: "55555555-5555-4555-8555-000000000001",
+  entityIdentifier: "55555555-5555-4555-8555-000000000002",
+  person: "55555555-5555-4555-8555-000000000003",
+  employment: "55555555-5555-4555-8555-000000000004",
+  compensationAgreement: "55555555-5555-4555-8555-000000000005",
+  paySchedule: "55555555-5555-4555-8555-000000000006",
+  payrollRun: "55555555-5555-4555-8555-000000000007",
+  rulePack: "55555555-5555-4555-8555-000000000008",
+  obligation: "55555555-5555-4555-8555-000000000009",
+  filingRequirement: "55555555-5555-4555-8555-000000000010",
+  filingDraft: "55555555-5555-4555-8555-000000000011",
+  bankAccount: "55555555-5555-4555-8555-000000000012",
+  paymentInstruction: "55555555-5555-4555-8555-000000000013",
+  workflowEntitySetup: "66666666-6666-4666-8666-000000000001",
+  workflowHireEmployee: "66666666-6666-4666-8666-000000000002",
+  workflowPayrollPreview: "66666666-6666-4666-8666-000000000003",
+  workflowAiBudget: "66666666-6666-4666-8666-000000000004",
+  workflowSyntheticWorker: "66666666-6666-4666-8666-000000000005",
+  runEntitySetup: "77777777-7777-4777-8777-000000000001",
+  runPayrollPreview: "77777777-7777-4777-8777-000000000002",
+  runSyntheticWorker: "77777777-7777-4777-8777-000000000003",
+  documentNewHire: "88888888-8888-4888-8888-000000000001",
+  documentPayroll: "88888888-8888-4888-8888-000000000002",
+  decisionQuote: "99999999-9999-4999-8999-000000000001",
+  evaluationSeed: "99999999-9999-4999-8999-000000000002",
 };
 
 const capIds = {
@@ -75,6 +126,13 @@ const capIds = {
   invoicePrepare: "10000000-0000-4000-8000-000000000006",
   paymentLinkPrepare: "10000000-0000-4000-8000-000000000007",
   ownerBriefGenerate: "10000000-0000-4000-8000-000000000008",
+  approvalRequest: "10000000-0000-4000-8000-000000000009",
+  documentPacketPrepare: "10000000-0000-4000-8000-000000000010",
+  payrollPreviewPrepare: "10000000-0000-4000-8000-000000000011",
+  filingPrepare: "10000000-0000-4000-8000-000000000012",
+  sensitiveReveal: "10000000-0000-4000-8000-000000000013",
+  achDraftPrepare: "10000000-0000-4000-8000-000000000014",
+  workerRead: "10000000-0000-4000-8000-000000000015",
 };
 
 async function seed() {
@@ -206,6 +264,80 @@ async function seed() {
         description: "Summarize leads, quote progress, cash, exceptions, and decisions.",
         evidence: { required: ["task_rollup", "kpi_snapshot"] },
       },
+      {
+        id: capIds.approvalRequest,
+        key: "approval.request",
+        name: "Request approval",
+        class: "task",
+        risk: "medium",
+        sideEffect: "internal",
+        description: "Create a human approval task with the required evidence packet.",
+        evidence: { required: ["approval_context", "recommended_decision"] },
+      },
+      {
+        id: capIds.documentPacketPrepare,
+        key: "document_packet.prepare",
+        name: "Prepare document packet",
+        class: "draft",
+        risk: "medium",
+        sideEffect: "internal",
+        description: "Prepare renderer-neutral document packets for hiring, payroll, filings, or evidence export.",
+        evidence: { required: ["template_versions", "source_facts"] },
+      },
+      {
+        id: capIds.payrollPreviewPrepare,
+        key: "payroll_preview.prepare",
+        name: "Prepare payroll preview",
+        class: "draft",
+        risk: "high",
+        sideEffect: "regulated",
+        description: "Prepare deterministic payroll preview records without submitting payroll or moving funds.",
+        rules: { external_submission: "blocked", money_movement: "approval_required" },
+        evidence: { required: ["source_data_lock", "calculation_trace", "variance_summary"] },
+      },
+      {
+        id: capIds.filingPrepare,
+        key: "filing.prepare",
+        name: "Prepare filing",
+        class: "draft",
+        risk: "high",
+        sideEffect: "regulated",
+        description: "Prepare filing drafts and validation packets without submitting to agencies.",
+        rules: { external_submission: "approval_required" },
+        evidence: { required: ["form_version", "source_facts", "validation_report"] },
+      },
+      {
+        id: capIds.sensitiveReveal,
+        key: "sensitive_data.reveal",
+        name: "Reveal sensitive data",
+        class: "reveal",
+        risk: "critical",
+        sideEffect: "regulated",
+        description: "Reveal restricted payroll, bank, identity, or filing data only with policy-backed audit.",
+        rules: { approval_required: true, reason_required: true },
+        evidence: { required: ["request_reason", "policy_check", "access_receipt"] },
+      },
+      {
+        id: capIds.achDraftPrepare,
+        key: "ach_draft.prepare",
+        name: "Prepare ACH draft",
+        class: "money",
+        risk: "critical",
+        sideEffect: "financial",
+        description: "Prepare ACH or tax payment drafts without executing money movement.",
+        rules: { dual_control: true, execution_blocked: true },
+        evidence: { required: ["payment_instruction", "approval_packet"] },
+      },
+      {
+        id: capIds.workerRead,
+        key: "worker.read",
+        name: "Read worker",
+        class: "read",
+        risk: "medium",
+        sideEffect: "none",
+        description: "Read scoped human or synthetic worker records for workflow execution.",
+        evidence: { required: ["scope_check"] },
+      },
     ])
     .onConflictDoNothing();
 
@@ -335,6 +467,75 @@ async function seed() {
     .insert(objects)
     .values([
       {
+        id: ids.legalEntityObject,
+        tenantId: ids.tenant,
+        type: "legal_entity",
+        name: "Continuous Demo LLC",
+        externalId: "seed-legal-entity",
+        data: { entity_type: "llc", jurisdiction: "DE", tax_classification: "partnership" },
+      },
+      {
+        id: ids.workLocationObject,
+        tenantId: ids.tenant,
+        type: "work_location",
+        name: "Continuous Demo Headquarters",
+        externalId: "seed-work-location",
+        data: { state: "NY", country: "US", remote_allowed: true },
+      },
+      {
+        id: ids.personObject,
+        tenantId: ids.tenant,
+        type: "person",
+        name: "Jordan Field",
+        externalId: "seed-person",
+        data: { role: "field_operations_lead", pii_masked: true },
+      },
+      {
+        id: ids.employmentObject,
+        tenantId: ids.tenant,
+        type: "employment",
+        name: "Jordan Field employment",
+        state: "onboarding",
+        externalId: "seed-employment",
+        data: { classification: "employee", flsa_status: "non_exempt" },
+      },
+      {
+        id: ids.payrollObject,
+        tenantId: ids.tenant,
+        type: "payroll_run",
+        name: "May 2026 payroll preview",
+        state: "preview_ready",
+        externalId: "seed-payroll-preview",
+        data: { deterministic: true, money_movement: "blocked" },
+      },
+      {
+        id: ids.filingObject,
+        tenantId: ids.tenant,
+        type: "filing_draft",
+        name: "Federal quarterly payroll filing draft",
+        state: "draft",
+        externalId: "seed-filing-draft",
+        data: { form: "941", agency: "IRS", submission: "blocked" },
+      },
+      {
+        id: ids.bankObject,
+        tenantId: ids.tenant,
+        type: "bank_account",
+        name: "Operating account",
+        state: "verified",
+        externalId: "seed-bank-account",
+        data: { account_mask: "6789", purpose: "operating" },
+      },
+      {
+        id: ids.obligationObject,
+        tenantId: ids.tenant,
+        type: "obligation",
+        name: "Quarterly payroll filing obligation",
+        state: "open",
+        externalId: "seed-obligation",
+        data: { domain: "payroll_tax", due: "quarterly" },
+      },
+      {
         id: ids.customerObject,
         tenantId: ids.tenant,
         type: "customer",
@@ -394,6 +595,339 @@ async function seed() {
         state: "prepared",
         externalId: "seed-payment",
         data: { amount_cents: 6225, currency: "USD", provider: "stripe" },
+      },
+    ])
+    .onConflictDoNothing();
+
+  await db
+    .insert(legalEntities)
+    .values({
+      id: ids.legalEntity,
+      tenantId: ids.tenant,
+      objectId: ids.legalEntityObject,
+      legalName: "Continuous Demo LLC",
+      entityType: "llc",
+      jurisdiction: "DE",
+      state: "active",
+      data: { tax_classification: "partnership", responsible_party: ids.owner },
+      effectiveAt: now,
+    })
+    .onConflictDoNothing();
+
+  await db
+    .insert(entityIdentifiers)
+    .values({
+      id: ids.entityIdentifier,
+      tenantId: ids.tenant,
+      legalEntityId: ids.legalEntity,
+      kind: "ein",
+      value: "XX-XXX6789",
+      issuer: "IRS",
+      data: { masked: true },
+      effectiveAt: now,
+    })
+    .onConflictDoNothing();
+
+  await db
+    .insert(people)
+    .values({
+      id: ids.person,
+      tenantId: ids.tenant,
+      objectId: ids.personObject,
+      name: "Jordan Field",
+      role: "field_operations_lead",
+      state: "active",
+      data: { contact: "masked", work_location_object_id: ids.workLocationObject },
+    })
+    .onConflictDoNothing();
+
+  await db
+    .insert(employments)
+    .values({
+      id: ids.employment,
+      tenantId: ids.tenant,
+      personId: ids.person,
+      legalEntityId: ids.legalEntity,
+      kind: "employee",
+      title: "Field Operations Lead",
+      state: "onboarding",
+      managerRef: `user:${ids.owner}`,
+      data: { flsa_status: "non_exempt", payroll_ready: false },
+      startsAt: now,
+    })
+    .onConflictDoNothing();
+
+  await db
+    .insert(compensationAgreements)
+    .values({
+      id: ids.compensationAgreement,
+      tenantId: ids.tenant,
+      employmentId: ids.employment,
+      kind: "hourly",
+      amountCents: 4200,
+      period: "hour",
+      state: "approved",
+      data: { overtime: "eligible", source: "bootstrap" },
+      effectiveAt: now,
+    })
+    .onConflictDoNothing();
+
+  await db
+    .insert(paySchedules)
+    .values({
+      id: ids.paySchedule,
+      tenantId: ids.tenant,
+      legalEntityId: ids.legalEntity,
+      name: "Biweekly payroll",
+      frequency: "biweekly",
+      timezone: "America/New_York",
+      state: "active",
+      data: { approval_required: true },
+    })
+    .onConflictDoNothing();
+
+  await db
+    .insert(payrollRuns)
+    .values({
+      id: ids.payrollRun,
+      tenantId: ids.tenant,
+      payScheduleId: ids.paySchedule,
+      state: "preview_ready",
+      periodStart: now,
+      periodEnd: nextMonth,
+      checkDate: nextMonth,
+      grossCents: 336000,
+      netCents: 248640,
+      taxCents: 87360,
+      data: {
+        calculation: "deterministic_preview",
+        blockers: ["manager_approval_required", "funding_not_submitted"],
+      },
+    })
+    .onConflictDoNothing();
+
+  await db
+    .insert(rulePacks)
+    .values({
+      id: ids.rulePack,
+      key: "us.payroll.federal.bootstrap",
+      name: "US payroll federal bootstrap",
+      domain: "payroll",
+      jurisdiction: "US",
+      version: "0.1.0",
+      sourceRefs: { placeholder: "authoritative_sources_required_before_execution" },
+      rules: { filing_941: "draft_only", deposits: "prepare_only" },
+      effectiveAt: now,
+    })
+    .onConflictDoNothing();
+
+  await db
+    .insert(obligations)
+    .values({
+      id: ids.obligation,
+      tenantId: ids.tenant,
+      objectId: ids.obligationObject,
+      rulePackId: ids.rulePack,
+      kind: "payroll_tax_filing",
+      state: "open",
+      name: "Quarterly federal payroll filing",
+      dueAt: nextMonth,
+      data: { form: "941", mode: "draft_only" },
+    })
+    .onConflictDoNothing();
+
+  await db
+    .insert(filingRequirements)
+    .values({
+      id: ids.filingRequirement,
+      tenantId: ids.tenant,
+      legalEntityId: ids.legalEntity,
+      rulePackId: ids.rulePack,
+      form: "941",
+      cadence: "quarterly",
+      agency: "IRS",
+      state: "active",
+      data: { execution: "human_approval_required" },
+    })
+    .onConflictDoNothing();
+
+  await db
+    .insert(filingDrafts)
+    .values({
+      id: ids.filingDraft,
+      tenantId: ids.tenant,
+      requirementId: ids.filingRequirement,
+      obligationId: ids.obligation,
+      state: "draft",
+      periodStart: now,
+      periodEnd: nextMonth,
+      data: { validation: "not_submittable", reason: "bootstrap_draft" },
+    })
+    .onConflictDoNothing();
+
+  await db
+    .insert(bankAccounts)
+    .values({
+      id: ids.bankAccount,
+      tenantId: ids.tenant,
+      legalEntityId: ids.legalEntity,
+      name: "Operating account",
+      purpose: "operating",
+      state: "verified",
+      data: { account_mask: "6789", money_movement: "dual_control_required" },
+    })
+    .onConflictDoNothing();
+
+  await db
+    .insert(paymentInstructions)
+    .values({
+      id: ids.paymentInstruction,
+      tenantId: ids.tenant,
+      bankAccountId: ids.bankAccount,
+      objectId: ids.payrollObject,
+      kind: "payroll_funding",
+      state: "draft",
+      amountCents: 336000,
+      data: { execution: "blocked_until_approval", rail: "ach" },
+    })
+    .onConflictDoNothing();
+
+  await db
+    .insert(workflowDefinitions)
+    .values([
+      {
+        id: ids.workflowEntitySetup,
+        key: "entity_setup",
+        name: "Entity setup",
+        purpose: "Make a business entity operationally legible before workers act.",
+        domain: "entity",
+        states: { order: ["draft", "facts_required", "review_ready", "approved", "evidence_complete"] },
+        transitions: { draft: ["facts_required"], facts_required: ["review_ready"], review_ready: ["approved"] },
+        objects: { required: ["legal_entity", "entity_identifier", "work_location", "bank_account"] },
+        approvals: { required: ["owner_entity_fact_confirmation"] },
+        evidence: { packet: "entity_setup_packet" },
+        tests: { required: ["entity_facts_present", "bank_ref_masked"] },
+      },
+      {
+        id: ids.workflowHireEmployee,
+        key: "hire_employee",
+        name: "Hire employee",
+        purpose: "Turn an accepted offer into a payroll-ready employee with auditable documents.",
+        domain: "workforce",
+        states: { order: ["offer_accepted", "classification_review", "onboarding_packet_prepared", "payroll_readiness_check", "payroll_ready"] },
+        transitions: { classification_review: ["onboarding_packet_prepared"], payroll_readiness_check: ["payroll_ready", "blocked"] },
+        objects: { required: ["person", "employment", "compensation_agreement", "pay_schedule"] },
+        approvals: { required: ["classification", "payroll_readiness"] },
+        evidence: { packet: "new_hire_packet" },
+        tests: { required: ["classification_reason", "document_packet_complete"] },
+      },
+      {
+        id: ids.workflowPayrollPreview,
+        key: "payroll_preview",
+        name: "Payroll preview",
+        purpose: "Preview payroll deterministically before any money movement.",
+        domain: "payroll",
+        states: { order: ["draft", "source_data_locked", "preview_ready", "awaiting_approval", "approved"] },
+        transitions: { preview_ready: ["awaiting_approval", "blocked"], awaiting_approval: ["approved"] },
+        objects: { required: ["pay_schedule", "payroll_run", "payment_instruction"] },
+        approvals: { required: ["payroll_approval", "dual_control_for_funding"] },
+        evidence: { packet: "payroll_packet" },
+        tests: { required: ["calculation_trace", "variance_report"] },
+      },
+      {
+        id: ids.workflowAiBudget,
+        key: "ai_budget_cycle",
+        name: "AI budget cycle",
+        purpose: "Allocate, reserve, use, and close intelligence budgets.",
+        domain: "ai_operations",
+        states: { order: ["allocated", "active", "usage_review", "closed"] },
+        transitions: { allocated: ["active"], active: ["usage_review"], usage_review: ["closed"] },
+        objects: { required: ["budget_pool", "budget_account", "budget_allocation", "usage_event"] },
+        approvals: { required: ["overage_approval"] },
+        evidence: { packet: "budget_close_packet" },
+        tests: { required: ["usage_attribution", "overage_policy"] },
+      },
+      {
+        id: ids.workflowSyntheticWorker,
+        key: "synthetic_worker_lifecycle",
+        name: "Synthetic worker lifecycle",
+        purpose: "Create, govern, evaluate, suspend, and retire agentic workers.",
+        domain: "ai_operations",
+        states: { order: ["draft", "scoped", "simulating", "approved", "active", "suspended", "retired"] },
+        transitions: { draft: ["scoped"], scoped: ["simulating"], simulating: ["approved"], approved: ["active"] },
+        objects: { required: ["worker", "capability_grant", "budget_account", "model_route"] },
+        approvals: { required: ["manager_launch_approval", "sensitive_capability_approval"] },
+        evidence: { packet: "synthetic_worker_packet" },
+        tests: { required: ["scope_check", "budget_check", "eval_baseline"] },
+      },
+    ])
+    .onConflictDoNothing();
+
+  await db
+    .insert(workflowRuns)
+    .values([
+      {
+        id: ids.runEntitySetup,
+        tenantId: ids.tenant,
+        definitionId: ids.workflowEntitySetup,
+        objectId: ids.legalEntityObject,
+        state: "review_ready",
+        idempotencyKey: "seed-entity-setup",
+        data: { facts: ["legal_entity", "ein_masked", "work_location", "bank_account"] },
+        blockers: { open: [] },
+        metrics: { completeness: 0.86 },
+      },
+      {
+        id: ids.runPayrollPreview,
+        tenantId: ids.tenant,
+        definitionId: ids.workflowPayrollPreview,
+        objectId: ids.payrollObject,
+        state: "preview_ready",
+        idempotencyKey: "seed-payroll-preview",
+        data: { payrollRunId: ids.payrollRun, paymentInstructionId: ids.paymentInstruction },
+        blockers: { open: ["manager_approval_required", "funding_not_submitted"] },
+        metrics: { gross_cents: 336000, net_cents: 248640 },
+      },
+      {
+        id: ids.runSyntheticWorker,
+        tenantId: ids.tenant,
+        definitionId: ids.workflowSyntheticWorker,
+        workerId: ids.worker,
+        state: "simulating",
+        idempotencyKey: "seed-synthetic-worker-lifecycle",
+        data: { workerId: ids.worker, autonomyLevel: 2 },
+        blockers: { open: ["external_execution_disabled"] },
+        metrics: { grants: Object.values(capIds).length },
+      },
+    ])
+    .onConflictDoNothing();
+
+  await db
+    .insert(documents)
+    .values([
+      {
+        id: ids.documentNewHire,
+        tenantId: ids.tenant,
+        objectId: ids.employmentObject,
+        workflowRunId: ids.runEntitySetup,
+        kind: "new_hire_packet",
+        name: "New-hire packet draft",
+        state: "draft",
+        sensitivity: "high",
+        hash: "bootstrap-new-hire-packet",
+        data: { restricted: true, required: ["w4", "i9", "direct_deposit", "policy_acknowledgement"] },
+      },
+      {
+        id: ids.documentPayroll,
+        tenantId: ids.tenant,
+        objectId: ids.payrollObject,
+        workflowRunId: ids.runPayrollPreview,
+        kind: "payroll_packet",
+        name: "Payroll preview packet",
+        state: "review_ready",
+        sensitivity: "critical",
+        hash: "bootstrap-payroll-packet",
+        data: { deterministic: true, money_movement: "blocked", approval_required: true },
       },
     ])
     .onConflictDoNothing();
@@ -612,6 +1146,46 @@ async function seed() {
         data: { total_cents: 24900, approval_required: true },
       },
     ])
+    .onConflictDoNothing();
+
+  await db
+    .insert(decisions)
+    .values({
+      id: ids.decisionQuote,
+      tenantId: ids.tenant,
+      taskId: ids.taskQuote,
+      eventId: ids.eventQuote,
+      workflowRunId: ids.runSyntheticWorker,
+      capabilityId: capIds.quotePrepare,
+      actorType: "worker",
+      actorId: ids.worker,
+      kind: "approval_recommendation",
+      state: "proposed",
+      decision: "request_owner_approval",
+      rationale: "Prepared quote is within standard price policy but external send still requires owner approval.",
+      data: { autonomy_level: 2, external_send: "approval_required" },
+    })
+    .onConflictDoNothing();
+
+  await db
+    .insert(evaluations)
+    .values({
+      id: ids.evaluationSeed,
+      tenantId: ids.tenant,
+      workerId: ids.worker,
+      taskId: ids.taskQuote,
+      eventId: ids.eventQuote,
+      kind: "bootstrap_quality",
+      score: "0.820",
+      data: {
+        dimensions: {
+          evidence_complete: true,
+          within_budget: true,
+          external_execution_blocked: true,
+          human_approval_requested: true,
+        },
+      },
+    })
     .onConflictDoNothing();
 
   await db

@@ -847,6 +847,433 @@ export const payments = pgTable(
   ],
 );
 
+export const legalEntities = pgTable(
+  "legal_entities",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    objectId: uuid("object_id").references(() => objects.id, {
+      onDelete: "set null",
+    }),
+    legalName: text("legal_name").notNull(),
+    entityType: text("entity_type").notNull(),
+    jurisdiction: text("jurisdiction").notNull(),
+    state: text("state").notNull().default("active"),
+    data: jsonb("data")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    effectiveAt: timestamp("effective_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("legal_entities_tenant_idx").on(table.tenantId),
+    uniqueIndex("legal_entities_object_idx").on(table.objectId),
+  ],
+);
+
+export const entityIdentifiers = pgTable(
+  "entity_identifiers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    legalEntityId: uuid("legal_entity_id")
+      .notNull()
+      .references(() => legalEntities.id, { onDelete: "cascade" }),
+    kind: varchar("kind", { length: 80 }).notNull(),
+    value: text("value").notNull(),
+    issuer: text("issuer"),
+    data: jsonb("data")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    effectiveAt: timestamp("effective_at", { withTimezone: true }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("entity_identifiers_tenant_idx").on(table.tenantId),
+    uniqueIndex("entity_identifiers_unique_idx").on(
+      table.tenantId,
+      table.legalEntityId,
+      table.kind,
+      table.value,
+    ),
+  ],
+);
+
+export const people = pgTable(
+  "people",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    objectId: uuid("object_id").references(() => objects.id, {
+      onDelete: "set null",
+    }),
+    name: text("name").notNull(),
+    role: text("role").notNull().default("person"),
+    state: text("state").notNull().default("active"),
+    data: jsonb("data")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("people_tenant_idx").on(table.tenantId),
+    uniqueIndex("people_object_idx").on(table.objectId),
+  ],
+);
+
+export const employments = pgTable(
+  "employments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    personId: uuid("person_id")
+      .notNull()
+      .references(() => people.id, { onDelete: "cascade" }),
+    workerId: uuid("worker_id").references(() => workers.id, {
+      onDelete: "set null",
+    }),
+    legalEntityId: uuid("legal_entity_id").references(() => legalEntities.id, {
+      onDelete: "set null",
+    }),
+    kind: text("kind").notNull().default("employee"),
+    title: text("title").notNull(),
+    state: text("state").notNull().default("draft"),
+    managerRef: text("manager_ref"),
+    data: jsonb("data")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    startsAt: timestamp("starts_at", { withTimezone: true }),
+    endsAt: timestamp("ends_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("employments_tenant_idx").on(table.tenantId),
+    index("employments_person_idx").on(table.personId),
+    index("employments_worker_idx").on(table.workerId),
+  ],
+);
+
+export const compensationAgreements = pgTable(
+  "compensation_agreements",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    employmentId: uuid("employment_id")
+      .notNull()
+      .references(() => employments.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    currency: varchar("currency", { length: 3 }).notNull().default("USD"),
+    period: text("period").notNull().default("hour"),
+    state: text("state").notNull().default("draft"),
+    data: jsonb("data")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    effectiveAt: timestamp("effective_at", { withTimezone: true }).notNull(),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("compensation_agreements_tenant_idx").on(table.tenantId),
+    index("compensation_agreements_employment_idx").on(table.employmentId),
+  ],
+);
+
+export const paySchedules = pgTable(
+  "pay_schedules",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    legalEntityId: uuid("legal_entity_id").references(() => legalEntities.id, {
+      onDelete: "set null",
+    }),
+    name: text("name").notNull(),
+    frequency: text("frequency").notNull(),
+    timezone: text("timezone").notNull().default("UTC"),
+    state: text("state").notNull().default("active"),
+    data: jsonb("data")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("pay_schedules_tenant_idx").on(table.tenantId),
+    uniqueIndex("pay_schedules_name_idx").on(table.tenantId, table.name),
+  ],
+);
+
+export const payrollRuns = pgTable(
+  "payroll_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    payScheduleId: uuid("pay_schedule_id")
+      .notNull()
+      .references(() => paySchedules.id, { onDelete: "cascade" }),
+    state: text("state").notNull().default("draft"),
+    periodStart: timestamp("period_start", { withTimezone: true }).notNull(),
+    periodEnd: timestamp("period_end", { withTimezone: true }).notNull(),
+    checkDate: timestamp("check_date", { withTimezone: true }).notNull(),
+    grossCents: integer("gross_cents").notNull().default(0),
+    netCents: integer("net_cents").notNull().default(0),
+    taxCents: integer("tax_cents").notNull().default(0),
+    data: jsonb("data")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("payroll_runs_tenant_idx").on(table.tenantId),
+    index("payroll_runs_schedule_idx").on(table.payScheduleId),
+  ],
+);
+
+export const rulePacks = pgTable(
+  "rule_packs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    key: varchar("key", { length: 140 }).notNull(),
+    name: text("name").notNull(),
+    domain: text("domain").notNull(),
+    jurisdiction: text("jurisdiction").notNull().default("US"),
+    version: varchar("version", { length: 40 }).notNull().default("0.1.0"),
+    sourceRefs: jsonb("source_refs")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    rules: jsonb("rules")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    active: boolean("active").notNull().default(true),
+    effectiveAt: timestamp("effective_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [uniqueIndex("rule_packs_key_version_idx").on(table.key, table.version)],
+);
+
+export const obligations = pgTable(
+  "obligations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    objectId: uuid("object_id").references(() => objects.id, {
+      onDelete: "set null",
+    }),
+    rulePackId: uuid("rule_pack_id").references(() => rulePacks.id, {
+      onDelete: "set null",
+    }),
+    kind: text("kind").notNull(),
+    state: text("state").notNull().default("open"),
+    name: text("name").notNull(),
+    dueAt: timestamp("due_at", { withTimezone: true }),
+    data: jsonb("data")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("obligations_tenant_idx").on(table.tenantId),
+    index("obligations_due_idx").on(table.tenantId, table.state, table.dueAt),
+  ],
+);
+
+export const filingRequirements = pgTable(
+  "filing_requirements",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    legalEntityId: uuid("legal_entity_id").references(() => legalEntities.id, {
+      onDelete: "set null",
+    }),
+    rulePackId: uuid("rule_pack_id").references(() => rulePacks.id, {
+      onDelete: "set null",
+    }),
+    form: text("form").notNull(),
+    cadence: text("cadence").notNull(),
+    agency: text("agency").notNull(),
+    state: text("state").notNull().default("active"),
+    data: jsonb("data")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("filing_requirements_tenant_idx").on(table.tenantId),
+    uniqueIndex("filing_requirements_unique_idx").on(
+      table.tenantId,
+      table.form,
+      table.agency,
+    ),
+  ],
+);
+
+export const filingDrafts = pgTable(
+  "filing_drafts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    requirementId: uuid("requirement_id")
+      .notNull()
+      .references(() => filingRequirements.id, { onDelete: "cascade" }),
+    obligationId: uuid("obligation_id").references(() => obligations.id, {
+      onDelete: "set null",
+    }),
+    state: text("state").notNull().default("draft"),
+    periodStart: timestamp("period_start", { withTimezone: true }),
+    periodEnd: timestamp("period_end", { withTimezone: true }),
+    data: jsonb("data")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("filing_drafts_tenant_idx").on(table.tenantId),
+    index("filing_drafts_requirement_idx").on(table.requirementId),
+  ],
+);
+
+export const bankAccounts = pgTable(
+  "bank_accounts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    legalEntityId: uuid("legal_entity_id").references(() => legalEntities.id, {
+      onDelete: "set null",
+    }),
+    name: text("name").notNull(),
+    purpose: text("purpose").notNull().default("operating"),
+    state: text("state").notNull().default("draft"),
+    data: jsonb("data")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("bank_accounts_tenant_idx").on(table.tenantId),
+    uniqueIndex("bank_accounts_name_idx").on(table.tenantId, table.name),
+  ],
+);
+
+export const paymentInstructions = pgTable(
+  "payment_instructions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    bankAccountId: uuid("bank_account_id")
+      .notNull()
+      .references(() => bankAccounts.id, { onDelete: "cascade" }),
+    objectId: uuid("object_id").references(() => objects.id, {
+      onDelete: "set null",
+    }),
+    kind: text("kind").notNull(),
+    state: text("state").notNull().default("draft"),
+    amountCents: integer("amount_cents"),
+    currency: varchar("currency", { length: 3 }).notNull().default("USD"),
+    data: jsonb("data")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("payment_instructions_tenant_idx").on(table.tenantId),
+    index("payment_instructions_bank_idx").on(table.bankAccountId),
+  ],
+);
+
 export const objectLinks = pgTable(
   "object_links",
   {
@@ -1096,6 +1523,210 @@ export const evidence = pgTable(
     index("evidence_object_idx").on(table.objectId),
     index("evidence_task_idx").on(table.taskId),
     index("evidence_event_idx").on(table.eventId),
+  ],
+);
+
+export const workflowDefinitions = pgTable(
+  "workflow_definitions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    key: varchar("key", { length: 140 }).notNull(),
+    version: varchar("version", { length: 40 }).notNull().default("1.0.0"),
+    name: text("name").notNull(),
+    purpose: text("purpose").notNull(),
+    domain: text("domain").notNull(),
+    states: jsonb("states")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    transitions: jsonb("transitions")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    objects: jsonb("objects")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    approvals: jsonb("approvals")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    evidence: jsonb("evidence")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    tests: jsonb("tests")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [uniqueIndex("workflow_definitions_key_version_idx").on(table.key, table.version)],
+);
+
+export const workflowRuns = pgTable(
+  "workflow_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    definitionId: uuid("definition_id")
+      .notNull()
+      .references(() => workflowDefinitions.id, { onDelete: "restrict" }),
+    objectId: uuid("object_id").references(() => objects.id, {
+      onDelete: "set null",
+    }),
+    workerId: uuid("worker_id").references(() => workers.id, {
+      onDelete: "set null",
+    }),
+    state: text("state").notNull(),
+    idempotencyKey: text("idempotency_key"),
+    data: jsonb("data")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    blockers: jsonb("blockers")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    metrics: jsonb("metrics")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    startedAt: timestamp("started_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("workflow_runs_tenant_idx").on(table.tenantId),
+    index("workflow_runs_definition_idx").on(table.definitionId),
+    index("workflow_runs_state_idx").on(table.tenantId, table.state),
+    uniqueIndex("workflow_runs_idempotency_idx").on(
+      table.tenantId,
+      table.definitionId,
+      table.idempotencyKey,
+    ),
+  ],
+);
+
+export const documents = pgTable(
+  "documents",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    objectId: uuid("object_id").references(() => objects.id, {
+      onDelete: "set null",
+    }),
+    workflowRunId: uuid("workflow_run_id").references(() => workflowRuns.id, {
+      onDelete: "set null",
+    }),
+    kind: text("kind").notNull(),
+    name: text("name").notNull(),
+    state: text("state").notNull().default("draft"),
+    sensitivity: riskLevel("sensitivity").notNull().default("medium"),
+    hash: text("hash"),
+    data: jsonb("data")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    retainedUntil: timestamp("retained_until", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("documents_tenant_idx").on(table.tenantId),
+    index("documents_workflow_idx").on(table.workflowRunId),
+    index("documents_object_idx").on(table.objectId),
+  ],
+);
+
+export const decisions = pgTable(
+  "decisions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    taskId: uuid("task_id").references(() => tasks.id, {
+      onDelete: "set null",
+    }),
+    eventId: uuid("event_id").references(() => events.id, {
+      onDelete: "set null",
+    }),
+    workflowRunId: uuid("workflow_run_id").references(() => workflowRuns.id, {
+      onDelete: "set null",
+    }),
+    capabilityId: uuid("capability_id").references(() => capabilities.id, {
+      onDelete: "set null",
+    }),
+    actorType: actorType("actor_type").notNull().default("system"),
+    actorId: uuid("actor_id"),
+    kind: text("kind").notNull(),
+    state: text("state").notNull().default("proposed"),
+    decision: text("decision").notNull(),
+    rationale: text("rationale").notNull().default(""),
+    data: jsonb("data")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("decisions_tenant_idx").on(table.tenantId),
+    index("decisions_task_idx").on(table.taskId),
+    index("decisions_workflow_idx").on(table.workflowRunId),
+  ],
+);
+
+export const evaluations = pgTable(
+  "evaluations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    workerId: uuid("worker_id").references(() => workers.id, {
+      onDelete: "set null",
+    }),
+    taskId: uuid("task_id").references(() => tasks.id, {
+      onDelete: "set null",
+    }),
+    eventId: uuid("event_id").references(() => events.id, {
+      onDelete: "set null",
+    }),
+    kind: text("kind").notNull(),
+    score: numeric("score", { precision: 6, scale: 3 }),
+    data: jsonb("data")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("evaluations_tenant_idx").on(table.tenantId),
+    index("evaluations_worker_idx").on(table.workerId),
+    index("evaluations_task_idx").on(table.taskId),
   ],
 );
 

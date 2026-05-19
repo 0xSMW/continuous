@@ -4,9 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       site_hosts:
-        description: "Caddy site hosts, for example http://:80 before DNS or continuoushq.com,www.continuoushq.com after DNS"
+        description: "Caddy site hosts, for example http://:80 before DNS or continuoushq.com after DNS"
         required: false
         default: "http://:80"
+      app_url:
+        description: "Canonical external app URL"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -27,7 +31,7 @@ jobs:
       DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/continuous' }}
       SITE_HOSTS: ${{ inputs.site_hosts }}
       ACME_EMAIL: ${{ secrets.ACME_EMAIL || 'admin@continuoushq.com' }}
-      APP_URL: http://${{ secrets.DEPLOY_HOST }}
+      APP_URL: ${{ inputs.app_url }}
       DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
       DO_API_TOKEN: ${{ secrets.DO_API_TOKEN }}
       DO_FIREWALL_NAME: continuous-fw
@@ -115,8 +119,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          app_url="${APP_URL:-http://$DEPLOY_HOST}"
           ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" \
-            "APP_DIR='$DEPLOY_PATH' SITE_HOSTS='$SITE_HOSTS' ACME_EMAIL='$ACME_EMAIL' APP_URL='$APP_URL' bash -s" <<'REMOTE'
+            "APP_DIR='$DEPLOY_PATH' SITE_HOSTS='$SITE_HOSTS' ACME_EMAIL='$ACME_EMAIL' APP_URL='$app_url' bash -s" <<'REMOTE'
           set -euo pipefail
           cd "$APP_DIR"
           if [ ! -f .env ]; then
@@ -133,6 +138,8 @@ jobs:
               printf 'ACME_EMAIL=%s\n' "$ACME_EMAIL"
               printf 'APP_IMAGE=continuous-app\n'
               printf 'APP_TAG=local\n'
+              printf 'REVENUE_WORKER_RUN_ENABLED=true\n'
+              printf 'REVENUE_WORKER_RUN_TOKEN=%s\n' "$(openssl rand -hex 32)"
             } > .env
           fi
           set -a
@@ -157,6 +164,12 @@ jobs:
           set_env APP_URL "$APP_URL"
           set_env SITE_HOSTS "$SITE_HOSTS"
           set_env ACME_EMAIL "$ACME_EMAIL"
+          worker_token="$(grep '^REVENUE_WORKER_RUN_TOKEN=' .env | cut -d= -f2- || true)"
+          if [ -z "$worker_token" ]; then
+            worker_token="$(openssl rand -hex 32)"
+            set_env REVENUE_WORKER_RUN_TOKEN "$worker_token"
+          fi
+          set_env REVENUE_WORKER_RUN_ENABLED true
           docker compose pull db caddy
           docker compose up -d db
           docker compose exec -T db sh -c 'until pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"; do sleep 1; done' </dev/null
@@ -171,7 +184,6 @@ jobs:
           fi
           docker compose --profile tools run --rm --build migrate bun run db:migrate </dev/null
           docker compose --profile tools run --rm --build migrate bun run db:seed </dev/null
-          docker compose rm -sf app caddy >/dev/null 2>&1 || true
           docker compose up -d --build --remove-orphans app caddy
           docker compose ps
           REMOTE

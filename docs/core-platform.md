@@ -171,6 +171,24 @@ The first worker should prove the whole platform loop:
 10. Reconcile external state and update the task ledger.
 11. Score the workflow for quality, cost, latency, correction rate, and KPI impact.
 
+## Runtime Slice
+
+The first implementation keeps the Revenue Worker deterministic and
+policy-bound:
+
+| Surface | Behavior |
+|---|---|
+| `/api/revenue-worker` | Operator-only snapshot of worker state, active tasks, controls, budget usage, and recent events |
+| `bun run worker:revenue` | Operator CLI that runs the persisted worker loop with an idempotency key |
+| `/api/revenue-worker/run` | Guarded `POST` endpoint, disabled by default and bearer-token gated when enabled |
+
+One run reserves budget, records a simulated inference, writes usage, emits an
+idempotent `revenue_worker.run.completed` event, captures trace evidence,
+records a no-external-send adapter receipt, updates the task to
+`approval_required`, and versions the quote object. External sends and money
+movement remain blocked until human approval and real adapter execution are
+implemented.
+
 ## Non-Goals For The First Slice
 
 Do not start with autonomous payroll, tax filing, legal advice, medical

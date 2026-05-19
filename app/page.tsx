@@ -1,4 +1,4 @@
-import { Database, FileText, Gauge, GitBranch, ShieldCheck, Workflow } from "lucide-react";
+import { Bot, Database, FileText, Gauge, GitBranch, ShieldCheck, Workflow } from "lucide-react";
 
 import { getHealth } from "../src/core/health";
 import { getCoreSummarySafe, summarizeCoreReadiness } from "../src/core/summary";
@@ -7,6 +7,23 @@ export const dynamic = "force-dynamic";
 
 const countLabels = {
   tenants: "Tenants",
+  legalEntities: "Legal entities",
+  people: "People",
+  employments: "Employments",
+  compensationAgreements: "Compensation",
+  paySchedules: "Pay schedules",
+  payrollRuns: "Payroll runs",
+  rulePacks: "Rule packs",
+  obligations: "Obligations",
+  filingRequirements: "Filing requirements",
+  filingDrafts: "Filing drafts",
+  bankAccounts: "Bank accounts",
+  paymentInstructions: "Payment instructions",
+  workflowDefinitions: "Workflow definitions",
+  workflowRuns: "Workflow runs",
+  documents: "Documents",
+  decisions: "Decisions",
+  evaluations: "Evaluations",
   customers: "Customers",
   leads: "Leads",
   quotes: "Quotes",
@@ -66,6 +83,11 @@ export default async function AdminPage() {
     dbError: result.error,
     counts: summary.counts,
   });
+  const workerRuntimeReady =
+    summary.counts.workers > 0 &&
+    summary.counts.capabilities > 0 &&
+    summary.counts.budgetAccounts > 0 &&
+    summary.counts.events > 0;
 
   return (
     <main className="shell">
@@ -110,6 +132,59 @@ export default async function AdminPage() {
       {result.error ? <p className="error">Database error: {result.error}</p> : null}
 
       <section className="layout">
+        <section className="panel span-3">
+          <div className="section-head">
+            <div>
+              <p className="label">Continuous Revenue Worker</p>
+              <h2>Operator-gated lead-to-cash runtime</h2>
+            </div>
+            <span className="stamp">Detailed snapshot requires operator token</span>
+          </div>
+          {workerRuntimeReady ? (
+            <div className="worker-grid">
+              <article className="worker-card primary">
+                <Bot aria-hidden="true" size={22} />
+                <div>
+                  <span className="label">Runtime</span>
+                  <h3>Revenue Worker installed</h3>
+                  <p>
+                    The first worker is backed by persisted worker, task, budget, event, evidence, and adapter records.
+                  </p>
+                </div>
+              </article>
+              <article className="worker-card">
+                <span className="label">Execution</span>
+                <dl>
+                  <div>
+                    <dt>External adapters</dt>
+                    <dd>Blocked</dd>
+                  </div>
+                  <div>
+                    <dt>HTTP runs</dt>
+                    <dd>Token gated</dd>
+                  </div>
+                  <div>
+                    <dt>Owner approval</dt>
+                    <dd>Required</dd>
+                  </div>
+                </dl>
+              </article>
+              <article className="worker-card">
+                <span className="label">Budget ledger</span>
+                <strong>{summary.counts.budgetAccounts.toLocaleString()}</strong>
+                <p>{summary.counts.usageEvents.toLocaleString()} usage events recorded across worker accounts.</p>
+              </article>
+              <article className="worker-card">
+                <span className="label">Governance</span>
+                <strong>{summary.counts.capabilities.toLocaleString()}</strong>
+                <p>{summary.counts.tasks.toLocaleString()} tasks, {summary.counts.evidence.toLocaleString()} evidence records, and operator-only worker snapshots.</p>
+              </article>
+            </div>
+          ) : (
+            <p className="empty">Revenue Worker bootstrap data is not available yet.</p>
+          )}
+        </section>
+
         <section className="panel span-2">
           <div className="section-head">
             <div>
@@ -155,7 +230,7 @@ export default async function AdminPage() {
           <div className="count-grid">
             {Object.entries(summary.counts).map(([key, value]) => (
               <div key={key}>
-                <span>{countLabels[key as keyof typeof countLabels]}</span>
+                <span>{countLabels[key as keyof typeof countLabels] ?? key}</span>
                 <strong>{value}</strong>
               </div>
             ))}

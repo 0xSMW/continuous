@@ -1178,3 +1178,50 @@ The infrastructure should remain headless and open, but the commercial product s
 The long-term platform is broader: a business graph that understands the company, a task ledger that knows what must happen, a capability registry that defines safe action, an AI gateway that budgets intelligence, generated UI that appears only when needed, and evidence that proves what every human or AI worker did.
 
 That is the scalable worker platform: **Continuous turns SMB work into governed, budgeted, measurable agentic labor.**
+
+**Additional core primitives for SMB infrastructure**
+
+If Continuous is the core operating infrastructure for the future of SMBs, the
+data model should also make the business graph complete enough to understand
+promises, obligations, capacity, communication, risk, authority, and measurement
+across every workflow. These primitives should be added without replacing the
+existing model. They clarify the next layer of the canonical graph.
+
+| Primitive | Why it belongs in core |
+|---|---|
+| Obligation | Represents things the business must, should, or may need to do because of a rule, policy, contract, customer promise, filing, payment, or internal control |
+| Commitment | Represents promises made to customers, workers, vendors, agencies, lenders, partners, or owners, including who promised what, to whom, by when, and under which terms |
+| Agreement | Gives contracts, SOWs, employment agreements, vendor terms, leases, subscriptions, benefit plan documents, and customer terms a shared backbone |
+| Resource | Models constrained capacity: people, synthetic workers, robots, rooms, vehicles, equipment, cash, inventory, materials, and calendar time |
+| WorkItem | Gives tasks, jobs, work orders, workflow steps, checklists, and exceptions one accountable operating unit with owner, dependency, output, cost, and quality |
+| Decision | Records choices, options considered, authority, policy context, reason, evidence, and downstream effects |
+| Conversation | Captures business communication across email, SMS, calls, chat, forms, portals, Slack, and partner systems |
+| KnowledgeSource | Stores business knowledge, templates, policies, playbooks, instructions, FAQs, source docs, and retrieved context for humans and synthetic workers |
+| Authority | Models approval power, delegation, approval limits, escalation paths, and who may approve money, filings, discounts, access, AI budgets, or worker policies |
+| Exception | Represents blocked, failed, risky, or anomalous states that need triage, escalation, mitigation, or evidence |
+| Metric | Gives owner briefs, worker scorecards, operating health, targets, anomalies, and ROI a shared measurement model |
+
+**Primitive detail**
+
+| Primitive | Supporting concepts |
+|---|---|
+| Obligation | ObligationSource, ObligationStatus, ObligationAssignment, ObligationEvidence, ObligationWaiver |
+| Commitment | CommitmentParty, CommitmentTerm, CommitmentStatus, CommitmentEvent |
+| Agreement | AgreementParty, AgreementTerm, AgreementVersion, AgreementSignature, AgreementRenewal |
+| Resource | ResourceAllocation, Capacity, Availability, Constraint, Utilization |
+| WorkItem | WorkItemDependency, WorkItemOutput, WorkItemCost, WorkItemQuality, WorkItemException |
+| Decision | DecisionOption, DecisionReason, DecisionAuthority, DecisionEvidence, DecisionImpact |
+| Conversation | Message, Participant, CommunicationConsent, CommunicationReceipt, ThreadSummary |
+| KnowledgeSource | KnowledgeChunk, Template, PolicyDocument, Playbook, Instruction, SourceVersion |
+| Authority | Delegation, ApprovalLimit, EscalationPath, Override, BreakGlassEvent |
+| Exception | Risk, Incident, Control, Mitigation, Escalation, Resolution |
+| Metric | MetricObservation, Target, Scorecard, Anomaly, Forecast |
+
+**Modeling rule**
+
+These primitives should stay generic and reusable. Payroll blockers, failed
+filings, customer complaints, ACH returns, unsafe AI outputs, connector outages,
+late jobs, low satisfaction, and missing documents should not each invent their
+own unrelated exception model. They should be specialized through type fields,
+rule context, workflow context, evidence, and domain-specific extensions only
+when extra structure is necessary.

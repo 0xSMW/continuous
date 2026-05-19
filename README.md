@@ -38,29 +38,38 @@ Then open `http://localhost:3000`.
 
 - `/api/health` reports Postgres-backed readiness checks.
 - `/api/core` returns persisted core counts, active tasks, and recent events.
+- `/api/revenue-worker` returns the persisted Revenue Worker snapshot for tokened operators.
+- `/api/revenue-worker/run` is a disabled-by-default guarded `POST` run path.
 
 ## Docs
 
 - [Core platform](docs/core-platform.md)
 - [Open workflows](docs/workflows.md)
+- [Agent build path](docs/agent-build-path.md)
+- [Revenue Worker expansion](docs/revenue-worker-expansion.md)
+- [Worker expansion map](docs/worker-expansion.md)
 - [Local development](docs/local-development.md)
 - [DigitalOcean deployment](docs/deployment.md)
 - [Infrastructure notes](infra/README.md)
 
 ## Deployment
 
-The production host is a DigitalOcean droplet. Initial HTTP-by-IP deployment:
+The production host is a DigitalOcean droplet. Before DNS cutover, deploy by IP
+with plain HTTP:
 
 ```sh
 ./scripts/create-droplet.sh
 HOST=45.55.53.92 ./scripts/deploy.sh
 ```
 
-After DNS for `continuoushq.com` points at the droplet:
+After DNS changes, refresh the Caddy site hosts without a full app deploy:
 
 ```sh
 HOST=45.55.53.92 ./scripts/configure-domain.sh
 ```
+
+Caddy issues and renews the HTTPS certificate automatically for
+`continuoushq.com` after DNS points at the droplet.
 
 ## License
 

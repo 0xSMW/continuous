@@ -4,7 +4,7 @@ set -euo pipefail
 HOST="${HOST:-}"
 SSH_USER="${SSH_USER:-root}"
 APP_DIR="${APP_DIR:-/opt/continuous}"
-SITE_HOSTS="${SITE_HOSTS:-continuoushq.com,www.continuoushq.com}"
+SITE_HOSTS="${SITE_HOSTS:-continuoushq.com}"
 ACME_EMAIL="${ACME_EMAIL:-admin@continuoushq.com}"
 first_host="${SITE_HOSTS%%,*}"
 first_host="${first_host#http://}"

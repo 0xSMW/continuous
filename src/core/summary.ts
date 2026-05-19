@@ -3,20 +3,37 @@ import type { AnyPgTable } from "drizzle-orm/pg-core";
 
 import {
   adapters,
+  bankAccounts,
   budgetAccounts,
   capabilities,
+  compensationAgreements,
   customers,
+  decisions,
+  documents,
+  employments,
   evidence,
+  evaluations,
   events,
+  filingDrafts,
+  filingRequirements,
   generatedViews,
   invoices,
   jobs,
+  legalEntities,
   leads,
+  obligations,
+  paySchedules,
+  paymentInstructions,
   payments,
+  payrollRuns,
+  people,
   quotes,
+  rulePacks,
   tasks,
   tenants,
   usageEvents,
+  workflowDefinitions,
+  workflowRuns,
   workers,
 } from "../db/schema";
 
@@ -26,6 +43,23 @@ export type CoreSummary = {
   tenantName: string | null;
   counts: {
     tenants: number;
+    legalEntities: number;
+    people: number;
+    employments: number;
+    compensationAgreements: number;
+    paySchedules: number;
+    payrollRuns: number;
+    rulePacks: number;
+    obligations: number;
+    filingRequirements: number;
+    filingDrafts: number;
+    bankAccounts: number;
+    paymentInstructions: number;
+    workflowDefinitions: number;
+    workflowRuns: number;
+    documents: number;
+    decisions: number;
+    evaluations: number;
     customers: number;
     leads: number;
     quotes: number;
@@ -73,6 +107,23 @@ export async function getCoreSummary(): Promise<CoreSummary> {
   const [
     tenantRows,
     tenantCount,
+    legalEntityCount,
+    peopleCount,
+    employmentCount,
+    compensationCount,
+    payScheduleCount,
+    payrollRunCount,
+    rulePackCount,
+    obligationCount,
+    filingRequirementCount,
+    filingDraftCount,
+    bankAccountCount,
+    paymentInstructionCount,
+    workflowDefinitionCount,
+    workflowRunCount,
+    documentCount,
+    decisionCount,
+    evaluationCount,
     customerCount,
     leadCount,
     quoteCount,
@@ -93,6 +144,23 @@ export async function getCoreSummary(): Promise<CoreSummary> {
   ] = await Promise.all([
     db.select({ name: tenants.name }).from(tenants).limit(1),
     tableCount(db, tenants),
+    tableCount(db, legalEntities),
+    tableCount(db, people),
+    tableCount(db, employments),
+    tableCount(db, compensationAgreements),
+    tableCount(db, paySchedules),
+    tableCount(db, payrollRuns),
+    tableCount(db, rulePacks),
+    tableCount(db, obligations),
+    tableCount(db, filingRequirements),
+    tableCount(db, filingDrafts),
+    tableCount(db, bankAccounts),
+    tableCount(db, paymentInstructions),
+    tableCount(db, workflowDefinitions),
+    tableCount(db, workflowRuns),
+    tableCount(db, documents),
+    tableCount(db, decisions),
+    tableCount(db, evaluations),
     tableCount(db, customers),
     tableCount(db, leads),
     tableCount(db, quotes),
@@ -137,6 +205,23 @@ export async function getCoreSummary(): Promise<CoreSummary> {
     tenantName: tenantRows[0]?.name ?? null,
     counts: {
       tenants: tenantCount,
+      legalEntities: legalEntityCount,
+      people: peopleCount,
+      employments: employmentCount,
+      compensationAgreements: compensationCount,
+      paySchedules: payScheduleCount,
+      payrollRuns: payrollRunCount,
+      rulePacks: rulePackCount,
+      obligations: obligationCount,
+      filingRequirements: filingRequirementCount,
+      filingDrafts: filingDraftCount,
+      bankAccounts: bankAccountCount,
+      paymentInstructions: paymentInstructionCount,
+      workflowDefinitions: workflowDefinitionCount,
+      workflowRuns: workflowRunCount,
+      documents: documentCount,
+      decisions: decisionCount,
+      evaluations: evaluationCount,
       customers: customerCount,
       leads: leadCount,
       quotes: quoteCount,
@@ -183,6 +268,23 @@ export async function getCoreSummarySafe(): Promise<
         tenantName: null,
         counts: {
           tenants: 0,
+          legalEntities: 0,
+          people: 0,
+          employments: 0,
+          compensationAgreements: 0,
+          paySchedules: 0,
+          payrollRuns: 0,
+          rulePacks: 0,
+          obligations: 0,
+          filingRequirements: 0,
+          filingDrafts: 0,
+          bankAccounts: 0,
+          paymentInstructions: 0,
+          workflowDefinitions: 0,
+          workflowRuns: 0,
+          documents: 0,
+          decisions: 0,
+          evaluations: 0,
           customers: 0,
           leads: 0,
           quotes: 0,
@@ -223,5 +325,13 @@ export function summarizeCoreReadiness(summary: CoreSummary) {
     hasCapabilities: summary.counts.capabilities > 0,
     hasEvidence: summary.counts.evidence > 0,
     hasBudgets: summary.counts.budgetAccounts > 0,
+    hasEntity: summary.counts.legalEntities > 0 && summary.counts.bankAccounts > 0,
+    hasWorkforce: summary.counts.people > 0 && summary.counts.employments > 0,
+    hasPayroll: summary.counts.paySchedules > 0 && summary.counts.payrollRuns > 0,
+    hasCompliance: summary.counts.rulePacks > 0 && summary.counts.obligations > 0,
+    hasFilings: summary.counts.filingRequirements > 0 && summary.counts.filingDrafts > 0,
+    hasWorkflows: summary.counts.workflowDefinitions > 0 && summary.counts.workflowRuns > 0,
+    hasDocuments: summary.counts.documents > 0,
+    hasEvaluations: summary.counts.evaluations > 0,
   };
 }

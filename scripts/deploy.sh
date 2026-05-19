@@ -9,7 +9,7 @@ SSH_USER="${SSH_USER:-root}"
 APP_DIR="${APP_DIR:-/opt/continuous}"
 SITE_HOSTS="${SITE_HOSTS:-http://:80}"
 ACME_EMAIL="${ACME_EMAIL:-admin@continuoushq.com}"
-APP_URL="${APP_URL:-http://$HOST}"
+APP_URL="${APP_URL:-}"
 POSTGRES_DB="${POSTGRES_DB:-continuous}"
 POSTGRES_USER="${POSTGRES_USER:-continuous}"
 REMOTE="$SSH_USER@$HOST"
@@ -18,6 +18,17 @@ if [ -z "$HOST" ]; then
   echo "Set HOST to the droplet IP or hostname." >&2
   echo "Example: HOST=203.0.113.10 ./scripts/deploy.sh" >&2
   exit 1
+fi
+
+if [ -z "$APP_URL" ]; then
+  if [ "$SITE_HOSTS" = "http://:80" ] || [ "$SITE_HOSTS" = ":80" ]; then
+    APP_URL="http://$HOST"
+  else
+    first_host="${SITE_HOSTS%%,*}"
+    first_host="${first_host#http://}"
+    first_host="${first_host#https://}"
+    APP_URL="https://$first_host"
+  fi
 fi
 
 quote() {
@@ -68,6 +79,8 @@ if [ ! -f .env ]; then
     printf 'ACME_EMAIL=%s\n' "$ACME_EMAIL"
     printf 'APP_IMAGE=continuous-app\n'
     printf 'APP_TAG=local\n'
+    printf 'REVENUE_WORKER_RUN_ENABLED=true\n'
+    printf 'REVENUE_WORKER_RUN_TOKEN=%s\n' "$(openssl rand -hex 32)"
   } > .env
   echo "Created $APP_DIR/.env"
 else
@@ -97,6 +110,13 @@ set_env APP_URL "$APP_URL"
 set_env SITE_HOSTS "$SITE_HOSTS"
 set_env ACME_EMAIL "$ACME_EMAIL"
 
+worker_token="$(grep '^REVENUE_WORKER_RUN_TOKEN=' .env | cut -d= -f2- || true)"
+if [ -z "$worker_token" ]; then
+  worker_token="$(openssl rand -hex 32)"
+  set_env REVENUE_WORKER_RUN_TOKEN "$worker_token"
+fi
+set_env REVENUE_WORKER_RUN_ENABLED true
+
 docker compose pull db caddy
 docker compose up -d db
 docker compose exec -T db sh -c 'until pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"; do sleep 1; done' </dev/null
@@ -111,7 +131,6 @@ fi
 
 docker compose --profile tools run --rm --build migrate bun run db:migrate </dev/null
 docker compose --profile tools run --rm --build migrate bun run db:seed </dev/null
-docker compose rm -sf app caddy >/dev/null 2>&1 || true
 docker compose up -d --build --remove-orphans app caddy
 docker compose ps
 REMOTE_SCRIPT

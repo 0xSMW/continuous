@@ -15,6 +15,8 @@ export type Health = {
   summary: {
     tenants: number;
     graphObjects: number;
+    operatingObjects: number;
+    workflows: number;
     tasks: number;
     events: number;
     evidence: number;
@@ -31,6 +33,23 @@ export type HealthInput = {
   dbError?: string | null;
   counts: {
     tenants: number;
+    legalEntities: number;
+    people: number;
+    employments: number;
+    compensationAgreements: number;
+    paySchedules: number;
+    payrollRuns: number;
+    rulePacks: number;
+    obligations: number;
+    filingRequirements: number;
+    filingDrafts: number;
+    bankAccounts: number;
+    paymentInstructions: number;
+    workflowDefinitions: number;
+    workflowRuns: number;
+    documents: number;
+    decisions: number;
+    evaluations: number;
     customers: number;
     leads: number;
     quotes: number;
@@ -55,10 +74,25 @@ export function getHealth(input: HealthInput): Health {
     input.counts.jobs +
     input.counts.invoices +
     input.counts.payments;
+  const operatingObjects =
+    input.counts.legalEntities +
+    input.counts.people +
+    input.counts.employments +
+    input.counts.compensationAgreements +
+    input.counts.paySchedules +
+    input.counts.payrollRuns +
+    input.counts.rulePacks +
+    input.counts.obligations +
+    input.counts.filingRequirements +
+    input.counts.filingDrafts +
+    input.counts.bankAccounts +
+    input.counts.paymentInstructions;
 
   const summary = {
     tenants: input.counts.tenants,
     graphObjects,
+    operatingObjects,
+    workflows: input.counts.workflowRuns,
     tasks: input.counts.tasks,
     events: input.counts.events,
     evidence: input.counts.evidence,
@@ -90,9 +124,19 @@ export function getHealth(input: HealthInput): Health {
       detail: `${graphObjects} persisted graph objects visible`,
     },
     {
+      id: "canonical_operating_layer",
+      state: operatingObjects >= 10 ? "pass" : "warn",
+      detail: `${operatingObjects} entity, workforce, payroll, filing, compliance, and payment records visible`,
+    },
+    {
+      id: "workflow_spine",
+      state: input.counts.workflowDefinitions > 0 && input.counts.workflowRuns > 0 ? "pass" : "warn",
+      detail: `${input.counts.workflowDefinitions} workflow definitions and ${input.counts.workflowRuns} workflow runs visible`,
+    },
+    {
       id: "evidence",
-      state: input.counts.evidence > 0 ? "pass" : "warn",
-      detail: `${input.counts.evidence} evidence records visible`,
+      state: input.counts.evidence > 0 && input.counts.documents > 0 ? "pass" : "warn",
+      detail: `${input.counts.evidence} evidence records and ${input.counts.documents} document packets visible`,
     },
     {
       id: "adapter_runtime",
