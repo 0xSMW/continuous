@@ -1552,6 +1552,9 @@ export const approvalRequests = pgTable(
     workerRunId: uuid("worker_run_id").references(() => workerRuns.id, {
       onDelete: "set null",
     }),
+    workflowRunId: uuid("workflow_run_id").references(() => workflowRuns.id, {
+      onDelete: "set null",
+    }),
     eventId: uuid("event_id").references(() => events.id, {
       onDelete: "set null",
     }),
@@ -1610,6 +1613,7 @@ export const approvalRequests = pgTable(
     index("approval_requests_state_idx").on(table.tenantId, table.state),
     index("approval_requests_task_idx").on(table.taskId),
     index("approval_requests_worker_run_idx").on(table.workerRunId),
+    index("approval_requests_workflow_run_idx").on(table.workflowRunId),
     index("approval_requests_event_idx").on(table.eventId),
     index("approval_requests_reviewer_idx").on(table.reviewerUserId),
   ],
@@ -1810,6 +1814,87 @@ export const workflowRuns = pgTable(
     uniqueIndex("workflow_runs_idempotency_idx").on(
       table.tenantId,
       table.definitionId,
+      table.idempotencyKey,
+    ),
+  ],
+);
+
+export const workflowSteps = pgTable(
+  "workflow_steps",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    definitionId: uuid("definition_id")
+      .notNull()
+      .references(() => workflowDefinitions.id, { onDelete: "restrict" }),
+    workflowRunId: uuid("workflow_run_id")
+      .notNull()
+      .references(() => workflowRuns.id, { onDelete: "cascade" }),
+    eventId: uuid("event_id").references(() => events.id, {
+      onDelete: "set null",
+    }),
+    approvalRequestId: uuid("approval_request_id").references(
+      () => approvalRequests.id,
+      { onDelete: "set null" },
+    ),
+    taskId: uuid("task_id").references(() => tasks.id, {
+      onDelete: "set null",
+    }),
+    objectId: uuid("object_id").references(() => objects.id, {
+      onDelete: "set null",
+    }),
+    workerId: uuid("worker_id").references(() => workers.id, {
+      onDelete: "set null",
+    }),
+    capabilityId: uuid("capability_id").references(() => capabilities.id, {
+      onDelete: "set null",
+    }),
+    kind: text("kind").notNull().default("transition"),
+    name: text("name").notNull().default(""),
+    state: runState("state").notNull().default("queued"),
+    priority: taskPriority("priority").notNull().default("normal"),
+    risk: riskLevel("risk").notNull().default("medium"),
+    fromState: text("from_state"),
+    toState: text("to_state").notNull(),
+    attempt: integer("attempt").notNull().default(1),
+    maxAttempts: integer("max_attempts").notNull().default(3),
+    leaseOwner: text("lease_owner"),
+    leasedUntil: timestamp("leased_until", { withTimezone: true }),
+    dueAt: timestamp("due_at", { withTimezone: true }),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
+    idempotencyKey: text("idempotency_key").notNull(),
+    input: jsonb("input")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    output: jsonb("output")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    error: jsonb("error")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("workflow_steps_tenant_idx").on(table.tenantId),
+    index("workflow_steps_run_idx").on(table.workflowRunId),
+    index("workflow_steps_state_idx").on(table.tenantId, table.state),
+    index("workflow_steps_approval_idx").on(table.approvalRequestId),
+    index("workflow_steps_task_idx").on(table.taskId),
+    uniqueIndex("workflow_steps_idempotency_idx").on(
+      table.tenantId,
+      table.workflowRunId,
       table.idempotencyKey,
     ),
   ],
@@ -2224,6 +2309,8 @@ export const tenantsRelations = relations(tenants, ({ many }) => ({
   tasks: many(tasks),
   events: many(events),
   workerRuns: many(workerRuns),
+  workflowRuns: many(workflowRuns),
+  workflowSteps: many(workflowSteps),
 }));
 
 export const usersRelations = relations(users, ({ one, many }) => ({
@@ -2246,12 +2333,15 @@ export const workersRelations = relations(workers, ({ one, many }) => ({
     references: [users.id],
   }),
   runs: many(workerRuns),
+  workflowRuns: many(workflowRuns),
+  workflowSteps: many(workflowSteps),
 }));
 
 export const capabilitiesRelations = relations(capabilities, ({ many }) => ({
   grants: many(capabilityGrants),
   tasks: many(tasks),
   events: many(events),
+  workflowSteps: many(workflowSteps),
   uiContracts: many(uiContracts),
 }));
 
@@ -2432,6 +2522,7 @@ export const tasksRelations = relations(tasks, ({ one, many }) => ({
   evidence: many(evidence),
   usageEvents: many(usageEvents),
   workerRuns: many(workerRuns),
+  workflowSteps: many(workflowSteps),
   approvalRequests: many(approvalRequests),
   auditEvents: many(auditEvents),
 }));
@@ -2463,6 +2554,7 @@ export const eventsRelations = relations(events, ({ one, many }) => ({
   }),
   evidence: many(evidence),
   workerRuns: many(workerRuns),
+  workflowSteps: many(workflowSteps),
   approvalRequests: many(approvalRequests),
   auditEvents: many(auditEvents),
 }));
@@ -2500,6 +2592,71 @@ export const workerRunsRelations = relations(workerRuns, ({ one, many }) => ({
   auditEvents: many(auditEvents),
 }));
 
+export const workflowDefinitionsRelations = relations(workflowDefinitions, ({ many }) => ({
+  runs: many(workflowRuns),
+  steps: many(workflowSteps),
+}));
+
+export const workflowRunsRelations = relations(workflowRuns, ({ one, many }) => ({
+  tenant: one(tenants, {
+    fields: [workflowRuns.tenantId],
+    references: [tenants.id],
+  }),
+  definition: one(workflowDefinitions, {
+    fields: [workflowRuns.definitionId],
+    references: [workflowDefinitions.id],
+  }),
+  object: one(objects, {
+    fields: [workflowRuns.objectId],
+    references: [objects.id],
+  }),
+  worker: one(workers, {
+    fields: [workflowRuns.workerId],
+    references: [workers.id],
+  }),
+  steps: many(workflowSteps),
+  approvalRequests: many(approvalRequests),
+}));
+
+export const workflowStepsRelations = relations(workflowSteps, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [workflowSteps.tenantId],
+    references: [tenants.id],
+  }),
+  definition: one(workflowDefinitions, {
+    fields: [workflowSteps.definitionId],
+    references: [workflowDefinitions.id],
+  }),
+  workflowRun: one(workflowRuns, {
+    fields: [workflowSteps.workflowRunId],
+    references: [workflowRuns.id],
+  }),
+  event: one(events, {
+    fields: [workflowSteps.eventId],
+    references: [events.id],
+  }),
+  approvalRequest: one(approvalRequests, {
+    fields: [workflowSteps.approvalRequestId],
+    references: [approvalRequests.id],
+  }),
+  task: one(tasks, {
+    fields: [workflowSteps.taskId],
+    references: [tasks.id],
+  }),
+  object: one(objects, {
+    fields: [workflowSteps.objectId],
+    references: [objects.id],
+  }),
+  worker: one(workers, {
+    fields: [workflowSteps.workerId],
+    references: [workers.id],
+  }),
+  capability: one(capabilities, {
+    fields: [workflowSteps.capabilityId],
+    references: [capabilities.id],
+  }),
+}));
+
 export const approvalRequestsRelations = relations(
   approvalRequests,
   ({ one, many }) => ({
@@ -2514,6 +2671,10 @@ export const approvalRequestsRelations = relations(
     workerRun: one(workerRuns, {
       fields: [approvalRequests.workerRunId],
       references: [workerRuns.id],
+    }),
+    workflowRun: one(workflowRuns, {
+      fields: [approvalRequests.workflowRunId],
+      references: [workflowRuns.id],
     }),
     event: one(events, {
       fields: [approvalRequests.eventId],
@@ -2538,6 +2699,7 @@ export const approvalRequestsRelations = relations(
       relationName: "decider",
     }),
     auditEvents: many(auditEvents),
+    workflowSteps: many(workflowSteps),
   }),
 );
 

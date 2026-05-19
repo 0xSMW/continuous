@@ -52,6 +52,7 @@ import {
   usageEvents,
   workflowDefinitions,
   workflowRuns,
+  workflowSteps,
   workerRuns,
   workers,
 } from "../db/schema";
@@ -76,6 +77,7 @@ export type CoreSummary = {
     paymentInstructions: number;
     workflowDefinitions: number;
     workflowRuns: number;
+    workflowSteps: number;
     workerRuns: number;
     approvalRequests: number;
     auditEvents: number;
@@ -159,6 +161,7 @@ export async function getCoreSummary(): Promise<CoreSummary> {
     paymentInstructionCount,
     workflowDefinitionCount,
     workflowRunCount,
+    workflowStepCount,
     workerRunCount,
     approvalRequestCount,
     auditEventCount,
@@ -215,6 +218,7 @@ export async function getCoreSummary(): Promise<CoreSummary> {
     tableCount(db, paymentInstructions),
     tableCount(db, workflowDefinitions),
     tableCount(db, workflowRuns),
+    tableCount(db, workflowSteps),
     tableCount(db, workerRuns),
     tableCount(db, approvalRequests),
     tableCount(db, auditEvents),
@@ -295,6 +299,7 @@ export async function getCoreSummary(): Promise<CoreSummary> {
       paymentInstructions: paymentInstructionCount,
       workflowDefinitions: workflowDefinitionCount,
       workflowRuns: workflowRunCount,
+      workflowSteps: workflowStepCount,
       workerRuns: workerRunCount,
       approvalRequests: approvalRequestCount,
       auditEvents: auditEventCount,
@@ -377,6 +382,7 @@ export async function getCoreSummarySafe(): Promise<
           paymentInstructions: 0,
           workflowDefinitions: 0,
           workflowRuns: 0,
+          workflowSteps: 0,
           workerRuns: 0,
           approvalRequests: 0,
           auditEvents: 0,
@@ -455,7 +461,11 @@ export function summarizeCoreReadiness(summary: CoreSummary) {
     hasPayroll: summary.counts.paySchedules > 0 && summary.counts.payrollRuns > 0,
     hasCompliance: summary.counts.rulePacks > 0 && summary.counts.obligations > 0,
     hasFilings: summary.counts.filingRequirements > 0 && summary.counts.filingDrafts > 0,
-    hasWorkflows: summary.counts.workflowDefinitions > 0 && summary.counts.workflowRuns > 0,
+    hasWorkflows:
+      summary.counts.workflowDefinitions > 0 &&
+      summary.counts.workflowRuns > 0 &&
+      summary.counts.workflowSteps > 0,
+    hasWorkflowSteps: summary.counts.workflowSteps > 0,
     hasWorkerRuns: summary.counts.workerRuns > 0,
     hasAuthority: summary.counts.approvalRequests > 0 && summary.counts.auditEvents > 0,
     hasDocuments: summary.counts.documents > 0,

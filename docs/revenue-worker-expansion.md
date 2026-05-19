@@ -15,13 +15,13 @@ state, and object versioning without external sends or money movement.
 | Operator read API | `GET /worker?view=snapshot&role=revenue_operations`, bearer-token required |
 | Approval API | `GET /worker?view=approvals&role=revenue_operations` and `POST /worker` with `command=approval.decide`, bearer-token required |
 | Run API | `POST /worker` with `command=run`, disabled by default and bearer-token gated when enabled |
-| Operator run | `bun run worker:revenue -- --idempotency-key=<key>` |
+| Operator run | `bun run worker:tool worker.run` with the same worker/config payload |
 | External execution | Disabled; adapter runtime records dry-run receipts and matched reconciliation only |
 
 `/worker` is the forward API. Worker role, tenant, operation config, and
 idempotency belong in query or payload fields, not in worker-family-specific URL
-paths. `/api/revenue-worker*` remains a temporary compatibility layer for the
-first worker only.
+paths. New worker families must add commands and config schemas, not new HTTP
+route names.
 
 ## Expansion Gates
 

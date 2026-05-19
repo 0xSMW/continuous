@@ -84,12 +84,12 @@ operator decisions can be written. Use the CLI path over SSH for direct
 operator-controlled smoke runs:
 
 ```sh
-ssh root@45.55.53.92 'cd /opt/continuous && docker compose --profile tools run --rm migrate bun run worker:revenue -- --idempotency-key=deploy-revenue-run-001'
+ssh root@45.55.53.92 'cd /opt/continuous && docker compose --profile tools run --rm migrate bun run worker:tool worker.run --payload='"'"'{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"deploy-revenue-run-001","config":{}}'"'"''
 ```
 
 For the HTTPS worker API path, call `POST /worker` with `command`, `worker`,
 `config`, and `idempotencyKey` fields plus the bearer token from
 `/opt/continuous/.env`. `GET /api/core`, `GET /worker?view=snapshot`, and
 `GET /worker?view=approvals` use the same bearer token for operator-only
-snapshots and approval review. The older `/api/revenue-worker*` routes remain
-compatibility wrappers while the first worker is being hardened.
+snapshots and approval review. Worker-specific HTTP paths are intentionally
+absent; expand the worker control plane through `/worker` payload fields.

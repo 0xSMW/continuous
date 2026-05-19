@@ -8,6 +8,7 @@ import {
   evidence,
   workflowDefinitions,
   workflowRuns,
+  workflowSteps,
   type JsonObject,
 } from "../db/schema";
 import { RevenueWorkerUnavailableError } from "../worker/revenue";
@@ -48,6 +49,30 @@ export type WorkflowRunRecord = {
   startedAt: string;
   updatedAt: string;
   completedAt: string | null;
+};
+
+export type WorkflowStepRecord = {
+  id: string;
+  workflowRunId: string;
+  definitionId: string;
+  eventId: string | null;
+  approvalRequestId: string | null;
+  kind: string;
+  name: string;
+  state: string;
+  fromState: string | null;
+  toState: string;
+  attempt: number;
+  maxAttempts: number;
+  leaseOwner: string | null;
+  leasedUntil: string | null;
+  nextAttemptAt: string | null;
+  input: JsonObject;
+  output: JsonObject;
+  error: JsonObject;
+  startedAt: string | null;
+  completedAt: string | null;
+  updatedAt: string;
 };
 
 export function stringArray(value: unknown) {
@@ -159,6 +184,32 @@ function runRecord(row: {
   };
 }
 
+function stepRecord(row: typeof workflowSteps.$inferSelect): WorkflowStepRecord {
+  return {
+    id: row.id,
+    workflowRunId: row.workflowRunId,
+    definitionId: row.definitionId,
+    eventId: row.eventId,
+    approvalRequestId: row.approvalRequestId,
+    kind: row.kind,
+    name: row.name,
+    state: row.state,
+    fromState: row.fromState,
+    toState: row.toState,
+    attempt: row.attempt,
+    maxAttempts: row.maxAttempts,
+    leaseOwner: row.leaseOwner,
+    leasedUntil: row.leasedUntil?.toISOString() ?? null,
+    nextAttemptAt: row.nextAttemptAt?.toISOString() ?? null,
+    input: row.input,
+    output: row.output,
+    error: row.error,
+    startedAt: row.startedAt?.toISOString() ?? null,
+    completedAt: row.completedAt?.toISOString() ?? null,
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
 export async function listWorkflows(input: {
   operatorEmail: string;
   tenantSlug?: string;
@@ -178,7 +229,7 @@ export async function listWorkflows(input: {
     runConditions.push(eq(workflowRuns.state, input.state));
   }
 
-  const [definitionRows, runRows] = await Promise.all([
+  const [definitionRows, runRows, stepRows] = await Promise.all([
     db
       .select()
       .from(workflowDefinitions)
@@ -194,6 +245,12 @@ export async function listWorkflows(input: {
       .where(and(...runConditions))
       .orderBy(desc(workflowRuns.updatedAt))
       .limit(50),
+    db
+      .select()
+      .from(workflowSteps)
+      .where(eq(workflowSteps.tenantId, operator.tenantId))
+      .orderBy(desc(workflowSteps.updatedAt))
+      .limit(100),
   ]);
 
   return {
@@ -206,6 +263,7 @@ export async function listWorkflows(input: {
     },
     definitions: definitionRows.map(definitionRecord),
     runs: runRows.map(runRecord),
+    steps: stepRows.map(stepRecord),
   };
 }
 
@@ -281,12 +339,14 @@ export async function startWorkflowRun(input: {
       return {
         created: false,
         run: runRecord(existingRun),
+        stepId: null,
         eventId: null,
         auditEventId: null,
       };
     }
 
     const now = new Date();
+    const leaseExpiresAt = new Date(now.getTime() + 5 * 60 * 1000);
     const [run] = await tx
       .insert(workflowRuns)
       .values({
@@ -309,6 +369,34 @@ export async function startWorkflowRun(input: {
       })
       .returning();
 
+    const [step] = await tx
+      .insert(workflowSteps)
+      .values({
+        tenantId: operator.tenantId,
+        definitionId: definition.id,
+        workflowRunId: run.id,
+        objectId: run.objectId,
+        workerId: run.workerId,
+        kind: "start",
+        name: `${definition.key}:start:${initialState}`,
+        state: "running",
+        toState: initialState,
+        attempt: 1,
+        maxAttempts: 3,
+        leaseOwner: operator.actorRef,
+        leasedUntil: leaseExpiresAt,
+        idempotencyKey: `${input.idempotencyKey}:start`,
+        input: {
+          workflowKey: definition.key,
+          state: initialState,
+          operatorUserId: operator.userId,
+          operatorEmail: operator.email,
+        },
+        startedAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: workflowSteps.id });
+
     const [event] = await tx
       .insert(events)
       .values({
@@ -322,6 +410,7 @@ export async function startWorkflowRun(input: {
         idempotencyKey: `${input.idempotencyKey}:workflow_started`,
         data: {
           workflowRunId: run.id,
+          workflowStepId: step.id,
           workflowKey: definition.key,
           state: initialState,
           operatorEmail: operator.email,
@@ -348,14 +437,31 @@ export async function startWorkflowRun(input: {
         data: {
           workflowKey: definition.key,
           workflowName: definition.name,
+          workflowStepId: step.id,
           state: initialState,
         },
       })
       .returning({ id: auditEvents.id });
 
+    await tx
+      .update(workflowSteps)
+      .set({
+        eventId: event.id,
+        state: "done",
+        output: {
+          eventId: event.id,
+          auditEventId: audit.id,
+          state: initialState,
+        },
+        completedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(workflowSteps.id, step.id));
+
     return {
       created: true,
       run: runRecord({ run, definition }),
+      stepId: step.id,
       eventId: event.id,
       auditEventId: audit.id,
     };
@@ -422,6 +528,7 @@ export async function transitionWorkflowRun(input: {
     }
 
     const now = new Date();
+    const leaseExpiresAt = new Date(now.getTime() + 5 * 60 * 1000);
     const completedAt = isTerminalWorkflowState(definition, input.toState) ? now : null;
     const transitionData = {
       fromState: row.run.state,
@@ -430,6 +537,38 @@ export async function transitionWorkflowRun(input: {
       operatorUserId: operator.userId,
       operatorEmail: operator.email,
     };
+    const transitionStepKey = `${row.run.id}:${row.run.state}:${input.toState}`;
+
+    const [step] = await tx
+      .insert(workflowSteps)
+      .values({
+        tenantId: operator.tenantId,
+        definitionId: definition.id,
+        workflowRunId: row.run.id,
+        objectId: row.run.objectId,
+        workerId: row.run.workerId,
+        kind: "transition",
+        name: `${definition.key}:${row.run.state}->${input.toState}`,
+        state: "running",
+        fromState: row.run.state,
+        toState: input.toState,
+        attempt: 1,
+        maxAttempts: 3,
+        leaseOwner: operator.actorRef,
+        leasedUntil: leaseExpiresAt,
+        idempotencyKey: transitionStepKey,
+        input: {
+          workflowKey: definition.key,
+          workflowName: definition.name,
+          ...transitionData,
+          data: jsonObject(input.data),
+          blockers: jsonObject(input.blockers),
+          metrics: jsonObject(input.metrics),
+        },
+        startedAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: workflowSteps.id });
 
     const [updatedRun] = await tx
       .update(workflowRuns)
@@ -466,6 +605,7 @@ export async function transitionWorkflowRun(input: {
         objectId: updatedRun.objectId,
         idempotencyKey: `${row.run.id}:${row.run.state}:${input.toState}:${now.toISOString()}`,
         data: {
+          workflowStepId: step.id,
           workflowRunId: row.run.id,
           workflowKey: definition.key,
           ...transitionData,
@@ -491,6 +631,7 @@ export async function transitionWorkflowRun(input: {
         data: {
           workflowKey: definition.key,
           workflowName: definition.name,
+          workflowStepId: step.id,
           ...transitionData,
         },
       })
@@ -509,6 +650,7 @@ export async function transitionWorkflowRun(input: {
         hash: `${source}:${row.run.id}:${row.run.state}:${input.toState}:${now.toISOString()}`,
         data: {
           workflowRunId: row.run.id,
+          workflowStepId: step.id,
           auditEventId: audit.id,
           transition: transitionData,
         },
@@ -525,6 +667,7 @@ export async function transitionWorkflowRun(input: {
         .insert(approvalRequests)
         .values({
           tenantId: operator.tenantId,
+          workflowRunId: row.run.id,
           eventId: event.id,
           objectId: updatedRun.objectId,
           requesterType: "user",
@@ -540,6 +683,7 @@ export async function transitionWorkflowRun(input: {
           requestedAction: {
             action: "approve_workflow_transition",
             workflowRunId: row.run.id,
+            workflowStepId: step.id,
             workflowKey: definition.key,
             fromState: row.run.state,
             toState: input.toState,
@@ -549,6 +693,7 @@ export async function transitionWorkflowRun(input: {
             eventId: event.id,
             auditEventId: audit.id,
             evidenceId: transitionEvidence.id,
+            workflowStepId: step.id,
           },
           policy: {
             source: "workflow_definitions.approvals",
@@ -557,6 +702,7 @@ export async function transitionWorkflowRun(input: {
           },
           data: {
             workflowRunId: row.run.id,
+            workflowStepId: step.id,
             workflowDefinitionId: definition.id,
             workflowKey: definition.key,
             workflowName: definition.name,
@@ -585,6 +731,7 @@ export async function transitionWorkflowRun(input: {
           idempotencyKey: `${row.run.id}:${row.run.state}:${input.toState}:approval_requested`,
           data: {
             workflowRunId: row.run.id,
+            workflowStepId: step.id,
             workflowKey: definition.key,
             workflowName: definition.name,
             reviewerUserId: operator.userId,
@@ -609,6 +756,7 @@ export async function transitionWorkflowRun(input: {
           hash: `${source}:approval:${approval.id}`,
           data: {
             workflowRunId: row.run.id,
+            workflowStepId: step.id,
             workflowKey: definition.key,
             approvalRequestId: approval.id,
             approvalAuditEventId: approvalAudit.id,
@@ -621,8 +769,29 @@ export async function transitionWorkflowRun(input: {
       approvalEvidenceId = approvalEvidence.id;
     }
 
+    await tx
+      .update(workflowSteps)
+      .set({
+        eventId: event.id,
+        approvalRequestId,
+        state: "done",
+        output: {
+          eventId: event.id,
+          auditEventId: audit.id,
+          evidenceId: transitionEvidence.id,
+          approvalRequestId,
+          approvalAuditEventId,
+          approvalEvidenceId,
+          transition: transitionData,
+        },
+        completedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(workflowSteps.id, step.id));
+
     return {
       run: runRecord({ run: updatedRun, definition: row.definition }),
+      stepId: step.id,
       eventId: event.id,
       auditEventId: audit.id,
       evidenceId: transitionEvidence.id,

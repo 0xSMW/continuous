@@ -96,6 +96,10 @@ function objectValue(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function jsonObject(value: unknown): JsonObject {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonObject) : {};
+}
+
 function stringValue(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
@@ -117,7 +121,7 @@ function targetFrom(payload: JsonObject) {
 
 export async function executeWorkerTool(name: string, payload: JsonObject = {}) {
   const target = targetFrom(payload);
-  const config = objectValue(payload.config);
+  const config = jsonObject(payload.config);
   const operatorEmail = stringValue(payload.operatorEmail) ?? env.REVENUE_WORKER_OPERATOR_EMAIL;
 
   if (name === "worker.snapshot") {
@@ -148,6 +152,7 @@ export async function executeWorkerTool(name: string, payload: JsonObject = {}) 
         tenantSlug: target.tenantSlug,
         workerId: target.workerId,
         operatorEmail,
+        config,
       }),
     };
   }

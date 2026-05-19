@@ -45,9 +45,9 @@ Approval decisions use the same route:
 }
 ```
 
-Worker-family-specific routes such as `/api/revenue-worker/run` are
-compatibility wrappers only. Future workers must use `/worker` with role and
-config in structured fields.
+Worker-family-specific routes such as `/api/revenue-worker/run` are not part of
+the public API. Future workers must use `/worker` with role, command,
+idempotency, and config in structured fields.
 
 ## Preconditions
 

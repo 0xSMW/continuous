@@ -33,6 +33,7 @@ export type Health = {
     budgetLedger: number;
     adapters: number;
     adapterLedger: number;
+    workflowSteps: number;
   };
   checks: Check[];
 };
@@ -105,6 +106,7 @@ export function getHealth(input: HealthInput): Health {
     budgetLedger,
     adapters: input.counts.adapters,
     adapterLedger,
+    workflowSteps: input.counts.workflowSteps,
   };
 
   const checks: Check[] = [
@@ -140,8 +142,13 @@ export function getHealth(input: HealthInput): Health {
     },
     {
       id: "workflow_spine",
-      state: input.counts.workflowDefinitions > 0 && input.counts.workflowRuns > 0 ? "pass" : "warn",
-      detail: `${input.counts.workflowDefinitions} workflow definitions and ${input.counts.workflowRuns} workflow runs visible`,
+      state:
+        input.counts.workflowDefinitions > 0 &&
+        input.counts.workflowRuns > 0 &&
+        input.counts.workflowSteps > 0
+          ? "pass"
+          : "warn",
+      detail: `${input.counts.workflowDefinitions} workflow definitions, ${input.counts.workflowRuns} workflow runs, and ${input.counts.workflowSteps} workflow steps visible`,
     },
     {
       id: "worker_run_ledger",

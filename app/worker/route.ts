@@ -14,6 +14,7 @@ import {
   authorizeRevenueWorkerRun,
   normalizeIdempotencyKey,
 } from "../../src/worker/security";
+import type { JsonObject } from "../../src/db/schema";
 
 export const dynamic = "force-dynamic";
 
@@ -34,6 +35,10 @@ function bodyObject(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
+}
+
+function jsonObject(value: unknown): JsonObject {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonObject) : {};
 }
 
 async function readBody(request: Request) {
@@ -238,7 +243,7 @@ export async function POST(request: Request) {
   const body = await readBody(request);
   const command = optionalString(body.command);
   const target = validateTarget(targetFrom(body.worker));
-  const config = bodyObject(body.config);
+  const config = jsonObject(body.config);
 
   if (!target.ok) {
     return errorResponse(target.error, 400);
@@ -265,6 +270,7 @@ export async function POST(request: Request) {
         tenantSlug: target.target.tenantSlug,
         workerId: target.target.workerId,
         operatorEmail: auth.operatorEmail,
+        config,
       });
 
       return Response.json(

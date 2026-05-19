@@ -197,6 +197,9 @@ Transitions use the same route:
 ```
 
 The runtime validates transitions against `workflow_definitions.transitions`,
-records events, audit events, and transition evidence, and creates a pending
-approval packet when a definition moves into an approval state. Do not add
-workflow-specific URL paths for individual business processes.
+records a durable `workflow_steps` row with lease, attempt, input, output, and
+state-transition fields, writes events, audit events, and transition evidence,
+and creates a pending approval packet when a definition moves into an approval
+state. `GET /workflow` returns active definitions, runs, and the recent step
+ledger; `POST /workflow` returns the `stepId` created for the command. Do not
+add workflow-specific URL paths for individual business processes.

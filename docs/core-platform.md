@@ -182,11 +182,15 @@ policy-bound:
 | `/worker?view=snapshot&role=revenue_operations` | Operator-only snapshot of worker state, active tasks, controls, budget usage, and recent events |
 | `/worker?view=approvals&role=revenue_operations` | Operator-only approval queue for worker decisions |
 | `POST /worker` | Canonical worker command surface; worker role, tenant selection, idempotency, and operation config live in structured payload fields |
-| `/workflow` | Canonical workflow command surface for listing definitions/runs and executing validated `start` / `transition` commands |
-| `bun run worker:revenue` | Operator CLI that runs the persisted worker loop with an idempotency key |
-| `/api/revenue-worker*` | Temporary first-worker compatibility wrappers; not the expansion API |
+| `/workflow` | Canonical workflow command surface for listing definitions/runs/steps and executing validated `start` / `transition` commands |
+| `bun run worker:tool worker.run` | Canonical local command surface using the same worker/config payload shape |
 
-One run reserves budget, records a simulated inference, writes usage, emits an
+Worker-specific HTTP paths are not part of the public API. New worker families
+must extend `/worker` with structured `worker`, `command`, `idempotencyKey`, and
+`config` fields rather than adding route names per worker.
+
+One run persists the received config in the run ledger, reserves budget, records
+a simulated inference, writes usage, emits an
 idempotent `revenue_worker.run.completed` event, captures trace evidence,
 records a no-external-send adapter receipt, updates the task to
 `approval_required`, and versions the quote object. External sends and money

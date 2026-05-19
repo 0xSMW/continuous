@@ -35,7 +35,6 @@ Useful app surfaces for worker development:
 | `/worker?view=snapshot` | Canonical operator-gated worker snapshot |
 | `/worker?view=approvals` | Canonical operator-gated worker approval queue |
 | `POST /worker` | Canonical command surface with `command`, `worker`, `config`, and `idempotencyKey` payload fields |
-| `bun run worker:revenue` | Operator CLI run path |
 | `bun run worker:tool` | Repo-owned JSON worker toolbox for agents and local automation |
 
 ## Boundary
@@ -56,7 +55,9 @@ For worker runtime changes, prefer the CLI path first because it does not expose
 HTTP mutation:
 
 ```sh
-bun run worker:revenue -- --idempotency-key=local-revenue-run-001
+bun run worker:tool worker.run <<'JSON'
+{"worker":{"role":"revenue_operations"},"idempotencyKey":"local-revenue-run-001","config":{}}
+JSON
 ```
 
 When the HTTP snapshot, approval, or run path is required, start the app with

@@ -21,6 +21,7 @@ const countLabels = {
   paymentInstructions: "Payment instructions",
   workflowDefinitions: "Workflow definitions",
   workflowRuns: "Workflow runs",
+  workflowSteps: "Workflow steps",
   workerRuns: "Worker runs",
   approvalRequests: "Approval requests",
   auditEvents: "Audit events",

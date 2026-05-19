@@ -21,6 +21,8 @@
 | Revenue Worker HTTP paths are guarded | There is no auth system yet, so detailed worker reads require the operator token, and the side-effecting run endpoint is disabled by default |
 | Added canonical worker API | `/worker` is the forward control-plane route; worker role, tenant selection, command, idempotency, and config live in structured query or payload fields |
 | Added canonical workflow API | `/workflow` validates definition-backed `start` and `transition` commands and records workflow events, audit events, and evidence |
+| Removed worker-specific HTTP wrappers | The greenfield API no longer exposes `/api/revenue-worker*`; new workers must extend `/worker` payloads rather than adding route names |
+| Added workflow step ledger | Workflow starts and transitions now write durable step records with lease, retry, input, output, state-transition, event, evidence, and approval links |
 | Agent build path uses app-server protocol tooling plus Next.js MCP | The installed Codex app-server CLI exposes protocol generation/help commands; `.mcp.json` keeps the Next.js 16 MCP bridge for route/runtime diagnostics |
 | Added the first authority ledger | Revenue Worker runs now create approval requests and audit events, and approval decisions create evidence before any external action is allowed |
 | Added first-class adapter dry-runs | Revenue Worker runs now create linked adapter runs/actions, receipt evidence, attempt metadata, and reconciliation state while external mutation remains disabled |
@@ -74,9 +76,10 @@ credential scopes, and approval UI are in place.
 The canonical HTTP shape is now `/worker`: `GET /worker?view=snapshot` for
 state, `GET /worker?view=approvals` for approval queues, and `POST /worker`
 with `command`, `worker`, `idempotencyKey`, and `config` for side-effecting
-operations. `/api/revenue-worker*` remains a compatibility layer only.
+operations. Worker-specific HTTP routes such as `/api/revenue-worker*` are
+absent by design.
 
 Workflow execution now has the same control-plane style through `/workflow`.
 Definitions remain declarative, and the runtime validates transitions against
-their JSON transition maps before updating `workflow_runs` and writing replayable
-event, audit, and evidence records.
+their JSON transition maps before updating `workflow_runs` and writing durable
+`workflow_steps`, replayable event, audit, evidence, and approval records.

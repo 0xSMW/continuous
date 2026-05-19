@@ -92,7 +92,9 @@ audit trail while keeping external send and money movement blocked.
 The same persisted loop can run without exposing HTTP:
 
 ```sh
-IDEMPOTENCY_KEY=local-revenue-run-002 bun run worker:revenue
+bun run worker:tool worker.run <<'JSON'
+{"worker":{"role":"revenue_operations"},"idempotencyKey":"local-revenue-run-002","config":{}}
+JSON
 ```
 
 Agent-facing local automation can use the repo-owned worker toolbox:
@@ -118,9 +120,9 @@ curl -X POST http://localhost:3000/worker \
   }"
 ```
 
-The older `/api/revenue-worker*` paths are compatibility wrappers for the first
-worker. New worker families should target `/worker` with role and config in the
-request payload.
+Worker-specific HTTP paths are intentionally absent. New worker families should
+target `/worker` with role, command, idempotency, and config in the request
+payload.
 
 ## Notes
 

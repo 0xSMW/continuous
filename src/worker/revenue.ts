@@ -654,6 +654,7 @@ export async function runRevenueWorker(input: {
   operatorEmail: string;
   tenantSlug?: string;
   workerId?: string;
+  config?: JsonObject;
   db?: Database;
 }): Promise<RevenueWorkerRunResult> {
   const db = input.db ?? defaultDb;
@@ -751,6 +752,7 @@ export async function runRevenueWorker(input: {
           data: {
             input: {
               idempotencyKey: input.idempotencyKey,
+              config: input.config ?? {},
               adoptedFromEvent: existingEvent.id,
             },
             output: eventOutput,
@@ -902,6 +904,7 @@ export async function runRevenueWorker(input: {
 
     const runInput = {
       idempotencyKey: input.idempotencyKey,
+      config: input.config ?? {},
       operator: {
         userId: operator.id,
         email: operator.email,
