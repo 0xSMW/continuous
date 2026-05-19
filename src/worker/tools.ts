@@ -212,6 +212,31 @@ export const workerTools = [
     },
   },
   {
+    name: "worker.adapters.retry",
+    description: "Execute due dry-run adapter retries without external execution.",
+    registry: {
+      role: "revenue_operations",
+      surface: "command",
+      command: "adapters.retry",
+      idempotency: "none",
+      externalExecution: "blocked",
+      requiresTenant: true,
+    },
+    inputSchema: {
+      type: "object",
+      properties: {
+        worker: { $ref: "#/$defs/workerTarget" },
+        config: {
+          type: "object",
+          properties: {
+            limit: { type: "number", minimum: 1, maximum: 100 },
+          },
+        },
+      },
+      required: ["worker"],
+    },
+  },
+  {
     name: "worker.owner.brief.generate",
     description: "Generate an owner brief from tenant-scoped Core records.",
     registry: {
@@ -486,6 +511,15 @@ export async function executeWorkerTool(name: string, payload: JsonObject = {}) 
   if (name === "worker.adapters.reconcile") {
     return executeWorkerCommand({
       command: "adapters.reconcile",
+      target,
+      operatorEmail,
+      config,
+    });
+  }
+
+  if (name === "worker.adapters.retry") {
+    return executeWorkerCommand({
+      command: "adapters.retry",
       target,
       operatorEmail,
       config,

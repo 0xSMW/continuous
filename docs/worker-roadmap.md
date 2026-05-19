@@ -27,7 +27,7 @@ adapters, generated UI, evidence, and evals.
 |---|---|
 | Lead-to-cash simulation | Run creates task, worker run, workflow run/steps, budget reservation, inference, usage, adapter dry-run, approval, audit, evidence, object version |
 | Approval execution | Approval decision uses shared approval service, advances the allowed workflow state, and leaves external execution blocked |
-| Adapter hardening | Persistence-only reconciliation writes audit/evidence records and retry/review system tasks; live credentials and retry execution remain gated |
+| Adapter hardening | Reconciliation writes audit/evidence records and retry/review system tasks; due dry-run retries execute with blocked receipts; live credentials remain gated |
 | Eval harness | CI-enforced lead-to-quote case proves classification, approval, budget, adapter receipt, and idempotency replay |
 | First controlled send | Approved external message sends through adapter with receipt and rollback/escalation evidence |
 
@@ -102,4 +102,4 @@ Do not add worker-specific HTTP routes. New worker families extend `/worker`
 by registering role-scoped commands, config schemas, capability grants,
 workflow definitions, approval policies, and evals. Promotion above autonomy
 level 2 requires live adapter scopes, retry workers, reconciliation, approval
-UI, and receipts.
+UI, receipts, and rollback evidence.

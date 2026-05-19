@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, lte } from "drizzle-orm";
 
 import { db as defaultDb } from "../db/client";
 import {
@@ -32,6 +32,18 @@ export type AdapterReconciliationResult = {
   taskIds: string[];
   retryTaskIds: string[];
   reviewTaskIds: string[];
+  auditEventIds: string[];
+  evidenceIds: string[];
+};
+
+export type AdapterRetryExecutionResult = {
+  processed: number;
+  runs: number;
+  actions: number;
+  retryRunIds: string[];
+  retryActionIds: string[];
+  closedRetryTaskIds: string[];
+  eventIds: string[];
   auditEventIds: string[];
   evidenceIds: string[];
 };
@@ -80,6 +92,24 @@ function pendingWhere() {
 
 function pendingActionWhere() {
   return eq(adapterActions.reconciliationState, "pending");
+}
+
+function scheduledRunRetryWhere(now: Date) {
+  return and(
+    eq(adapterRuns.mode, "dry_run"),
+    eq(adapterRuns.state, "queued"),
+    eq(adapterRuns.reconciliationState, "retry_scheduled"),
+    lte(adapterRuns.nextAttemptAt, now),
+  );
+}
+
+function scheduledActionRetryWhere(now: Date) {
+  return and(
+    eq(adapterActions.mode, "dry_run"),
+    eq(adapterActions.state, "queued"),
+    eq(adapterActions.reconciliationState, "retry_scheduled"),
+    lte(adapterActions.nextAttemptAt, now),
+  );
 }
 
 async function tenantIdFor(db: Database, tenantSlug?: string) {
@@ -323,6 +353,184 @@ async function createFollowupTask(
   };
 }
 
+async function closeRetryTasks(
+  db: DatabaseExecutor,
+  input: {
+    tenantId: string;
+    targetType: "adapter_run" | "adapter_action";
+    targetId: string;
+    eventId: string;
+    auditEventId: string;
+    evidenceId: string;
+    now: Date;
+  },
+) {
+  const taskRows = await db
+    .select({
+      id: tasks.id,
+      outcome: tasks.outcome,
+      evidence: tasks.evidence,
+    })
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.tenantId, input.tenantId),
+        eq(tasks.ownerRef, "system:adapter-reconciliation"),
+        eq(tasks.state, "waiting"),
+      ),
+    );
+  const matchingTaskIds = taskRows
+    .filter((task) => {
+      const taskEvidence = task.evidence;
+      const taskOutcome = task.outcome;
+
+      return (
+        taskEvidence.targetType === input.targetType &&
+        taskEvidence.targetId === input.targetId &&
+        taskOutcome.decision === "retry_scheduled"
+      );
+    })
+    .map((task) => task.id);
+
+  if (!matchingTaskIds.length) {
+    return [];
+  }
+
+  for (const task of taskRows.filter((row) => matchingTaskIds.includes(row.id))) {
+    await db
+      .update(tasks)
+      .set({
+        state: "done",
+        outcome: {
+          ...task.outcome,
+          status: "adapter_retry_executed",
+          retryEventId: input.eventId,
+          retryAuditEventId: input.auditEventId,
+          retryEvidenceId: input.evidenceId,
+          externalExecution: "blocked",
+          executable: false,
+        },
+        updatedAt: input.now,
+      })
+      .where(eq(tasks.id, task.id));
+  }
+
+  return matchingTaskIds;
+}
+
+async function recordRetryExecution(
+  db: DatabaseExecutor,
+  input: {
+    tenantId: string;
+    targetType: "adapter_run" | "adapter_action";
+    targetId: string;
+    connectionId: string;
+    workerRunId?: string | null;
+    eventId?: string | null;
+    taskId?: string | null;
+    capabilityId?: string | null;
+    attempt: number;
+    maxAttempts: number;
+    operation: string;
+    receipt: JsonObject;
+    response?: JsonObject;
+    now: Date;
+  },
+) {
+  const data = {
+    targetType: input.targetType,
+    targetId: input.targetId,
+    connectionId: input.connectionId,
+    workerRunId: input.workerRunId ?? null,
+    attempt: input.attempt,
+    maxAttempts: input.maxAttempts,
+    operation: input.operation,
+    externalExecution: "blocked",
+    externalMutation: false,
+    externalSend: false,
+  };
+  const [event] = await db
+    .insert(events)
+    .values({
+      tenantId: input.tenantId,
+      type: "adapter.retry.executed",
+      source,
+      actorType: "system",
+      actorRef: "system:adapter-reconciliation",
+      taskId: input.taskId,
+      capabilityId: input.capabilityId,
+      connectionId: input.connectionId,
+      idempotencyKey: `${input.targetType}:${input.targetId}:retry_executed:${input.attempt}:event`,
+      data: {
+        ...data,
+        sourceEventId: input.eventId ?? null,
+        receipt: input.receipt,
+        response: input.response ?? null,
+      },
+      occurredAt: input.now,
+    })
+    .returning({ id: events.id });
+  const [audit] = await db
+    .insert(auditEvents)
+    .values({
+      tenantId: input.tenantId,
+      type: "adapter.retry.executed",
+      source,
+      actorType: "system",
+      actorRef: "system:adapter-reconciliation",
+      targetType: input.targetType,
+      targetId: input.targetId,
+      taskId: input.taskId,
+      workerRunId: input.workerRunId,
+      eventId: event.id,
+      capabilityId: input.capabilityId,
+      risk: "medium",
+      idempotencyKey: `${input.targetType}:${input.targetId}:retry_executed:${input.attempt}`,
+      data: {
+        ...data,
+        receipt: input.receipt,
+        response: input.response ?? null,
+      },
+    })
+    .returning({ id: auditEvents.id });
+  const [proof] = await db
+    .insert(evidence)
+    .values({
+      tenantId: input.tenantId,
+      kind: "receipt",
+      name: "Adapter retry executed",
+      taskId: input.taskId,
+      eventId: event.id,
+      capabilityId: input.capabilityId,
+      actorType: "system",
+      hash: `${source}:${input.targetType}:${input.targetId}:retry_executed:${input.attempt}:${input.now.toISOString()}`,
+      data: {
+        ...data,
+        eventId: event.id,
+        auditEventId: audit.id,
+        receipt: input.receipt,
+        response: input.response ?? null,
+      },
+    })
+    .returning({ id: evidence.id });
+  const closedRetryTaskIds = await closeRetryTasks(db, {
+    tenantId: input.tenantId,
+    targetType: input.targetType,
+    targetId: input.targetId,
+    eventId: event.id,
+    auditEventId: audit.id,
+    evidenceId: proof.id,
+    now: input.now,
+  });
+
+  return {
+    eventId: event.id,
+    auditEventId: audit.id,
+    evidenceId: proof.id,
+    closedRetryTaskIds,
+  };
+}
+
 async function reconcileAction(db: DatabaseExecutor, row: AdapterActionRow, now: Date) {
   const decision = decisionFor({
     mode: row.mode,
@@ -482,6 +690,123 @@ async function reconcileRun(db: DatabaseExecutor, row: AdapterRunRow, now: Date)
   return { decision, followup, ...evidenceResult };
 }
 
+async function executeActionRetry(db: DatabaseExecutor, row: AdapterActionRow, now: Date) {
+  const response = {
+    ...row.response,
+    status: "retry_executed",
+    retryExecutedAt: now.toISOString(),
+    attempt: row.attempt,
+    externalExecution: "blocked",
+    externalSend: false,
+  };
+  const receipt = {
+    ...row.receipt,
+    retryExecutedAt: now.toISOString(),
+    retryAttempt: row.attempt,
+    externalMutation: false,
+    externalSend: false,
+    reconciliationState: "pending",
+  };
+  const updated = await db
+    .update(adapterActions)
+    .set({
+      state: "done",
+      reconciliationState: "pending",
+      nextAttemptAt: null,
+      response,
+      receipt,
+      error: {},
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(adapterActions.id, row.id),
+        eq(adapterActions.state, "queued"),
+        eq(adapterActions.reconciliationState, "retry_scheduled"),
+      ),
+    )
+    .returning({ id: adapterActions.id });
+
+  if (!updated.length) {
+    return null;
+  }
+
+  const proof = await recordRetryExecution(db, {
+    tenantId: row.tenantId,
+    targetType: "adapter_action",
+    targetId: row.id,
+    connectionId: row.connectionId,
+    eventId: row.eventId,
+    taskId: row.taskId,
+    capabilityId: row.capabilityId,
+    attempt: row.attempt,
+    maxAttempts: row.maxAttempts,
+    operation: row.operation,
+    receipt,
+    response,
+    now,
+  });
+
+  return proof;
+}
+
+async function executeRunRetry(db: DatabaseExecutor, row: AdapterRunRow, now: Date) {
+  const receipt = {
+    ...row.receipt,
+    retryExecutedAt: now.toISOString(),
+    retryAttempt: row.attempt,
+    externalMutation: false,
+    externalSend: false,
+    reconciliationState: "pending",
+  };
+  const data = {
+    ...row.data,
+    retryExecutedAt: now.toISOString(),
+    externalExecution: "blocked",
+    externalMutation: false,
+    externalSend: false,
+  };
+  const updated = await db
+    .update(adapterRuns)
+    .set({
+      state: "done",
+      reconciliationState: "pending",
+      nextAttemptAt: null,
+      receipt,
+      error: {},
+      data,
+      endedAt: now,
+    })
+    .where(
+      and(
+        eq(adapterRuns.id, row.id),
+        eq(adapterRuns.state, "queued"),
+        eq(adapterRuns.reconciliationState, "retry_scheduled"),
+      ),
+    )
+    .returning({ id: adapterRuns.id });
+
+  if (!updated.length) {
+    return null;
+  }
+
+  const proof = await recordRetryExecution(db, {
+    tenantId: row.tenantId,
+    targetType: "adapter_run",
+    targetId: row.id,
+    connectionId: row.connectionId,
+    workerRunId: row.workerRunId,
+    eventId: row.eventId,
+    attempt: row.attempt,
+    maxAttempts: row.maxAttempts,
+    operation: row.operation,
+    receipt,
+    now,
+  });
+
+  return proof;
+}
+
 export async function reconcileAdapterLedger(input: {
   tenantSlug?: string;
   limit?: number;
@@ -590,4 +915,86 @@ export async function reconcileAdapterLedger(input: {
   });
 
   return result;
+}
+
+export async function executeAdapterRetries(input: {
+  tenantSlug?: string;
+  limit?: number;
+  now?: Date;
+  db?: Database;
+} = {}): Promise<AdapterRetryExecutionResult> {
+  const db = input.db ?? defaultDb;
+  const now = input.now ?? new Date();
+  const limit = Math.max(1, Math.min(input.limit ?? 25, 100));
+  const tenantId = await tenantIdFor(db, input.tenantSlug);
+  const result: AdapterRetryExecutionResult = {
+    processed: 0,
+    runs: 0,
+    actions: 0,
+    retryRunIds: [],
+    retryActionIds: [],
+    closedRetryTaskIds: [],
+    eventIds: [],
+    auditEventIds: [],
+    evidenceIds: [],
+  };
+  const actionConditions = [scheduledActionRetryWhere(now)];
+  const runConditions = [scheduledRunRetryWhere(now)];
+
+  if (tenantId) {
+    actionConditions.push(eq(adapterActions.tenantId, tenantId));
+    runConditions.push(eq(adapterRuns.tenantId, tenantId));
+  }
+
+  await db.transaction(async (tx) => {
+    const actionRows = await tx
+      .select()
+      .from(adapterActions)
+      .where(and(...actionConditions))
+      .orderBy(asc(adapterActions.nextAttemptAt), asc(adapterActions.createdAt))
+      .limit(limit);
+    const runRows = await tx
+      .select()
+      .from(adapterRuns)
+      .where(and(...runConditions))
+      .orderBy(asc(adapterRuns.nextAttemptAt), asc(adapterRuns.createdAt))
+      .limit(limit);
+
+    for (const row of actionRows) {
+      const executed = await executeActionRetry(tx, row, now);
+
+      if (!executed) {
+        continue;
+      }
+
+      result.processed += 1;
+      result.actions += 1;
+      result.retryActionIds.push(row.id);
+      result.eventIds.push(executed.eventId);
+      result.auditEventIds.push(executed.auditEventId);
+      result.evidenceIds.push(executed.evidenceId);
+      result.closedRetryTaskIds.push(...executed.closedRetryTaskIds);
+    }
+
+    for (const row of runRows) {
+      const executed = await executeRunRetry(tx, row, now);
+
+      if (!executed) {
+        continue;
+      }
+
+      result.processed += 1;
+      result.runs += 1;
+      result.retryRunIds.push(row.id);
+      result.eventIds.push(executed.eventId);
+      result.auditEventIds.push(executed.auditEventId);
+      result.evidenceIds.push(executed.evidenceId);
+      result.closedRetryTaskIds.push(...executed.closedRetryTaskIds);
+    }
+  });
+
+  return {
+    ...result,
+    closedRetryTaskIds: Array.from(new Set(result.closedRetryTaskIds)),
+  };
 }

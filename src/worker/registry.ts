@@ -1,4 +1,4 @@
-import { reconcileAdapterLedger } from "../core/adapters";
+import { executeAdapterRetries, reconcileAdapterLedger } from "../core/adapters";
 import {
   decideApproval,
   listApprovals,
@@ -264,6 +264,28 @@ const revenueDefinition: WorkerDefinition = {
         }
 
         return reconcileAdapterLedger({
+          tenantSlug: context.target.tenantSlug,
+          limit: optionalLimit(context.config.limit),
+        });
+      },
+    },
+    "adapters.retry": {
+      name: "adapters.retry",
+      description: "Execute due dry-run adapter retries without external execution.",
+      idempotency: "none",
+      sideEffects: "internal",
+      externalExecution: "blocked",
+      requiresTenant: true,
+      async handle(context) {
+        if (!context.target.tenantSlug) {
+          throw new PlatformUnavailableError(
+            "invalid_worker_target",
+            "worker.tenantSlug is required for adapter retry execution.",
+            400,
+          );
+        }
+
+        return executeAdapterRetries({
           tenantSlug: context.target.tenantSlug,
           limit: optionalLimit(context.config.limit),
         });

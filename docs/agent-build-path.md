@@ -156,6 +156,21 @@ Use the same route for operational worker commands:
 }
 ```
 
+Due retry execution uses the same shape and remains blocked:
+
+```json
+{
+  "command": "adapters.retry",
+  "worker": {
+    "role": "revenue_operations",
+    "tenantSlug": "continuous-demo"
+  },
+  "config": {
+    "limit": 25
+  }
+}
+```
+
 The worker toolbox uses the same payload shape:
 
 ```sh
@@ -166,6 +181,10 @@ bun run worker:tool worker.snapshot <<'JSON'
 JSON
 
 bun run worker:tool worker.adapters.reconcile <<'JSON'
+{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{"limit":25}}
+JSON
+
+bun run worker:tool worker.adapters.retry <<'JSON'
 {"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{"limit":25}}
 JSON
 ```

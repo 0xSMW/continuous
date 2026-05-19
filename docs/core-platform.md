@@ -182,7 +182,7 @@ policy-bound:
 | `POST /api/core` | Canonical Core command surface for `task.create`, `task.transition`, `object.upsert`, `object.link`, `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`, `document.packet.prepare`, `decision.record`, `approval.request`, `capability.grant`, `budget.reserve`, `budget.charge`, `budget.release`, `view.publish`, and `customer_signal.record`; tenant selection and command fields live in structured `core` and `config` payloads |
 | `/worker?view=snapshot&role=revenue_operations` | Operator-only snapshot of worker state, active tasks, controls, budget usage, and recent events |
 | `/worker?view=approvals&role=revenue_operations` | Operator-only approval queue for worker decisions |
-| `POST /worker` | Canonical worker command surface for `run`, `continue`, `approval.decide`, and `adapters.reconcile`; worker role, tenant selection, idempotency, and operation config live in structured payload fields |
+| `POST /worker` | Canonical worker command surface for `run`, `continue`, `approval.decide`, `adapters.reconcile`, and `adapters.retry`; worker role, tenant selection, idempotency, and operation config live in structured payload fields |
 | `/workflow` | Canonical workflow command surface for listing definitions/runs/steps and executing validated `start` / `transition` / `approval.decide` commands |
 | `/workflow?view=approvals` | Operator-only approval queue for workflow decisions backed by the shared approval service |
 | `bun run worker:tool worker.run` | Canonical local command surface using the same worker/config payload shape |

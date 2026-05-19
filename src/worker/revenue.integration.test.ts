@@ -61,6 +61,12 @@ function objectValue(value: unknown): JsonObject {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonObject) : {};
 }
 
+function stringList(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    : [];
+}
+
 maybeDescribe("Revenue Worker integration eval", () => {
   beforeAll(() => {
     execFileSync("bun", ["run", "db:migrate"], {
@@ -1990,6 +1996,90 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(retryEvidence.every((item) => objectValue(item.data).externalExecution === "blocked")).toBe(
       true,
     );
+
+    const retryExecution = await executeWorkerCommand({
+      command: "adapters.retry",
+      target: {
+        role: "revenue_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      config: {
+        limit: 1,
+      },
+    });
+    const retryOutput = objectValue(retryExecution.result);
+
+    expect(retryExecution.command).toBe("adapters.retry");
+    expect(retryOutput.processed).toBe(2);
+    expect(retryOutput.runs).toBe(1);
+    expect(retryOutput.actions).toBe(1);
+    expect(retryOutput.retryRunIds).toEqual([runId]);
+    expect(retryOutput.retryActionIds).toEqual([actionId]);
+    expect(retryOutput.closedRetryTaskIds).toEqual(
+      expect.arrayContaining(result.retryTaskIds),
+    );
+
+    const [retriedRun] = await db.select().from(adapterRuns).where(eq(adapterRuns.id, runId)).limit(1);
+    const [retriedAction] = await db
+      .select()
+      .from(adapterActions)
+      .where(eq(adapterActions.id, actionId))
+      .limit(1);
+    const closedRetryTasks = await db
+      .select()
+      .from(tasks)
+      .where(inArray(tasks.id, result.retryTaskIds));
+    const retryExecutionEvidence = await db
+      .select()
+      .from(evidence)
+      .where(inArray(evidence.id, stringList(retryOutput.evidenceIds)));
+
+    expect(retriedRun?.state).toBe("done");
+    expect(retriedRun?.reconciliationState).toBe("pending");
+    expect(retriedRun?.nextAttemptAt).toBeNull();
+    expect(objectValue(retriedRun?.error)).toEqual({});
+    expect(objectValue(retriedRun?.receipt).externalMutation).toBe(false);
+    expect(objectValue(retriedRun?.receipt).externalSend).toBe(false);
+    expect(retriedAction?.state).toBe("done");
+    expect(retriedAction?.reconciliationState).toBe("pending");
+    expect(retriedAction?.nextAttemptAt).toBeNull();
+    expect(objectValue(retriedAction?.error)).toEqual({});
+    expect(objectValue(retriedAction?.receipt).externalMutation).toBe(false);
+    expect(objectValue(retriedAction?.receipt).externalSend).toBe(false);
+    expect(closedRetryTasks.every((task) => task.state === "done")).toBe(true);
+    expect(
+      closedRetryTasks.every(
+        (task) => objectValue(task.outcome).status === "adapter_retry_executed",
+      ),
+    ).toBe(true);
+    expect(retryExecutionEvidence).toHaveLength(2);
+    expect(retryExecutionEvidence.every((item) => item.name === "Adapter retry executed")).toBe(true);
+    expect(
+      retryExecutionEvidence.every(
+        (item) => objectValue(item.data).externalExecution === "blocked",
+      ),
+    ).toBe(true);
+
+    const retryReconcile = await reconcileAdapterLedger({
+      tenantSlug: "continuous-demo",
+      limit: 1,
+      now: new Date("2026-05-19T00:10:00.000Z"),
+      db,
+    });
+
+    expect(retryReconcile.processed).toBe(2);
+    expect(retryReconcile.matched).toBe(2);
+
+    const [matchedRun] = await db.select().from(adapterRuns).where(eq(adapterRuns.id, runId)).limit(1);
+    const [matchedAction] = await db
+      .select()
+      .from(adapterActions)
+      .where(eq(adapterActions.id, actionId))
+      .limit(1);
+
+    expect(matchedRun?.reconciliationState).toBe("matched");
+    expect(matchedAction?.reconciliationState).toBe("matched");
   }, 120_000);
 
   it("creates review tasks for failed adapter rows that exhausted retries", async () => {

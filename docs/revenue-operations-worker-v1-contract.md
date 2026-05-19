@@ -102,6 +102,22 @@ Adapter reconciliation also stays on the same command surface:
 }
 ```
 
+Due adapter retries use the same tenant-scoped command envelope and remain
+dry-run only:
+
+```json
+{
+  "command": "adapters.retry",
+  "worker": {
+    "role": "revenue_operations",
+    "tenantSlug": "continuous-demo"
+  },
+  "config": {
+    "limit": 25
+  }
+}
+```
+
 Worker-family-specific routes are not part of the public API. There is no
 Revenue Operations compatibility path or worker-specific local mutation
 shortcut; HTTP and CLI callers both go through the registered `/worker` command
@@ -121,6 +137,7 @@ and local toolbox aliases resolve to the same handlers and validation rules.
 | `continue` | `worker.continue` | `approvalId` | Required | Approved execution packet or revised approval packet, workflow step, task outcome, audit/evidence | Blocked |
 | `approval.decide` | `worker.approvals.decide` | `approvalId`, `action`, optional `note` | None | Approval/task/workflow evidence only | Blocked |
 | `adapters.reconcile` | `worker.adapters.reconcile` | Tenant-scoped `worker.tenantSlug`, optional integer `limit` | None | Adapter reconciliation audit/evidence plus retry/review system tasks | Blocked |
+| `adapters.retry` | `worker.adapters.retry` | Tenant-scoped `worker.tenantSlug`, optional integer `limit` | None | Executes due dry-run retry rows, closes retry tasks, and writes blocked receipt evidence | Blocked |
 
 ## Run Config
 
@@ -183,7 +200,7 @@ The first runtime only prepares owner-review packets.
 | `workflow_runs` | Owns the lead-to-cash state machine for the prepared worker action |
 | `workflow_steps` | Records intake resolved, packet prepared, adapter dry-run recorded, approval requested, and approval decision transitions |
 | `budget_reservations` | Reserves and marks deterministic simulation units as used |
-| `adapter_runs` | Records dry-run adapter execution, attempt metadata, receipt state, and reconciliation state |
+| `adapter_runs` | Records dry-run adapter execution, attempt metadata, retry execution, receipt state, and reconciliation state |
 | `inferences` | Stores prompt/result/safety trace |
 | `usage_events` | Attributes units to budget, task, capability, and worker |
 | `events` | Emits `revenue_worker.run.completed` with linked output ids |
@@ -191,7 +208,7 @@ The first runtime only prepares owner-review packets.
 | `adapter_actions` | Links to the adapter run and drafts customer-response intent with `externalSend=false` |
 | `approval_requests` | Creates pending operator approval for the prepared action |
 | `audit_events` | Records run request, approval request, and approval decision |
-| `tasks` | Moves active work to `approval_required`; decision later moves to `waiting`, `active`, or `blocked`; reconciliation creates non-executable retry/review system tasks |
+| `tasks` | Moves active work to `approval_required`; decision later moves to `waiting`, `active`, or `blocked`; reconciliation creates retry/review system tasks and retry execution closes due retry tasks |
 | `object_versions` | Records approval-required state against the object spine |
 
 `POST /worker` with `command=continue` creates a separate idempotent

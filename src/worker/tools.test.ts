@@ -88,6 +88,7 @@ describe("worker tool contract", () => {
       "worker.approvals.list",
       "worker.approvals.decide",
       "worker.adapters.reconcile",
+      "worker.adapters.retry",
       "worker.owner.brief.generate",
       "worker.owner.decision_queue.prepare",
       "worker.owner.anomaly.triage",
@@ -125,6 +126,11 @@ describe("worker tool contract", () => {
         expect.objectContaining({
           role: "revenue_operations",
           name: "adapters.reconcile",
+          requiresTenant: true,
+        }),
+        expect.objectContaining({
+          role: "revenue_operations",
+          name: "adapters.retry",
           requiresTenant: true,
         }),
         expect.objectContaining({
@@ -295,6 +301,19 @@ describe("worker tool contract", () => {
     ).rejects.toThrow("worker.tenantSlug is required for adapters.reconcile.");
   });
 
+  it("requires tenant scope for adapter retry execution", async () => {
+    await expect(
+      executeWorkerTool("worker.adapters.retry", {
+        worker: {
+          role: "revenue_operations",
+        },
+        config: {
+          limit: 25,
+        },
+      }),
+    ).rejects.toThrow("worker.tenantSlug is required for adapters.retry.");
+  });
+
   it("rejects malformed command config instead of silently normalizing it", async () => {
     await expect(
       executeWorkerTool("worker.approvals.decide", {
@@ -309,6 +328,20 @@ describe("worker tool contract", () => {
   it("uses registry validation for adapter reconciliation limits", async () => {
     await expect(
       executeWorkerTool("worker.adapters.reconcile", {
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        config: {
+          limit: 1.5,
+        },
+      }),
+    ).rejects.toThrow("config.limit must be an integer between 1 and 100.");
+  });
+
+  it("uses registry validation for adapter retry limits", async () => {
+    await expect(
+      executeWorkerTool("worker.adapters.retry", {
         worker: {
           role: "revenue_operations",
           tenantSlug: "continuous-demo",

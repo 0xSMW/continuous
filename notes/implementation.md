@@ -34,7 +34,8 @@
 | Added planned future-worker metadata | `worker:tool schema` and `continuous.worker.schema` now expose planned command/view metadata for future workers while keeping those roles non-executable until runtime handlers exist |
 | Added Owner Chief-of-Staff runtime slice | `owner_chief_of_staff` is now a registered `/worker` role with read-only `brief.generate`, `decision_queue.prepare`, `anomaly.triage`, `snapshot`, `briefs`, and `decisions` surfaces, seeded capability/budget/workflow substrate, owner brief packets, generated views, and eval coverage |
 | Added first Revenue Worker eval gate | `bun run test` now includes a CI-backed Postgres integration eval that runs the seeded worker, verifies persisted output/evaluation records, and checks idempotent replay |
-| Added persistence-only adapter reconciliation | `worker.adapters.reconcile` scans pending dry-run adapter runs/actions, writes matched/retry/review state, records audit/evidence, and creates non-executable retry/review system tasks without external execution |
+| Added persistence-only adapter reconciliation | `worker.adapters.reconcile` scans pending dry-run adapter runs/actions, writes matched/retry/review state, records audit/evidence, and creates blocked retry/review system tasks without external execution |
+| Added blocked adapter retry execution | `worker.adapters.retry` drains due dry-run retry rows, writes blocked retry receipts/audit/evidence, closes retry system tasks, and leaves rows pending for reconciliation without external sends |
 | Added headless Core task creation | `POST /api/core` with `command=task.create` creates platform tasks, emits `task.created`, and records audit proof without worker-specific routes |
 | Expanded headless Core writes | `POST /api/core` now supports `object.upsert`, `event.ingest`, `evidence.attach`, `document.create`, and `decision.record` with tenant-scoped idempotency and audit proof |
 | Added Core graph and generated-view commands | `POST /api/core` now supports `object.link` and `view.publish`, so object relationships and renderer-neutral UI contracts are written through the same structured Core payload instead of seed-only data |
@@ -107,16 +108,17 @@ spend, creates durable budget/evidence/event/approval/audit records, writes
 workflow steps for intake, packet preparation, adapter dry-run, approval
 request, and approval decision, writes dry-run adapter run/action/receipt
 evidence, marks the quote task as `approval_required`, and leaves external
-execution disabled until live retry execution, live credential scopes, rollback
-paths, and approval UI are in place.
+execution disabled until live credential scopes, rollback paths, and approval UI
+are in place.
 
 The canonical HTTP shape is now `/worker` with explicit worker roles:
 `GET /worker?view=snapshot&role=revenue_operations` for state,
 `GET /worker?view=approvals&role=revenue_operations` for approval queues, and
 `POST /worker` with `command`, `worker`, `idempotencyKey`, and `config` for
-side-effecting operations. Adapter reconciliation uses the same route with
-`command=adapters.reconcile`, a tenant-scoped `worker` target, and
-`config.limit`; revision continuation uses `command=continue`, an
+side-effecting operations. Adapter reconciliation and retry execution use the
+same route with `command=adapters.reconcile` or `command=adapters.retry`, a
+tenant-scoped `worker` target, and `config.limit`; revision continuation uses
+`command=continue`, an
 idempotency key, and `config.approvalId`. Route handlers now delegate to the
 worker command registry,
 which owns role allowlisting, command lookup, idempotency, config validation,
