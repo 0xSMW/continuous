@@ -190,6 +190,34 @@ function requiredString(value: unknown, field: string) {
   return output;
 }
 
+function requiredStringMax(value: unknown, field: string, max: number) {
+  const output = requiredString(value, field);
+
+  if (output.length > max) {
+    throw new PlatformUnavailableError(
+      "core_field_too_long",
+      `${field} must be ${max} characters or fewer.`,
+      400,
+    );
+  }
+
+  return output;
+}
+
+function optionalStringMax(value: unknown, field: string, max: number) {
+  const output = cleanString(value);
+
+  if (output && output.length > max) {
+    throw new PlatformUnavailableError(
+      "core_field_too_long",
+      `${field} must be ${max} characters or fewer.`,
+      400,
+    );
+  }
+
+  return output;
+}
+
 function jsonObject(value: unknown): JsonObject {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonObject) : {};
 }
@@ -1162,7 +1190,7 @@ export async function linkCoreObjects(input: CoreObjectLinkInput) {
   const db = input.db ?? defaultDb;
   const fromObjectId = requiredUuid(input.fromObjectId, "config.fromObjectId");
   const toObjectId = requiredUuid(input.toObjectId, "config.toObjectId");
-  const type = requiredString(input.type, "config.type");
+  const type = requiredStringMax(input.type, "config.type", 80);
   const effectiveAt = optionalDate(input.effectiveAt, "config.effectiveAt");
   const endedAt = optionalDate(input.endedAt, "config.endedAt");
   const operator = await loadOperatorContext({
@@ -1326,13 +1354,13 @@ export async function linkCoreObjects(input: CoreObjectLinkInput) {
 
 export async function publishCoreView(input: CoreViewPublishInput) {
   const db = input.db ?? defaultDb;
-  const key = requiredString(input.key, "config.key");
+  const key = requiredStringMax(input.key, "config.key", 140);
   const name = requiredString(input.name, "config.name");
   const purpose = requiredString(input.purpose, "config.purpose");
-  const version = cleanString(input.version) ?? "1.0.0";
+  const version = optionalStringMax(input.version, "config.version", 40) ?? "1.0.0";
   const surface = cleanString(input.surface) ?? "web";
   const capabilityId = optionalUuid(input.capabilityId, "config.capabilityId");
-  const objectType = cleanString(input.objectType);
+  const objectType = optionalStringMax(input.objectType, "config.objectType", 80);
   const taskState = parseTaskState(cleanString(input.taskState));
   const active = input.active ?? true;
   const operator = await loadOperatorContext({

@@ -582,13 +582,12 @@ jobs:
           CORE_LINK_ID="$(echo "$CORE_LINK_RESPONSE" | /usr/bin/jq -r '.data.result.objectLinkId')"
           CORE_VIEW_KEY="deploy-core-view-$RUN_ID"
           CORE_VIEW_PAYLOAD="$(
-            /usr/bin/jq -nc --arg key "$CORE_VIEW_KEY" --arg viewKey "deploy.notice.review" --arg objectId "$CORE_OBJECT_ID" '{
+            /usr/bin/jq -nc --arg key "$CORE_VIEW_KEY" --arg viewKey "deploy.notice.review.$RUN_ID" --arg objectId "$CORE_OBJECT_ID" '{
               command: "view.publish",
               core: {tenantSlug: "continuous-demo"},
               idempotencyKey: $key,
               config: {
                 key: $viewKey,
-                version: $key,
                 name: "Deploy smoke notice review",
                 purpose: "Render deploy smoke operator review data without external execution.",
                 objectType: "agency_notice",
