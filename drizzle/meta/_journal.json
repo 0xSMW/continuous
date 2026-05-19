@@ -57,6 +57,13 @@
       "when": 1779213801753,
       "tag": "0007_open_sunspot",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1779231685211,
+      "tag": "0008_mixed_zodiak",
+      "breakpoints": true
     }
   ]
 }

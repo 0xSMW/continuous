@@ -243,6 +243,54 @@ jobs:
             docker compose exec -T db psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"
           }
 
+          PAYROLL_KEY="deploy-payroll-preview-smoke"
+          PAYROLL_PAYLOAD="$(
+            /usr/bin/jq -nc --arg key "$PAYROLL_KEY" --arg externalId "$PAYROLL_KEY" '{
+              command: "payroll.preview.record",
+              core: {tenantSlug: "continuous-demo"},
+              idempotencyKey: $key,
+              config: {
+                payrollRunId: "55555555-5555-4555-8555-000000000007",
+                statement: {
+                  employmentId: "55555555-5555-4555-8555-000000000004",
+                  objectId: "33333333-3333-4333-8333-000000000105",
+                  externalId: $externalId,
+                  state: "draft",
+                  grossCents: 336000,
+                  netCents: 248640,
+                  taxCents: 87360,
+                  deductionCents: 0
+                },
+                lines: [
+                  {kind: "earning", code: "regular_hours", amountCents: 336000, taxable: true},
+                  {kind: "tax", code: "federal_withholding", amountCents: 87360}
+                ],
+                liabilities: [
+                  {kind: "tax_withholding", payee: "IRS", jurisdiction: "US", amountCents: 87360}
+                ],
+                trace: {
+                  hash: $key,
+                  sourceRefs: {payrollRunId: "55555555-5555-4555-8555-000000000007"},
+                  inputs: {hours: 80, rateCents: 4200},
+                  outputs: {grossCents: 336000, netCents: 248640, taxCents: 87360},
+                  rules: {execution: "preview_only"}
+                }
+              }
+            }'
+          )"
+          PAYROLL_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/api/core \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$PAYROLL_PAYLOAD"
+          )"
+
+          echo "$PAYROLL_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{recorded:.data.result.recorded,statementId:.data.result.statementId,lineCount:(.data.result.lineIds | length),liabilityCount:(.data.result.liabilityIds | length),traceId:.data.result.traceId,evidenceId:.data.result.evidenceId}}'
+          echo "$PAYROLL_RESPONSE" | /usr/bin/jq -e \
+            '.error == null and .data.command == "payroll.preview.record" and (.data.result.recorded | type) == "boolean" and (.data.result.statementId | length > 0) and (.data.result.lineIds | length) == 2 and (.data.result.liabilityIds | length) == 1 and (.data.result.traceId | length > 0) and (.data.result.evidenceId | length > 0)' \
+            >/dev/null
+
           SCHEMA="$(docker compose --profile tools run --rm migrate bun run worker:tool schema </dev/null)"
           echo "$SCHEMA" | /usr/bin/jq -c '{commands:.registry.commands, views:.registry.views, planned:[.registry.plannedContracts[].role], plannedCommandCount:(.registry.plannedCommands|length), plannedViewCount:(.registry.plannedViews|length), tools:[.tools[].name]}'
           echo "$SCHEMA" | /usr/bin/jq -e '

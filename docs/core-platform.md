@@ -48,7 +48,7 @@ evidence before packaged workers can safely act.
 | Location | Location, Establishment, TaxNexusProfile |
 | Workforce | Person, Worker, WorkRelationship, Position, ManagerAssignment, EmploymentStatusEvent |
 | Compensation | CompensationAgreement, CompensationLine, DeductionAuthorization |
-| Payroll | PaySchedule, PayPeriod, PayrollRun, PayStatement, PayrollLine, PayrollLiability |
+| Payroll | PaySchedule, PayPeriod, PayrollRun, PayStatement, PayrollLine, PayrollLiability, PayrollTrace |
 | Time and leave | Schedule, TimeEntry, Timesheet, PTOPolicy, PTOBalance, LeaveCase |
 | Filings | FilingRequirement, FilingCase, FilingArtifact, AgencyNotice |
 | Payments | BankAccount, PaymentInstruction, PaymentTransaction, PaymentBatch, PaymentEvent, TaxDeposit |
@@ -151,7 +151,7 @@ approval-aware, evidence-backed, and renderer-neutral:
 | Hire employee | Offer, classification, W-4, I-9, new-hire report, E-Verify when applicable, benefits, access, and payroll readiness become one workflow |
 | Engage contractor | W-9, contract/SOW, classification, payment terms, 1099 readiness, and access scope are governed separately from employment |
 | Termination | Final pay, PTO payout, benefits/COBRA, access removal, device return, unemployment evidence, and retention clocks are coordinated |
-| Payroll preview | Source data, calculation trace, blockers, variance, approval, paystubs, liabilities, and evidence are deterministic and replayable |
+| Payroll preview | Source data, pay statements, earning/tax/deduction lines, liabilities, calculation trace, blockers, variance, approval, paystubs, and evidence are persisted, deterministic, and replayable |
 | Filing draft | Applicability, source data, form version, validation, approval, submission state, receipt, rejection, and correction are explicit |
 | AI budget cycle | Intelligence allocations, reservations, usage, overages, approvals, and chargebacks are ledgered |
 | Synthetic-worker lifecycle | Manager, mission, scopes, capabilities, budget, model route, memory, evals, incidents, and retirement are governed |
@@ -179,7 +179,7 @@ policy-bound:
 
 | Surface | Behavior |
 |---|---|
-| `POST /api/core` | Canonical Core command surface for `task.create`, `task.transition`, `object.upsert`, `object.link`, `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`, `document.packet.prepare`, `decision.record`, `approval.request`, `capability.grant`, `budget.reserve`, `budget.charge`, `budget.release`, `view.publish`, and `customer_signal.record`; tenant selection and command fields live in structured `core` and `config` payloads |
+| `POST /api/core` | Canonical Core command surface for `task.create`, `task.transition`, `object.upsert`, `object.link`, `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`, `document.packet.prepare`, `decision.record`, `approval.request`, `capability.grant`, `budget.reserve`, `budget.charge`, `budget.release`, `view.publish`, `customer_signal.record`, and `payroll.preview.record`; tenant selection and command fields live in structured `core` and `config` payloads |
 | `/worker?view=snapshot&role=revenue_operations` | Operator-only snapshot of worker state, active tasks, controls, budget usage, and recent events |
 | `/worker?view=approvals&role=revenue_operations` | Operator-only approval queue for worker decisions |
 | `POST /worker` | Canonical worker command surface for `lead.read`, `run`, `continue`, `approval.decide`, `adapters.reconcile`, and `adapters.retry`; worker role, tenant selection, idempotency, and operation config live in structured payload fields |
@@ -216,7 +216,9 @@ attaches evidence, creates document packets, records decisions, requests
 platform approvals, prepares durable evidence packets, grants scoped capabilities, moves AI budget through
 reserve/charge/release ledger states, and publishes renderer-neutral generated
 views. `customer_signal.record` adds satisfaction, feedback, complaint,
-testimonial, and review records as typed customer signals. Every command is
+testimonial, and review records as typed customer signals. `payroll.preview.record`
+writes pay statements, payroll lines, liabilities, calculation traces, audit
+events, and trace evidence without submission or money movement. Every command is
 tenant-scoped, idempotent, audit-backed, and blocks external execution.
 
 ## Non-Goals For The First Slice

@@ -19,6 +19,7 @@ import {
   recordCoreDecision,
   upsertCoreObject,
 } from "../core/primitives";
+import { recordPayrollPreview } from "../core/payroll";
 import { createCoreTask, transitionCoreTask } from "../core/tasks";
 import { db, pool } from "../db/client";
 import {
@@ -41,6 +42,11 @@ import {
   objects,
   objectLinks,
   objectVersions,
+  payrollLiabilities,
+  payrollLines,
+  payrollRuns,
+  payrollStatements,
+  payrollTraces,
   tasks,
   generatedViews,
   usageEvents,
@@ -153,6 +159,180 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(replay.created).toBe(false);
     expect(replay.taskId).toBe(first.taskId);
     expect(taskCount.value).toBe(1);
+  }, 120_000);
+
+  it("records payroll preview statements, lines, liabilities, traces, and proof", async () => {
+    const runId = randomUUID();
+    const idempotencyKey = `ci-payroll-preview-${runId}`;
+    const payrollRunId = "55555555-5555-4555-8555-000000000007";
+    const employmentId = "55555555-5555-4555-8555-000000000004";
+    const payrollObjectId = "33333333-3333-4333-8333-000000000105";
+    const first = await recordPayrollPreview({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey,
+      payrollRunId,
+      statement: {
+        employmentId,
+        objectId: payrollObjectId,
+        externalId: `ci-payroll-statement-${runId}`,
+        state: "draft",
+        grossCents: 336000,
+        netCents: 248640,
+        taxCents: 87360,
+        deductionCents: 0,
+        data: {
+          source: "ci",
+        },
+      },
+      lines: [
+        {
+          kind: "earning",
+          code: "regular_hours",
+          description: "Regular wages",
+          amountCents: 336000,
+          taxable: true,
+          data: {
+            hours: 80,
+            rateCents: 4200,
+          },
+        },
+        {
+          kind: "tax",
+          code: "federal_withholding",
+          amountCents: 87360,
+          data: {
+            authority: "IRS",
+          },
+        },
+      ],
+      liabilities: [
+        {
+          kind: "tax_withholding",
+          payee: "IRS",
+          jurisdiction: "US",
+          amountCents: 87360,
+          state: "draft",
+        },
+      ],
+      trace: {
+        hash: `ci-payroll-trace-${runId}`,
+        sourceRefs: {
+          payrollRunId,
+          employmentId,
+        },
+        inputs: {
+          hours: 80,
+          rateCents: 4200,
+        },
+        outputs: {
+          grossCents: 336000,
+          netCents: 248640,
+          taxCents: 87360,
+        },
+        rules: {
+          execution: "preview_only",
+        },
+      },
+      db,
+    });
+
+    expect(first.recorded).toBe(true);
+    expect(first.statementId).toBeTruthy();
+    expect(first.lineIds).toHaveLength(2);
+    expect(first.liabilityIds).toHaveLength(1);
+    expect(first.traceId).toBeTruthy();
+    expect(first.eventId).toBeTruthy();
+    expect(first.auditEventId).toBeTruthy();
+    expect(first.evidenceId).toBeTruthy();
+
+    const [statement] = await db
+      .select()
+      .from(payrollStatements)
+      .where(eq(payrollStatements.id, first.statementId))
+      .limit(1);
+    const lines = await db
+      .select()
+      .from(payrollLines)
+      .where(eq(payrollLines.statementId, first.statementId));
+    const liabilities = await db
+      .select()
+      .from(payrollLiabilities)
+      .where(eq(payrollLiabilities.statementId, first.statementId));
+    const [trace] = await db
+      .select()
+      .from(payrollTraces)
+      .where(eq(payrollTraces.id, first.traceId ?? ""))
+      .limit(1);
+    const [audit] = await db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.id, first.auditEventId))
+      .limit(1);
+    const [proof] = await db
+      .select()
+      .from(evidence)
+      .where(eq(evidence.id, first.evidenceId ?? ""))
+      .limit(1);
+    const [payrollRun] = await db
+      .select()
+      .from(payrollRuns)
+      .where(eq(payrollRuns.id, payrollRunId))
+      .limit(1);
+
+    expect(statement?.payrollRunId).toBe(payrollRunId);
+    expect(statement?.employmentId).toBe(employmentId);
+    expect(statement?.grossCents).toBe(336000);
+    expect(lines.map((line) => line.kind).sort()).toEqual(["earning", "tax"]);
+    expect(liabilities[0]?.payee).toBe("IRS");
+    expect(trace?.hash).toBe(`ci-payroll-trace-${runId}`);
+    expect(audit?.type).toBe("payroll.preview.recorded");
+    expect(audit?.source).toBe("continuous.core.payroll");
+    expect(audit?.targetType).toBe("payroll_statement");
+    expect(objectValue(audit?.data).externalExecution).toBe("blocked");
+    expect(proof?.kind).toBe("trace");
+    expect(objectValue(proof?.data).traceId).toBe(first.traceId);
+    expect(objectValue(payrollRun?.data).preview).toMatchObject({
+      lastStatementId: first.statementId,
+      traceId: first.traceId,
+      externalExecution: "blocked",
+    });
+
+    const replay = await recordPayrollPreview({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey,
+      payrollRunId,
+      statement: {
+        employmentId,
+        grossCents: 1,
+        netCents: 1,
+        taxCents: 0,
+      },
+      lines: [
+        {
+          kind: "earning",
+          amountCents: 1,
+        },
+      ],
+      trace: {
+        hash: "should-not-create-new-trace",
+      },
+      db,
+    });
+    const [auditCount] = await db
+      .select({ value: count() })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.source, "continuous.core.payroll"),
+          eq(auditEvents.idempotencyKey, `${idempotencyKey}:payroll_preview_recorded`),
+        ),
+      );
+
+    expect(replay.recorded).toBe(false);
+    expect(replay.statementId).toBe(first.statementId);
+    expect(auditCount.value).toBe(1);
   }, 120_000);
 
   it("transitions headless core tasks and requests approval packets", async () => {

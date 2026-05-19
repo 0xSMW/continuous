@@ -73,7 +73,7 @@ approval/revision continuations, and broader factuality evals before promotion.
 |---|---|
 | Core objects | Person, employment, contractor engagement, credential, compensation, document |
 | Workflow | Hire employee, engage contractor, credential renewal, payroll input readiness |
-| Capabilities | `document_packet.prepare`, `payroll_preview.prepare`, `approval.request` |
+| Capabilities | `document_packet.prepare`, `payroll.preview.record`, `approval.request` |
 | Adapters | Signature/docs, calendar, HRIS/payroll dry-run, email |
 | Launch gate | Restricted documents and payroll blockers are visible without autonomous submission |
 

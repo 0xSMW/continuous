@@ -66,6 +66,10 @@ export function getHealth(input: HealthInput): Health {
     input.counts.compensationAgreements +
     input.counts.paySchedules +
     input.counts.payrollRuns +
+    input.counts.payrollStatements +
+    input.counts.payrollLines +
+    input.counts.payrollLiabilities +
+    input.counts.payrollTraces +
     input.counts.rulePacks +
     input.counts.obligations +
     input.counts.filingRequirements +

@@ -3,6 +3,7 @@ import { requestApproval } from "../../../src/core/approvals";
 import { reserveBudget, chargeBudget, releaseBudget } from "../../../src/core/budgets";
 import { grantCapability } from "../../../src/core/capabilities";
 import { getHealth } from "../../../src/core/health";
+import { recordPayrollPreview } from "../../../src/core/payroll";
 import { getCoreSummarySafe } from "../../../src/core/summary";
 import {
   attachCoreEvidence,
@@ -1090,11 +1091,61 @@ export async function POST(request: Request) {
     }
   }
 
+  if (command === "payroll.preview.record") {
+    const idempotency = normalizeIdempotencyKey(
+      request.headers.get("idempotency-key") ?? body.idempotencyKey,
+    );
+
+    if (!idempotency.ok) {
+      return errorResponse(
+        {
+          code: "invalid_idempotency_key",
+          message: idempotency.message,
+        },
+        400,
+      );
+    }
+
+    try {
+      const result = await recordPayrollPreview({
+        operatorEmail: auth.operatorEmail,
+        idempotencyKey: idempotency.key,
+        tenantSlug,
+        payrollRunId: optionalString(config.payrollRunId) ?? "",
+        statement: jsonObject(config.statement),
+        lines: config.lines,
+        liabilities: config.liabilities,
+        trace: config.trace,
+      });
+
+      return Response.json(
+        {
+          api: apiVersion,
+          data: {
+            command,
+            core: {
+              tenantSlug: tenantSlug ?? null,
+            },
+            result,
+          },
+          error: null,
+        },
+        {
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    } catch (error) {
+      return coreErrorResponse(error, "core_payroll_preview_record_failed");
+    }
+  }
+
   return errorResponse(
     {
       code: "core_command_unsupported",
       message:
-        "Core command must be task.create, task.transition, object.upsert, object.link, event.ingest, evidence.attach, document.create, packet.prepare, document.packet.prepare, decision.record, approval.request, capability.grant, budget.reserve, budget.charge, budget.release, view.publish, or customer_signal.record.",
+        "Core command must be task.create, task.transition, object.upsert, object.link, event.ingest, evidence.attach, document.create, packet.prepare, document.packet.prepare, decision.record, approval.request, capability.grant, budget.reserve, budget.charge, budget.release, view.publish, customer_signal.record, or payroll.preview.record.",
     },
     400,
   );

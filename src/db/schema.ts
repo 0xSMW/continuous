@@ -1121,6 +1121,187 @@ export const payrollRuns = pgTable(
   ],
 );
 
+export const payrollStatements = pgTable(
+  "payroll_statements",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    payrollRunId: uuid("payroll_run_id")
+      .notNull()
+      .references(() => payrollRuns.id, { onDelete: "cascade" }),
+    employmentId: uuid("employment_id").references(() => employments.id, {
+      onDelete: "set null",
+    }),
+    personId: uuid("person_id").references(() => people.id, {
+      onDelete: "set null",
+    }),
+    objectId: uuid("object_id").references(() => objects.id, {
+      onDelete: "set null",
+    }),
+    externalId: text("external_id"),
+    state: text("state").notNull().default("draft"),
+    grossCents: integer("gross_cents").notNull().default(0),
+    netCents: integer("net_cents").notNull().default(0),
+    taxCents: integer("tax_cents").notNull().default(0),
+    deductionCents: integer("deduction_cents").notNull().default(0),
+    currency: varchar("currency", { length: 3 }).notNull().default("USD"),
+    periodStart: timestamp("period_start", { withTimezone: true }),
+    periodEnd: timestamp("period_end", { withTimezone: true }),
+    checkDate: timestamp("check_date", { withTimezone: true }),
+    data: jsonb("data")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("payroll_statements_tenant_idx").on(table.tenantId),
+    index("payroll_statements_run_idx").on(table.payrollRunId),
+    index("payroll_statements_employment_idx").on(table.employmentId),
+    index("payroll_statements_object_idx").on(table.objectId),
+    uniqueIndex("payroll_statements_external_idx").on(
+      table.tenantId,
+      table.payrollRunId,
+      table.externalId,
+    ),
+  ],
+);
+
+export const payrollLines = pgTable(
+  "payroll_lines",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    payrollRunId: uuid("payroll_run_id")
+      .notNull()
+      .references(() => payrollRuns.id, { onDelete: "cascade" }),
+    statementId: uuid("statement_id")
+      .notNull()
+      .references(() => payrollStatements.id, { onDelete: "cascade" }),
+    employmentId: uuid("employment_id").references(() => employments.id, {
+      onDelete: "set null",
+    }),
+    kind: text("kind").notNull(),
+    code: varchar("code", { length: 120 }),
+    description: text("description"),
+    amountCents: integer("amount_cents").notNull(),
+    currency: varchar("currency", { length: 3 }).notNull().default("USD"),
+    taxable: boolean("taxable").notNull().default(false),
+    data: jsonb("data")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("payroll_lines_tenant_idx").on(table.tenantId),
+    index("payroll_lines_run_idx").on(table.payrollRunId),
+    index("payroll_lines_statement_idx").on(table.statementId),
+    index("payroll_lines_kind_idx").on(table.kind),
+  ],
+);
+
+export const payrollLiabilities = pgTable(
+  "payroll_liabilities",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    payrollRunId: uuid("payroll_run_id")
+      .notNull()
+      .references(() => payrollRuns.id, { onDelete: "cascade" }),
+    statementId: uuid("statement_id").references(() => payrollStatements.id, {
+      onDelete: "cascade",
+    }),
+    kind: text("kind").notNull(),
+    payee: text("payee"),
+    jurisdiction: text("jurisdiction"),
+    amountCents: integer("amount_cents").notNull(),
+    currency: varchar("currency", { length: 3 }).notNull().default("USD"),
+    state: text("state").notNull().default("draft"),
+    dueAt: timestamp("due_at", { withTimezone: true }),
+    data: jsonb("data")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("payroll_liabilities_tenant_idx").on(table.tenantId),
+    index("payroll_liabilities_run_idx").on(table.payrollRunId),
+    index("payroll_liabilities_statement_idx").on(table.statementId),
+    index("payroll_liabilities_state_idx").on(table.state),
+    index("payroll_liabilities_due_idx").on(table.dueAt),
+  ],
+);
+
+export const payrollTraces = pgTable(
+  "payroll_traces",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    payrollRunId: uuid("payroll_run_id")
+      .notNull()
+      .references(() => payrollRuns.id, { onDelete: "cascade" }),
+    statementId: uuid("statement_id").references(() => payrollStatements.id, {
+      onDelete: "cascade",
+    }),
+    kind: text("kind").notNull().default("calculation"),
+    sourceRefs: jsonb("source_refs")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    inputs: jsonb("inputs")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    outputs: jsonb("outputs")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    rules: jsonb("rules")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    hash: text("hash"),
+    data: jsonb("data")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("payroll_traces_tenant_idx").on(table.tenantId),
+    index("payroll_traces_run_idx").on(table.payrollRunId),
+    index("payroll_traces_statement_idx").on(table.statementId),
+    index("payroll_traces_hash_idx").on(table.hash),
+  ],
+);
+
 export const rulePacks = pgTable(
   "rule_packs",
   {
@@ -2407,6 +2588,12 @@ export const tenantsRelations = relations(tenants, ({ many }) => ({
   jobs: many(jobs),
   invoices: many(invoices),
   payments: many(payments),
+  paySchedules: many(paySchedules),
+  payrollRuns: many(payrollRuns),
+  payrollStatements: many(payrollStatements),
+  payrollLines: many(payrollLines),
+  payrollLiabilities: many(payrollLiabilities),
+  payrollTraces: many(payrollTraces),
   customerSignals: many(customerSignals),
   objects: many(objects),
   tasks: many(tasks),
@@ -2576,6 +2763,108 @@ export const paymentsRelations = relations(payments, ({ one }) => ({
   object: one(objects, {
     fields: [payments.objectId],
     references: [objects.id],
+  }),
+}));
+
+export const paySchedulesRelations = relations(paySchedules, ({ one, many }) => ({
+  tenant: one(tenants, {
+    fields: [paySchedules.tenantId],
+    references: [tenants.id],
+  }),
+  legalEntity: one(legalEntities, {
+    fields: [paySchedules.legalEntityId],
+    references: [legalEntities.id],
+  }),
+  payrollRuns: many(payrollRuns),
+}));
+
+export const payrollRunsRelations = relations(payrollRuns, ({ one, many }) => ({
+  tenant: one(tenants, {
+    fields: [payrollRuns.tenantId],
+    references: [tenants.id],
+  }),
+  paySchedule: one(paySchedules, {
+    fields: [payrollRuns.payScheduleId],
+    references: [paySchedules.id],
+  }),
+  statements: many(payrollStatements),
+  lines: many(payrollLines),
+  liabilities: many(payrollLiabilities),
+  traces: many(payrollTraces),
+}));
+
+export const payrollStatementsRelations = relations(payrollStatements, ({ one, many }) => ({
+  tenant: one(tenants, {
+    fields: [payrollStatements.tenantId],
+    references: [tenants.id],
+  }),
+  payrollRun: one(payrollRuns, {
+    fields: [payrollStatements.payrollRunId],
+    references: [payrollRuns.id],
+  }),
+  employment: one(employments, {
+    fields: [payrollStatements.employmentId],
+    references: [employments.id],
+  }),
+  person: one(people, {
+    fields: [payrollStatements.personId],
+    references: [people.id],
+  }),
+  object: one(objects, {
+    fields: [payrollStatements.objectId],
+    references: [objects.id],
+  }),
+  lines: many(payrollLines),
+  liabilities: many(payrollLiabilities),
+  traces: many(payrollTraces),
+}));
+
+export const payrollLinesRelations = relations(payrollLines, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [payrollLines.tenantId],
+    references: [tenants.id],
+  }),
+  payrollRun: one(payrollRuns, {
+    fields: [payrollLines.payrollRunId],
+    references: [payrollRuns.id],
+  }),
+  statement: one(payrollStatements, {
+    fields: [payrollLines.statementId],
+    references: [payrollStatements.id],
+  }),
+  employment: one(employments, {
+    fields: [payrollLines.employmentId],
+    references: [employments.id],
+  }),
+}));
+
+export const payrollLiabilitiesRelations = relations(payrollLiabilities, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [payrollLiabilities.tenantId],
+    references: [tenants.id],
+  }),
+  payrollRun: one(payrollRuns, {
+    fields: [payrollLiabilities.payrollRunId],
+    references: [payrollRuns.id],
+  }),
+  statement: one(payrollStatements, {
+    fields: [payrollLiabilities.statementId],
+    references: [payrollStatements.id],
+  }),
+}));
+
+export const payrollTracesRelations = relations(payrollTraces, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [payrollTraces.tenantId],
+    references: [tenants.id],
+  }),
+  payrollRun: one(payrollRuns, {
+    fields: [payrollTraces.payrollRunId],
+    references: [payrollRuns.id],
+  }),
+  statement: one(payrollStatements, {
+    fields: [payrollTraces.statementId],
+    references: [payrollStatements.id],
   }),
 }));
 

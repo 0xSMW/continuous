@@ -93,8 +93,8 @@ The additional Core write commands are `task.transition`, `object.link`,
 `event.ingest`, `evidence.attach`, `document.create`, `decision.record`,
 `packet.prepare`, `document.packet.prepare`, `approval.request`,
 `capability.grant`, `budget.reserve`, `budget.charge`, `budget.release`, and
-`view.publish`, and `customer_signal.record`. Each command writes audit proof
-and keeps external execution blocked.
+`view.publish`, `customer_signal.record`, and `payroll.preview.record`. Each
+command writes audit proof and keeps external execution blocked.
 
 The repo also includes `.mcp.json` for the Next.js MCP bridge. With `bun run dev`
 running, compatible coding agents can inspect routes, runtime errors, metadata,

@@ -45,7 +45,11 @@ import {
   paySchedules,
   paymentInstructions,
   payments,
+  payrollLiabilities,
+  payrollLines,
   payrollRuns,
+  payrollStatements,
+  payrollTraces,
   people,
   quotes,
   rulePacks,
@@ -71,6 +75,10 @@ export type CoreSummary = {
     compensationAgreements: number;
     paySchedules: number;
     payrollRuns: number;
+    payrollStatements: number;
+    payrollLines: number;
+    payrollLiabilities: number;
+    payrollTraces: number;
     rulePacks: number;
     obligations: number;
     filingRequirements: number;
@@ -157,6 +165,10 @@ export async function getCoreSummary(): Promise<CoreSummary> {
     compensationCount,
     payScheduleCount,
     payrollRunCount,
+    payrollStatementCount,
+    payrollLineCount,
+    payrollLiabilityCount,
+    payrollTraceCount,
     rulePackCount,
     obligationCount,
     filingRequirementCount,
@@ -216,6 +228,10 @@ export async function getCoreSummary(): Promise<CoreSummary> {
     tableCount(db, compensationAgreements),
     tableCount(db, paySchedules),
     tableCount(db, payrollRuns),
+    tableCount(db, payrollStatements),
+    tableCount(db, payrollLines),
+    tableCount(db, payrollLiabilities),
+    tableCount(db, payrollTraces),
     tableCount(db, rulePacks),
     tableCount(db, obligations),
     tableCount(db, filingRequirements),
@@ -299,6 +315,10 @@ export async function getCoreSummary(): Promise<CoreSummary> {
       compensationAgreements: compensationCount,
       paySchedules: payScheduleCount,
       payrollRuns: payrollRunCount,
+      payrollStatements: payrollStatementCount,
+      payrollLines: payrollLineCount,
+      payrollLiabilities: payrollLiabilityCount,
+      payrollTraces: payrollTraceCount,
       rulePacks: rulePackCount,
       obligations: obligationCount,
       filingRequirements: filingRequirementCount,
@@ -384,6 +404,10 @@ export async function getCoreSummarySafe(): Promise<
           compensationAgreements: 0,
           paySchedules: 0,
           payrollRuns: 0,
+          payrollStatements: 0,
+          payrollLines: 0,
+          payrollLiabilities: 0,
+          payrollTraces: 0,
           rulePacks: 0,
           obligations: 0,
           filingRequirements: 0,
@@ -474,7 +498,13 @@ export function summarizeCoreReadiness(summary: CoreSummary) {
     hasEntity: summary.counts.legalEntities > 0 && summary.counts.bankAccounts > 0,
     hasCustomerSignals: summary.counts.customerSignals > 0,
     hasWorkforce: summary.counts.people > 0 && summary.counts.employments > 0,
-    hasPayroll: summary.counts.paySchedules > 0 && summary.counts.payrollRuns > 0,
+    hasPayroll:
+      summary.counts.paySchedules > 0 &&
+      summary.counts.payrollRuns > 0 &&
+      summary.counts.payrollStatements > 0 &&
+      summary.counts.payrollLines > 0 &&
+      summary.counts.payrollLiabilities > 0 &&
+      summary.counts.payrollTraces > 0,
     hasCompliance: summary.counts.rulePacks > 0 && summary.counts.obligations > 0,
     hasFilings: summary.counts.filingRequirements > 0 && summary.counts.filingDrafts > 0,
     hasWorkflows:

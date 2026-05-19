@@ -36,7 +36,7 @@ Useful app surfaces for worker development:
 | `/` | Runtime dashboard with public core state and redacted worker readiness |
 | `/api/health` | Machine health check |
 | `/api/core` | Operator-gated persisted primitive summary |
-| `POST /api/core` | Canonical Core command surface with `command`, `core`, `config`, and `idempotencyKey` payload fields for tasks, task transitions, approvals, capability grants, budget ledger operations, objects, object links, events, evidence, documents, packets, decisions, generated views, and customer signals |
+| `POST /api/core` | Canonical Core command surface with `command`, `core`, `config`, and `idempotencyKey` payload fields for tasks, task transitions, approvals, capability grants, budget ledger operations, objects, object links, events, evidence, documents, packets, decisions, generated views, customer signals, and payroll preview artifacts |
 | `/worker?view=snapshot&role=revenue_operations` | Canonical operator-gated worker snapshot |
 | `/worker?view=approvals&role=revenue_operations` | Canonical operator-gated worker approval queue |
 | `POST /worker` | Canonical command surface with `command`, `worker`, `config`, and `idempotencyKey` payload fields |
@@ -145,8 +145,8 @@ The same surface owns the persisted Core primitives used by future workers:
 Other supported Core commands are `task.transition`, `object.link`,
 `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`,
 `document.packet.prepare`, `decision.record`, `approval.request`,
-`capability.grant`, `budget.reserve`, `budget.charge`, `budget.release`, and
-`view.publish`, and `customer_signal.record`.
+`capability.grant`, `budget.reserve`, `budget.charge`, `budget.release`,
+`view.publish`, `customer_signal.record`, and `payroll.preview.record`.
 
 Use the same route for operational worker commands:
 

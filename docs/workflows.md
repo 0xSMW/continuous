@@ -34,8 +34,8 @@ Every workflow must define:
 | Engage contractor | W-9, contract/SOW, classification rationale, payment terms, 1099 readiness, backup-withholding status, payment instruction, insurance/certifications, access scope | Contractor packet |
 | Change compensation | Compensation agreement, wage/salary/rate change, effective date, approval, retro-pay analysis, payroll-impact report | Compensation-change packet |
 | Change work location | New work location, residence/work split, tax nexus, local rule review, withholding changes, benefits/labor impact | Location-change packet |
-| Run payroll | Pay schedule, pay period, approved time, compensation, benefits, deductions, taxes, preview, variance, approval, ACH/tax drafts, paystubs, journal | Payroll packet |
-| Off-cycle payroll | Reason, affected workers, earning/tax treatment, calculation trace, approval, payment draft, correction link | Off-cycle packet |
+| Run payroll | Pay schedule, pay period, approved time, compensation, benefits, deductions, taxes, persisted pay statements, payroll lines, liabilities, calculation trace, variance, approval, ACH/tax drafts, paystubs, journal | Payroll packet |
+| Off-cycle payroll | Reason, affected workers, earning/tax treatment, persisted pay statements, payroll lines, liabilities, calculation trace, approval, payment draft, correction link | Off-cycle packet |
 | Quarter close | Payroll aggregates, tax-liability ledger, deposits, Form 941 draft, state wage/tax drafts, reconciliation, receipts | Quarter-close packet |
 | Year-end | W-2/W-3, 1099, ACA if applicable, employee/contractor copies, state annual reconciliation, corrections | Year-end packet |
 | Termination | Separation facts, final pay, PTO payout, COBRA/benefits review, access deprovision, device return, unemployment evidence, I-9 retention clock | Termination packet |

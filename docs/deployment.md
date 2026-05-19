@@ -28,7 +28,8 @@ supports `task.create`, `task.transition`, `object.upsert`, `object.link`,
 `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`,
 `document.packet.prepare`, `decision.record`, `approval.request`,
 `capability.grant`, `budget.reserve`, `budget.charge`,
-`budget.release`, `view.publish`, and `customer_signal.record`, all with the
+`budget.release`, `view.publish`, `customer_signal.record`, and
+`payroll.preview.record`, all with the
 same bearer token used by worker and workflow commands.
 
 ## First Deploy

@@ -45,7 +45,11 @@ import {
   paySchedules,
   paymentInstructions,
   payments,
+  payrollLiabilities,
+  payrollLines,
   payrollRuns,
+  payrollStatements,
+  payrollTraces,
   people,
   quotes,
   rulePacks,
@@ -136,6 +140,11 @@ const ids = {
   filingDraft: "55555555-5555-4555-8555-000000000011",
   bankAccount: "55555555-5555-4555-8555-000000000012",
   paymentInstruction: "55555555-5555-4555-8555-000000000013",
+  payrollStatement: "55555555-5555-4555-8555-000000000014",
+  payrollLineEarning: "55555555-5555-4555-8555-000000000015",
+  payrollLineTax: "55555555-5555-4555-8555-000000000016",
+  payrollLiability: "55555555-5555-4555-8555-000000000017",
+  payrollTrace: "55555555-5555-4555-8555-000000000018",
   workflowEntitySetup: "66666666-6666-4666-8666-000000000001",
   workflowHireEmployee: "66666666-6666-4666-8666-000000000002",
   workflowPayrollPreview: "66666666-6666-4666-8666-000000000003",
@@ -953,6 +962,101 @@ async function seed() {
         calculation: "deterministic_preview",
         blockers: ["manager_approval_required", "funding_not_submitted"],
       },
+    })
+    .onConflictDoNothing();
+
+  await db
+    .insert(payrollStatements)
+    .values({
+      id: ids.payrollStatement,
+      tenantId: ids.tenant,
+      payrollRunId: ids.payrollRun,
+      employmentId: ids.employment,
+      personId: ids.person,
+      objectId: ids.payrollObject,
+      externalId: "seed-payroll-preview-statement",
+      state: "draft",
+      grossCents: 336000,
+      netCents: 248640,
+      taxCents: 87360,
+      deductionCents: 0,
+      periodStart: now,
+      periodEnd: nextMonth,
+      checkDate: nextMonth,
+      data: {
+        preview: true,
+        blockers: ["manager_approval_required", "funding_not_submitted"],
+      },
+    })
+    .onConflictDoNothing();
+
+  await db
+    .insert(payrollLines)
+    .values([
+      {
+        id: ids.payrollLineEarning,
+        tenantId: ids.tenant,
+        payrollRunId: ids.payrollRun,
+        statementId: ids.payrollStatement,
+        employmentId: ids.employment,
+        kind: "earning",
+        code: "regular_hours",
+        description: "Regular wages",
+        amountCents: 336000,
+        taxable: true,
+        data: { hours: 80, rateCents: 4200 },
+      },
+      {
+        id: ids.payrollLineTax,
+        tenantId: ids.tenant,
+        payrollRunId: ids.payrollRun,
+        statementId: ids.payrollStatement,
+        employmentId: ids.employment,
+        kind: "tax",
+        code: "federal_withholding",
+        description: "Federal withholding preview",
+        amountCents: 87360,
+        taxable: false,
+        data: { authority: "IRS", mode: "draft_only" },
+      },
+    ])
+    .onConflictDoNothing();
+
+  await db
+    .insert(payrollLiabilities)
+    .values({
+      id: ids.payrollLiability,
+      tenantId: ids.tenant,
+      payrollRunId: ids.payrollRun,
+      statementId: ids.payrollStatement,
+      kind: "tax_withholding",
+      payee: "IRS",
+      jurisdiction: "US",
+      amountCents: 87360,
+      state: "draft",
+      dueAt: nextMonth,
+      data: { execution: "blocked_until_approval", source: "seed-payroll-preview" },
+    })
+    .onConflictDoNothing();
+
+  await db
+    .insert(payrollTraces)
+    .values({
+      id: ids.payrollTrace,
+      tenantId: ids.tenant,
+      payrollRunId: ids.payrollRun,
+      statementId: ids.payrollStatement,
+      kind: "calculation",
+      sourceRefs: {
+        employmentId: ids.employment,
+        compensationAgreementId: ids.compensationAgreement,
+        payScheduleId: ids.paySchedule,
+      },
+      inputs: { hours: 80, rateCents: 4200, period: "biweekly" },
+      outputs: { grossCents: 336000, taxCents: 87360, netCents: 248640 },
+      rules: { source: "bootstrap", execution: "preview_only" },
+      hash: "bootstrap-payroll-trace",
+      data: { externalExecution: "blocked" },
     })
     .onConflictDoNothing();
 

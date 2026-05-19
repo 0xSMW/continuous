@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   grantCapability: vi.fn(),
   ingestCoreEvent: vi.fn(),
   linkCoreObjects: vi.fn(),
+  recordPayrollPreview: vi.fn(),
   prepareCorePacket: vi.fn(),
   publishCoreView: vi.fn(),
   recordCoreDecision: vi.fn(),
@@ -37,6 +38,10 @@ vi.mock("../../../src/core/capabilities", () => ({
 
 vi.mock("../../../src/core/health", () => ({
   getHealth: mocks.getHealth,
+}));
+
+vi.mock("../../../src/core/payroll", () => ({
+  recordPayrollPreview: mocks.recordPayrollPreview,
 }));
 
 vi.mock("../../../src/core/summary", () => ({
@@ -142,6 +147,113 @@ describe("POST /api/core", () => {
     });
   });
 
+  it("dispatches payroll.preview.record with statement, lines, liabilities, and trace config", async () => {
+    mocks.recordPayrollPreview.mockResolvedValue({
+      recorded: true,
+      payrollRunId: "55555555-5555-4555-8555-000000000007",
+      statementId: "77777777-7777-4777-8777-000000000001",
+      lineIds: ["77777777-7777-4777-8777-000000000002"],
+      liabilityIds: ["77777777-7777-4777-8777-000000000003"],
+      traceId: "77777777-7777-4777-8777-000000000004",
+      eventId: "event-1",
+      auditEventId: "audit-1",
+      evidenceId: "evidence-1",
+    });
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/api/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "payroll.preview.record",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "payroll-route-test-001",
+          config: {
+            payrollRunId: "55555555-5555-4555-8555-000000000007",
+            statement: {
+              employmentId: "44444444-4444-4444-8444-000000000001",
+              grossCents: 336000,
+              netCents: 248640,
+              taxCents: 87360,
+              deductionCents: 0,
+            },
+            lines: [
+              {
+                kind: "earning",
+                code: "regular_hours",
+                amountCents: 336000,
+              },
+            ],
+            liabilities: [
+              {
+                kind: "federal_withholding",
+                payee: "IRS",
+                amountCents: 87360,
+              },
+            ],
+            trace: {
+              hash: "route-payroll-trace",
+              inputs: {
+                regularHours: 80,
+              },
+              outputs: {
+                grossCents: 336000,
+              },
+            },
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.command).toBe("payroll.preview.record");
+    expect(body.data.core.tenantSlug).toBe("continuous-demo");
+    expect(body.data.result.statementId).toBe("77777777-7777-4777-8777-000000000001");
+    expect(mocks.recordPayrollPreview).toHaveBeenCalledWith({
+      operatorEmail: "operator@example.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: "payroll-route-test-001",
+      payrollRunId: "55555555-5555-4555-8555-000000000007",
+      statement: {
+        employmentId: "44444444-4444-4444-8444-000000000001",
+        grossCents: 336000,
+        netCents: 248640,
+        taxCents: 87360,
+        deductionCents: 0,
+      },
+      lines: [
+        {
+          kind: "earning",
+          code: "regular_hours",
+          amountCents: 336000,
+        },
+      ],
+      liabilities: [
+        {
+          kind: "federal_withholding",
+          payee: "IRS",
+          amountCents: 87360,
+        },
+      ],
+      trace: {
+        hash: "route-payroll-trace",
+        inputs: {
+          regularHours: 80,
+        },
+        outputs: {
+          grossCents: 336000,
+        },
+      },
+    });
+  });
+
   it("rejects commands outside the configured tenant scope before dispatch", async () => {
     vi.stubEnv("CONTROL_PLANE_ALLOWED_TENANTS", "continuous-demo");
 
@@ -173,6 +285,36 @@ describe("POST /api/core", () => {
       message: "This operator token is not allowed to access the requested tenant.",
     });
     expect(mocks.createCoreTask).not.toHaveBeenCalled();
+  });
+
+  it("rejects payroll.preview.record before dispatch when idempotency is invalid", async () => {
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/api/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "payroll.preview.record",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "",
+          config: {
+            payrollRunId: "55555555-5555-4555-8555-000000000007",
+            lines: [],
+            trace: {},
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error.code).toBe("invalid_idempotency_key");
+    expect(mocks.recordPayrollPreview).not.toHaveBeenCalled();
   });
 
   it("requires a tenant for scoped Core summary reads", async () => {
