@@ -66,12 +66,12 @@ config in structured fields.
 |---|---|
 | `worker_runs` | Owns lifecycle, idempotency, run input, and run output |
 | `budget_reservations` | Reserves and marks deterministic simulation units as used |
-| `adapter_runs` | Records read-only simulated adapter activity |
+| `adapter_runs` | Records dry-run adapter execution, attempt metadata, receipt state, and reconciliation state |
 | `inferences` | Stores prompt/result/safety trace |
 | `usage_events` | Attributes units to budget, task, capability, and worker |
 | `events` | Emits `revenue_worker.run.completed` with linked output ids |
-| `evidence` | Stores trace and later approval decision evidence |
-| `adapter_actions` | Drafts customer-response intent with `externalSend=false` |
+| `evidence` | Stores trace, adapter receipt, and later approval decision evidence |
+| `adapter_actions` | Links to the adapter run and drafts customer-response intent with `externalSend=false` |
 | `approval_requests` | Creates pending operator approval for the prepared action |
 | `audit_events` | Records run request, approval request, and approval decision |
 | `tasks` | Moves active work to `approval_required`; decision later moves to `waiting`, `active`, or `blocked` |

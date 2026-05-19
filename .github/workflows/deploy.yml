@@ -8,9 +8,9 @@ on:
         required: false
         default: "continuoushq.com, getcontinuous.app"
       app_url:
-        description: "Canonical external app URL"
+        description: "Canonical external app URL; omitted values derive from the first site host"
         required: false
-        default: "https://continuoushq.com"
+        default: ""
 
 permissions:
   contents: read
@@ -137,7 +137,10 @@ jobs:
             SITE_HOSTS="continuoushq.com, getcontinuous.app"
           fi
           if [[ -z "${APP_URL:-}" || "$APP_URL" == http://* ]]; then
-            APP_URL="https://continuoushq.com"
+            first_host="$(printf '%s' "$SITE_HOSTS" | cut -d, -f1 | xargs)"
+            first_host="${first_host#http://}"
+            first_host="${first_host#https://}"
+            APP_URL="https://$first_host"
           fi
           app_url="${APP_URL:-https://continuoushq.com}"
           ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" \

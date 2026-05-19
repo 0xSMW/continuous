@@ -1935,11 +1935,34 @@ export const adapterRuns = pgTable(
     connectionId: uuid("connection_id")
       .notNull()
       .references(() => connections.id, { onDelete: "cascade" }),
+    workerRunId: uuid("worker_run_id").references(() => workerRuns.id, {
+      onDelete: "set null",
+    }),
+    eventId: uuid("event_id").references(() => events.id, {
+      onDelete: "set null",
+    }),
+    mode: text("mode").notNull().default("read"),
+    operation: text("operation").notNull().default("sync"),
+    idempotencyKey: text("idempotency_key"),
     state: runState("state").notNull().default("queued"),
+    attempt: integer("attempt").notNull().default(1),
+    maxAttempts: integer("max_attempts").notNull().default(1),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
+    reconciliationState: text("reconciliation_state")
+      .notNull()
+      .default("not_required"),
     cursor: text("cursor"),
     readCount: integer("read_count").notNull().default(0),
     writeCount: integer("write_count").notNull().default(0),
+    receipt: jsonb("receipt")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
     error: jsonb("error")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    data: jsonb("data")
       .$type<JsonObject>()
       .notNull()
       .default(sql`'{}'::jsonb`),
@@ -1952,6 +1975,12 @@ export const adapterRuns = pgTable(
   (table) => [
     index("adapter_runs_tenant_idx").on(table.tenantId),
     index("adapter_runs_connection_idx").on(table.connectionId),
+    index("adapter_runs_worker_run_idx").on(table.workerRunId),
+    index("adapter_runs_state_idx").on(table.tenantId, table.state),
+    uniqueIndex("adapter_runs_idempotency_idx").on(
+      table.connectionId,
+      table.idempotencyKey,
+    ),
   ],
 );
 
@@ -1965,6 +1994,9 @@ export const adapterActions = pgTable(
     connectionId: uuid("connection_id")
       .notNull()
       .references(() => connections.id, { onDelete: "cascade" }),
+    adapterRunId: uuid("adapter_run_id").references(() => adapterRuns.id, {
+      onDelete: "set null",
+    }),
     capabilityId: uuid("capability_id").references(() => capabilities.id, {
       onDelete: "set null",
     }),
@@ -1976,6 +2008,14 @@ export const adapterActions = pgTable(
     }),
     idempotencyKey: text("idempotency_key").notNull(),
     state: callState("state").notNull().default("queued"),
+    mode: text("mode").notNull().default("dry_run"),
+    operation: text("operation").notNull().default("action"),
+    attempt: integer("attempt").notNull().default(1),
+    maxAttempts: integer("max_attempts").notNull().default(1),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
+    reconciliationState: text("reconciliation_state")
+      .notNull()
+      .default("pending"),
     request: jsonb("request")
       .$type<JsonObject>()
       .notNull()
@@ -2002,7 +2042,9 @@ export const adapterActions = pgTable(
   (table) => [
     index("adapter_actions_tenant_idx").on(table.tenantId),
     index("adapter_actions_connection_idx").on(table.connectionId),
+    index("adapter_actions_run_idx").on(table.adapterRunId),
     index("adapter_actions_task_idx").on(table.taskId),
+    index("adapter_actions_state_idx").on(table.tenantId, table.state),
     uniqueIndex("adapter_actions_idempotency_idx").on(
       table.connectionId,
       table.idempotencyKey,
@@ -2649,7 +2691,7 @@ export const modelRoutesRelations = relations(modelRoutes, ({ one, many }) => ({
   inferences: many(inferences),
 }));
 
-export const adapterRunsRelations = relations(adapterRuns, ({ one }) => ({
+export const adapterRunsRelations = relations(adapterRuns, ({ one, many }) => ({
   tenant: one(tenants, {
     fields: [adapterRuns.tenantId],
     references: [tenants.id],
@@ -2658,6 +2700,15 @@ export const adapterRunsRelations = relations(adapterRuns, ({ one }) => ({
     fields: [adapterRuns.connectionId],
     references: [connections.id],
   }),
+  workerRun: one(workerRuns, {
+    fields: [adapterRuns.workerRunId],
+    references: [workerRuns.id],
+  }),
+  event: one(events, {
+    fields: [adapterRuns.eventId],
+    references: [events.id],
+  }),
+  actions: many(adapterActions),
 }));
 
 export const adapterActionsRelations = relations(adapterActions, ({ one }) => ({
@@ -2668,6 +2719,10 @@ export const adapterActionsRelations = relations(adapterActions, ({ one }) => ({
   connection: one(connections, {
     fields: [adapterActions.connectionId],
     references: [connections.id],
+  }),
+  adapterRun: one(adapterRuns, {
+    fields: [adapterActions.adapterRunId],
+    references: [adapterRuns.id],
   }),
   capability: one(capabilities, {
     fields: [adapterActions.capabilityId],

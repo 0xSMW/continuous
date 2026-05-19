@@ -11,12 +11,12 @@ state, and object versioning without external sends or money movement.
 | Area | Current state |
 |---|---|
 | Worker identity | `Revenue Operations Worker`, autonomy level 2, owner-managed |
-| Core loop | One operator run creates worker run, budget, inference, usage, event, evidence, adapter action, task update, and object version records |
+| Core loop | One operator run creates worker run, budget, inference, usage, event, evidence, adapter run/action, task update, and object version records |
 | Operator read API | `GET /worker?view=snapshot&role=revenue_operations`, bearer-token required |
 | Approval API | `GET /worker?view=approvals&role=revenue_operations` and `POST /worker` with `command=approval.decide`, bearer-token required |
 | Run API | `POST /worker` with `command=run`, disabled by default and bearer-token gated when enabled |
 | Operator run | `bun run worker:revenue -- --idempotency-key=<key>` |
-| External execution | Disabled; adapter action records simulated receipts only |
+| External execution | Disabled; adapter runtime records dry-run receipts and matched reconciliation only |
 
 `/worker` is the forward API. Worker role, tenant, operation config, and
 idempotency belong in query or payload fields, not in worker-family-specific URL
@@ -35,7 +35,7 @@ smoke test.
 | Budget | Reservation before model/tool work and usage attribution after |
 | Evidence | Source snapshot, prompt/result trace, approval, and adapter receipt |
 | Approval | First-class `approval_requests`, approval decision evidence, and audit trail |
-| Adapter safety | Scoped credentials, dry-run mode, receipts, retries, and reconciliation |
+| Adapter safety | Dry-run mode, receipt evidence, attempt metadata, and reconciliation state are persisted; scoped live credentials and retry workers are still blocked |
 | Eval | Historical lead/quote cases with expected classification and action outputs |
 
 ## Next Capabilities
@@ -86,6 +86,6 @@ smoke test.
 1. Convert the deterministic run into a small state machine.
 2. Add read-only real lead intake.
 3. Add quote approval UI backed by `ui_contracts`.
-4. Add dry-run adapter execution with reconciliation.
+4. Add retry execution paths and reconciliation workers for failed or uncertain adapter results.
 5. Add eval fixtures and CI checks for lead classification and quote decisions.
 6. Raise autonomy only for read, classify, draft, and owner brief capabilities.

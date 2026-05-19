@@ -118,7 +118,9 @@ export type RevenueWorkerRunResult = {
   reservationId: string | null;
   inferenceId: string | null;
   usageEventId: string | null;
+  adapterRunId: string | null;
   adapterActionId: string | null;
+  adapterReceiptEvidenceId: string | null;
   approvalRequestId: string | null;
   auditEventId: string | null;
   snapshot: RevenueWorkerSnapshot;
@@ -694,7 +696,9 @@ export async function runRevenueWorker(input: {
         reservationId: stringData(existingRun.data, "reservationId"),
         inferenceId: stringData(existingRun.data, "inferenceId"),
         usageEventId: stringData(existingRun.data, "usageEventId"),
+        adapterRunId: stringData(existingRun.data, "adapterRunId"),
         adapterActionId: stringData(existingRun.data, "adapterActionId"),
+        adapterReceiptEvidenceId: stringData(existingRun.data, "adapterReceiptEvidenceId"),
         approvalRequestId: stringData(existingRun.data, "approvalRequestId"),
         auditEventId: stringData(existingRun.data, "auditEventId"),
       };
@@ -724,7 +728,9 @@ export async function runRevenueWorker(input: {
         reservationId: stringData(existingEvent.data, "reservationId"),
         inferenceId: stringData(existingEvent.data, "inferenceId"),
         usageEventId: stringData(existingEvent.data, "usageEventId"),
+        adapterRunId: stringData(existingEvent.data, "adapterRunId"),
         adapterActionId: stringData(existingEvent.data, "adapterActionId"),
+        adapterReceiptEvidenceId: stringData(existingEvent.data, "adapterReceiptEvidenceId"),
         approvalRequestId: stringData(existingEvent.data, "approvalRequestId"),
         auditEventId: stringData(existingEvent.data, "auditEventId"),
       };
@@ -762,7 +768,9 @@ export async function runRevenueWorker(input: {
         reservationId: stringData(existingEvent.data, "reservationId"),
         inferenceId: stringData(existingEvent.data, "inferenceId"),
         usageEventId: stringData(existingEvent.data, "usageEventId"),
+        adapterRunId: stringData(existingEvent.data, "adapterRunId"),
         adapterActionId: stringData(existingEvent.data, "adapterActionId"),
+        adapterReceiptEvidenceId: stringData(existingEvent.data, "adapterReceiptEvidenceId"),
         approvalRequestId: stringData(existingEvent.data, "approvalRequestId"),
         auditEventId: stringData(existingEvent.data, "auditEventId"),
       };
@@ -972,12 +980,24 @@ export async function runRevenueWorker(input: {
       .values({
         tenantId: context.worker.tenantId,
         connectionId: context.connectionId,
-        state: "done",
+        workerRunId: workerRun.id,
+        mode: "dry_run",
+        operation: "draft_customer_response",
+        idempotencyKey: `${input.idempotencyKey}:adapter_run`,
+        state: "running",
+        attempt: 1,
+        maxAttempts: 3,
+        reconciliationState: "pending",
         cursor: input.idempotencyKey,
         readCount: 1,
         writeCount: 0,
+        data: {
+          workerRunId: workerRun.id,
+          capabilityId,
+          externalMutation: false,
+          dryRun: true,
+        },
         startedAt: now,
-        endedAt: now,
       })
       .returning({ id: adapterRuns.id });
 
@@ -1097,27 +1117,84 @@ export async function runRevenueWorker(input: {
       .values({
         tenantId: context.worker.tenantId,
         connectionId: context.connectionId,
+        adapterRunId: adapterRun.id,
         capabilityId,
         taskId: task?.id,
         eventId: event.id,
         idempotencyKey: input.idempotencyKey,
         state: "done",
+        mode: "dry_run",
+        operation: "draft_customer_response",
+        attempt: 1,
+        maxAttempts: 3,
+        reconciliationState: "matched",
         request: {
           action: "draft_customer_response",
           workerRunId: workerRun.id,
           externalSend: false,
+          dryRun: true,
         },
         response: {
           status: "prepared",
           nextStep: "owner_approval",
+          reconciliation: "matched",
         },
         receipt: {
-          mode: "simulation",
+          mode: "dry_run",
+          receiptId: traceHash(input.idempotencyKey, "adapter_receipt"),
+          adapterRunId: adapterRun.id,
           workerRunId: workerRun.id,
           externalMutation: false,
+          reconciliationState: "matched",
+          checkedAt: now.toISOString(),
         },
       })
       .returning({ id: adapterActions.id });
+
+    const [receiptEvidence] = await tx
+      .insert(evidence)
+      .values({
+        tenantId: context.worker.tenantId,
+        kind: "receipt",
+        name: "Adapter dry-run receipt",
+        objectId: task?.objectId,
+        taskId: task?.id,
+        eventId: event.id,
+        capabilityId,
+        actorType: "adapter",
+        actorId: context.connectionId,
+        hash: traceHash(input.idempotencyKey, "adapter_receipt"),
+        data: {
+          mode: "dry_run",
+          workerRunId: workerRun.id,
+          adapterRunId: adapterRun.id,
+          adapterActionId: action.id,
+          idempotencyKey: input.idempotencyKey,
+          operation: "draft_customer_response",
+          externalMutation: false,
+          reconciliationState: "matched",
+          checkedAt: now.toISOString(),
+        },
+      })
+      .returning({ id: evidence.id });
+
+    await tx
+      .update(adapterRuns)
+      .set({
+        eventId: event.id,
+        state: "done",
+        reconciliationState: "matched",
+        receipt: {
+          mode: "dry_run",
+          receiptEvidenceId: receiptEvidence.id,
+          adapterActionId: action.id,
+          externalMutation: false,
+          reconciliationState: "matched",
+          checkedAt: now.toISOString(),
+        },
+        endedAt: now,
+      })
+      .where(eq(adapterRuns.id, adapterRun.id));
 
     const [approval] = await tx
       .insert(approvalRequests)
@@ -1143,14 +1220,16 @@ export async function runRevenueWorker(input: {
           action: "approve_and_send",
           adapterActionId: action.id,
           externalSend: false,
-          currentMode: "simulation",
+          currentMode: "dry_run",
         },
         evidence: {
           eventId: event.id,
           evidenceId: workerEvidence.id,
           inferenceId: inference.id,
           usageEventId: usage.id,
+          adapterRunId: adapterRun.id,
           adapterActionId: action.id,
+          adapterReceiptEvidenceId: receiptEvidence.id,
         },
         policy: {
           externalSend: "approval_required",
@@ -1161,6 +1240,9 @@ export async function runRevenueWorker(input: {
           operatorRunAuditId: runAudit.id,
           classification: "quote_ready_for_owner_approval",
           workerRunId: workerRun.id,
+          adapterRunId: adapterRun.id,
+          adapterActionId: action.id,
+          adapterReceiptEvidenceId: receiptEvidence.id,
         },
       })
       .returning({ id: approvalRequests.id });
@@ -1188,7 +1270,9 @@ export async function runRevenueWorker(input: {
           reviewerUserId: task?.reviewerUserId ?? operator.id,
           operatorUserId: operator.id,
           externalExecution: "blocked",
+          adapterRunId: adapterRun.id,
           adapterActionId: action.id,
+          adapterReceiptEvidenceId: receiptEvidence.id,
         },
       })
       .returning({ id: auditEvents.id });
@@ -1203,6 +1287,9 @@ export async function runRevenueWorker(input: {
           usageEventId: usage.id,
           reservationId: reservation.id,
           runAuditId: runAudit.id,
+          adapterRunId: adapterRun.id,
+          adapterActionId: action.id,
+          adapterReceiptEvidenceId: receiptEvidence.id,
           approvalRequestId: approval.id,
           auditEventId: approvalAudit.id,
           decision: "prepared_quote_for_owner_approval",
@@ -1222,10 +1309,13 @@ export async function runRevenueWorker(input: {
       state: "proposed",
       decision: "request_owner_approval",
       rationale: "External communication and money movement are blocked until owner approval.",
-      data: {
-        workerRunId: workerRun.id,
-        approvalRequestId: approval.id,
-        idempotencyKey: input.idempotencyKey,
+        data: {
+          workerRunId: workerRun.id,
+          adapterRunId: adapterRun.id,
+          adapterActionId: action.id,
+          adapterReceiptEvidenceId: receiptEvidence.id,
+          approvalRequestId: approval.id,
+          idempotencyKey: input.idempotencyKey,
         classification: "quote_ready_for_owner_approval",
         autonomyLevel: 2,
       },
@@ -1260,7 +1350,9 @@ export async function runRevenueWorker(input: {
             status: "quote_ready_for_owner_approval",
             workerRunId: workerRun.id,
             runEventId: event.id,
+            adapterRunId: adapterRun.id,
             adapterActionId: action.id,
+            adapterReceiptEvidenceId: receiptEvidence.id,
             approvalRequestId: approval.id,
             auditEventId: approvalAudit.id,
           },
@@ -1299,6 +1391,9 @@ export async function runRevenueWorker(input: {
           state: "approval_required",
           workerRunId: workerRun.id,
           sourceEventId: event.id,
+          adapterRunId: adapterRun.id,
+          adapterActionId: action.id,
+          adapterReceiptEvidenceId: receiptEvidence.id,
           approvalRequestId: approval.id,
           approvalRequired: true,
         },
@@ -1333,7 +1428,9 @@ export async function runRevenueWorker(input: {
           reservationId: reservation.id,
           inferenceId: inference.id,
           usageEventId: usage.id,
+          adapterRunId: adapterRun.id,
           adapterActionId: action.id,
+          adapterReceiptEvidenceId: receiptEvidence.id,
           approvalRequestId: approval.id,
           auditEventId: approvalAudit.id,
         },
@@ -1355,6 +1452,7 @@ export async function runRevenueWorker(input: {
       usageEventId: usage.id,
       adapterRunId: adapterRun.id,
       adapterActionId: action.id,
+      adapterReceiptEvidenceId: receiptEvidence.id,
       approvalRequestId: approval.id,
       auditEventId: approvalAudit.id,
     };
@@ -1385,6 +1483,8 @@ export async function runRevenueWorker(input: {
       inferenceId: inference.id,
       usageEventId: usage.id,
       adapterActionId: action.id,
+      adapterRunId: adapterRun.id,
+      adapterReceiptEvidenceId: receiptEvidence.id,
       approvalRequestId: approval.id,
       auditEventId: approvalAudit.id,
     };

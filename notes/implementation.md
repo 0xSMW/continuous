@@ -23,6 +23,7 @@
 | Added canonical workflow API | `/workflow` validates definition-backed `start` and `transition` commands and records workflow events, audit events, and evidence |
 | Agent build path uses app-server protocol tooling plus Next.js MCP | The installed Codex app-server CLI exposes protocol generation/help commands; `.mcp.json` keeps the Next.js 16 MCP bridge for route/runtime diagnostics |
 | Added the first authority ledger | Revenue Worker runs now create approval requests and audit events, and approval decisions create evidence before any external action is allowed |
+| Added first-class adapter dry-runs | Revenue Worker runs now create linked adapter runs/actions, receipt evidence, attempt metadata, and reconciliation state while external mutation remains disabled |
 | HTTPS is managed by Caddy | `continuoushq.com` and `getcontinuous.app` now point at the droplet, and Caddy issues and renews Let's Encrypt certificates from the persisted `caddy_data` volume |
 
 ### Tradeoffs
@@ -65,9 +66,10 @@ budget, inference, usage, adapter, worker-run, approval, audit, and UI-contract
 primitives. Each run requires an idempotency key, writes a `worker_runs`
 lifecycle record, binds a configured active operator user, enforces an active
 worker capability grant and budget before spend, creates durable
-budget/evidence/event/approval/audit records, marks the quote task as
-`approval_required`, and leaves external execution disabled until real adapter
-execution and approval UI are in place.
+budget/evidence/event/approval/audit records, writes dry-run adapter
+run/action/receipt evidence, marks the quote task as `approval_required`, and
+leaves external execution disabled until retry/reconciliation workers, live
+credential scopes, and approval UI are in place.
 
 The canonical HTTP shape is now `/worker`: `GET /worker?view=snapshot` for
 state, `GET /worker?view=approvals` for approval queues, and `POST /worker`

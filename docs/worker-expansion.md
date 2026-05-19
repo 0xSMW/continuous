@@ -37,7 +37,7 @@ are explicit.
 | 0 | Read scoped records and summarize | Tenant/worker scope check and audit event |
 | 1 | Draft messages, packets, decisions, and recommendations | Golden evals for factuality and missing-fact handling |
 | 2 | Create internal tasks and update internal records | Idempotent workflow run plus evidence packet |
-| 3 | Send bounded external communications under policy | Approval UI, adapter receipt, retry/reconciliation path |
+| 3 | Send bounded external communications under policy | Approval UI, live credential scope, retry worker, and failure reconciliation path |
 | 4 | Prepare transactions, filings, contracts, payroll, or payments | Deterministic non-LLM calculation/validation and dual-control approval |
 | 5 | Execute approved external actions | Human approval event, credential scope, receipt, rollback/escalation plan |
 

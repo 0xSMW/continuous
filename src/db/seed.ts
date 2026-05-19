@@ -1,5 +1,7 @@
 import { db, pool } from "./client";
 import {
+  adapterActions,
+  adapterRuns,
   adapters,
   approvalRequests,
   auditEvents,
@@ -92,6 +94,9 @@ const ids = {
   workerRunSeed: "dddddddd-dddd-4ddd-8ddd-000000000003",
   evidenceLead: "eeeeeeee-eeee-4eee-8eee-000000000001",
   evidenceQuote: "eeeeeeee-eeee-4eee-8eee-000000000002",
+  evidenceAdapterReceipt: "eeeeeeee-eeee-4eee-8eee-000000000003",
+  adapterRunSeed: "abababab-abab-4aba-8aba-000000000001",
+  adapterActionSeed: "abababab-abab-4aba-8aba-000000000002",
   usage: "12121212-1212-4121-8121-121212121212",
   view: "34343434-3434-4343-8343-343434343434",
   legalEntity: "55555555-5555-4555-8555-000000000001",
@@ -1149,6 +1154,9 @@ async function seed() {
           eventId: ids.eventQuote,
           taskId: ids.taskQuote,
           evidenceId: ids.evidenceQuote,
+          adapterRunId: ids.adapterRunSeed,
+          adapterActionId: ids.adapterActionSeed,
+          adapterReceiptEvidenceId: ids.evidenceAdapterReceipt,
           approvalRequestId: ids.approvalQuote,
           auditEventId: ids.auditApprovalRequested,
           classification: "quote_ready_for_owner_approval",
@@ -1157,6 +1165,81 @@ async function seed() {
         },
       },
       endedAt: now,
+    })
+    .onConflictDoNothing();
+
+  await db
+    .insert(adapterRuns)
+    .values({
+      id: ids.adapterRunSeed,
+      tenantId: ids.tenant,
+      connectionId: ids.connection,
+      workerRunId: ids.workerRunSeed,
+      eventId: ids.eventQuote,
+      mode: "dry_run",
+      operation: "draft_customer_response",
+      idempotencyKey: "seed-revenue-worker-run:adapter_run",
+      state: "done",
+      attempt: 1,
+      maxAttempts: 3,
+      reconciliationState: "matched",
+      cursor: "seed-revenue-worker-run",
+      readCount: 1,
+      writeCount: 0,
+      receipt: {
+        mode: "dry_run",
+        receiptEvidenceId: ids.evidenceAdapterReceipt,
+        adapterActionId: ids.adapterActionSeed,
+        externalMutation: false,
+        reconciliationState: "matched",
+      },
+      data: {
+        workerRunId: ids.workerRunSeed,
+        dryRun: true,
+        externalMutation: false,
+      },
+      startedAt: now,
+      endedAt: now,
+    })
+    .onConflictDoNothing();
+
+  await db
+    .insert(adapterActions)
+    .values({
+      id: ids.adapterActionSeed,
+      tenantId: ids.tenant,
+      connectionId: ids.connection,
+      adapterRunId: ids.adapterRunSeed,
+      capabilityId: capIds.quotePrepare,
+      taskId: ids.taskQuote,
+      eventId: ids.eventQuote,
+      idempotencyKey: "seed-revenue-worker-run",
+      state: "done",
+      mode: "dry_run",
+      operation: "draft_customer_response",
+      attempt: 1,
+      maxAttempts: 3,
+      reconciliationState: "matched",
+      request: {
+        action: "draft_customer_response",
+        workerRunId: ids.workerRunSeed,
+        externalSend: false,
+        dryRun: true,
+      },
+      response: {
+        status: "prepared",
+        nextStep: "owner_approval",
+        reconciliation: "matched",
+      },
+      receipt: {
+        mode: "dry_run",
+        receiptId: "bootstrap-adapter-receipt",
+        adapterRunId: ids.adapterRunSeed,
+        receiptEvidenceId: ids.evidenceAdapterReceipt,
+        workerRunId: ids.workerRunSeed,
+        externalMutation: false,
+        reconciliationState: "matched",
+      },
     })
     .onConflictDoNothing();
 
@@ -1196,6 +1279,28 @@ async function seed() {
           auditEventId: ids.auditApprovalRequested,
         },
       },
+      {
+        id: ids.evidenceAdapterReceipt,
+        tenantId: ids.tenant,
+        kind: "receipt",
+        name: "Adapter dry-run receipt",
+        objectId: ids.quoteObject,
+        taskId: ids.taskQuote,
+        eventId: ids.eventQuote,
+        capabilityId: capIds.quotePrepare,
+        actorType: "adapter",
+        actorId: ids.connection,
+        hash: "bootstrap-adapter-receipt",
+        data: {
+          mode: "dry_run",
+          workerRunId: ids.workerRunSeed,
+          adapterRunId: ids.adapterRunSeed,
+          adapterActionId: ids.adapterActionSeed,
+          operation: "draft_customer_response",
+          externalMutation: false,
+          reconciliationState: "matched",
+        },
+      },
     ])
     .onConflictDoNothing();
 
@@ -1221,12 +1326,16 @@ async function seed() {
       summary: "Seeded Revenue Worker quote draft is ready for owner approval; external send is blocked.",
       requestedAction: {
         action: "approve_and_send",
+        adapterActionId: ids.adapterActionSeed,
         externalSend: false,
-        currentMode: "simulation",
+        currentMode: "dry_run",
       },
       evidence: {
         eventId: ids.eventQuote,
         evidenceId: ids.evidenceQuote,
+        adapterRunId: ids.adapterRunSeed,
+        adapterActionId: ids.adapterActionSeed,
+        adapterReceiptEvidenceId: ids.evidenceAdapterReceipt,
       },
       policy: {
         externalSend: "approval_required",
@@ -1235,6 +1344,8 @@ async function seed() {
       data: {
         classification: "quote_ready_for_owner_approval",
         workerRunId: ids.workerRunSeed,
+        adapterRunId: ids.adapterRunSeed,
+        adapterActionId: ids.adapterActionSeed,
       },
     })
     .onConflictDoNothing();
