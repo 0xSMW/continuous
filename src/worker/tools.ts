@@ -380,10 +380,6 @@ function objectValue(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function jsonObject(value: unknown): JsonObject {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonObject) : {};
-}
-
 function stringValue(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
@@ -399,7 +395,8 @@ function targetFrom(payload: JsonObject): WorkerTargetInput {
 
 export async function executeWorkerTool(name: string, payload: JsonObject = {}) {
   const target = targetFrom(payload);
-  const config = jsonObject(payload.config);
+  const config = payload.config;
+  const viewConfig = objectValue(payload.config);
   const operatorEmail = stringValue(payload.operatorEmail) ?? process.env.WORKER_OPERATOR_EMAIL ?? "";
 
   if (name === "worker.snapshot") {
@@ -440,7 +437,7 @@ export async function executeWorkerTool(name: string, payload: JsonObject = {}) 
       view: "approvals",
       target,
       operatorEmail,
-      state: stringValue(config.state),
+      state: stringValue(viewConfig.state),
     });
 
     return {
@@ -454,7 +451,7 @@ export async function executeWorkerTool(name: string, payload: JsonObject = {}) 
       view: "briefs",
       target,
       operatorEmail,
-      state: stringValue(config.state),
+      state: stringValue(viewConfig.state),
     });
 
     return {
@@ -468,7 +465,7 @@ export async function executeWorkerTool(name: string, payload: JsonObject = {}) 
       view: "decisions",
       target,
       operatorEmail,
-      state: stringValue(config.state),
+      state: stringValue(viewConfig.state),
     });
 
     return {

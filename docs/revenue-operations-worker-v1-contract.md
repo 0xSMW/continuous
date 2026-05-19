@@ -1,4 +1,4 @@
-# Revenue Worker V1 Contract
+# Revenue Operations Worker V1 Contract
 
 This contract defines the first worker surface that can be expanded without
 raising autonomy or permitting external sends.

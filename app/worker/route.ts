@@ -41,6 +41,14 @@ function targetFrom(value: unknown): WorkerTargetInput {
   };
 }
 
+function idempotencyKeyFrom(body: Record<string, unknown>, request: Request) {
+  if (Object.prototype.hasOwnProperty.call(body, "idempotencyKey")) {
+    return body.idempotencyKey;
+  }
+
+  return request.headers.get("idempotency-key") ?? undefined;
+}
+
 function targetFromUrl(request: Request): WorkerTargetInput {
   const url = new URL(request.url);
   return {
@@ -140,7 +148,7 @@ export async function POST(request: Request) {
       command: optionalString(body.command),
       target: targetFrom(body.worker),
       config: body.config,
-      idempotencyKey: request.headers.get("idempotency-key") ?? body.idempotencyKey,
+      idempotencyKey: idempotencyKeyFrom(body, request),
       operatorEmail: auth.operatorEmail,
     });
 

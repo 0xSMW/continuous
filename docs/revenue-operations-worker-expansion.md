@@ -1,4 +1,4 @@
-# Revenue Worker Expansion
+# Revenue Operations Worker Expansion
 
 The current Revenue Worker is a deterministic persisted simulation. It proves
 worker identity, capability grants, task ownership, budget reservation, usage,

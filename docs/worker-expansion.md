@@ -36,7 +36,7 @@ Implementation-grade contracts:
 
 | Worker | Contract |
 |---|---|
-| Revenue Operations | [Revenue Worker V1 Contract](revenue-worker-v1-contract.md) |
+| Revenue Operations | [Revenue Operations Worker V1 Contract](revenue-operations-worker-v1-contract.md) |
 | Owner Chief-of-Staff | [Owner Chief-of-Staff Worker V1 Contract](owner-chief-of-staff-worker-v1-contract.md) |
 | Dispatch/Ops | [Dispatch Operations Worker V1 Contract](dispatch-operations-worker-v1-contract.md) |
 | Finance | [Finance Operations Worker V1 Contract](finance-operations-worker-v1-contract.md) |

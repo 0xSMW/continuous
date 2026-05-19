@@ -258,7 +258,18 @@ describe("worker tool contract", () => {
           limit: 25,
         },
       }),
-    ).rejects.toThrow("worker.tenantSlug is required for adapter reconciliation.");
+    ).rejects.toThrow("worker.tenantSlug is required for adapters.reconcile.");
+  });
+
+  it("rejects malformed command config instead of silently normalizing it", async () => {
+    await expect(
+      executeWorkerTool("worker.approvals.decide", {
+        worker: {
+          role: "revenue_operations",
+        },
+        config: "approval-id",
+      }),
+    ).rejects.toThrow("config must be an object when provided.");
   });
 
   it("uses registry validation for adapter reconciliation limits", async () => {

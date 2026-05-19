@@ -100,10 +100,6 @@ function optionalString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-function jsonObject(value: unknown): JsonObject {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonObject) : {};
-}
-
 function optionalLimit(value: unknown) {
   if (value === undefined || value === null) {
     return undefined;
@@ -144,6 +140,22 @@ function requireIdempotency(value: unknown) {
   }
 
   return idempotency.key;
+}
+
+function commandConfig(value: unknown): JsonObject {
+  if (value === undefined || value === null) {
+    return {};
+  }
+
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as JsonObject;
+  }
+
+  throw new PlatformUnavailableError(
+    "invalid_worker_command_config",
+    "config must be an object when provided.",
+    400,
+  );
 }
 
 const revenueDefinition: WorkerDefinition = {
@@ -581,7 +593,7 @@ export async function executeWorkerCommand(input: {
   if (command.requiresTenant && !target.tenantSlug) {
     throw new PlatformUnavailableError(
       "invalid_worker_target",
-      "worker.tenantSlug is required for adapter reconciliation.",
+      `worker.tenantSlug is required for ${command.name}.`,
       400,
     );
   }
@@ -591,7 +603,7 @@ export async function executeWorkerCommand(input: {
   const result = await command.handle({
     target,
     operatorEmail: input.operatorEmail,
-    config: jsonObject(input.config),
+    config: commandConfig(input.config),
     idempotencyKey,
   });
 
