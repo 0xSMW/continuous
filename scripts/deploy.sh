@@ -84,6 +84,8 @@ if [ ! -f .env ]; then
     printf 'WORKER_RUN_ENABLED=true\n'
     printf 'WORKER_RUN_TOKEN=%s\n' "$(openssl rand -hex 32)"
     printf 'WORKER_OPERATOR_EMAIL=%s\n' "$WORKER_OPERATOR_EMAIL"
+    printf 'CONTROL_PLANE_ALLOWED_TENANTS=continuous-demo\n'
+    printf 'CONTROL_PLANE_ALLOWED_WORKER_ROLES=revenue_operations,owner_chief_of_staff\n'
   } > .env
   echo "Created $APP_DIR/.env"
 else
@@ -113,6 +115,8 @@ set_env APP_URL "$APP_URL"
 set_env SITE_HOSTS "$SITE_HOSTS"
 set_env ACME_EMAIL "$ACME_EMAIL"
 set_env WORKER_OPERATOR_EMAIL "$WORKER_OPERATOR_EMAIL"
+set_env CONTROL_PLANE_ALLOWED_TENANTS "continuous-demo"
+set_env CONTROL_PLANE_ALLOWED_WORKER_ROLES "revenue_operations,owner_chief_of_staff"
 
 worker_token="$(grep '^WORKER_RUN_TOKEN=' .env | cut -d= -f2- || true)"
 if [ -z "$worker_token" ]; then

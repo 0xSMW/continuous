@@ -82,7 +82,10 @@ JSON
 When the HTTP snapshot, approval, or run path is required, start the app with
 `WORKER_RUN_TOKEN` and include that bearer token on operator routes.
 `WORKER_OPERATOR_EMAIL` must match an active seeded user, defaulting to
-`owner@continuoushq.com`. Keep worker-specific config in the JSON payload:
+`owner@continuoushq.com`. Production also sets
+`CONTROL_PLANE_ALLOWED_TENANTS` and `CONTROL_PLANE_ALLOWED_WORKER_ROLES`, so
+operator routes must carry an allowed `tenantSlug` and `/worker` calls must
+carry an allowed `worker.role`. Keep worker-specific config in the JSON payload:
 
 ```json
 {

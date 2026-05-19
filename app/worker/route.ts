@@ -6,7 +6,12 @@ import {
   workerApiVersion,
   workerErrorStatus,
 } from "../../src/worker/registry";
-import { authorizeWorkerRead, authorizeWorkerRun } from "../../src/worker/security";
+import {
+  authorizeControlPlaneScope,
+  authorizeWorkerRead,
+  authorizeWorkerRun,
+  controlPlaneScopeFromEnv,
+} from "../../src/worker/security";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +26,10 @@ function bodyObject(value: unknown) {
 }
 
 const workerCommandEnvelopeFields = new Set(["command", "worker", "idempotencyKey", "config"]);
+const controlPlaneScope = controlPlaneScopeFromEnv({
+  allowedTenants: env.CONTROL_PLANE_ALLOWED_TENANTS,
+  allowedWorkerRoles: env.CONTROL_PLANE_ALLOWED_WORKER_ROLES,
+});
 
 async function readBody(request: Request) {
   if (!request.headers.get("content-type")?.includes("application/json")) {
@@ -92,6 +101,16 @@ function workerErrorResponse(error: unknown, fallbackCode: string) {
   );
 }
 
+function guardErrorResponse(error: { code: string; message: string; status: number }) {
+  return errorResponse(
+    {
+      code: error.code,
+      message: error.message,
+    },
+    error.status,
+  );
+}
+
 export async function GET(request: Request) {
   const auth = authorizeWorkerRead({
     appEnv: env.APP_ENV,
@@ -102,15 +121,27 @@ export async function GET(request: Request) {
   });
 
   if (!auth.ok) {
-    return errorResponse(auth, auth.status);
+    return guardErrorResponse(auth);
   }
 
   const url = new URL(request.url);
+  const target = targetFromUrl(request);
+  const scope = authorizeControlPlaneScope({
+    scope: controlPlaneScope,
+    tenantSlug: target.tenantSlug,
+    workerRole: target.role,
+    requireTenant: true,
+    requireWorkerRole: true,
+  });
+
+  if (!scope.ok) {
+    return guardErrorResponse(scope);
+  }
 
   try {
     const result = await executeWorkerView({
       operatorEmail: auth.operatorEmail,
-      target: targetFromUrl(request),
+      target,
       view: optionalString(url.searchParams.get("view")),
       state: optionalString(url.searchParams.get("state")),
     });
@@ -144,11 +175,12 @@ export async function POST(request: Request) {
   });
 
   if (!auth.ok) {
-    return errorResponse(auth, auth.status);
+    return guardErrorResponse(auth);
   }
 
   const body = await readBody(request);
   const unexpectedFields = unexpectedWorkerPayloadFields(body);
+  const target = targetFrom(body.worker);
 
   if (unexpectedFields.length > 0) {
     return errorResponse(
@@ -160,10 +192,22 @@ export async function POST(request: Request) {
     );
   }
 
+  const scope = authorizeControlPlaneScope({
+    scope: controlPlaneScope,
+    tenantSlug: target.tenantSlug,
+    workerRole: target.role,
+    requireTenant: true,
+    requireWorkerRole: true,
+  });
+
+  if (!scope.ok) {
+    return guardErrorResponse(scope);
+  }
+
   try {
     const result = await executeWorkerCommand({
       command: optionalString(body.command),
-      target: targetFrom(body.worker),
+      target,
       config: body.config,
       idempotencyKey: idempotencyKeyFrom(body, request),
       operatorEmail: auth.operatorEmail,

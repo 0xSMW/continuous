@@ -88,8 +88,12 @@ openssl s_client -connect 45.55.53.92:443 -servername continuoushq.com </dev/nul
 The deploy path enables the generic worker command surface with a generated
 bearer token in `/opt/continuous/.env`. `WORKER_OPERATOR_EMAIL` defaults to the
 seeded owner user and must match an active user before approval records or
-operator decisions can be written. Use the CLI path over SSH for direct
-operator-controlled smoke runs:
+operator decisions can be written. The deploy path also scopes that token to
+`CONTROL_PLANE_ALLOWED_TENANTS=continuous-demo` and
+`CONTROL_PLANE_ALLOWED_WORKER_ROLES=revenue_operations,owner_chief_of_staff`;
+requests to `/worker`, `/api/core`, or `/workflow` must carry an allowed
+`tenantSlug`, and worker requests must carry an allowed `worker.role`. Use the
+CLI path over SSH for direct operator-controlled smoke runs:
 
 ```sh
 ssh root@45.55.53.92 'cd /opt/continuous && docker compose --profile tools run --rm migrate bun run worker:tool worker.lead.read --payload='"'"'{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"deploy-lead-read-001","config":{"source":"website_form","records":[{"sourceEventId":"deploy-form-001","customerName":"Acme Roof Repair","customerIntent":"roof leak inspection","serviceArea":"roofing","urgency":"high"}]}}'"'"''

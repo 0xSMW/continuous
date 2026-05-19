@@ -141,4 +141,58 @@ describe("POST /api/core", () => {
       occurredAt: "2026-05-19T18:00:00.000Z",
     });
   });
+
+  it("rejects commands outside the configured tenant scope before dispatch", async () => {
+    vi.stubEnv("CONTROL_PLANE_ALLOWED_TENANTS", "continuous-demo");
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/api/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "task.create",
+          core: {
+            tenantSlug: "other-tenant",
+          },
+          idempotencyKey: "core-scope-test-001",
+          config: {
+            title: "Out-of-scope task",
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(body.error).toEqual({
+      code: "control_plane_tenant_forbidden",
+      message: "This operator token is not allowed to access the requested tenant.",
+    });
+    expect(mocks.createCoreTask).not.toHaveBeenCalled();
+  });
+
+  it("requires a tenant for scoped Core summary reads", async () => {
+    vi.stubEnv("CONTROL_PLANE_ALLOWED_TENANTS", "continuous-demo");
+
+    const { GET } = await import("./route");
+    const response = await GET(
+      new Request("http://localhost/api/core", {
+        headers: {
+          authorization: "Bearer test-token",
+        },
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(body.error).toEqual({
+      code: "control_plane_tenant_required",
+      message: "tenantSlug is required for scoped control-plane access.",
+    });
+    expect(mocks.getCoreSummarySafe).not.toHaveBeenCalled();
+  });
 });

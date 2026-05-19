@@ -4,15 +4,18 @@ const mocks = vi.hoisted(() => ({
   executeWorkerCommand: vi.fn(),
   executeWorkerView: vi.fn(),
   workerErrorStatus: vi.fn(),
-}));
-
-vi.mock("../../src/env", () => ({
   env: {
     APP_ENV: "test",
     WORKER_RUN_ENABLED: true,
     WORKER_RUN_TOKEN: "test-token",
     WORKER_OPERATOR_EMAIL: "operator@example.com",
+    CONTROL_PLANE_ALLOWED_TENANTS: undefined as string | undefined,
+    CONTROL_PLANE_ALLOWED_WORKER_ROLES: undefined as string | undefined,
   },
+}));
+
+vi.mock("../../src/env", () => ({
+  env: mocks.env,
 }));
 
 vi.mock("../../src/worker/registry", () => ({
@@ -25,6 +28,14 @@ vi.mock("../../src/worker/registry", () => ({
 describe("/worker route", () => {
   beforeEach(() => {
     vi.resetModules();
+    Object.assign(mocks.env, {
+      APP_ENV: "test",
+      WORKER_RUN_ENABLED: true,
+      WORKER_RUN_TOKEN: "test-token",
+      WORKER_OPERATOR_EMAIL: "operator@example.com",
+      CONTROL_PLANE_ALLOWED_TENANTS: undefined,
+      CONTROL_PLANE_ALLOWED_WORKER_ROLES: undefined,
+    });
     mocks.workerErrorStatus.mockImplementation((error: unknown, fallbackCode: string) => ({
       status:
         error && typeof error === "object" && "status" in error
@@ -107,6 +118,72 @@ describe("/worker route", () => {
       idempotencyKey: "body-key-001",
       operatorEmail: "operator@example.com",
     });
+  });
+
+  it("rejects POST commands outside the configured tenant scope", async () => {
+    mocks.env.CONTROL_PLANE_ALLOWED_TENANTS = "continuous-demo";
+    mocks.env.CONTROL_PLANE_ALLOWED_WORKER_ROLES = "revenue_operations";
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/worker", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "run",
+          worker: {
+            role: "revenue_operations",
+            tenantSlug: "other-tenant",
+          },
+          idempotencyKey: "tenant-scope-001",
+          config: {},
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(body.error).toEqual({
+      code: "control_plane_tenant_forbidden",
+      message: "This operator token is not allowed to access the requested tenant.",
+    });
+    expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
+  });
+
+  it("rejects POST commands outside the configured worker role scope", async () => {
+    mocks.env.CONTROL_PLANE_ALLOWED_TENANTS = "continuous-demo";
+    mocks.env.CONTROL_PLANE_ALLOWED_WORKER_ROLES = "revenue_operations";
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/worker", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "brief.generate",
+          worker: {
+            role: "owner_chief_of_staff",
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "role-scope-001",
+          config: {},
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(body.error).toEqual({
+      code: "control_plane_worker_role_forbidden",
+      message: "This operator token is not allowed to access the requested worker role.",
+    });
+    expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
   });
 
   it("keeps idempotency-key as a fallback only when the payload omits idempotencyKey", async () => {
@@ -268,5 +345,27 @@ describe("/worker route", () => {
       view: "briefs",
       state: "review_ready",
     });
+  });
+
+  it("rejects GET views that omit tenant under scoped access", async () => {
+    mocks.env.CONTROL_PLANE_ALLOWED_TENANTS = "continuous-demo";
+    mocks.env.CONTROL_PLANE_ALLOWED_WORKER_ROLES = "revenue_operations";
+
+    const { GET } = await import("./route");
+    const response = await GET(
+      new Request("http://localhost/worker?view=snapshot&role=revenue_operations", {
+        headers: {
+          authorization: "Bearer test-token",
+        },
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(body.error).toEqual({
+      code: "control_plane_tenant_required",
+      message: "tenantSlug is required for scoped control-plane access.",
+    });
+    expect(mocks.executeWorkerView).not.toHaveBeenCalled();
   });
 });

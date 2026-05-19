@@ -44,7 +44,9 @@ bun run dev
 
 Open `http://localhost:3000` and `/api/health`. `/api/core` is an
 operator-only summary and uses the same bearer token as the canonical `/worker`
-control plane.
+control plane. Set `CONTROL_PLANE_ALLOWED_TENANTS` and
+`CONTROL_PLANE_ALLOWED_WORKER_ROLES` to comma-delimited allowlists when testing
+the production-scoped token behavior.
 
 Core side effects use a structured command payload. For local-only testing,
 start the app with `WORKER_RUN_ENABLED=true` and call:
@@ -143,7 +145,10 @@ Runs are bound to `WORKER_OPERATOR_EMAIL`, which defaults to the seeded
 `owner@continuoushq.com` user. A successful run records an approval request and
 audit trail while keeping external send and money movement blocked. Use
 `worker.lead.read` to persist source lead records before `worker.run`;
-`config.leadPacket` is only the direct fallback for controlled local tests.
+`config.leadPacket` is only the direct fallback for controlled local tests. If
+`CONTROL_PLANE_ALLOWED_TENANTS` is set, every operator route must include an
+allowed `tenantSlug`; if `CONTROL_PLANE_ALLOWED_WORKER_ROLES` is set, `/worker`
+calls must include an allowed `worker.role`.
 
 The same persisted loop can run without exposing HTTP:
 

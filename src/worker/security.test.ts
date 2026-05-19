@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { authorizeWorkerRead, authorizeWorkerRun, normalizeIdempotencyKey } from "./security";
+import {
+  authorizeControlPlaneScope,
+  authorizeWorkerRead,
+  authorizeWorkerRun,
+  controlPlaneScopeFromEnv,
+  normalizeIdempotencyKey,
+} from "./security";
 
 const acceptedCredential = ["accepted", "worker", "credential"].join(".");
 const operatorEmail = "owner@continuoushq.com";
@@ -119,5 +125,93 @@ describe("authorizeWorkerRead", () => {
         authorization: `Bearer ${acceptedCredential}`,
       }),
     ).toEqual({ ok: true, operatorEmail });
+  });
+});
+
+describe("control-plane scope", () => {
+  it("parses comma-delimited tenant and worker role allowlists", () => {
+    expect(
+      controlPlaneScopeFromEnv({
+        allowedTenants: "continuous-demo, second-tenant, continuous-demo",
+        allowedWorkerRoles: "revenue_operations, owner_chief_of_staff",
+      }),
+    ).toEqual({
+      tenantSlugs: ["continuous-demo", "second-tenant"],
+      workerRoles: ["revenue_operations", "owner_chief_of_staff"],
+    });
+  });
+
+  it("requires tenant and worker role when scoped access is configured", () => {
+    const scope = controlPlaneScopeFromEnv({
+      allowedTenants: "continuous-demo",
+      allowedWorkerRoles: "revenue_operations",
+    });
+
+    expect(
+      authorizeControlPlaneScope({
+        scope,
+        requireTenant: true,
+        requireWorkerRole: true,
+      }),
+    ).toEqual({
+      ok: false,
+      status: 403,
+      code: "control_plane_tenant_required",
+      message: "tenantSlug is required for scoped control-plane access.",
+    });
+  });
+
+  it("rejects out-of-scope tenants and worker roles", () => {
+    const scope = controlPlaneScopeFromEnv({
+      allowedTenants: "continuous-demo",
+      allowedWorkerRoles: "revenue_operations",
+    });
+
+    expect(
+      authorizeControlPlaneScope({
+        scope,
+        tenantSlug: "other-tenant",
+        workerRole: "revenue_operations",
+        requireTenant: true,
+        requireWorkerRole: true,
+      }),
+    ).toEqual({
+      ok: false,
+      status: 403,
+      code: "control_plane_tenant_forbidden",
+      message: "This operator token is not allowed to access the requested tenant.",
+    });
+
+    expect(
+      authorizeControlPlaneScope({
+        scope,
+        tenantSlug: "continuous-demo",
+        workerRole: "finance_operations",
+        requireTenant: true,
+        requireWorkerRole: true,
+      }),
+    ).toEqual({
+      ok: false,
+      status: 403,
+      code: "control_plane_worker_role_forbidden",
+      message: "This operator token is not allowed to access the requested worker role.",
+    });
+  });
+
+  it("allows explicitly scoped tenants and roles", () => {
+    const scope = controlPlaneScopeFromEnv({
+      allowedTenants: "continuous-demo",
+      allowedWorkerRoles: "revenue_operations",
+    });
+
+    expect(
+      authorizeControlPlaneScope({
+        scope,
+        tenantSlug: "continuous-demo",
+        workerRole: "revenue_operations",
+        requireTenant: true,
+        requireWorkerRole: true,
+      }),
+    ).toEqual({ ok: true });
   });
 });

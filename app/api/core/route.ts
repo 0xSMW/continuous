@@ -18,8 +18,10 @@ import {
 import { createCoreTask, transitionCoreTask } from "../../../src/core/tasks";
 import { PlatformUnavailableError } from "../../../src/core/errors";
 import {
+  authorizeControlPlaneScope,
   authorizeWorkerRead,
   authorizeWorkerRun,
+  controlPlaneScopeFromEnv,
   normalizeIdempotencyKey,
 } from "../../../src/worker/security";
 import type { JsonObject } from "../../../src/db/schema";
@@ -27,6 +29,10 @@ import type { JsonObject } from "../../../src/db/schema";
 export const dynamic = "force-dynamic";
 
 const apiVersion = "continuous.core.v1";
+const controlPlaneScope = controlPlaneScopeFromEnv({
+  allowedTenants: env.CONTROL_PLANE_ALLOWED_TENANTS,
+  allowedWorkerRoles: env.CONTROL_PLANE_ALLOWED_WORKER_ROLES,
+});
 
 function optionalString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
@@ -106,6 +112,16 @@ function coreErrorResponse(error: unknown, fallbackCode: string) {
   );
 }
 
+function guardErrorResponse(error: { code: string; message: string; status: number }) {
+  return errorResponse(
+    {
+      code: error.code,
+      message: error.message,
+    },
+    error.status,
+  );
+}
+
 export async function GET(request: Request) {
   const auth = authorizeWorkerRead({
     appEnv: env.APP_ENV,
@@ -116,7 +132,19 @@ export async function GET(request: Request) {
   });
 
   if (!auth.ok) {
-    return errorResponse(auth, auth.status);
+    return guardErrorResponse(auth);
+  }
+
+  const url = new URL(request.url);
+  const tenantSlug = optionalString(url.searchParams.get("tenantSlug"));
+  const scope = authorizeControlPlaneScope({
+    scope: controlPlaneScope,
+    tenantSlug,
+    requireTenant: true,
+  });
+
+  if (!scope.ok) {
+    return guardErrorResponse(scope);
   }
 
   const result = await getCoreSummarySafe();
@@ -152,7 +180,7 @@ export async function POST(request: Request) {
   });
 
   if (!auth.ok) {
-    return errorResponse(auth, auth.status);
+    return guardErrorResponse(auth);
   }
 
   const body = await readBody(request);
@@ -160,6 +188,15 @@ export async function POST(request: Request) {
   const core = bodyObject(body.core);
   const config = bodyObject(body.config);
   const tenantSlug = optionalString(core.tenantSlug);
+  const scope = authorizeControlPlaneScope({
+    scope: controlPlaneScope,
+    tenantSlug,
+    requireTenant: true,
+  });
+
+  if (!scope.ok) {
+    return guardErrorResponse(scope);
+  }
 
   if (command === "task.create") {
     const idempotency = normalizeIdempotencyKey(

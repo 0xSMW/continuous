@@ -15,6 +15,12 @@ const envSchema = z.object({
   WORKER_OPERATOR_EMAIL: z
     .preprocess((value) => (value === "" ? undefined : value), z.string().email().optional())
     .default("owner@continuoushq.com"),
+  CONTROL_PLANE_ALLOWED_TENANTS: z
+    .preprocess((value) => (value === "" ? undefined : value), z.string().optional())
+    .optional(),
+  CONTROL_PLANE_ALLOWED_WORKER_ROLES: z
+    .preprocess((value) => (value === "" ? undefined : value), z.string().optional())
+    .optional(),
 });
 
 export const env = envSchema.parse({
@@ -24,4 +30,6 @@ export const env = envSchema.parse({
   WORKER_RUN_ENABLED: process.env.WORKER_RUN_ENABLED,
   WORKER_RUN_TOKEN: process.env.WORKER_RUN_TOKEN,
   WORKER_OPERATOR_EMAIL: process.env.WORKER_OPERATOR_EMAIL,
+  CONTROL_PLANE_ALLOWED_TENANTS: process.env.CONTROL_PLANE_ALLOWED_TENANTS,
+  CONTROL_PLANE_ALLOWED_WORKER_ROLES: process.env.CONTROL_PLANE_ALLOWED_WORKER_ROLES,
 });

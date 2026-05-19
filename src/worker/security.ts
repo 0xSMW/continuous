@@ -11,6 +11,97 @@ export type RunAuthResult =
   | { ok: true; operatorEmail: string }
   | { ok: false; status: 401 | 403; code: string; message: string };
 
+export type ControlPlaneScope = {
+  tenantSlugs: string[];
+  workerRoles: string[];
+};
+
+export type ControlPlaneScopeResult =
+  | { ok: true }
+  | { ok: false; status: 403; code: string; message: string };
+
+function scopeList(value?: string | null) {
+  return Array.from(
+    new Set(
+      (value ?? "")
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function allows(list: string[], value: string) {
+  return list.includes("*") || list.includes(value);
+}
+
+function optionalScopeValue(value?: string | null) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+export function controlPlaneScopeFromEnv(input: {
+  allowedTenants?: string | null;
+  allowedWorkerRoles?: string | null;
+}): ControlPlaneScope {
+  return {
+    tenantSlugs: scopeList(input.allowedTenants),
+    workerRoles: scopeList(input.allowedWorkerRoles),
+  };
+}
+
+export function authorizeControlPlaneScope(input: {
+  scope: ControlPlaneScope;
+  tenantSlug?: string | null;
+  workerRole?: string | null;
+  requireTenant?: boolean;
+  requireWorkerRole?: boolean;
+}): ControlPlaneScopeResult {
+  const tenantSlug = optionalScopeValue(input.tenantSlug);
+  const workerRole = optionalScopeValue(input.workerRole);
+
+  if (input.scope.tenantSlugs.length > 0) {
+    if (!tenantSlug && input.requireTenant) {
+      return {
+        ok: false,
+        status: 403,
+        code: "control_plane_tenant_required",
+        message: "tenantSlug is required for scoped control-plane access.",
+      };
+    }
+
+    if (tenantSlug && !allows(input.scope.tenantSlugs, tenantSlug)) {
+      return {
+        ok: false,
+        status: 403,
+        code: "control_plane_tenant_forbidden",
+        message: "This operator token is not allowed to access the requested tenant.",
+      };
+    }
+  }
+
+  if (input.scope.workerRoles.length > 0) {
+    if (!workerRole && input.requireWorkerRole) {
+      return {
+        ok: false,
+        status: 403,
+        code: "control_plane_worker_role_required",
+        message: "worker.role is required for scoped worker access.",
+      };
+    }
+
+    if (workerRole && !allows(input.scope.workerRoles, workerRole)) {
+      return {
+        ok: false,
+        status: 403,
+        code: "control_plane_worker_role_forbidden",
+        message: "This operator token is not allowed to access the requested worker role.",
+      };
+    }
+  }
+
+  return { ok: true };
+}
+
 export function authorizeWorkerRun(input: RunAuthInput): RunAuthResult {
   if (!input.enabled) {
     return {

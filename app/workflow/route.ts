@@ -13,14 +13,20 @@ import {
 import type { JsonObject } from "../../src/db/schema";
 import { RevenueWorkerUnavailableError } from "../../src/worker/revenue";
 import {
+  authorizeControlPlaneScope,
   authorizeWorkerRead,
   authorizeWorkerRun,
+  controlPlaneScopeFromEnv,
   normalizeIdempotencyKey,
 } from "../../src/worker/security";
 
 export const dynamic = "force-dynamic";
 
 const apiVersion = "continuous.workflow.v1";
+const controlPlaneScope = controlPlaneScopeFromEnv({
+  allowedTenants: env.CONTROL_PLANE_ALLOWED_TENANTS,
+  allowedWorkerRoles: env.CONTROL_PLANE_ALLOWED_WORKER_ROLES,
+});
 
 function optionalString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
@@ -87,6 +93,16 @@ function workflowErrorResponse(error: unknown, fallbackCode: string) {
   );
 }
 
+function guardErrorResponse(error: { code: string; message: string; status: number }) {
+  return errorResponse(
+    {
+      code: error.code,
+      message: error.message,
+    },
+    error.status,
+  );
+}
+
 export async function GET(request: Request) {
   const auth = authorizeWorkerRead({
     appEnv: env.APP_ENV,
@@ -97,17 +113,27 @@ export async function GET(request: Request) {
   });
 
   if (!auth.ok) {
-    return errorResponse(auth, auth.status);
+    return guardErrorResponse(auth);
   }
 
   const url = new URL(request.url);
   const view = optionalString(url.searchParams.get("view")) ?? "overview";
+  const tenantSlug = optionalString(url.searchParams.get("tenantSlug"));
+  const scope = authorizeControlPlaneScope({
+    scope: controlPlaneScope,
+    tenantSlug,
+    requireTenant: true,
+  });
+
+  if (!scope.ok) {
+    return guardErrorResponse(scope);
+  }
 
   try {
     if (view === "approvals") {
       const approvals = await listApprovals({
         operatorEmail: auth.operatorEmail,
-        tenantSlug: optionalString(url.searchParams.get("tenantSlug")),
+        tenantSlug,
         state: optionalString(url.searchParams.get("state")),
         subject: "workflow",
       });
@@ -141,7 +167,7 @@ export async function GET(request: Request) {
 
     const data = await listWorkflows({
       operatorEmail: auth.operatorEmail,
-      tenantSlug: optionalString(url.searchParams.get("tenantSlug")),
+      tenantSlug,
       state: optionalString(url.searchParams.get("state")),
     });
 
@@ -173,13 +199,23 @@ export async function POST(request: Request) {
   });
 
   if (!auth.ok) {
-    return errorResponse(auth, auth.status);
+    return guardErrorResponse(auth);
   }
 
   const body = await readBody(request);
   const workflow = bodyObject(body.workflow);
   const config = bodyObject(body.config);
   const command = optionalString(body.command);
+  const tenantSlug = optionalString(workflow.tenantSlug);
+  const scope = authorizeControlPlaneScope({
+    scope: controlPlaneScope,
+    tenantSlug,
+    requireTenant: true,
+  });
+
+  if (!scope.ok) {
+    return guardErrorResponse(scope);
+  }
 
   if (command === "start") {
     const workflowKey = optionalString(workflow.key);
@@ -206,7 +242,7 @@ export async function POST(request: Request) {
         operatorEmail: auth.operatorEmail,
         workflowKey,
         idempotencyKey: idempotency.key,
-        tenantSlug: optionalString(workflow.tenantSlug),
+        tenantSlug,
         objectId: optionalString(workflow.objectId),
         workerId: optionalString(workflow.workerId),
         initialState: optionalString(config.initialState),
@@ -222,7 +258,7 @@ export async function POST(request: Request) {
             command,
             workflow: {
               key: workflowKey,
-              tenantSlug: optionalString(workflow.tenantSlug) ?? null,
+              tenantSlug: tenantSlug ?? null,
             },
             result,
           },
@@ -256,7 +292,7 @@ export async function POST(request: Request) {
     try {
       const result = await transitionWorkflowRun({
         operatorEmail: auth.operatorEmail,
-        tenantSlug: optionalString(workflow.tenantSlug),
+        tenantSlug,
         runId,
         toState,
         reason: optionalString(config.reason),
@@ -272,7 +308,7 @@ export async function POST(request: Request) {
             command,
             workflow: {
               runId,
-              tenantSlug: optionalString(workflow.tenantSlug) ?? null,
+              tenantSlug: tenantSlug ?? null,
             },
             result,
           },
@@ -307,7 +343,7 @@ export async function POST(request: Request) {
       const result = await decideApproval({
         approvalId,
         operatorEmail: auth.operatorEmail,
-        tenantSlug: optionalString(workflow.tenantSlug),
+        tenantSlug,
         action,
         note: optionalString(config.note),
         subject: "workflow",
@@ -319,7 +355,7 @@ export async function POST(request: Request) {
           data: {
             command,
             workflow: {
-              tenantSlug: optionalString(workflow.tenantSlug) ?? null,
+              tenantSlug: tenantSlug ?? null,
             },
             result,
           },

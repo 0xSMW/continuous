@@ -164,6 +164,8 @@ jobs:
               printf 'WORKER_RUN_ENABLED=true\n'
               printf 'WORKER_RUN_TOKEN=%s\n' "$(openssl rand -hex 32)"
               printf 'WORKER_OPERATOR_EMAIL=%s\n' "$WORKER_OPERATOR_EMAIL"
+              printf 'CONTROL_PLANE_ALLOWED_TENANTS=continuous-demo\n'
+              printf 'CONTROL_PLANE_ALLOWED_WORKER_ROLES=revenue_operations,owner_chief_of_staff\n'
             } > .env
           fi
           set_env() {
@@ -186,6 +188,8 @@ jobs:
           set_env SITE_HOSTS "$SITE_HOSTS"
           set_env ACME_EMAIL "$ACME_EMAIL"
           set_env WORKER_OPERATOR_EMAIL "$WORKER_OPERATOR_EMAIL"
+          set_env CONTROL_PLANE_ALLOWED_TENANTS "continuous-demo"
+          set_env CONTROL_PLANE_ALLOWED_WORKER_ROLES "revenue_operations,owner_chief_of_staff"
           POSTGRES_USER="$(grep '^POSTGRES_USER=' .env | cut -d= -f2- || true)"
           POSTGRES_DB="$(grep '^POSTGRES_DB=' .env | cut -d= -f2- || true)"
           POSTGRES_USER="${POSTGRES_USER:-continuous}"
