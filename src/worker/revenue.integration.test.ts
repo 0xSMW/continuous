@@ -1272,10 +1272,27 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(continuation.created).toBe(true);
     expect(continuation.originalWorkerRunId).toBe(first.workerRunId);
     expect(continuation.workflowRunId).toBe(first.workflowRunId);
-    expect(output.status).toBe("revision_continuation_queued");
-    expect(output.nextAction).toBe("prepare_revised_packet");
+    expect(output.status).toBe("revised_packet_ready_for_owner_approval");
+    expect(output.nextAction).toBe("owner_approval");
     expect(output.externalExecution).toBe("blocked");
     expect(output.externalSend).toBe(false);
+    expect(output.revisionApprovalRequestId).toBeTruthy();
+    expect(output.revisedPacketEvidenceId).toBeTruthy();
+    expect(output.revisedPacketDocumentId).toBeTruthy();
+    expect(output.revisedEvidencePacketId).toBeTruthy();
+
+    const revisionApprovalRequestId = String(output.revisionApprovalRequestId ?? "");
+    const revisedPacketEvidenceId = String(output.revisedPacketEvidenceId ?? "");
+    const revisedPacketDocumentId = String(output.revisedPacketDocumentId ?? "");
+    const revisedEvidencePacketId = String(output.revisedEvidencePacketId ?? "");
+    const revisedPacket = objectValue(output.revisedPacket);
+
+    expect(output.approvalRequestId).toBe(revisionApprovalRequestId);
+    expect(output.originalApprovalRequestId).toBe(first.approvalRequestId);
+    expect(revisedPacket.status).toBe("revised_packet_ready_for_owner_approval");
+    expect(revisedPacket.externalExecution).toBe("blocked");
+    expect(revisedPacket.externalSend).toBe(false);
+    expect(revisedPacket.requiresApproval).toBe(true);
 
     const [workflowRun] = await db
       .select()
@@ -1285,9 +1302,12 @@ maybeDescribe("Revenue Worker integration eval", () => {
     const workflowData = objectValue(workflowRun?.data);
     const revisionContinuation = objectValue(workflowData.revisionContinuation);
 
-    expect(workflowRun?.state).toBe("revision_requested");
+    expect(workflowRun?.state).toBe("approval_requested");
     expect(revisionContinuation.workerRunId).toBe(continuation.workerRunId);
     expect(revisionContinuation.action).toBe("revision_requested");
+    expect(revisionContinuation.revisionApprovalRequestId).toBe(revisionApprovalRequestId);
+    expect(revisionContinuation.revisedPacketEvidenceId).toBe(revisedPacketEvidenceId);
+    expect(workflowData.approvalRequestId).toBe(revisionApprovalRequestId);
     expect(workflowData.workflowStepIds).toContain(continuation.workflowStepId);
 
     const [continuationStep] = await db
@@ -1299,8 +1319,10 @@ maybeDescribe("Revenue Worker integration eval", () => {
 
     expect(continuationStep?.kind).toBe("worker_continuation");
     expect(continuationStep?.fromState).toBe("revision_requested");
-    expect(continuationStep?.toState).toBe("revision_requested");
-    expect(stepOutput.nextAction).toBe("prepare_revised_packet");
+    expect(continuationStep?.toState).toBe("approval_requested");
+    expect(stepOutput.nextAction).toBe("owner_approval");
+    expect(stepOutput.revisionApprovalRequestId).toBe(revisionApprovalRequestId);
+    expect(stepOutput.revisedPacketEvidenceId).toBe(revisedPacketEvidenceId);
     expect(stepOutput.externalExecution).toBe("blocked");
     expect(stepOutput.externalSend).toBe(false);
 
@@ -1311,11 +1333,63 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .limit(1);
     const taskOutcome = objectValue(task?.outcome);
 
-    expect(task?.state).toBe("active");
-    expect(taskOutcome.status).toBe("revision_continuation_queued");
+    expect(task?.state).toBe("approval_required");
+    expect(taskOutcome.status).toBe("revised_packet_ready_for_owner_approval");
+    expect(taskOutcome.approvalRequestId).toBe(revisionApprovalRequestId);
+    expect(taskOutcome.originalApprovalRequestId).toBe(first.approvalRequestId);
+    expect(taskOutcome.revisedPacketEvidenceId).toBe(revisedPacketEvidenceId);
     expect(objectValue(taskOutcome.revisionContinuation).workerRunId).toBe(
       continuation.workerRunId,
     );
+
+    const [revisionApproval] = await db
+      .select()
+      .from(approvalRequests)
+      .where(eq(approvalRequests.id, revisionApprovalRequestId))
+      .limit(1);
+    const revisionRequestedAction = objectValue(revisionApproval?.requestedAction);
+    const revisionPolicy = objectValue(revisionApproval?.policy);
+    const revisionApprovalData = objectValue(revisionApproval?.data);
+
+    expect(revisionApproval?.kind).toBe("quote_revision_approval");
+    expect(revisionApproval?.state).toBe("pending");
+    expect(revisionApproval?.workerRunId).toBe(continuation.workerRunId);
+    expect(revisionRequestedAction.action).toBe("review_revised_packet");
+    expect(revisionRequestedAction.externalSend).toBe(false);
+    expect(revisionRequestedAction.revisedPacketEvidenceId).toBe(revisedPacketEvidenceId);
+    expect(revisionRequestedAction.revisedPacketDocumentId).toBe(revisedPacketDocumentId);
+    expect(revisionRequestedAction.revisedEvidencePacketId).toBe(revisedEvidencePacketId);
+    expect(revisionPolicy.revisionOfApprovalRequestId).toBe(first.approvalRequestId);
+    expect(revisionApprovalData.originalApprovalRequestId).toBe(first.approvalRequestId);
+
+    const [revisedEvidence] = await db
+      .select()
+      .from(evidence)
+      .where(eq(evidence.id, revisedPacketEvidenceId))
+      .limit(1);
+    const revisedEvidenceData = objectValue(revisedEvidence?.data);
+
+    expect(revisedEvidence?.kind).toBe("draft");
+    expect(revisedEvidenceData.externalExecution).toBe("blocked");
+    expect(revisedEvidenceData.externalSend).toBe(false);
+    expect(objectValue(revisedEvidenceData.revisedPacket).status).toBe(
+      "revised_packet_ready_for_owner_approval",
+    );
+
+    const [revisedDocument] = await db
+      .select()
+      .from(documents)
+      .where(eq(documents.id, revisedPacketDocumentId))
+      .limit(1);
+    const [revisedPacketRow] = await db
+      .select()
+      .from(evidencePackets)
+      .where(eq(evidencePackets.id, revisedEvidencePacketId))
+      .limit(1);
+
+    expect(revisedDocument?.state).toBe("prepared");
+    expect(revisedPacketRow?.state).toBe("prepared");
+    expect(revisedPacketRow?.documentId).toBe(revisedPacketDocumentId);
 
     const [originalWorkerRun] = await db
       .select()
@@ -1327,6 +1401,8 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(objectValue(originalOutput.revisionContinuation).workerRunId).toBe(
       continuation.workerRunId,
     );
+    expect(originalOutput.revisionApprovalRequestId).toBe(revisionApprovalRequestId);
+    expect(originalOutput.revisedPacketEvidenceId).toBe(revisedPacketEvidenceId);
     expect(originalOutput.externalSend).toBe(false);
 
     const [adapterAction] = await db
@@ -1350,7 +1426,8 @@ maybeDescribe("Revenue Worker integration eval", () => {
 
     expect(replay.created).toBe(false);
     expect(replay.workerRunId).toBe(continuation.workerRunId);
-    expect(objectValue(replay.output).status).toBe("revision_continuation_queued");
+    expect(objectValue(replay.output).status).toBe("revised_packet_ready_for_owner_approval");
+    expect(objectValue(replay.output).revisionApprovalRequestId).toBe(revisionApprovalRequestId);
   }, 120_000);
 
   it("runs from persisted Core lead intake under config.intake", async () => {

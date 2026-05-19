@@ -1122,6 +1122,7 @@ async function seed() {
           packet_prepared: ["adapter_dry_run_recorded", "blocked"],
           adapter_dry_run_recorded: ["approval_requested", "blocked"],
           approval_requested: ["approved", "revision_requested", "rejected"],
+          revision_requested: ["approval_requested", "blocked"],
         },
         objects: { required: ["lead", "customer", "quote"] },
         approvals: { required: ["owner_quote_approval"], states: { approval_requested: ["owner_quote_approval"] } },

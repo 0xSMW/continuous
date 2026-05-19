@@ -196,15 +196,18 @@ The first runtime only prepares owner-review packets.
 
 `POST /worker` with `command=continue` creates a separate idempotent
 `worker_runs` continuation record and `workflow_steps.kind=worker_continuation`
-entry. V1 supports `revision_requested` approvals only; it queues the revised
-packet work, updates the task outcome, and keeps adapter execution blocked.
+entry. V1 supports `revision_requested` approvals only; it prepares a revised
+no-send quote packet, stores the revised packet evidence/document packet,
+creates a fresh pending `quote_revision_approval`, moves the workflow back to
+`approval_requested`, updates the task back to `approval_required`, and keeps
+adapter execution blocked.
 
 ## Approval Actions
 
 | Action | Approval state | Task state | Workflow state | External behavior |
 |---|---|---|---|---|
 | `approved` | `approved` | `waiting` | `approved` when the definition allows it | Still blocked until real adapter execution exists |
-| `revision_requested` | `revision_requested` | `active` | `revision_requested` when the definition allows it | `command=continue` queues revised packet work |
+| `revision_requested` | `revision_requested`; after `command=continue`, a new `quote_revision_approval` is `pending` | `approval_required` after the revised packet is prepared | `approval_requested` after the revised packet is prepared | `command=continue` prepares a revised no-send packet and requests owner approval again |
 | `rejected` | `rejected` | `blocked` | `rejected` when the definition allows it | Worker should stop the prepared action |
 
 ## Non-Goals

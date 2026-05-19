@@ -16,7 +16,9 @@ import {
   capabilityGrants,
   connections,
   decisions,
+  documents,
   evidence,
+  evidencePackets,
   evaluations,
   events,
   generatedViews,
@@ -679,6 +681,72 @@ function leadPacketFromConfig(config: JsonObject) {
       raw: lead,
     },
   };
+}
+
+function revisedPacketFromOriginal(params: {
+  originalOutput: JsonObject;
+  revisionNote: string;
+  now: Date;
+  approvalRequestId: string;
+  originalWorkerRunId: string;
+  workerRunId: string;
+  workflowRunId: string;
+}) {
+  const previousPacket = objectValue(params.originalOutput.revisedPacket);
+  const basePacket = Object.keys(previousPacket).length > 0 ? previousPacket : params.originalOutput;
+  const previousQuote = objectValue(basePacket.quote ?? params.originalOutput.quote);
+  const previousPolicy = objectValue(previousQuote.policy);
+  const previousDraft = stringValue(
+    basePacket.draftResponse ?? params.originalOutput.draftResponse,
+    "A revised customer response is ready for owner review.",
+  );
+  const previousHistory = Array.isArray(basePacket.revisionHistory)
+    ? basePacket.revisionHistory
+    : [];
+  const revisionNumber = previousHistory.length + 1;
+  const generatedAt = params.now.toISOString();
+  const revision = {
+    number: revisionNumber,
+    action: "revision_requested",
+    note: params.revisionNote,
+    originalApprovalRequestId: params.approvalRequestId,
+    originalWorkerRunId: params.originalWorkerRunId,
+    workerRunId: params.workerRunId,
+    workflowRunId: params.workflowRunId,
+    generatedAt,
+  };
+
+  return {
+    schemaVersion: "revenue_worker.revised_packet.v1",
+    status: "revised_packet_ready_for_owner_approval",
+    revision,
+    revisionHistory: [...previousHistory, revision],
+    source: stringValue(basePacket.source ?? params.originalOutput.source, "unknown"),
+    sourceEventId: stringValue(basePacket.sourceEventId ?? params.originalOutput.sourceEventId) || null,
+    classification: "revised_quote_ready_for_owner_approval",
+    previousClassification: stringValue(
+      basePacket.classification ?? params.originalOutput.classification,
+      "quote_ready_for_owner_approval",
+    ),
+    draftResponse:
+      `${previousDraft}\n\nOwner revision request: ${params.revisionNote} ` +
+      "Revised packet is ready for owner review; no customer message will be sent until approval.",
+    quote: {
+      ...previousQuote,
+      policy: {
+        ...previousPolicy,
+        approvalRequired: true,
+        externalSend: false,
+        moneyMovement: "blocked",
+      },
+      revision,
+    },
+    guardrails: ["no_external_send", "no_money_movement", "owner_approval_required"],
+    externalExecution: "blocked",
+    externalSend: false,
+    requiresApproval: true,
+    nextAction: "owner_approval",
+  } satisfies JsonObject;
 }
 
 function workerWhere(selector: RevenueWorkerSelector) {
@@ -2488,7 +2556,9 @@ export async function continueRevenueWorker(input: {
 
     if (existingRun) {
       const output = outputData(existingRun.data);
-      const existingApprovalId = stringData(existingRun.data, "approvalRequestId");
+      const existingApprovalId =
+        stringData(existingRun.data, "originalApprovalRequestId") ??
+        stringData(existingRun.data, "approvalRequestId");
 
       if (existingRun.mode !== "continuation" || existingApprovalId !== approvalId) {
         throw new RevenueWorkerUnavailableError(
@@ -2636,12 +2706,22 @@ export async function continueRevenueWorker(input: {
         updatedAt: now,
       })
       .returning({ id: workerRuns.id });
+    const revisedPacket = revisedPacketFromOriginal({
+      originalOutput,
+      revisionNote,
+      now,
+      approvalRequestId: approval.id,
+      originalWorkerRunId: originalRun.id,
+      workerRunId: workerRun.id,
+      workflowRunId: workflow.run.id,
+    });
+    const revisedPacketHash = hashObject(revisedPacket);
 
     const [event] = await tx
       .insert(events)
       .values({
         tenantId: context.worker.tenantId,
-        type: "revenue_worker.revision.requested",
+        type: "revenue_worker.revision.prepared",
         source,
         actorType: "worker",
         actorId: context.worker.id,
@@ -2657,9 +2737,14 @@ export async function continueRevenueWorker(input: {
           workerRunId: workerRun.id,
           workflowRunId: workflow.run.id,
           action: "revision_requested",
+          status: "revised_packet_ready_for_owner_approval",
           note: revisionNote,
+          revisedPacket,
+          revisedPacketHash,
+          nextAction: "owner_approval",
           externalExecution: "blocked",
           externalSend: false,
+          requiresApproval: true,
         },
         occurredAt: now,
       })
@@ -2669,7 +2754,7 @@ export async function continueRevenueWorker(input: {
       .insert(auditEvents)
       .values({
         tenantId: context.worker.tenantId,
-        type: "revenue_worker.continuation.requested",
+        type: "revenue_worker.continuation.completed",
         source,
         actorType: "worker",
         actorId: context.worker.id,
@@ -2690,9 +2775,13 @@ export async function continueRevenueWorker(input: {
           workflowRunId: workflow.run.id,
           workflowState: workflow.run.state,
           action: "revision_requested",
-          nextAction: "prepare_revised_packet",
+          status: "revised_packet_ready_for_owner_approval",
+          nextAction: "owner_approval",
+          revisedPacket,
+          revisedPacketHash,
           externalExecution: "blocked",
           externalSend: false,
+          requiresApproval: true,
         },
       })
       .returning({ id: auditEvents.id });
@@ -2720,11 +2809,348 @@ export async function continueRevenueWorker(input: {
           note: revisionNote,
           originalOutput,
           approvalContinuation,
+          revisedPacket,
+          revisedPacketHash,
+          nextAction: "owner_approval",
+          externalExecution: "blocked",
+          externalSend: false,
+          requiresApproval: true,
+        },
+      })
+      .returning({ id: evidence.id });
+    const [revisedPacketEvidence] = await tx
+      .insert(evidence)
+      .values({
+        tenantId: context.worker.tenantId,
+        kind: "draft",
+        name: "Revenue Worker revised packet",
+        objectId: approval.objectId,
+        taskId: approval.taskId,
+        eventId: event.id,
+        capabilityId: approval.capabilityId,
+        actorType: "worker",
+        actorId: context.worker.id,
+        hash: revisedPacketHash,
+        data: {
+          approvalRequestId: approval.id,
+          originalWorkerRunId: originalRun.id,
+          workerRunId: workerRun.id,
+          workflowRunId: workflow.run.id,
+          traceEvidenceId: trace.id,
+          action: "revision_requested",
+          note: revisionNote,
+          revisedPacket,
+          revisedPacketHash,
+          externalExecution: "blocked",
+          externalSend: false,
+          requiresApproval: true,
+        },
+      })
+      .returning({ id: evidence.id });
+    const [revisedPacketDocument] = await tx
+      .insert(documents)
+      .values({
+        tenantId: context.worker.tenantId,
+        objectId: approval.objectId,
+        workflowRunId: workflow.run.id,
+        kind: "revenue_quote_revision_packet",
+        name: "Revenue quote revision packet",
+        state: "prepared",
+        sensitivity: approval.risk,
+        hash: revisedPacketHash,
+        data: {
+          approvalRequestId: approval.id,
+          originalWorkerRunId: originalRun.id,
+          workerRunId: workerRun.id,
+          workflowRunId: workflow.run.id,
+          eventId: event.id,
+          traceEvidenceId: trace.id,
+          revisedPacketEvidenceId: revisedPacketEvidence.id,
+          revisedPacket,
+          revisedPacketHash,
+          externalExecution: "blocked",
+          externalSend: false,
+          requiresApproval: true,
+        },
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: documents.id });
+    const [revisedEvidencePacket] = await tx
+      .insert(evidencePackets)
+      .values({
+        tenantId: context.worker.tenantId,
+        documentId: revisedPacketDocument.id,
+        objectId: approval.objectId,
+        taskId: approval.taskId,
+        workflowRunId: workflow.run.id,
+        eventId: event.id,
+        capabilityId: approval.capabilityId,
+        kind: "revenue_quote_revision_packet",
+        name: "Revenue quote revision packet",
+        state: "prepared",
+        sensitivity: approval.risk,
+        evidenceIds: { ids: [trace.id, revisedPacketEvidence.id] },
+        documentIds: { ids: [revisedPacketDocument.id] },
+        data: {
+          approvalRequestId: approval.id,
+          originalWorkerRunId: originalRun.id,
+          workerRunId: workerRun.id,
+          workflowRunId: workflow.run.id,
+          eventId: event.id,
+          revisedPacket,
+          revisedPacketHash,
+          externalExecution: "blocked",
+          externalSend: false,
+          requiresApproval: true,
+        },
+        hash: revisedPacketHash,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: evidencePackets.id });
+    const revisedQuote = objectValue(revisedPacket.quote);
+    const revision = objectValue(revisedPacket.revision);
+    const [revisionApproval] = await tx
+      .insert(approvalRequests)
+      .values({
+        tenantId: context.worker.tenantId,
+        taskId: approval.taskId,
+        workerRunId: workerRun.id,
+        workflowRunId: workflow.run.id,
+        eventId: event.id,
+        objectId: approval.objectId,
+        capabilityId: approval.capabilityId,
+        requesterType: "worker",
+        requesterId: context.worker.id,
+        requesterRef: `worker:${context.worker.id}`,
+        reviewerUserId: approval.reviewerUserId ?? operator.id,
+        kind: "quote_revision_approval",
+        state: "pending",
+        priority: approval.priority,
+        risk: approval.risk,
+        title: "Review revised quote packet",
+        summary: `Revenue Worker prepared revision ${numberValue(revision.number)} of the quote packet for owner approval; external send remains blocked.`,
+        requestedAction: {
+          action: "review_revised_packet",
+          originalApprovalRequestId: approval.id,
+          originalWorkerRunId: originalRun.id,
+          revisedPacketEvidenceId: revisedPacketEvidence.id,
+          revisedPacketDocumentId: revisedPacketDocument.id,
+          revisedEvidencePacketId: revisedEvidencePacket.id,
+          revisedPacket,
+          quote: revisedQuote,
+          externalSend: false,
+          currentMode: "dry_run",
+        },
+        evidence: {
+          eventId: event.id,
+          traceEvidenceId: trace.id,
+          revisedPacketEvidenceId: revisedPacketEvidence.id,
+          revisedPacketDocumentId: revisedPacketDocument.id,
+          revisedEvidencePacketId: revisedEvidencePacket.id,
+          originalApprovalRequestId: approval.id,
+          originalWorkerRunId: originalRun.id,
+          workflowRunId: workflow.run.id,
+        },
+        policy: {
+          ...objectValue(approval.policy),
+          externalSend: "approval_required",
+          moneyMovement: "blocked",
+          revisionOfApprovalRequestId: approval.id,
+        },
+        data: {
+          originalApprovalRequestId: approval.id,
+          originalWorkerRunId: originalRun.id,
+          workerRunId: workerRun.id,
+          workflowRunId: workflow.run.id,
+          eventId: event.id,
+          auditEventId: audit.id,
+          traceEvidenceId: trace.id,
+          revisedPacketEvidenceId: revisedPacketEvidence.id,
+          revisedPacketDocumentId: revisedPacketDocument.id,
+          revisedEvidencePacketId: revisedEvidencePacket.id,
+          revisionNote,
+          revisedPacket,
+          revisedPacketHash,
           externalExecution: "blocked",
           externalSend: false,
         },
       })
-      .returning({ id: evidence.id });
+      .returning({ id: approvalRequests.id });
+    const [revisionApprovalAudit] = await tx
+      .insert(auditEvents)
+      .values({
+        tenantId: context.worker.tenantId,
+        type: "approval.requested",
+        source,
+        actorType: "worker",
+        actorId: context.worker.id,
+        actorRef: `worker:${context.worker.id}`,
+        targetType: "approval_request",
+        targetId: revisionApproval.id,
+        taskId: approval.taskId,
+        workerRunId: workerRun.id,
+        approvalRequestId: revisionApproval.id,
+        eventId: event.id,
+        objectId: approval.objectId,
+        capabilityId: approval.capabilityId,
+        risk: approval.risk,
+        idempotencyKey: `${input.idempotencyKey}:revision_approval_requested`,
+        data: {
+          originalApprovalRequestId: approval.id,
+          originalWorkerRunId: originalRun.id,
+          reviewerUserId: approval.reviewerUserId ?? operator.id,
+          operatorUserId: operator.id,
+          workflowRunId: workflow.run.id,
+          traceEvidenceId: trace.id,
+          revisedPacketEvidenceId: revisedPacketEvidence.id,
+          revisedPacketDocumentId: revisedPacketDocument.id,
+          revisedEvidencePacketId: revisedEvidencePacket.id,
+          revisedPacketHash,
+          externalExecution: "blocked",
+          externalSend: false,
+        },
+      })
+      .returning({ id: auditEvents.id });
+    const continuationLinks = {
+      revisionApprovalRequestId: revisionApproval.id,
+      revisionApprovalAuditEventId: revisionApprovalAudit.id,
+      revisedPacketEvidenceId: revisedPacketEvidence.id,
+      revisedPacketDocumentId: revisedPacketDocument.id,
+      revisedEvidencePacketId: revisedEvidencePacket.id,
+    };
+
+    await tx
+      .update(evidence)
+      .set({
+        data: {
+          approvalRequestId: revisionApproval.id,
+          originalApprovalRequestId: approval.id,
+          originalWorkerRunId: originalRun.id,
+          workerRunId: workerRun.id,
+          workflowRunId: workflow.run.id,
+          traceEvidenceId: trace.id,
+          action: "revision_requested",
+          note: revisionNote,
+          ...continuationLinks,
+          revisedPacket,
+          revisedPacketHash,
+          externalExecution: "blocked",
+          externalSend: false,
+          requiresApproval: true,
+        },
+      })
+      .where(eq(evidence.id, revisedPacketEvidence.id));
+    await tx
+      .update(documents)
+      .set({
+        data: {
+          approvalRequestId: revisionApproval.id,
+          originalApprovalRequestId: approval.id,
+          originalWorkerRunId: originalRun.id,
+          workerRunId: workerRun.id,
+          workflowRunId: workflow.run.id,
+          eventId: event.id,
+          traceEvidenceId: trace.id,
+          ...continuationLinks,
+          revisedPacket,
+          revisedPacketHash,
+          externalExecution: "blocked",
+          externalSend: false,
+          requiresApproval: true,
+        },
+        updatedAt: now,
+      })
+      .where(eq(documents.id, revisedPacketDocument.id));
+    await tx
+      .update(evidencePackets)
+      .set({
+        data: {
+          approvalRequestId: revisionApproval.id,
+          originalApprovalRequestId: approval.id,
+          originalWorkerRunId: originalRun.id,
+          workerRunId: workerRun.id,
+          workflowRunId: workflow.run.id,
+          eventId: event.id,
+          ...continuationLinks,
+          revisedPacket,
+          revisedPacketHash,
+          externalExecution: "blocked",
+          externalSend: false,
+          requiresApproval: true,
+        },
+        updatedAt: now,
+      })
+      .where(eq(evidencePackets.id, revisedEvidencePacket.id));
+
+    await tx
+      .update(events)
+      .set({
+        data: {
+          approvalRequestId: revisionApproval.id,
+          originalApprovalRequestId: approval.id,
+          originalWorkerRunId: originalRun.id,
+          workerRunId: workerRun.id,
+          workflowRunId: workflow.run.id,
+          action: "revision_requested",
+          status: "revised_packet_ready_for_owner_approval",
+          note: revisionNote,
+          ...continuationLinks,
+          revisedPacket,
+          revisedPacketHash,
+          nextAction: "owner_approval",
+          externalExecution: "blocked",
+          externalSend: false,
+          requiresApproval: true,
+        },
+      })
+      .where(eq(events.id, event.id));
+    await tx
+      .update(auditEvents)
+      .set({
+        data: {
+          approvalRequestId: revisionApproval.id,
+          originalApprovalRequestId: approval.id,
+          originalWorkerRunId: originalRun.id,
+          workflowRunId: workflow.run.id,
+          workflowState: workflow.run.state,
+          action: "revision_requested",
+          status: "revised_packet_ready_for_owner_approval",
+          nextAction: "owner_approval",
+          ...continuationLinks,
+          revisedPacket,
+          revisedPacketHash,
+          externalExecution: "blocked",
+          externalSend: false,
+          requiresApproval: true,
+        },
+      })
+      .where(eq(auditEvents.id, audit.id));
+    await tx
+      .update(evidence)
+      .set({
+        data: {
+          approvalRequestId: revisionApproval.id,
+          originalApprovalRequestId: approval.id,
+          originalWorkerRunId: originalRun.id,
+          workerRunId: workerRun.id,
+          workflowRunId: workflow.run.id,
+          auditEventId: audit.id,
+          action: "revision_requested",
+          note: revisionNote,
+          originalOutput,
+          approvalContinuation,
+          ...continuationLinks,
+          revisedPacket,
+          revisedPacketHash,
+          nextAction: "owner_approval",
+          externalExecution: "blocked",
+          externalSend: false,
+          requiresApproval: true,
+        },
+      })
+      .where(eq(evidence.id, trace.id));
 
     const [workflowStep] = await tx
       .insert(workflowSteps)
@@ -2733,33 +3159,41 @@ export async function continueRevenueWorker(input: {
         definitionId: workflow.definition.id,
         workflowRunId: workflow.run.id,
         eventId: event.id,
-        approvalRequestId: approval.id,
+        approvalRequestId: revisionApproval.id,
         taskId: approval.taskId,
         objectId: approval.objectId,
         workerId: context.worker.id,
         capabilityId: approval.capabilityId,
         kind: "worker_continuation",
-        name: `${workflow.definition.key}:revision_requested`,
+        name: `${workflow.definition.key}:revision_prepared`,
         state: "done",
         priority: approval.priority,
         risk: approval.risk,
         fromState: workflow.run.state,
-        toState: "revision_requested",
+        toState: "approval_requested",
         attempt: 1,
         maxAttempts: 1,
         leaseOwner: `worker:${context.worker.id}`,
         leasedUntil: now,
-        idempotencyKey: `${input.idempotencyKey}:revision_requested`,
+        idempotencyKey: `${input.idempotencyKey}:approval_requested`,
         input: continuationInput,
         output: {
-          approvalRequestId: approval.id,
+          approvalRequestId: revisionApproval.id,
+          originalApprovalRequestId: approval.id,
+          revisionApprovalRequestId: revisionApproval.id,
+          revisionApprovalAuditEventId: revisionApprovalAudit.id,
           workerRunId: workerRun.id,
           originalWorkerRunId: originalRun.id,
           auditEventId: audit.id,
           evidenceId: trace.id,
-          nextAction: "prepare_revised_packet",
+          revisedPacketEvidenceId: revisedPacketEvidence.id,
+          revisedPacketDocumentId: revisedPacketDocument.id,
+          revisedEvidencePacketId: revisedEvidencePacket.id,
+          revisedPacket,
+          nextAction: "owner_approval",
           externalExecution: "blocked",
           externalSend: false,
+          requiresApproval: true,
         },
         startedAt: now,
         completedAt: now,
@@ -2768,8 +3202,11 @@ export async function continueRevenueWorker(input: {
       .returning({ id: workflowSteps.id });
 
     const output = {
-      status: "revision_continuation_queued",
-      approvalRequestId: approval.id,
+      status: "revised_packet_ready_for_owner_approval",
+      approvalRequestId: revisionApproval.id,
+      originalApprovalRequestId: approval.id,
+      revisionApprovalRequestId: revisionApproval.id,
+      revisionApprovalAuditEventId: revisionApprovalAudit.id,
       originalWorkerRunId: originalRun.id,
       workerRunId: workerRun.id,
       workflowRunId: workflow.run.id,
@@ -2777,9 +3214,15 @@ export async function continueRevenueWorker(input: {
       eventId: event.id,
       auditEventId: audit.id,
       evidenceId: trace.id,
-      nextAction: "prepare_revised_packet",
+      revisedPacketEvidenceId: revisedPacketEvidence.id,
+      revisedPacketDocumentId: revisedPacketDocument.id,
+      revisedEvidencePacketId: revisedEvidencePacket.id,
+      revisedPacket,
+      revisedPacketHash,
+      nextAction: "owner_approval",
       externalExecution: "blocked",
       externalSend: false,
+      requiresApproval: true,
     };
     const workflowData = objectValue(workflow.run.data);
     const revisionContinuation = {
@@ -2792,16 +3235,25 @@ export async function continueRevenueWorker(input: {
     await tx
       .update(workflowRuns)
       .set({
-        state: "revision_requested",
+        state: "approval_requested",
         data: {
           ...workflowData,
+          approvalRequestId: revisionApproval.id,
+          originalApprovalRequestId: approval.id,
+          revisionApprovalRequestId: revisionApproval.id,
+          revisionApprovalAuditEventId: revisionApprovalAudit.id,
+          revisedPacketEvidenceId: revisedPacketEvidence.id,
+          revisedPacketDocumentId: revisedPacketDocument.id,
+          revisedEvidencePacketId: revisedEvidencePacket.id,
+          revisedPacket,
+          revisedPacketHash,
           revisionContinuation,
           lastWorkerContinuation: revisionContinuation,
           workflowStepIds: appendString(workflowData.workflowStepIds, workflowStep.id),
         },
         blockers: {
           ...objectValue(workflow.run.blockers),
-          open: ["revision_requested", "external_execution_blocked"],
+          open: ["owner_approval_required", "external_execution_blocked"],
         },
         completedAt: null,
         updatedAt: now,
@@ -2818,12 +3270,21 @@ export async function continueRevenueWorker(input: {
       await tx
         .update(tasks)
         .set({
-          state: "active",
+          state: "approval_required",
           outcome: {
             ...objectValue(task?.outcome),
-            status: "revision_continuation_queued",
+            status: "revised_packet_ready_for_owner_approval",
+            approvalRequestId: revisionApproval.id,
+            originalApprovalRequestId: approval.id,
+            revisionApprovalRequestId: revisionApproval.id,
+            revisionApprovalAuditEventId: revisionApprovalAudit.id,
+            revisedPacketEvidenceId: revisedPacketEvidence.id,
+            revisedPacketDocumentId: revisedPacketDocument.id,
+            revisedEvidencePacketId: revisedEvidencePacket.id,
+            revisedPacket,
             revisionContinuation,
             externalExecution: "blocked",
+            externalSend: false,
           },
           updatedAt: now,
         })
@@ -2838,6 +3299,11 @@ export async function continueRevenueWorker(input: {
           output: {
             ...originalOutput,
             revisionContinuation,
+            revisionApprovalRequestId: revisionApproval.id,
+            revisedPacketEvidenceId: revisedPacketEvidence.id,
+            revisedPacketDocumentId: revisedPacketDocument.id,
+            revisedEvidencePacketId: revisedEvidencePacket.id,
+            revisedPacket,
             externalExecution: "blocked",
             externalSend: false,
           },
@@ -2874,7 +3340,7 @@ export async function continueRevenueWorker(input: {
       originalWorkerRunId: originalRun.id,
       eventId: event.id,
       taskId: approval.taskId,
-      approvalRequestId: approval.id,
+      approvalRequestId: revisionApproval.id,
       auditEventId: audit.id,
       evidenceId: trace.id,
       workflowRunId: workflow.run.id,
