@@ -20,6 +20,7 @@ import { PlatformUnavailableError } from "./errors";
 import { loadOperatorContext, type OperatorContext } from "./operators";
 
 type Database = typeof defaultDb;
+type QueryClient = Pick<Database, "execute" | "select">;
 type ActorType = "user" | "worker" | "adapter" | "system";
 type EvidenceKind = "snapshot" | "draft" | "approval" | "receipt" | "trace" | "export" | "note";
 type RiskLevel = "low" | "medium" | "high" | "critical";
@@ -239,7 +240,7 @@ function parseRisk(value: string | undefined) {
   );
 }
 
-async function assertObject(tx: Database, tenantId: string, objectId?: string) {
+async function assertObject(tx: QueryClient, tenantId: string, objectId?: string) {
   if (!objectId) {
     return;
   }
@@ -259,7 +260,7 @@ async function assertObject(tx: Database, tenantId: string, objectId?: string) {
   }
 }
 
-async function assertTask(tx: Database, tenantId: string, taskId?: string) {
+async function assertTask(tx: QueryClient, tenantId: string, taskId?: string) {
   if (!taskId) {
     return;
   }
@@ -279,7 +280,7 @@ async function assertTask(tx: Database, tenantId: string, taskId?: string) {
   }
 }
 
-async function assertEvent(tx: Database, tenantId: string, eventId?: string) {
+async function assertEvent(tx: QueryClient, tenantId: string, eventId?: string) {
   if (!eventId) {
     return;
   }
@@ -299,7 +300,7 @@ async function assertEvent(tx: Database, tenantId: string, eventId?: string) {
   }
 }
 
-async function assertCapability(tx: Database, capabilityId?: string) {
+async function assertCapability(tx: QueryClient, capabilityId?: string) {
   if (!capabilityId) {
     return;
   }
@@ -319,7 +320,7 @@ async function assertCapability(tx: Database, capabilityId?: string) {
   }
 }
 
-async function assertAdapter(tx: Database, adapterId?: string) {
+async function assertAdapter(tx: QueryClient, adapterId?: string) {
   if (!adapterId) {
     return;
   }
@@ -339,7 +340,7 @@ async function assertAdapter(tx: Database, adapterId?: string) {
   }
 }
 
-async function assertConnection(tx: Database, tenantId: string, connectionId?: string) {
+async function assertConnection(tx: QueryClient, tenantId: string, connectionId?: string) {
   if (!connectionId) {
     return;
   }
@@ -359,7 +360,7 @@ async function assertConnection(tx: Database, tenantId: string, connectionId?: s
   }
 }
 
-async function assertWorkflowRun(tx: Database, tenantId: string, workflowRunId?: string) {
+async function assertWorkflowRun(tx: QueryClient, tenantId: string, workflowRunId?: string) {
   if (!workflowRunId) {
     return;
   }
@@ -379,7 +380,7 @@ async function assertWorkflowRun(tx: Database, tenantId: string, workflowRunId?:
   }
 }
 
-async function nextObjectVersion(tx: Database, objectId: string) {
+async function nextObjectVersion(tx: QueryClient, objectId: string) {
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext('object_version'), hashtext(${objectId}))`);
 
   const [version] = await tx
