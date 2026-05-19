@@ -33,12 +33,12 @@ HOST=45.55.53.92 ./scripts/deploy.sh
 The deploy script waits for cloud-init, syncs the repo to `/opt/continuous`,
 creates a remote `.env` with a random Postgres password, runs migrations, seeds
 bootstrap records, builds the app image, and starts the stack. After DNS is
-pointed, the default hosts are `continuoushq.com, getcontinuous.app` and the
-default app URL is `https://continuoushq.com`.
+pointed, `scripts/configure-domain.sh` switches the site host to
+`continuoushq.com` and the app URL to `https://continuoushq.com`.
 
 ## DNS Cutover
 
-After `continuoushq.com` and `getcontinuous.app` point at `45.55.53.92`:
+After `continuoushq.com` points at `45.55.53.92`:
 
 ```sh
 HOST=45.55.53.92 ./scripts/configure-domain.sh
@@ -70,9 +70,15 @@ CI is separate and runs on pushes to `main`, pull requests, and manual dispatch.
 ## Post-Deploy Verification
 
 ```sh
+curl -fsS http://45.55.53.92/api/health
+curl -fsS http://45.55.53.92/api/core
+```
+
+After DNS cutover:
+
+```sh
 curl -fsS https://continuoushq.com/api/health
 curl -fsS https://continuoushq.com/api/core
-curl -fsS https://getcontinuous.app/api/health
 openssl s_client -connect 45.55.53.92:443 -servername continuoushq.com </dev/null 2>/dev/null | openssl x509 -noout -subject -issuer -dates
 ```
 
