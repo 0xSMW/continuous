@@ -65,6 +65,13 @@ Continuous should therefore optimize for:
 
 Continuous is a **headless worker platform for SMBs**.
 
+It is also the canonical operating layer for entity, workforce, payroll,
+filings, compliance, payments, AI operations, generated UI, and evidence. The
+web app, CLI, TUI, employee portal, embedded partner surface, Slack approval
+card, and agent console are render targets over the same graph, events,
+workflows, rule packs, typed capabilities, approval policies, budgets, and
+evidence packets.
+
 It has three product planes:
 
 | Plane | What it is | Customer-facing value |
@@ -72,6 +79,34 @@ It has three product planes:
 | Continuous Core | Headless business graph, event log, task ledger, workflows, rule packs, capability registry, generated UI, evidence, adapters | Makes the business legible enough for agents to act |
 | Continuous AI Gateway | Model routing, intelligence budgets, token/cost ledger, provider controls, agent authorization, synthetic-worker governance | Lets leaders manage AI spend and autonomy like operating capacity |
 | Continuous Workers | Packaged agentic workers with missions, tools, workflows, budgets, approvals, vertical context, KPIs, and evidence | Gives SMBs outcome-owning AI labor they can “hire” |
+
+**Canonical operating layer**
+
+Continuous Core must model both the legal business and the operating workforce
+before any packaged worker can safely act. Revenue workflows remain the first
+commercial wedge, but the foundation should not be a revenue-only demo. The
+first build milestone is a self-hostable core that can represent an SMB entity,
+its humans, its synthetic workers, its obligations, its payroll-ready facts, its
+payments, its AI spend, and the evidence trail around every important action.
+
+| Layer | Product responsibility |
+|---|---|
+| Entity graph | Legal entities, responsible parties, officers, owners, entity identifiers, agency accounts, registrations, tax accounts, locations, establishments |
+| Workforce graph | People, employees, contractors, positions, manager assignments, compensation, schedules, time, leave, credentials, documents, employment status events |
+| Payroll kernel | Pay schedules, pay periods, payroll runs, wage lines, tax lines, deduction lines, net pay, liabilities, pay statements, corrections, calculation traces |
+| Filing engine | Filing requirements, obligations, drafts, validations, submissions, receipts, rejections, corrections, amendments, notices, retention |
+| Compliance engine | Source-linked rule packs, effective dates, jurisdiction overlays, threshold monitors, obligation creation, blocker explanations |
+| Payment engine | Bank accounts, payment instructions, ACH batches, entries, funding events, returns, reversals, tax deposits, dual control |
+| AI operations | Synthetic workers, model routes, intelligence pools, budget accounts, allocations, reservations, usage events, evaluations, AI incidents |
+| Generated UI | Renderer-neutral view contracts for web, TUI, mobile, Slack, embedded, PDF, and agent context |
+| Evidence layer | Audit events, snapshots, receipts, attestations, hashes, exports, retention rules, workflow packets |
+
+The decisive product idea is that Continuous manages both human workers and
+synthetic workers. Human employees and contractors create payroll, compliance,
+access, benefits, and documentation obligations. Synthetic workers create AI
+spend, permissions, model-routing, memory, tool-access, and performance
+obligations. The AI gateway is therefore a first-class business system, not a
+sidecar.
 
 **What changes from the prior plan**
 
@@ -345,16 +380,93 @@ Evidence and observability
 
 **Business graph object model**
 
+The data model should stay small at the core and expressive at the edges. Do
+not create a top-level table every time the product names a workflow artifact.
+Prefer stable primitives with clear `kind`, `type`, `role`, `state`, or
+`category` fields, plus extension records when a domain genuinely needs
+structured detail.
+
 | Domain | Core objects |
 |---|---|
-| Customer/revenue | Lead, Customer, Contact, Opportunity, Offer, Package, PriceRule, Quote, Proposal, Contract, Booking, Invoice, Payment, Review |
+| Organization | Tenant, Workspace, Team, CostCenter |
+| Entity | Entity, EntityIdentifier, EntityParty, EntityRegistration, AgencyAccount, TaxAccount |
+| Jurisdiction | Jurisdiction, Agency, RulePackCoverage |
+| Location | Location, Establishment, TaxNexusProfile |
+| Person | Person, PersonIdentifier, Address, ContactMethod, DemographicRecord, PrivacyConsent |
+| Workforce | Worker, WorkRelationship, Position, ManagerAssignment, EmploymentStatusEvent |
+| Compensation | CompensationAgreement, CompensationLine, DeductionAuthorization |
+| Payroll | PaySchedule, PayPeriod, PayrollRun, PayStatement, PayrollLine, PayrollLiability |
+| Time and leave | Schedule, TimeEntry, Timesheet, PTOPolicy, PTOBalance, LeaveCase |
+| Benefits | BenefitPlan, EligibilityRule, BenefitElection, Dependent, COBRAEvent, ACAOffer |
+| Payments | BankAccount, PaymentInstruction, PaymentTransaction, PaymentBatch, PaymentEvent, TaxDeposit |
+| Filings | FilingRequirement, FilingCase, FilingArtifact, AgencyNotice |
+| Documents | Document, DocumentTemplate, SignatureRequest, SignatureEvent, RetentionPolicy |
+| Customer/revenue | Customer, Contact, Lead, Opportunity, Offer, PriceRule, Quote, Proposal, Contract, Booking, Invoice, CustomerSignal |
 | Delivery | Job, WorkOrder, Task, Checklist, Appointment, Route, Crew, Material, Asset, Closeout, QualityRecord |
-| Finance | Account, Vendor, Bill, Expense, Receipt, PaymentInstruction, CashForecast, ReconciliationItem |
-| Workforce | HumanWorker, Contractor, Role, Schedule, Credential, Training, PayrollInput, TimeEntry |
-| Agentic workers | AgenticWorker, Mission, Skill, CapabilityGrant, ToolCredential, MemoryScope, BudgetAccount, Evaluation |
-| Compliance | Obligation, License, Permit, InsurancePolicy, Filing, Notice, EvidencePacket, RulePack |
-| Systems | Connector, ExternalAccount, Webhook, SyncJob, DataQualityIssue, PermissionGrant |
-| Governance | Policy, ApprovalRequest, Decision, RiskLevel, AuditEvent, BudgetAllocation |
+| Finance | Account, Vendor, Bill, Expense, CashForecast, ReconciliationItem |
+| Workforce operations | Candidate, Credential, Training, PayrollInput, AccessRequest, DeviceAssignment |
+| AI gateway | ModelProvider, ModelRoute, InferenceRequest, InferenceResult, IntelligencePool, BudgetAccount, BudgetAllocation, BudgetReservation, UsageEvent |
+| Compliance | Obligation, RulePack, RuleVersion, License, Permit, InsurancePolicy, Notice, ThresholdMonitor |
+| Systems | Connector, ExternalAccount, Webhook, SyncJob, DataQualityIssue |
+| Governance | Policy, PolicyBinding, ApprovalPolicy, ApprovalRequest, Decision, RiskLevel, PermissionGrant, CapabilityGrant, AuditEvent |
+| Evidence | EvidencePacket, EvidenceItem |
+
+**Modeling simplifications**
+
+| Current product language | Canonical model |
+|---|---|
+| HumanWorker, AgenticWorker, SyntheticWorker, service worker, robot worker | `Worker.kind = human | synthetic | robot | service` |
+| Employment, contractor engagement, temp assignment, vendor staff | `WorkRelationship.type = employee | contractor | temp | vendor_staff | intern` |
+| Role versus position | `Position` for job/capacity; `PermissionGrant` or `PolicyBinding` for access control |
+| Schedule and work schedule | `Schedule.type = work | shift | appointment | pay_period | deadline | task` |
+| WageRate, Salary, BonusPlan, CommissionPlan | `CompensationLine.type = hourly | salary | bonus | commission | stipend | reimbursement` |
+| Package | `Offer.type = package` or `OfferComponent` when bundled pricing needs structure |
+| Proposal | `Proposal` when it has its own lifecycle; otherwise `Quote.type = proposal` |
+| Payment | `PaymentTransaction` for actual money movement; `Invoice.payment_status` for summary state |
+| Review | `CustomerSignal.type = review` |
+| EarningLine, TaxLine, DeductionLine, NetPayLine | `PayrollLine.type = earning | employee_tax | employer_tax | deduction | net_pay | reimbursement` |
+| ACH batch, payroll batch, tax payment batch | `PaymentBatch.type = ach | payroll | tax_deposit | reimbursement | vendor_payment` |
+| Funding, return, reversal, settlement | `PaymentEvent.type = funding | settlement | return | reversal | failure | reconciliation` |
+| Filing, filing draft, submission, receipt, rejection, amendment | `FilingCase` plus `FilingArtifact.type = draft | submission | receipt | rejection | amendment | correction | export` |
+| Document template, document instance, onboarding packet, termination packet | `Document.kind` and `EvidencePacket.type`; packets are assembled evidence, not separate domain tables |
+| SatisfactionSignal, FeedbackItem, Complaint, Testimonial, Review | `CustomerSignal.type = satisfaction | feedback | complaint | testimonial | review | referral` |
+| Responsible party, officer, owner, signer, payroll contact | `EntityParty.role = responsible_party | officer | owner | signer | payroll_contact | beneficial_owner` |
+| CapabilityGrant and AICapabilityGrant | `CapabilityGrant.actor_ref` can point to a human worker, synthetic worker, service account, API client, or partner |
+| Snapshot, receipt, trace, export, attestation, approval artifact | `EvidenceItem.type = snapshot | receipt | trace | export | attestation | approval | draft` |
+
+Customer records should preserve more than transactions. Continuous needs
+canonical customer signals so workers can understand customer health, service
+quality, recovery risk, referrals, reviews, testimonials, complaints, and
+product/service improvement loops. Feedback can arrive from surveys, reviews,
+emails, calls, SMS, support tickets, invoices, closeout forms, and owner notes;
+it should be attached to the relevant customer, contact, job, invoice, worker,
+location, and source event.
+
+| Customer signal | Purpose |
+|---|---|
+| `satisfaction` | Structured sentiment, score, NPS/CSAT-like result, or service-quality marker |
+| `feedback` | Free-form customer feedback with source, topic, severity, and follow-up status |
+| `complaint` | Negative feedback requiring owner review, service recovery, refund review, or compliance escalation |
+| `testimonial` | Positive feedback that may become review, referral, case study, or marketing material after approval |
+| `review` | Public or platform-specific review with rating, source, response status, and evidence |
+
+**Effective-dated facts**
+
+Continuous should never rely on one mutable company or employee profile. Payroll,
+filings, benefits, compliance, AI permissions, and generated UI all depend on
+facts as of a date.
+
+| Fact type | Why effective dating is required |
+|---|---|
+| Legal entity names and addresses | Filings, notices, registrations, and tax accounts depend on historical entity data |
+| Work location | Withholding, state/local labor rules, OSHA establishment, new-hire reporting, and nexus depend on work location |
+| Residence address | Tax, benefits, notices, and employee communication depend on residence at the relevant time |
+| Compensation | Payroll, retro pay, overtime, benefits, and audit trails depend on approved effective dates |
+| FLSA status | Overtime and wage compliance depend on classification when work occurred |
+| Benefits eligibility | Elections, deductions, COBRA, ACA, and plan documents depend on plan-year and coverage dates |
+| AI permissions | Synthetic-worker and employee model/tool access may change month to month |
+| Intelligence budget | Model access and spend controls depend on allocation period and policy version |
+| Rule packs | Tax, filing, and compliance logic changes by jurisdiction and effective date |
 
 **Task ledger model**
 
@@ -601,6 +713,118 @@ Product implication:
 | Medical/clinical | Worker may handle administrative intake where allowed; no autonomous diagnosis/treatment |
 | Money movement | Worker may prepare; human approval and dual control execute |
 
+**Open workflow catalog**
+
+Continuous should keep workflows open, inspectable, replayable, and renderer
+neutral. A workflow is not a screen. It is a state machine over canonical facts,
+events, rules, capabilities, approvals, generated views, documents, and
+evidence.
+
+| Workflow | Purpose | Required documents and records | Approval posture | Evidence packet |
+|---|---|---|---|---|
+| Entity setup | Make a business entity operationally legible | Legal entity record, EIN/entity identifiers, responsible party, officers/owners, agency accounts, work locations, tax accounts, bank account, authorization records | Human confirms entity, tax, bank, and agency facts | Entity setup packet with source snapshots, approvals, registrations, and account refs |
+| Open new state | Prepare payroll/compliance for a worker or location in a new jurisdiction | Work location, remote work location, state registration, tax account, new-hire reporting path, rule-pack coverage | Human approves state readiness before payroll execution | State readiness packet with blockers and registrations |
+| Hire employee | Turn an accepted offer into a payroll-ready employee | Offer snapshot, worker profile, classification review, W-4, I-9, E-Verify case when applicable, state new-hire report, direct deposit, compensation agreement, handbook/policy acknowledgements, benefits eligibility/elections, payroll readiness checklist, access/device requests | Worker may prepare and chase; human attests I-9, approves payroll readiness, and approves external submissions until authority is proven | New-hire packet with offer, docs, deadlines, signatures, attestations, reports, approvals, and missing-fact history |
+| Engage contractor | Make a contractor payable and governed without creating employee records | W-9, contract/SOW, classification rationale, payment terms, 1099 readiness, backup-withholding status when applicable, bank/payment instruction, insurance/certifications if needed, access scope | Human approves classification, contract, payment setup, and sensitive-data reveal | Contractor packet with W-9, contract, classification evidence, payment setup, access scope, and 1099 readiness |
+| Change compensation | Apply pay changes without losing history | Compensation agreement, wage/salary/rate change, effective date, approval, retro-pay analysis, payroll-impact report | Human approval required before payroll impact | Compensation-change packet with prior/new terms, approval, effective date, and payroll trace |
+| Change work location | Keep tax, labor, benefits, and compliance current when location changes | New work location, residence/work split, tax nexus profile, local rule review, state/local setup, withholding changes, benefits/labor-rule impact | Human approval required when payroll or jurisdiction changes | Location-change packet with rule snapshot, impact analysis, and setup blockers |
+| Run payroll | Produce approved payroll, paystubs, payments, liabilities, and journals | Pay schedule, pay period, approved time, compensation, benefits, deductions, garnishments, tax setup, payroll preview, variance report, approval, ACH/tax payment drafts, paystubs, journal entries | Human approval and dual control for money movement | Payroll packet with source data, rule versions, calculation trace, approval, ACH/tax records, paystubs, liabilities, and reconciliation |
+| Off-cycle payroll | Handle bonus, correction, missed pay, supplemental pay, or termination pay | Off-cycle reason, affected workers, earning/tax treatment, calculation trace, approval, payment draft, correction link | Human approval and dual control required | Off-cycle packet with reason, trace, approval, payment, and correction evidence |
+| Quarter close | Prepare employment tax and wage-reporting obligations | Payroll period aggregates, tax-liability ledger, deposits, Form 941 draft, state wage/tax drafts, reconciliation report, filing approval, receipts | Worker drafts and validates; authorized human or managed path submits | Quarter-close packet with aggregates, drafts, approvals, submission receipts, and reconciliation |
+| Year-end | Complete annual worker and contractor reporting | W-2/W-3 data, employee copies, 1099-NEC data, contractor copies, ACA data when applicable, state annual reconciliations, correction packets | Human approval for filings and corrections | Year-end packet with form versions, recipient copies, submissions, rejections, corrections, and receipts |
+| Termination or firing | Close employment safely and preserve required records | Separation facts, risk review, final pay calculation, PTO payout, benefits/COBRA review, access deprovision plan, device return, unemployment evidence, final pay approval, I-9 retention clock, payroll/tax correction if needed, evidence export | Human approval required for separation, final pay, benefits notices, and access removal | Termination packet with separation facts, approvals, final pay trace, benefits/access actions, notices, receipts, and retention dates |
+| Leave | Manage protected/company leave and payroll effects | Leave request, eligibility facts, tenure/hours/worksite, notices, certification docs where applicable, benefit continuation, payroll handling, return-to-work status | Human/HR approval depending policy and risk | Leave packet with eligibility, notices, certifications, payroll effects, and return status |
+| Injury or incident | Triage safety, workers' comp, OSHA, and evidence | Incident report, establishment, witnesses, recordability review, photos/docs, workers' comp path, forms, annual summary status | Human safety/HR approval required for regulated submissions | Incident packet with source report, recordability rationale, forms, notices, and receipts |
+| Benefits renewal | Keep eligibility, elections, deductions, and carrier state aligned | Plan year, benefit plans, eligibility rules, elections, dependents, carrier sync, deduction changes, SPD/SMM notices | Human approval for plan setup and employee-facing notices | Benefits packet with plan versions, elections, deductions, carrier sync, and notices |
+| Agency notice | Classify and respond to government notices | Notice intake, entity/worker/filing refs, due date, classification, response draft, attachments, approval, submission receipt | Human approval required before response or payment | Notice packet with original notice, classification, response, approval, submission, and receipt |
+| AI monthly budget cycle | Allocate and close intelligence budgets | Intelligence pool, budget accounts, allocations, reservations, overages, grants, usage ledger, chargebacks, approvals | Managers approve allocations and overages | Budget-close packet with allocations, usage, exceptions, overages, and chargebacks |
+| Synthetic-worker lifecycle | Create, govern, evaluate, suspend, and retire AI workers | Synthetic worker identity, manager, mission, data scopes, capability grants, model routes, memory policy, budget account, eval policy, audit policy | Human manager/admin approval for launch, sensitive capabilities, budget, and retirement | Synthetic-worker packet with grants, budgets, evals, incidents, tool revocations, and archived traces |
+
+**New-hire workflow state machine**
+
+```text
+draft
+→ offer_accepted
+→ worker_profile_created
+→ classification_review
+→ onboarding_packet_prepared
+→ employee_tasks_sent
+→ employee_tasks_pending
+→ employer_tasks_pending
+→ external_reports_pending
+→ payroll_readiness_check
+→ payroll_ready
+→ active
+→ exception
+```
+
+| State | Generated UI | Worker role | Required documents or records | Evidence |
+|---|---|---|---|---|
+| offer_accepted | Hire summary and missing facts | Create draft worker and validate entity/work location | Offer snapshot, start date, hiring manager, position | Offer snapshot |
+| classification_review | Classification risk view | Draft classification rationale and blockers | Employee/contractor rationale, FLSA status, work location | Classification evidence |
+| onboarding_packet_prepared | Document packet preview | Generate documents and tasks | W-4, I-9, direct deposit, compensation agreement, acknowledgements, benefits forms when applicable | Template versions |
+| employee_tasks_pending | Employee portal tasks | Send reminders and summarize missing items | Signed forms, personal details, bank data, tax details | Signature events and missing-fact log |
+| employer_tasks_pending | I-9 employer review and payroll setup | Prepare review; never falsely attest | I-9 employer attestation, payroll setup, access/device requests | Employer attestation events |
+| external_reports_pending | Filing packet review | Prepare new-hire report and E-Verify case when applicable | New-hire report draft, E-Verify case draft, state path | Filing draft and case draft |
+| payroll_readiness_check | Readiness checklist | Detect missing tax, bank, compensation, benefit, time, or rule facts | Pay schedule, compensation, tax setup, payment instruction | Readiness report |
+| payroll_ready | Confirmation | Summarize result and residual risk | Complete readiness checklist | New-hire evidence packet |
+
+**Termination workflow state machine**
+
+```text
+initiated
+→ facts_required
+→ risk_review
+→ final_pay_calculation
+→ benefits_review
+→ access_deprovision_staged
+→ approval_pending
+→ approved
+→ final_pay_executed
+→ external_notices_handled
+→ access_removed
+→ evidence_complete
+→ closed
+```
+
+| State | Generated UI | Worker role | Required documents or records | Evidence |
+|---|---|---|---|---|
+| facts_required | Separation facts form | Identify missing facts | Separation reason, last day, work location, final hours, equipment, manager notes | Manager/HR inputs |
+| risk_review | Legal/HR risk panel | Flag policy, jurisdiction, protected leave, wage, or notice issues | Policy snapshot, leave/accommodation status, final pay rule snapshot | Rule snapshot |
+| final_pay_calculation | Final pay review | Draft calculation and explain components | Final wages, PTO payout, deductions, reimbursements, garnishments, off-cycle run if needed | Payroll trace |
+| benefits_review | COBRA/benefits impact | Draft benefit and carrier tasks | Benefit enrollment, COBRA trigger review, carrier notice tasks | Benefit state |
+| access_deprovision_staged | IT action queue | Stage app, device, card, and credential actions | Access list, device assignment, credential list, return plan | Access plan |
+| approval_pending | Approval card | Request HR, payroll, legal, or manager approval | Separation packet, final pay packet, benefits/access plan | Approval events |
+| final_pay_executed | Final pay status | Reconcile payment and paystub state | ACH/payment record, paystub, tax liability update | Payment receipt |
+| external_notices_handled | Notice and filing queue | Prepare unemployment/new agency tasks when applicable | External notice drafts, state records, receipts | Filing/notice receipts |
+| access_removed | Deprovision status | Confirm revocations and returns | Revocation receipts, device return, credential disablement | Access receipts |
+| closed | Audit packet | Summarize completion and residual risks | I-9 retention clock, record-retention policy, evidence export | Termination evidence packet |
+
+**Payroll workflow states**
+
+```text
+draft
+→ source_data_locked
+→ calculating
+→ preview_ready
+→ blocked
+→ awaiting_approval
+→ approved
+→ funding_pending
+→ payment_prepared
+→ payment_submitted
+→ paid
+→ tax_liabilities_created
+→ deposits_scheduled
+→ reconciled
+→ closed
+→ corrected
+```
+
+Payroll must be deterministic, replayable, and testable. LLMs may explain,
+detect blockers, draft approvals, and summarize variance, but payroll
+calculation cannot depend on an LLM.
+
 **Vertical overlays**
 
 Continuous Core should be horizontal. Continuous Workers should become credible through vertical overlays.
@@ -814,15 +1038,15 @@ For SMBs, most early worker actions should live between Levels 1 and 3. High-ris
 
 | Phase | Build | Proof point |
 |---|---|---|
-| 0 | Continuous Core: graph, task ledger, capability registry, AI gateway, generated UI, CLI/TUI | Can reconstruct business state and produce generated task surfaces |
-| 1 | Revenue Operations Worker for service SMBs | More leads answered, faster quotes, more deposits/invoices collected |
-| 2 | Worker control plane: budgets, autonomy levels, evals, worker scorecards | Customers can hire, govern, budget, and evaluate workers |
-| 3 | Ops Worker | Jobs scheduled, customers updated, closeouts completed, handoffs reduced |
-| 4 | Finance Worker | Invoices issued, AR chased, expenses coded, cash forecast visible |
-| 5 | Workforce Worker | Hiring, onboarding, credentials, schedules, payroll inputs coordinated |
-| 6 | Compliance Worker | Licenses, insurance, contracts, permits, safety, and evidence tracked |
-| 7 | Vertical packs | Construction, professional services, real estate services, transportation, retail/wholesale |
-| 8 | Marketplace | Third-party workers, adapters, rule packs, workflow packs, vertical packs |
+| 0 | Canonical operating layer: entity, workforce, payroll-ready facts, filings, compliance obligations, payments, AI gateway, generated UI, evidence, CLI/TUI | Can reconstruct entity/workforce/payroll/compliance state and produce generated task surfaces |
+| 1 | Open workflow core: entity setup, hire, contractor engagement, termination, payroll preview, AI budget cycle, synthetic-worker lifecycle | Workflows are stateful, replayable, approval-aware, document-aware, and evidence-backed |
+| 2 | Rule-pack and obligation engine: federal anchors, first state pack, effective dates, golden tests | Events produce explainable obligations, deadlines, blockers, and source-linked rule snapshots |
+| 3 | Payroll draft: deterministic payroll preview, variance explanation, paystubs, liabilities | Payroll can be previewed, blocked, approved, and audited without money movement |
+| 4 | Filing draft: new-hire, Form 941, W-2/W-3, 1099, agency notice packet model | Filings can be drafted, validated, approved, rejected, corrected, and retained |
+| 5 | Revenue Operations Worker for service SMBs | More leads answered, faster quotes, more deposits/invoices collected |
+| 6 | Worker control plane: budgets, autonomy levels, evals, worker scorecards | Customers can hire, govern, budget, and evaluate human and synthetic workers |
+| 7 | Ops, Finance, Workforce, Compliance, and Systems Workers | Jobs, cash, hiring, compliance, and connectors operate on the same core graph |
+| 8 | Vertical packs and marketplace | Third-party workers, adapters, rule packs, workflow packs, UI packs, and vertical packs |
 | 9 | Managed execution | Payroll, filings, payments, and expert-reviewed regulated workflows |
 
 **MVP scope**
@@ -830,23 +1054,30 @@ For SMBs, most early worker actions should live between Levels 1 and 3. High-ris
 The MVP should be:
 
 ```text
-Continuous Revenue Worker + Continuous Core
+Continuous Core canonical operating layer + first open workflows
 ```
 
 Minimum capabilities:
 
 | Area | MVP requirement |
 |---|---|
-| Business graph | Customers, leads, offers, quotes, jobs, invoices, payments, tasks |
-| Connectors | Email, calendar, website forms, accounting, payments, CRM or spreadsheet |
-| Worker runtime | Revenue Worker identity, mission, tools, memory, budget, evals |
-| AI gateway | Model routing, monthly budget, usage ledger, per-task limits |
-| Capability registry | Read, classify, draft, prepare quote, schedule, invoice, follow up, brief owner |
-| Generated UI | Owner brief, quote approval, task queue, lead review, budget dashboard |
-| Task ledger | Every lead, quote, follow-up, invoice, review request, and exception |
-| Evidence | Message snapshots, drafts, approvals, sent receipts, quote versions |
-| Admin control | Autonomy level, templates, pricing guardrails, approval thresholds |
-| Scorecard | Leads answered, response time, quotes sent, bookings, invoices, collections, reviews, budget burn |
+| Entity graph | Entity, entity IDs, entity parties, locations, agency/tax accounts, bank account refs |
+| Workforce graph | Person, Worker, WorkRelationship, Position, manager, compensation, schedule, time, credentials, documents |
+| Payroll foundation | Pay schedules, pay periods, payroll preview, earning/tax/deduction/net lines, liabilities, pay statement draft |
+| Compliance foundation | Rule-pack framework, source refs, effective dates, obligations, deadlines, blockers, threshold monitors |
+| Filing foundation | Filing requirements, obligations, FilingCase, FilingArtifact, rejection/correction states |
+| Payment foundation | Bank accounts, payment instructions, PaymentBatch, PaymentTransaction, PaymentEvent, dual-control approval, reconciliation states |
+| AI gateway | Model routing, intelligence pools, budget accounts, allocations, reservations, usage ledger, per-task limits |
+| Worker runtime | Worker identity, kind, manager, mission, scopes, capability grants, model route, budget, eval policy |
+| Capability registry | Read, explain, draft, validate, request approval, submit regulated item, move money, reveal sensitive data |
+| Generated UI | New-hire review, termination review, payroll run review, filing review, approval card, evidence viewer, budget dashboard |
+| Workflow engine | Entity setup, hire employee, engage contractor, terminate worker, payroll preview, AI budget cycle, synthetic-worker lifecycle |
+| Evidence | EvidencePacket and EvidenceItem for new-hire, contractor, payroll, filing, termination, AI action, and rule-change packets |
+| CLI/TUI | Capability discovery, workflow inspection, generated UI rendering, evidence export, AI budget operations |
+
+The Revenue Operations Worker is still the first customer-facing worker demo
+because it proves near-term SMB ROI. It should sit on top of the broader core,
+not define the core's boundaries.
 
 **The first killer demo**
 
@@ -924,16 +1155,19 @@ This demo proves the whole thesis: business graph, task ledger, worker runtime, 
 
 | Workstream | First deliverable |
 |---|---|
-| Core graph | Customer, lead, offer, quote, job, invoice, payment, task, evidence |
-| Worker runtime | AgenticWorker, mission, skills, tools, autonomy, memory, manager |
-| AI gateway | Provider routes, token ledger, budget accounts, reservations, usage events |
-| Capability registry | Lead classify, response draft, quote prepare, schedule propose, invoice prepare |
-| Generated UI | Owner brief, lead review, quote approval, budget dashboard |
-| Connectors | Gmail/Google Workspace, calendar, QuickBooks, Stripe, website forms |
-| Task ledger | Lead-to-cash task states and follow-up engine |
-| Evidence | Message snapshots, quote versions, approvals, sent receipts |
-| Eval harness | Historical lead simulation, quality scoring, budget scoring, conversion tracking |
-| Vertical seed | Professional services and home/local services templates |
+| Core graph | Entity, EntityParty, Location, Person, Worker, WorkRelationship, Position, CompensationAgreement, PaySchedule, Obligation, FilingCase, PaymentTransaction, EvidencePacket |
+| Workflow engine | State machines for entity setup, hire, contractor engagement, termination, payroll preview, AI budget cycle, synthetic-worker lifecycle |
+| Document model | Document, templates, signatures, retention, restricted access, and packet assembly through EvidencePacket |
+| Rule-pack framework | Source-linked rules, effective dates, tests, jurisdiction overlays, obligation creation |
+| Payroll kernel | Deterministic payroll preview, PayrollLine records, liabilities, variance report, blocker detection |
+| Filing engine | FilingCase plus FilingArtifact draft/validate/approve/submit/receipt/reject/correct lifecycle |
+| Payment engine | PaymentBatch, PaymentTransaction, PaymentEvent, funding state, return/reversal state, dual-control approval |
+| Worker runtime | Worker.kind for human, synthetic, robot, and service actors; missions, scopes, permissions, autonomy, memory, managers |
+| AI gateway | Provider routes, normalized units, budget accounts, reservations, usage events, sensitive-data gates |
+| Capability registry | Payroll preview, filing prepare, document packet prepare, approval request, sensitive reveal, ACH draft, worker read |
+| Generated UI | New-hire review, termination review, payroll review, filing review, AI budget dashboard, evidence viewer |
+| CLI/TUI | Render generated views, inspect workflows, list capabilities, export evidence, allocate AI budgets |
+| Revenue demo | Lead-to-cash workflow on the same graph once the core substrate is coherent |
 
 **Final strategy**
 

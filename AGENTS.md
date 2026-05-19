@@ -10,6 +10,8 @@ always maximize thruput with 6 subagents
 
 always choose simple, clear naming for files, functions, and objects that an intelligent system or human can infer due to context over word salad verbose names
 
+for data models, prefer a small set of clear primitives with type/kind/role/status fields over many near-duplicate entity names
+
 we will host infra on digital ocean use doctl
 
 keep a running notes file in implementation.md with decisions you had to make weren't in the strategy or spec, things you had to change, tradeoffs you had to make or anything else I should know

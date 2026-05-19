@@ -17,8 +17,13 @@ Continuous is a headless worker platform with three planes:
 The first complete platform slice is:
 
 ```text
-Continuous Revenue Worker + Continuous Core
+Continuous Core canonical operating layer + first open workflows
 ```
+
+Revenue Operations remains the first customer-facing worker demo, but it sits on
+top of a broader core. The core must be able to represent entity, workforce,
+payroll, filings, compliance, payments, AI operations, generated UI, and
+evidence before packaged workers can safely act.
 
 ## Core Components
 
@@ -34,6 +39,22 @@ Continuous Revenue Worker + Continuous Core
 | Adapter runtime | Connect to systems of action with retries, idempotency, receipts, reconciliation, and scoped credentials |
 | Generated UI | Produce structured views for approvals, briefs, queues, exceptions, evidence, budgets, and scorecards |
 | Evidence layer | Capture receipts, snapshots, approvals, traces, versions, exports, and audit packets |
+
+## Canonical Operating Layer
+
+| Domain | First objects |
+|---|---|
+| Entity | Entity, EntityIdentifier, EntityParty, EntityRegistration, AgencyAccount, TaxAccount |
+| Location | Location, Establishment, TaxNexusProfile |
+| Workforce | Person, Worker, WorkRelationship, Position, ManagerAssignment, EmploymentStatusEvent |
+| Compensation | CompensationAgreement, CompensationLine, DeductionAuthorization |
+| Payroll | PaySchedule, PayPeriod, PayrollRun, PayStatement, PayrollLine, PayrollLiability |
+| Time and leave | Schedule, TimeEntry, Timesheet, PTOPolicy, PTOBalance, LeaveCase |
+| Filings | FilingRequirement, FilingCase, FilingArtifact, AgencyNotice |
+| Payments | BankAccount, PaymentInstruction, PaymentTransaction, PaymentBatch, PaymentEvent, TaxDeposit |
+| Documents | Document, DocumentTemplate, SignatureRequest, SignatureEvent, RetentionPolicy |
+| AI operations | Worker, ModelRoute, IntelligencePool, BudgetAccount, BudgetAllocation, BudgetReservation, UsageEvent |
+| Evidence | AuditEvent, EvidencePacket, EvidenceItem |
 
 ## Bootstrap Order
 
@@ -54,12 +75,20 @@ The first core slice should keep names direct and inferable:
 
 | Area | Initial objects |
 |---|---|
-| Revenue | Lead, Customer, Contact, Offer, PriceRule, Quote, Booking, Invoice, Payment, Review |
-| Delivery | Job, WorkOrder, Task, Appointment, Checklist, Closeout |
-| Worker | Worker, Mission, Skill, Capability, ToolCredential, MemoryScope, BudgetAccount, Evaluation |
-| Systems | Connector, ExternalAccount, Webhook, SyncJob, PermissionGrant, DataQualityIssue |
-| Governance | Policy, ApprovalRequest, Decision, RiskLevel, AuditEvent, BudgetAllocation |
-| Evidence | EvidencePacket, Snapshot, Receipt, Trace, Export |
+| Customer | Customer, Contact, CustomerSignal |
+| Revenue | Lead, Opportunity, Offer, PriceRule, Quote, Proposal, Contract, Booking, Invoice, PaymentTransaction |
+| Entity | Entity, EntityIdentifier, EntityParty, Location, AgencyAccount, TaxAccount |
+| Workforce | Person, Worker, WorkRelationship, Position, Schedule, CompensationAgreement |
+| Payroll | PaySchedule, PayPeriod, PayrollRun, PayStatement, PayrollLine |
+| Compliance | RulePack, RuleVersion, Obligation, FilingRequirement, ThresholdMonitor |
+| Filings | FilingCase, FilingArtifact, AgencyNotice |
+| Payments | BankAccount, PaymentInstruction, PaymentBatch, PaymentTransaction, PaymentEvent |
+| Documents | Document, DocumentTemplate, SignatureRequest, SignatureEvent, RetentionPolicy |
+| Worker | Worker, Mission, Skill, Capability, CapabilityGrant, ToolCredential, MemoryScope, BudgetAccount, Evaluation |
+| AI gateway | ModelProvider, ModelRoute, IntelligencePool, BudgetAccount, BudgetAllocation, BudgetReservation, UsageEvent |
+| Systems | Connector, ExternalAccount, Webhook, SyncJob, DataQualityIssue |
+| Governance | Policy, PolicyBinding, ApprovalPolicy, ApprovalRequest, Decision, RiskLevel, PermissionGrant, CapabilityGrant, AuditEvent, BudgetAllocation |
+| Evidence | EvidencePacket, EvidenceItem |
 
 ## Task Ledger Requirements
 
@@ -109,6 +138,22 @@ Default autonomy by capability class:
 | Move money | Human approval and dual control required |
 | Reveal sensitive data | Restricted and audited |
 | Change worker policy | Human admin required |
+
+## Open Workflow Slice
+
+The first workflow slice should prove that Continuous is document-aware,
+approval-aware, evidence-backed, and renderer-neutral:
+
+| Workflow | Must prove |
+|---|---|
+| Entity setup | Entity, tax, agency, bank, and location facts become auditable setup state |
+| Hire employee | Offer, classification, W-4, I-9, new-hire report, E-Verify when applicable, benefits, access, and payroll readiness become one workflow |
+| Engage contractor | W-9, contract/SOW, classification, payment terms, 1099 readiness, and access scope are governed separately from employment |
+| Termination | Final pay, PTO payout, benefits/COBRA, access removal, device return, unemployment evidence, and retention clocks are coordinated |
+| Payroll preview | Source data, calculation trace, blockers, variance, approval, paystubs, liabilities, and evidence are deterministic and replayable |
+| Filing draft | Applicability, source data, form version, validation, approval, submission state, receipt, rejection, and correction are explicit |
+| AI budget cycle | Intelligence allocations, reservations, usage, overages, approvals, and chargebacks are ledgered |
+| Synthetic-worker lifecycle | Manager, mission, scopes, capabilities, budget, model route, memory, evals, incidents, and retirement are governed |
 
 ## Revenue Worker Slice
 

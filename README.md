@@ -3,10 +3,10 @@
 Continuous is an open source business platform for SMBs to hire, manage, govern,
 budget, evaluate, and coordinate human, AI, and robot workers.
 
-The first runtime slice is **Continuous Core**: a persisted headless substrate
-for agentic workers. It includes the business graph, task ledger, capability
-registry, AI budget ledger, adapter model, generated UI contracts, event log,
-and evidence layer.
+The first runtime slice is **Continuous Core**: a persisted headless operating
+layer for entity, workforce, payroll, filings, compliance, payments, AI
+operations, generated UI, and evidence. Revenue workflows remain the first
+customer-facing worker demo, but they sit on top of this broader core.
 
 ## Stack
 
@@ -42,6 +42,7 @@ Then open `http://localhost:3000`.
 ## Docs
 
 - [Core platform](docs/core-platform.md)
+- [Open workflows](docs/workflows.md)
 - [Local development](docs/local-development.md)
 - [DigitalOcean deployment](docs/deployment.md)
 - [Infrastructure notes](infra/README.md)
