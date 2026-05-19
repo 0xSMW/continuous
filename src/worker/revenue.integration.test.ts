@@ -5,6 +5,13 @@ import { and, count, eq, inArray, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { reconcileAdapterLedger } from "../core/adapters";
+import {
+  attachCoreEvidence,
+  createCoreDocument,
+  ingestCoreEvent,
+  recordCoreDecision,
+  upsertCoreObject,
+} from "../core/primitives";
 import { createCoreTask } from "../core/tasks";
 import { db, pool } from "../db/client";
 import {
@@ -12,9 +19,13 @@ import {
   adapterRuns,
   auditEvents,
   connections,
+  decisions,
+  documents,
   events,
   evaluations,
   evidence,
+  objects,
+  objectVersions,
   tasks,
   workerRuns,
   type JsonObject,
@@ -115,6 +126,153 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(replay.created).toBe(false);
     expect(replay.taskId).toBe(first.taskId);
     expect(taskCount.value).toBe(1);
+  }, 120_000);
+
+  it("persists headless core objects, events, evidence, documents, and decisions", async () => {
+    const runId = randomUUID();
+    const objectResult = await upsertCoreObject({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-core-object-${runId}`,
+      type: "agency_notice",
+      name: "Agency notice from the Department of Cheerful Paperwork",
+      source: "ci.core",
+      externalId: `notice-${runId}`,
+      state: "received",
+      data: {
+        agency: "Department of Cheerful Paperwork",
+        dueInDays: 14,
+      },
+      version: {
+        data: {
+          state: "received",
+          factsLocked: true,
+        },
+        reason: "CI primitive smoke",
+      },
+      db,
+    });
+
+    expect(objectResult.created).toBe(true);
+    expect(objectResult.objectId).toBeTruthy();
+    expect(objectResult.objectVersionId).toBeTruthy();
+    expect(objectResult.eventId).toBeTruthy();
+    expect(objectResult.auditEventId).toBeTruthy();
+
+    const eventResult = await ingestCoreEvent({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-core-event-${runId}`,
+      type: "agency_notice.received",
+      source: "ci.core.intake",
+      objectId: objectResult.objectId,
+      data: {
+        channel: "mailroom",
+        mood: "stern but manageable",
+      },
+      db,
+    });
+
+    const evidenceResult = await attachCoreEvidence({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-core-evidence-${runId}`,
+      kind: "snapshot",
+      name: "Agency notice source snapshot",
+      objectId: objectResult.objectId,
+      eventId: eventResult.eventId,
+      data: {
+        receivedBy: "operator",
+        documentState: "legible",
+      },
+      db,
+    });
+
+    const documentResult = await createCoreDocument({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-core-document-${runId}`,
+      kind: "agency_notice_packet",
+      name: "Agency notice packet",
+      state: "review_ready",
+      sensitivity: "high",
+      objectId: objectResult.objectId,
+      data: {
+        evidenceIds: [evidenceResult.evidenceId],
+      },
+      db,
+    });
+
+    const decisionResult = await recordCoreDecision({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-core-decision-${runId}`,
+      kind: "notice_routing",
+      state: "proposed",
+      decision: "owner_review_required",
+      rationale: "Notice response should be reviewed before any agency contact.",
+      eventId: eventResult.eventId,
+      data: {
+        objectId: objectResult.objectId,
+        evidenceId: evidenceResult.evidenceId,
+        documentId: documentResult.documentId,
+      },
+      db,
+    });
+
+    const [object] = await db.select().from(objects).where(eq(objects.id, objectResult.objectId)).limit(1);
+    const [version] = await db
+      .select()
+      .from(objectVersions)
+      .where(eq(objectVersions.id, objectResult.objectVersionId))
+      .limit(1);
+    const [event] = await db.select().from(events).where(eq(events.id, eventResult.eventId)).limit(1);
+    const [evidenceItem] = await db
+      .select()
+      .from(evidence)
+      .where(eq(evidence.id, evidenceResult.evidenceId))
+      .limit(1);
+    const [document] = await db
+      .select()
+      .from(documents)
+      .where(eq(documents.id, documentResult.documentId))
+      .limit(1);
+    const [decision] = await db
+      .select()
+      .from(decisions)
+      .where(eq(decisions.id, decisionResult.decisionId))
+      .limit(1);
+    const [auditCount] = await db
+      .select({ value: count() })
+      .from(auditEvents)
+      .where(
+        inArray(auditEvents.id, [
+          objectResult.auditEventId,
+          eventResult.auditEventId ?? "",
+          evidenceResult.auditEventId,
+          documentResult.auditEventId,
+          decisionResult.auditEventId,
+        ]),
+      );
+    const replay = await attachCoreEvidence({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-core-evidence-${runId}`,
+      kind: "snapshot",
+      name: "Different name should replay existing evidence",
+      db,
+    });
+
+    expect(object?.externalId).toBe(`notice-${runId}`);
+    expect(version?.version).toBe(objectResult.version);
+    expect(event?.type).toBe("agency_notice.received");
+    expect(evidenceItem?.kind).toBe("snapshot");
+    expect(document?.kind).toBe("agency_notice_packet");
+    expect(document?.sensitivity).toBe("high");
+    expect(decision?.decision).toBe("owner_review_required");
+    expect(auditCount.value).toBe(5);
+    expect(replay.created).toBe(false);
+    expect(replay.evidenceId).toBe(evidenceResult.evidenceId);
   }, 120_000);
 
   it("persists the golden lead-to-quote output, eval row, and idempotent replay", async () => {

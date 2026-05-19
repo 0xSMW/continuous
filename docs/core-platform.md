@@ -179,7 +179,7 @@ policy-bound:
 
 | Surface | Behavior |
 |---|---|
-| `POST /api/core` | Canonical Core command surface for headless primitives such as `task.create`; tenant selection and task fields live in structured `core` and `config` payloads |
+| `POST /api/core` | Canonical Core command surface for `task.create`, `object.upsert`, `event.ingest`, `evidence.attach`, `document.create`, and `decision.record`; tenant selection and command fields live in structured `core` and `config` payloads |
 | `/worker?view=snapshot&role=revenue_operations` | Operator-only snapshot of worker state, active tasks, controls, budget usage, and recent events |
 | `/worker?view=approvals&role=revenue_operations` | Operator-only approval queue for worker decisions |
 | `POST /worker` | Canonical worker command surface for `run`, `approval.decide`, and `adapters.reconcile`; worker role, tenant selection, idempotency, and operation config live in structured payload fields |
@@ -204,9 +204,11 @@ to `approval_required`, and versions the quote object. External sends and money
 movement remain blocked until human approval and real adapter execution are
 implemented.
 
-Core task creation is platform-level, not worker-specific. `POST /api/core`
-with `command=task.create` creates accountable work, emits `task.created`, and
-writes audit proof without touching external systems.
+Core writes are platform-level, not worker-specific. `POST /api/core` now
+creates accountable tasks, upserts typed business objects with object versions,
+ingests events, attaches evidence, creates document packets, and records
+decisions. Every command is tenant-scoped, idempotent, audit-backed, and blocks
+external execution.
 
 ## Non-Goals For The First Slice
 

@@ -23,9 +23,9 @@ commands.
 | `migrate` | Drizzle migration/seed runner |
 | `caddy` | Automatic HTTPS, HTTP redirects, and certificate renewal |
 
-`POST /api/core` is the operator-gated headless Core command surface. The first
-side-effecting command is `task.create`, which creates a task, emits
-`task.created`, and writes audit proof with the same bearer token used by
+`POST /api/core` is the operator-gated headless Core command surface. It
+supports `task.create`, `object.upsert`, `event.ingest`, `evidence.attach`,
+`document.create`, and `decision.record`, all with the same bearer token used by
 worker and workflow commands.
 
 ## First Deploy
@@ -98,3 +98,5 @@ For the HTTPS worker API path, call `POST /worker` with `command`, `worker`,
 `GET /worker?view=approvals` use the same bearer token for operator-only
 snapshots and approval review. Worker-specific HTTP paths are intentionally
 absent; expand the worker control plane through `/worker` payload fields.
+The deploy workflow also smokes `/api/core` task, object, event, evidence,
+document, and decision commands after each production rollout.

@@ -38,7 +38,8 @@ Then open `http://localhost:3000`.
 
 - `/api/health` reports Postgres-backed readiness checks.
 - `/api/core` returns persisted core counts, active tasks, and recent events for tokened operators;
-  `POST /api/core` accepts structured core commands such as `task.create`.
+  `POST /api/core` accepts structured core commands: `task.create`, `object.upsert`,
+  `event.ingest`, `evidence.attach`, `document.create`, and `decision.record`.
 - `/worker` is the canonical worker control-plane API. Use `GET /worker?view=snapshot` or
   `GET /worker?view=approvals`; use `POST /worker` with `command` and `config`
   payloads for side-effecting worker commands. Revenue operations runs provide

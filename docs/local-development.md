@@ -65,6 +65,31 @@ curl -X POST http://localhost:3000/api/core \
   }'
 ```
 
+Core object, event, evidence, document, and decision commands use the same
+`command` / `core` / `config` shape:
+
+```sh
+curl -X POST http://localhost:3000/api/core \
+  -H "authorization: Bearer $WORKER_RUN_TOKEN" \
+  -H "content-type: application/json" \
+  -d '{
+    "command": "object.upsert",
+    "core": {"tenantSlug": "continuous-demo"},
+    "idempotencyKey": "local-core-object-001",
+    "config": {
+      "type": "agency_notice",
+      "name": "Agency notice packet",
+      "source": "operator_payload",
+      "externalId": "notice-001",
+      "data": {"agency": "Department of Cheerful Paperwork"}
+    }
+  }'
+```
+
+The additional Core write commands are `event.ingest`, `evidence.attach`,
+`document.create`, and `decision.record`. Each command writes audit proof and
+keeps external execution blocked.
+
 The repo also includes `.mcp.json` for the Next.js MCP bridge. With `bun run dev`
 running, compatible coding agents can inspect routes, runtime errors, metadata,
 and logs through `next-devtools-mcp`. The installed Codex app-server CLI exposes

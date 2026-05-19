@@ -10,7 +10,7 @@
 - Add customer satisfaction and feedback entities: SatisfactionSignal, FeedbackItem, Complaint, Testimonial, and Review.
 - Extend the broader workflow catalog beyond the first seven seeded workflows: open new state, compensation change, location change, payroll run, off-cycle payroll, quarter close, year-end, leave, injury/incident, benefits renewal, and agency notice.
 - Wire workflow step handlers into capability execution, retry workers, and adapter reconciliation.
-- Extend headless Core commands beyond `task.create` to object upsert, event ingest, evidence attach, document packet create, and decision record.
+- Add more specialized Core commands for object links, workflow packets, generated UI views, and rule changes.
 - Add document/evidence packet support for new-hire, contractor, payroll, filing, termination, AI action, and rule-change workflows.
 - Build the approval UI on top of the shared `approval_requests`, `audit_events`, and evidence API.
 - Keep all worker-family HTTP controls on `/worker` with structured `worker`, `command`, `idempotencyKey`, and `config` fields; do not add worker-family-specific URL shapes.

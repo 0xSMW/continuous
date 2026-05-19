@@ -401,6 +401,172 @@ jobs:
           select 'core_audit' as kind, type, source, data->>'externalExecution'
           from audit_events where id = '$CORE_AUDIT_ID'::uuid and target_id = '$CORE_TASK_ID'::uuid;
           SQL
+
+          CORE_OBJECT_KEY="deploy-core-object-$RUN_ID"
+          CORE_OBJECT_PAYLOAD="$(
+            /usr/bin/jq -nc --arg key "$CORE_OBJECT_KEY" '{
+              command: "object.upsert",
+              core: {tenantSlug: "continuous-demo"},
+              idempotencyKey: $key,
+              config: {
+                type: "agency_notice",
+                name: "Deploy smoke agency notice",
+                state: "received",
+                source: "deploy_smoke",
+                externalId: $key,
+                data: {
+                  source: "deploy_smoke",
+                  dueInDays: 14
+                },
+                reason: "Deploy smoke core primitive"
+              }
+            }'
+          )"
+          CORE_OBJECT_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/api/core \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$CORE_OBJECT_PAYLOAD"
+          )"
+
+          echo "$CORE_OBJECT_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,objectId:.data.result.objectId,version:.data.result.version,eventId:.data.result.eventId,auditEventId:.data.result.auditEventId}}'
+          echo "$CORE_OBJECT_RESPONSE" | /usr/bin/jq -e \
+            '.error == null and .data.command == "object.upsert" and .data.result.created == true and (.data.result.objectId | length > 0) and (.data.result.version >= 1)' \
+            >/dev/null
+
+          CORE_OBJECT_ID="$(echo "$CORE_OBJECT_RESPONSE" | /usr/bin/jq -r '.data.result.objectId')"
+          CORE_EVENT_KEY="deploy-core-event-$RUN_ID"
+          CORE_EVENT_PAYLOAD="$(
+            /usr/bin/jq -nc --arg key "$CORE_EVENT_KEY" --arg objectId "$CORE_OBJECT_ID" '{
+              command: "event.ingest",
+              core: {tenantSlug: "continuous-demo"},
+              idempotencyKey: $key,
+              config: {
+                type: "deploy_smoke.notice.received",
+                source: "deploy_smoke.core",
+                objectId: $objectId,
+                data: {channel: "deploy_smoke"}
+              }
+            }'
+          )"
+          CORE_EVENT_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/api/core \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$CORE_EVENT_PAYLOAD"
+          )"
+
+          echo "$CORE_EVENT_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:.data.result}'
+          echo "$CORE_EVENT_RESPONSE" | /usr/bin/jq -e \
+            '.error == null and .data.command == "event.ingest" and (.data.result.eventId | length > 0)' \
+            >/dev/null
+
+          CORE_INGESTED_EVENT_ID="$(echo "$CORE_EVENT_RESPONSE" | /usr/bin/jq -r '.data.result.eventId')"
+          CORE_EVIDENCE_KEY="deploy-core-evidence-$RUN_ID"
+          CORE_EVIDENCE_PAYLOAD="$(
+            /usr/bin/jq -nc --arg key "$CORE_EVIDENCE_KEY" --arg objectId "$CORE_OBJECT_ID" --arg eventId "$CORE_INGESTED_EVENT_ID" '{
+              command: "evidence.attach",
+              core: {tenantSlug: "continuous-demo"},
+              idempotencyKey: $key,
+              config: {
+                kind: "snapshot",
+                name: "Deploy smoke source snapshot",
+                objectId: $objectId,
+                eventId: $eventId,
+                data: {externalExecution: "blocked"}
+              }
+            }'
+          )"
+          CORE_EVIDENCE_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/api/core \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$CORE_EVIDENCE_PAYLOAD"
+          )"
+
+          echo "$CORE_EVIDENCE_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:.data.result}'
+          echo "$CORE_EVIDENCE_RESPONSE" | /usr/bin/jq -e \
+            '.error == null and .data.command == "evidence.attach" and (.data.result.evidenceId | length > 0)' \
+            >/dev/null
+
+          CORE_EVIDENCE_ID="$(echo "$CORE_EVIDENCE_RESPONSE" | /usr/bin/jq -r '.data.result.evidenceId')"
+          CORE_DOCUMENT_KEY="deploy-core-document-$RUN_ID"
+          CORE_DOCUMENT_PAYLOAD="$(
+            /usr/bin/jq -nc --arg key "$CORE_DOCUMENT_KEY" --arg objectId "$CORE_OBJECT_ID" --arg evidenceId "$CORE_EVIDENCE_ID" '{
+              command: "document.create",
+              core: {tenantSlug: "continuous-demo"},
+              idempotencyKey: $key,
+              config: {
+                kind: "agency_notice_packet",
+                name: "Deploy smoke agency notice packet",
+                state: "review_ready",
+                sensitivity: "high",
+                objectId: $objectId,
+                data: {evidenceIds: [$evidenceId]}
+              }
+            }'
+          )"
+          CORE_DOCUMENT_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/api/core \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$CORE_DOCUMENT_PAYLOAD"
+          )"
+
+          echo "$CORE_DOCUMENT_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:.data.result}'
+          echo "$CORE_DOCUMENT_RESPONSE" | /usr/bin/jq -e \
+            '.error == null and .data.command == "document.create" and (.data.result.documentId | length > 0)' \
+            >/dev/null
+
+          CORE_DOCUMENT_ID="$(echo "$CORE_DOCUMENT_RESPONSE" | /usr/bin/jq -r '.data.result.documentId')"
+          CORE_DECISION_KEY="deploy-core-decision-$RUN_ID"
+          CORE_DECISION_PAYLOAD="$(
+            /usr/bin/jq -nc --arg key "$CORE_DECISION_KEY" --arg eventId "$CORE_INGESTED_EVENT_ID" --arg objectId "$CORE_OBJECT_ID" --arg documentId "$CORE_DOCUMENT_ID" '{
+              command: "decision.record",
+              core: {tenantSlug: "continuous-demo"},
+              idempotencyKey: $key,
+              config: {
+                kind: "notice_routing",
+                state: "proposed",
+                decision: "owner_review_required",
+                rationale: "Deploy smoke record; no external action.",
+                eventId: $eventId,
+                data: {
+                  objectId: $objectId,
+                  documentId: $documentId,
+                  externalExecution: "blocked"
+                }
+              }
+            }'
+          )"
+          CORE_DECISION_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/api/core \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$CORE_DECISION_PAYLOAD"
+          )"
+
+          echo "$CORE_DECISION_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:.data.result}'
+          echo "$CORE_DECISION_RESPONSE" | /usr/bin/jq -e \
+            '.error == null and .data.command == "decision.record" and (.data.result.decisionId | length > 0)' \
+            >/dev/null
+
+          CORE_DECISION_ID="$(echo "$CORE_DECISION_RESPONSE" | /usr/bin/jq -r '.data.result.decisionId')"
+          psql_db -At <<SQL
+          select 'core_object' as kind, type, state, external_id
+          from objects where id = '$CORE_OBJECT_ID'::uuid;
+          select 'core_evidence' as kind, kind, name
+          from evidence where id = '$CORE_EVIDENCE_ID'::uuid;
+          select 'core_document' as kind, kind, state, sensitivity
+          from documents where id = '$CORE_DOCUMENT_ID'::uuid;
+          select 'core_decision' as kind, kind, state, decision
+          from decisions where id = '$CORE_DECISION_ID'::uuid;
+          SQL
           REMOTE
 
       - name: Close runner SSH access
