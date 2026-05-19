@@ -45,6 +45,21 @@ Approval decisions use the same route:
 }
 ```
 
+Adapter reconciliation also stays on the same command surface:
+
+```json
+{
+  "command": "adapters.reconcile",
+  "worker": {
+    "role": "revenue_operations",
+    "tenantSlug": "continuous-demo"
+  },
+  "config": {
+    "limit": 25
+  }
+}
+```
+
 Worker-family-specific routes such as `/api/revenue-worker/run` are not part of
 the public API. Future workers must use `/worker` with role, command,
 idempotency, and config in structured fields.

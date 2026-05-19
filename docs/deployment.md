@@ -88,7 +88,7 @@ ssh root@45.55.53.92 'cd /opt/continuous && docker compose --profile tools run -
 ```
 
 For the HTTPS worker API path, call `POST /worker` with `command`, `worker`,
-`config`, and `idempotencyKey` fields plus the bearer token from
+`config`, and `idempotencyKey` fields as required by the command plus the bearer token from
 `/opt/continuous/.env`. `GET /api/core`, `GET /worker?view=snapshot`, and
 `GET /worker?view=approvals` use the same bearer token for operator-only
 snapshots and approval review. Worker-specific HTTP paths are intentionally

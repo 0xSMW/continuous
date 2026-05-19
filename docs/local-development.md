@@ -105,6 +105,19 @@ bun run worker:tool worker.snapshot --payload='{"worker":{"role":"revenue_operat
 bun run worker:tool worker.adapters.reconcile --payload='{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{"limit":25}}'
 ```
 
+The same reconciliation command is available through the canonical worker API:
+
+```sh
+curl -X POST http://localhost:3000/worker \
+  -H "authorization: Bearer $REVENUE_WORKER_RUN_TOKEN" \
+  -H "content-type: application/json" \
+  -d '{
+    "command": "adapters.reconcile",
+    "worker": {"role": "revenue_operations", "tenantSlug": "continuous-demo"},
+    "config": {"limit": 25}
+  }'
+```
+
 List and decide approvals with the same bearer token:
 
 ```sh

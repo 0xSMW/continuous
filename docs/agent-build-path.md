@@ -81,6 +81,21 @@ When the HTTP snapshot, approval, or run path is required, start the app with
 }
 ```
 
+Use the same route for operational worker commands:
+
+```json
+{
+  "command": "adapters.reconcile",
+  "worker": {
+    "role": "revenue_operations",
+    "tenantSlug": "continuous-demo"
+  },
+  "config": {
+    "limit": 25
+  }
+}
+```
+
 The worker toolbox uses the same payload shape:
 
 ```sh

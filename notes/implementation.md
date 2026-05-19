@@ -81,7 +81,9 @@ credential scopes, and approval UI are in place.
 The canonical HTTP shape is now `/worker`: `GET /worker?view=snapshot` for
 state, `GET /worker?view=approvals` for approval queues, and `POST /worker`
 with `command`, `worker`, `idempotencyKey`, and `config` for side-effecting
-operations. Worker-specific HTTP routes such as `/api/revenue-worker*` are
+operations. Adapter reconciliation uses the same route with
+`command=adapters.reconcile`, a tenant-scoped `worker` target, and
+`config.limit`. Worker-specific HTTP routes such as `/api/revenue-worker*` are
 absent by design.
 
 Workflow execution now has the same control-plane style through `/workflow`.

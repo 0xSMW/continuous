@@ -4,6 +4,7 @@ import {
   listApprovals,
   normalizeApprovalDecision,
 } from "../../src/core/approvals";
+import { reconcileAdapterLedger } from "../../src/core/adapters";
 import { PlatformUnavailableError } from "../../src/core/errors";
 import type { JsonObject } from "../../src/db/schema";
 import {
@@ -40,6 +41,24 @@ function bodyObject(value: unknown) {
 
 function jsonObject(value: unknown): JsonObject {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonObject) : {};
+}
+
+function optionalLimit(value: unknown) {
+  if (value === undefined || value === null) {
+    return { ok: true as const, value: undefined };
+  }
+
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 100) {
+    return {
+      ok: false as const,
+      error: {
+        code: "invalid_worker_command_config",
+        message: "config.limit must be an integer between 1 and 100.",
+      },
+    };
+  }
+
+  return { ok: true as const, value };
 }
 
 async function readBody(request: Request) {
@@ -349,10 +368,58 @@ export async function POST(request: Request) {
     }
   }
 
+  if (command === "adapters.reconcile") {
+    if (!target.target.tenantSlug) {
+      return errorResponse(
+        {
+          code: "invalid_worker_target",
+          message: "worker.tenantSlug is required for adapters.reconcile.",
+        },
+        400,
+      );
+    }
+
+    const limit = optionalLimit(config.limit);
+
+    if (!limit.ok) {
+      return errorResponse(limit.error, 400);
+    }
+
+    try {
+      const result = await reconcileAdapterLedger({
+        tenantSlug: target.target.tenantSlug,
+        limit: limit.value,
+      });
+
+      return Response.json(
+        {
+          api: apiVersion,
+          data: {
+            worker: {
+              role: target.target.role,
+              id: target.target.workerId ?? null,
+              tenantSlug: target.target.tenantSlug,
+            },
+            command,
+            result,
+          },
+          error: null,
+        },
+        {
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    } catch (error) {
+      return workerErrorResponse(error, "worker_adapter_reconciliation_failed");
+    }
+  }
+
   return errorResponse(
     {
       code: "worker_command_unsupported",
-      message: "Worker command must be run or approval.decide.",
+      message: "Worker command must be run, approval.decide, or adapters.reconcile.",
     },
     400,
   );

@@ -15,6 +15,7 @@ state, and object versioning without external sends or money movement.
 | Operator read API | `GET /worker?view=snapshot&role=revenue_operations`, bearer-token required |
 | Approval API | `GET /worker?view=approvals&role=revenue_operations` and `POST /worker` with `command=approval.decide`, bearer-token required |
 | Run API | `POST /worker` with `command=run`, disabled by default and bearer-token gated when enabled |
+| Adapter reconciliation API | `POST /worker` with `command=adapters.reconcile`, tenant-scoped and bearer-token required |
 | Operator run | `bun run worker:tool worker.run` with the same worker/config payload |
 | External execution | Disabled; adapter runtime records dry-run receipts and matched reconciliation only |
 
