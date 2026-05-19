@@ -8,6 +8,8 @@ are explicit.
 
 Use [Worker execution roadmap](worker-roadmap.md) for the phase-by-phase
 implementation gates from the first worker to the broader worker catalog.
+Use [Worker contract template](worker-contract-template.md) before coding any
+new worker family.
 
 ## Launch Order
 
@@ -22,6 +24,13 @@ implementation gates from the first worker to the broader worker catalog.
 | 7 | Systems Worker | Connector health, sync repair, data quality, and workflow automation | Tenant-scoped adapter grants, rollback plans, and sync reconciliation tests |
 
 ## Per-Worker Contracts
+
+Every worker needs an implementation-grade V1 contract before runtime code. The
+contract must name the exact `/worker` `command`, `worker`, `config`, and
+`idempotencyKey` shape; required Core commands; object fields and link types;
+workflow states and transitions; capability grants; adapter dry-run payloads;
+evidence packet schema; generated view contract; eval fixtures; and security
+boundaries.
 
 | Worker | Core objects | Capabilities | Workflows | Adapters | Evidence packet | Eval gate |
 |---|---|---|---|---|---|---|

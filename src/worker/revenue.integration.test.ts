@@ -9,6 +9,8 @@ import {
   attachCoreEvidence,
   createCoreDocument,
   ingestCoreEvent,
+  linkCoreObjects,
+  publishCoreView,
   recordCoreDecision,
   upsertCoreObject,
 } from "../core/primitives";
@@ -26,8 +28,10 @@ import {
   evaluations,
   evidence,
   objects,
+  objectLinks,
   objectVersions,
   tasks,
+  generatedViews,
   workerRuns,
   type JsonObject,
 } from "../db/schema";
@@ -274,6 +278,127 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(auditCount.value).toBe(5);
     expect(replay.created).toBe(false);
     expect(replay.evidenceId).toBe(evidenceResult.evidenceId);
+  }, 120_000);
+
+  it("persists headless core object links and generated views", async () => {
+    const runId = randomUUID();
+    const notice = await upsertCoreObject({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-link-notice-${runId}`,
+      type: "agency_notice",
+      name: "Linked agency notice",
+      source: "ci.core",
+      externalId: `linked-notice-${runId}`,
+      db,
+    });
+    const customer = await upsertCoreObject({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-link-customer-${runId}`,
+      type: "customer",
+      name: "Linked customer",
+      source: "ci.core",
+      externalId: `linked-customer-${runId}`,
+      db,
+    });
+    const link = await linkCoreObjects({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-object-link-${runId}`,
+      fromObjectId: notice.objectId,
+      toObjectId: customer.objectId,
+      type: "about_customer",
+      data: {
+        confidence: "operator_confirmed",
+      },
+      db,
+    });
+    const view = await publishCoreView({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-view-publish-${runId}`,
+      key: `ci.notice.review.${runId}`,
+      name: "Notice review",
+      purpose: "Render an operator review packet for an agency notice.",
+      objectType: "agency_notice",
+      taskState: "approval_required",
+      contract: {
+        sections: ["summary", "evidence", "actions"],
+      },
+      actions: {
+        valid: ["approve", "request_revision"],
+      },
+      data: {
+        objectId: notice.objectId,
+      },
+      mask: {
+        pii: "redacted_by_default",
+      },
+      db,
+    });
+
+    expect(link.created).toBe(true);
+    expect(link.updated).toBe(false);
+    expect(link.link.fromObjectId).toBe(notice.objectId);
+    expect(link.link.toObjectId).toBe(customer.objectId);
+    expect(view.created).toBe(true);
+    expect(view.updated).toBe(false);
+    expect(view.view.key).toBe(`ci.notice.review.${runId}`);
+
+    const [persistedLink] = await db
+      .select()
+      .from(objectLinks)
+      .where(eq(objectLinks.id, link.objectLinkId))
+      .limit(1);
+    const [persistedView] = await db
+      .select()
+      .from(generatedViews)
+      .where(eq(generatedViews.id, view.viewId))
+      .limit(1);
+    const [auditCount] = await db
+      .select({ value: count() })
+      .from(auditEvents)
+      .where(
+        inArray(auditEvents.id, [
+          notice.auditEventId,
+          customer.auditEventId,
+          link.auditEventId,
+          view.auditEventId,
+        ]),
+      );
+    const linkReplay = await linkCoreObjects({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-object-link-${runId}`,
+      fromObjectId: notice.objectId,
+      toObjectId: customer.objectId,
+      type: "about_customer",
+      data: {
+        confidence: "should_replay",
+      },
+      db,
+    });
+    const viewReplay = await publishCoreView({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-view-publish-${runId}`,
+      key: `ci.notice.review.${runId}`,
+      name: "Different name should replay",
+      purpose: "Replay existing view.",
+      db,
+    });
+
+    expect(persistedLink?.type).toBe("about_customer");
+    expect(objectValue(persistedLink?.data).confidence).toBe("operator_confirmed");
+    expect(persistedView?.purpose).toBe("Render an operator review packet for an agency notice.");
+    expect(persistedView?.taskState).toBe("approval_required");
+    expect(objectValue(persistedView?.contract).sections).toEqual(["summary", "evidence", "actions"]);
+    expect(auditCount.value).toBe(4);
+    expect(linkReplay.created).toBe(false);
+    expect(linkReplay.objectLinkId).toBe(link.objectLinkId);
+    expect(viewReplay.created).toBe(false);
+    expect(viewReplay.viewId).toBe(view.viewId);
   }, 120_000);
 
   it("persists the golden lead-to-quote output, eval row, and idempotent replay", async () => {

@@ -32,7 +32,7 @@ Useful app surfaces for worker development:
 | `/` | Runtime dashboard with public core state and redacted worker readiness |
 | `/api/health` | Machine health check |
 | `/api/core` | Operator-gated persisted primitive summary |
-| `POST /api/core` | Canonical Core command surface with `command`, `core`, `config`, and `idempotencyKey` payload fields for tasks, objects, events, evidence, documents, and decisions |
+| `POST /api/core` | Canonical Core command surface with `command`, `core`, `config`, and `idempotencyKey` payload fields for tasks, objects, object links, events, evidence, documents, decisions, and generated views |
 | `/worker?view=snapshot` | Canonical operator-gated worker snapshot |
 | `/worker?view=approvals` | Canonical operator-gated worker approval queue |
 | `POST /worker` | Canonical command surface with `command`, `worker`, `config`, and `idempotencyKey` payload fields |
@@ -126,8 +126,8 @@ The same surface owns the persisted Core primitives used by future workers:
 }
 ```
 
-Other supported Core commands are `event.ingest`, `evidence.attach`,
-`document.create`, and `decision.record`.
+Other supported Core commands are `object.link`, `event.ingest`,
+`evidence.attach`, `document.create`, `decision.record`, and `view.publish`.
 
 Use the same route for operational worker commands:
 

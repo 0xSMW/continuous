@@ -549,6 +549,80 @@ jobs:
             >/dev/null
 
           CORE_OBJECT_ID="$(echo "$CORE_OBJECT_RESPONSE" | /usr/bin/jq -r '.data.result.objectId')"
+          CORE_LINK_KEY="deploy-core-link-$RUN_ID"
+          CORE_LINK_PAYLOAD="$(
+            /usr/bin/jq -nc --arg key "$CORE_LINK_KEY" --arg fromObjectId "$CORE_OBJECT_ID" --arg toObjectId "$LEAD_OBJECT_ID" '{
+              command: "object.link",
+              core: {tenantSlug: "continuous-demo"},
+              idempotencyKey: $key,
+              config: {
+                fromObjectId: $fromObjectId,
+                toObjectId: $toObjectId,
+                type: "related_lead",
+                data: {
+                  source: "deploy_smoke",
+                  externalExecution: "blocked"
+                }
+              }
+            }'
+          )"
+          CORE_LINK_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/api/core \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$CORE_LINK_PAYLOAD"
+          )"
+
+          echo "$CORE_LINK_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:.data.result}'
+          echo "$CORE_LINK_RESPONSE" | /usr/bin/jq -e \
+            '.error == null and .data.command == "object.link" and (.data.result.objectLinkId | length > 0)' \
+            >/dev/null
+
+          CORE_LINK_ID="$(echo "$CORE_LINK_RESPONSE" | /usr/bin/jq -r '.data.result.objectLinkId')"
+          CORE_VIEW_KEY="deploy-core-view-$RUN_ID"
+          CORE_VIEW_PAYLOAD="$(
+            /usr/bin/jq -nc --arg key "$CORE_VIEW_KEY" --arg viewKey "deploy.notice.review" --arg objectId "$CORE_OBJECT_ID" '{
+              command: "view.publish",
+              core: {tenantSlug: "continuous-demo"},
+              idempotencyKey: $key,
+              config: {
+                key: $viewKey,
+                version: $key,
+                name: "Deploy smoke notice review",
+                purpose: "Render deploy smoke operator review data without external execution.",
+                objectType: "agency_notice",
+                taskState: "approval_required",
+                contract: {
+                  sections: ["summary", "evidence", "actions"]
+                },
+                actions: {
+                  valid: ["approve", "request_revision"]
+                },
+                data: {
+                  objectId: $objectId,
+                  externalExecution: "blocked"
+                },
+                mask: {
+                  pii: "redacted_by_default"
+                }
+              }
+            }'
+          )"
+          CORE_VIEW_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/api/core \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$CORE_VIEW_PAYLOAD"
+          )"
+
+          echo "$CORE_VIEW_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:.data.result}'
+          echo "$CORE_VIEW_RESPONSE" | /usr/bin/jq -e \
+            '.error == null and .data.command == "view.publish" and (.data.result.viewId | length > 0)' \
+            >/dev/null
+
+          CORE_VIEW_ID="$(echo "$CORE_VIEW_RESPONSE" | /usr/bin/jq -r '.data.result.viewId')"
           CORE_EVENT_KEY="deploy-core-event-$RUN_ID"
           CORE_EVENT_PAYLOAD="$(
             /usr/bin/jq -nc --arg key "$CORE_EVENT_KEY" --arg objectId "$CORE_OBJECT_ID" '{
@@ -673,6 +747,10 @@ jobs:
           psql_db -At <<SQL
           select 'core_object' as kind, type, state, external_id
           from objects where id = '$CORE_OBJECT_ID'::uuid;
+          select 'core_object_link' as kind, type, data->>'externalExecution'
+          from object_links where id = '$CORE_LINK_ID'::uuid;
+          select 'core_view' as kind, key, version, object_type, task_state::text
+          from ui_contracts where id = '$CORE_VIEW_ID'::uuid;
           select 'core_evidence' as kind, kind, name
           from evidence where id = '$CORE_EVIDENCE_ID'::uuid;
           select 'core_document' as kind, kind, state, sensitivity

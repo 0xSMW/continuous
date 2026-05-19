@@ -5,6 +5,8 @@ import {
   attachCoreEvidence,
   createCoreDocument,
   ingestCoreEvent,
+  linkCoreObjects,
+  publishCoreView,
   recordCoreDecision,
   upsertCoreObject,
 } from "../../../src/core/primitives";
@@ -33,6 +35,10 @@ function bodyObject(value: unknown) {
 
 function jsonObject(value: unknown): JsonObject {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonObject) : {};
+}
+
+function optionalBoolean(value: unknown) {
+  return typeof value === "boolean" ? value : undefined;
 }
 
 function actorFrom(value: unknown) {
@@ -495,11 +501,120 @@ export async function POST(request: Request) {
     }
   }
 
+  if (command === "object.link") {
+    const idempotency = normalizeIdempotencyKey(
+      request.headers.get("idempotency-key") ?? body.idempotencyKey,
+    );
+
+    if (!idempotency.ok) {
+      return errorResponse(
+        {
+          code: "invalid_idempotency_key",
+          message: idempotency.message,
+        },
+        400,
+      );
+    }
+
+    try {
+      const result = await linkCoreObjects({
+        operatorEmail: auth.operatorEmail,
+        idempotencyKey: idempotency.key,
+        tenantSlug,
+        fromObjectId: optionalString(config.fromObjectId) ?? optionalString(config.fromId) ?? "",
+        toObjectId: optionalString(config.toObjectId) ?? optionalString(config.toId) ?? "",
+        type: optionalString(config.type) ?? "",
+        data: jsonObject(config.data),
+        effectiveAt: optionalString(config.effectiveAt),
+        endedAt: optionalString(config.endedAt),
+      });
+
+      return Response.json(
+        {
+          api: apiVersion,
+          data: {
+            command,
+            core: {
+              tenantSlug: tenantSlug ?? null,
+            },
+            result,
+          },
+          error: null,
+        },
+        {
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    } catch (error) {
+      return coreErrorResponse(error, "core_object_link_failed");
+    }
+  }
+
+  if (command === "view.publish") {
+    const idempotency = normalizeIdempotencyKey(
+      request.headers.get("idempotency-key") ?? body.idempotencyKey,
+    );
+
+    if (!idempotency.ok) {
+      return errorResponse(
+        {
+          code: "invalid_idempotency_key",
+          message: idempotency.message,
+        },
+        400,
+      );
+    }
+
+    try {
+      const result = await publishCoreView({
+        operatorEmail: auth.operatorEmail,
+        idempotencyKey: idempotency.key,
+        tenantSlug,
+        key: optionalString(config.key) ?? "",
+        name: optionalString(config.name) ?? "",
+        purpose: optionalString(config.purpose) ?? "",
+        version: optionalString(config.version),
+        surface: optionalString(config.surface),
+        capabilityId: optionalString(config.capabilityId),
+        objectType: optionalString(config.objectType),
+        taskState: optionalString(config.taskState),
+        contract: jsonObject(config.contract),
+        actions: jsonObject(config.actions),
+        data: jsonObject(config.data),
+        mask: jsonObject(config.mask),
+        active: optionalBoolean(config.active),
+      });
+
+      return Response.json(
+        {
+          api: apiVersion,
+          data: {
+            command,
+            core: {
+              tenantSlug: tenantSlug ?? null,
+            },
+            result,
+          },
+          error: null,
+        },
+        {
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    } catch (error) {
+      return coreErrorResponse(error, "core_view_publish_failed");
+    }
+  }
+
   return errorResponse(
     {
       code: "core_command_unsupported",
       message:
-        "Core command must be task.create, object.upsert, event.ingest, evidence.attach, document.create, or decision.record.",
+        "Core command must be task.create, object.upsert, object.link, event.ingest, evidence.attach, document.create, decision.record, or view.publish.",
     },
     400,
   );

@@ -11,8 +11,10 @@ import {
   events,
   evidence,
   objects,
+  objectLinks,
   objectVersions,
   tasks,
+  uiContracts,
   workflowRuns,
   type JsonObject,
 } from "../db/schema";
@@ -24,6 +26,7 @@ type QueryClient = Pick<Database, "execute" | "select">;
 type ActorType = "user" | "worker" | "adapter" | "system";
 type EvidenceKind = "snapshot" | "draft" | "approval" | "receipt" | "trace" | "export" | "note";
 type RiskLevel = "low" | "medium" | "high" | "critical";
+type CoreTaskState = "draft" | "active" | "waiting" | "approval_required" | "blocked" | "done" | "canceled";
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -44,6 +47,8 @@ const eventSource = "continuous.core.events";
 const evidenceSource = "continuous.core.evidence";
 const documentSource = "continuous.core.documents";
 const decisionSource = "continuous.core.decisions";
+const objectLinkSource = "continuous.core.object_links";
+const viewSource = "continuous.core.views";
 
 export type ActorInput = {
   type?: string;
@@ -138,6 +143,39 @@ export type CoreDecisionRecordInput = {
   db?: Database;
 };
 
+export type CoreObjectLinkInput = {
+  operatorEmail: string;
+  idempotencyKey: string;
+  tenantSlug?: string;
+  fromObjectId: string;
+  toObjectId: string;
+  type: string;
+  data?: JsonObject;
+  effectiveAt?: string;
+  endedAt?: string;
+  db?: Database;
+};
+
+export type CoreViewPublishInput = {
+  operatorEmail: string;
+  idempotencyKey: string;
+  tenantSlug?: string;
+  key: string;
+  name: string;
+  purpose: string;
+  version?: string;
+  surface?: string;
+  capabilityId?: string;
+  objectType?: string;
+  taskState?: string;
+  contract?: JsonObject;
+  actions?: JsonObject;
+  data?: JsonObject;
+  mask?: JsonObject;
+  active?: boolean;
+  db?: Database;
+};
+
 function cleanString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
@@ -170,6 +208,16 @@ function optionalUuid(value: string | undefined, field: string) {
   }
 
   return value;
+}
+
+function requiredUuid(value: unknown, field: string) {
+  const uuid = optionalUuid(requiredString(value, field), field);
+
+  if (!uuid) {
+    throw new PlatformUnavailableError("core_reference_invalid", `${field} must be a UUID.`, 400);
+  }
+
+  return uuid;
 }
 
 function optionalDate(value: string | undefined, field: string) {
@@ -236,6 +284,32 @@ function parseRisk(value: string | undefined) {
   throw new PlatformUnavailableError(
     "core_risk_invalid",
     "config.sensitivity must be low, medium, high, or critical.",
+    400,
+  );
+}
+
+function parseTaskState(value: string | undefined) {
+  if (!value) {
+    return undefined;
+  }
+
+  const taskStates = new Set<CoreTaskState>([
+    "draft",
+    "active",
+    "waiting",
+    "approval_required",
+    "blocked",
+    "done",
+    "canceled",
+  ]);
+
+  if (taskStates.has(value as CoreTaskState)) {
+    return value as CoreTaskState;
+  }
+
+  throw new PlatformUnavailableError(
+    "core_task_state_invalid",
+    "config.taskState must be draft, active, waiting, approval_required, blocked, done, or canceled.",
     400,
   );
 }
@@ -1080,6 +1154,347 @@ export async function recordCoreDecision(input: CoreDecisionRecordInput) {
       decisionId: decision.id,
       eventId: event.id,
       auditEventId: audit.id,
+    };
+  });
+}
+
+export async function linkCoreObjects(input: CoreObjectLinkInput) {
+  const db = input.db ?? defaultDb;
+  const fromObjectId = requiredUuid(input.fromObjectId, "config.fromObjectId");
+  const toObjectId = requiredUuid(input.toObjectId, "config.toObjectId");
+  const type = requiredString(input.type, "config.type");
+  const effectiveAt = optionalDate(input.effectiveAt, "config.effectiveAt");
+  const endedAt = optionalDate(input.endedAt, "config.endedAt");
+  const operator = await loadOperatorContext({
+    db,
+    operatorEmail: input.operatorEmail,
+    tenantSlug: input.tenantSlug,
+  });
+
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${operator.tenantId}), hashtext(${`${objectLinkSource}:${input.idempotencyKey}`}))`,
+    );
+
+    const [existingAudit] = await tx
+      .select({
+        auditEventId: auditEvents.id,
+        targetId: auditEvents.targetId,
+        eventId: auditEvents.eventId,
+      })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.tenantId, operator.tenantId),
+          eq(auditEvents.source, objectLinkSource),
+          eq(auditEvents.idempotencyKey, `${input.idempotencyKey}:object_linked`),
+          eq(auditEvents.targetType, "object_link"),
+        ),
+      )
+      .limit(1);
+
+    if (existingAudit?.targetId) {
+      const [link] = await tx
+        .select()
+        .from(objectLinks)
+        .where(
+          and(
+            eq(objectLinks.tenantId, operator.tenantId),
+            eq(objectLinks.id, existingAudit.targetId),
+          ),
+        )
+        .limit(1);
+
+      if (link) {
+        return {
+          created: false,
+          updated: false,
+          objectLinkId: link.id,
+          eventId: existingAudit.eventId,
+          auditEventId: existingAudit.auditEventId,
+          link: {
+            id: link.id,
+            fromObjectId: link.fromId,
+            toObjectId: link.toId,
+            type: link.type,
+          },
+        };
+      }
+    }
+
+    await Promise.all([
+      assertObject(tx, operator.tenantId, fromObjectId),
+      assertObject(tx, operator.tenantId, toObjectId),
+    ]);
+
+    const [existingLink] = await tx
+      .select()
+      .from(objectLinks)
+      .where(
+        and(
+          eq(objectLinks.tenantId, operator.tenantId),
+          eq(objectLinks.fromId, fromObjectId),
+          eq(objectLinks.toId, toObjectId),
+          eq(objectLinks.type, type),
+        ),
+      )
+      .limit(1);
+    const [link] = existingLink
+      ? await tx
+          .update(objectLinks)
+          .set({
+            data: jsonObject(input.data),
+            effectiveAt,
+            endedAt,
+          })
+          .where(eq(objectLinks.id, existingLink.id))
+          .returning()
+      : await tx
+          .insert(objectLinks)
+          .values({
+            tenantId: operator.tenantId,
+            fromId: fromObjectId,
+            toId: toObjectId,
+            type,
+            data: jsonObject(input.data),
+            effectiveAt,
+            endedAt,
+          })
+          .returning();
+    const now = new Date();
+    const [event] = await tx
+      .insert(events)
+      .values({
+        tenantId: operator.tenantId,
+        type: existingLink ? "object_link.updated" : "object_link.created",
+        source: objectLinkSource,
+        actorType: "user",
+        actorId: operator.userId,
+        actorRef: operator.actorRef,
+        objectId: fromObjectId,
+        idempotencyKey: `${input.idempotencyKey}:object_linked`,
+        data: {
+          objectLinkId: link.id,
+          fromObjectId,
+          toObjectId,
+          type,
+          endedAt: endedAt?.toISOString() ?? null,
+        },
+        occurredAt: now,
+      })
+      .returning({ id: events.id });
+    const [audit] = await tx
+      .insert(auditEvents)
+      .values({
+        tenantId: operator.tenantId,
+        type: existingLink ? "object_link.updated" : "object_link.created",
+        source: objectLinkSource,
+        actorType: "user",
+        actorId: operator.userId,
+        actorRef: operator.actorRef,
+        targetType: "object_link",
+        targetId: link.id,
+        eventId: event.id,
+        objectId: fromObjectId,
+        risk: "low",
+        idempotencyKey: `${input.idempotencyKey}:object_linked`,
+        data: {
+          objectLinkId: link.id,
+          fromObjectId,
+          toObjectId,
+          type,
+          externalExecution: "blocked",
+        },
+      })
+      .returning({ id: auditEvents.id });
+
+    return {
+      created: !existingLink,
+      updated: Boolean(existingLink),
+      objectLinkId: link.id,
+      eventId: event.id,
+      auditEventId: audit.id,
+      link: {
+        id: link.id,
+        fromObjectId: link.fromId,
+        toObjectId: link.toId,
+        type: link.type,
+      },
+    };
+  });
+}
+
+export async function publishCoreView(input: CoreViewPublishInput) {
+  const db = input.db ?? defaultDb;
+  const key = requiredString(input.key, "config.key");
+  const name = requiredString(input.name, "config.name");
+  const purpose = requiredString(input.purpose, "config.purpose");
+  const version = cleanString(input.version) ?? "1.0.0";
+  const surface = cleanString(input.surface) ?? "web";
+  const capabilityId = optionalUuid(input.capabilityId, "config.capabilityId");
+  const objectType = cleanString(input.objectType);
+  const taskState = parseTaskState(cleanString(input.taskState));
+  const active = input.active ?? true;
+  const operator = await loadOperatorContext({
+    db,
+    operatorEmail: input.operatorEmail,
+    tenantSlug: input.tenantSlug,
+  });
+
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${operator.tenantId}), hashtext(${`${viewSource}:${input.idempotencyKey}`}))`,
+    );
+
+    const [existingAudit] = await tx
+      .select({
+        auditEventId: auditEvents.id,
+        targetId: auditEvents.targetId,
+        eventId: auditEvents.eventId,
+      })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.tenantId, operator.tenantId),
+          eq(auditEvents.source, viewSource),
+          eq(auditEvents.idempotencyKey, `${input.idempotencyKey}:view_published`),
+          eq(auditEvents.targetType, "ui_contract"),
+        ),
+      )
+      .limit(1);
+
+    if (existingAudit?.targetId) {
+      const [view] = await tx
+        .select()
+        .from(uiContracts)
+        .where(
+          and(
+            eq(uiContracts.tenantId, operator.tenantId),
+            eq(uiContracts.id, existingAudit.targetId),
+          ),
+        )
+        .limit(1);
+
+      if (view) {
+        return {
+          created: false,
+          updated: false,
+          viewId: view.id,
+          eventId: existingAudit.eventId,
+          auditEventId: existingAudit.auditEventId,
+          view: {
+            id: view.id,
+            key: view.key,
+            version: view.version,
+            name: view.name,
+            active: view.active,
+          },
+        };
+      }
+    }
+
+    await assertCapability(tx, capabilityId);
+
+    const [existingView] = await tx
+      .select()
+      .from(uiContracts)
+      .where(
+        and(
+          eq(uiContracts.tenantId, operator.tenantId),
+          eq(uiContracts.key, key),
+          eq(uiContracts.version, version),
+        ),
+      )
+      .limit(1);
+    const now = new Date();
+    const values = {
+      capabilityId,
+      key,
+      version,
+      name,
+      purpose,
+      surface,
+      objectType,
+      taskState,
+      contract: jsonObject(input.contract),
+      actions: jsonObject(input.actions),
+      data: jsonObject(input.data),
+      mask: jsonObject(input.mask),
+      active,
+      updatedAt: now,
+    };
+    const [view] = existingView
+      ? await tx.update(uiContracts).set(values).where(eq(uiContracts.id, existingView.id)).returning()
+      : await tx
+          .insert(uiContracts)
+          .values({
+            tenantId: operator.tenantId,
+            ...values,
+            createdAt: now,
+          })
+          .returning();
+    const [event] = await tx
+      .insert(events)
+      .values({
+        tenantId: operator.tenantId,
+        type: existingView ? "view.updated" : "view.published",
+        source: viewSource,
+        actorType: "user",
+        actorId: operator.userId,
+        actorRef: operator.actorRef,
+        capabilityId,
+        idempotencyKey: `${input.idempotencyKey}:view_published`,
+        data: {
+          viewId: view.id,
+          key,
+          version,
+          name,
+          purpose,
+          surface,
+          objectType: objectType ?? null,
+          taskState: taskState ?? null,
+          active,
+        },
+        occurredAt: now,
+      })
+      .returning({ id: events.id });
+    const [audit] = await tx
+      .insert(auditEvents)
+      .values({
+        tenantId: operator.tenantId,
+        type: existingView ? "view.updated" : "view.published",
+        source: viewSource,
+        actorType: "user",
+        actorId: operator.userId,
+        actorRef: operator.actorRef,
+        targetType: "ui_contract",
+        targetId: view.id,
+        eventId: event.id,
+        capabilityId,
+        risk: "low",
+        idempotencyKey: `${input.idempotencyKey}:view_published`,
+        data: {
+          viewId: view.id,
+          key,
+          version,
+          externalExecution: "blocked",
+        },
+      })
+      .returning({ id: auditEvents.id });
+
+    return {
+      created: !existingView,
+      updated: Boolean(existingView),
+      viewId: view.id,
+      eventId: event.id,
+      auditEventId: audit.id,
+      view: {
+        id: view.id,
+        key: view.key,
+        version: view.version,
+        name: view.name,
+        active: view.active,
+      },
     };
   });
 }

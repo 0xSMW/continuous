@@ -30,6 +30,7 @@
 | Added persistence-only adapter reconciliation | `worker.adapters.reconcile` scans pending dry-run adapter runs/actions, writes matched/retry/review state, and records audit/evidence without external execution |
 | Added headless Core task creation | `POST /api/core` with `command=task.create` creates platform tasks, emits `task.created`, and records audit proof without worker-specific routes |
 | Expanded headless Core writes | `POST /api/core` now supports `object.upsert`, `event.ingest`, `evidence.attach`, `document.create`, and `decision.record` with tenant-scoped idempotency and audit proof |
+| Added Core graph and generated-view commands | `POST /api/core` now supports `object.link` and `view.publish`, so object relationships and renderer-neutral UI contracts are written through the same structured Core payload instead of seed-only data |
 | Agent build path uses app-server protocol tooling plus Next.js MCP | The installed Codex app-server CLI exposes protocol generation/help commands; `.mcp.json` keeps the Next.js 16 MCP bridge for route/runtime diagnostics |
 | Added the first authority ledger | Revenue Worker runs now create approval requests and audit events, and approval decisions create evidence before any external action is allowed |
 | Added first-class adapter dry-runs | Revenue Worker runs now create linked adapter runs/actions, receipt evidence, attempt metadata, and reconciliation state while external mutation remains disabled |
@@ -61,7 +62,7 @@ certificates. Continuous Core now has
 persisted graph, task, capability, event, evidence, budget, adapter, authority,
 document, decision, and generated UI primitives plus worker run lifecycle
 records and `/`, `/api/health`, `/api/core`, and `POST /api/core` task, object,
-event, evidence, document, and decision commands. Local
+object-link, event, evidence, document, decision, and generated-view commands. Local
 Node-side validation passes; the real Bun path is verified in the droplet
 containers and GitHub CI.
 
