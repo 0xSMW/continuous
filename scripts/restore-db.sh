@@ -3,6 +3,7 @@ set -euo pipefail
 
 HOST="${HOST:-}"
 SSH_USER="${SSH_USER:-root}"
+SSH_KEY="${SSH_KEY:-}"
 APP_DIR="${APP_DIR:-/opt/continuous}"
 BACKUP_FILE="${BACKUP_FILE:-}"
 REMOTE_BACKUP_FILE="${REMOTE_BACKUP_FILE:-}"
@@ -10,6 +11,10 @@ CONFIRM_RESTORE="${CONFIRM_RESTORE:-}"
 START_APP_AFTER_RESTORE="${START_APP_AFTER_RESTORE:-true}"
 REMOTE="$SSH_USER@$HOST"
 SSH_ARGS=(-o BatchMode=yes -o ConnectTimeout=10)
+
+if [ -n "$SSH_KEY" ]; then
+  SSH_ARGS+=(-i "$SSH_KEY")
+fi
 
 if [ -z "$HOST" ]; then
   echo "Set HOST to the droplet IP or hostname." >&2

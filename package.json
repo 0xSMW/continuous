@@ -14,6 +14,7 @@
     "test": "vitest run",
     "test:eval": "vitest run src/worker/evals.test.ts src/worker/revenue.integration.test.ts",
     "check": "bun run lint && bun run typecheck && bun run test && bun run build",
+    "ops:backup-check": "./scripts/check-backup-age.sh",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "bun src/db/migrate.ts",
     "db:studio": "drizzle-kit studio",

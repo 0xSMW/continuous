@@ -114,7 +114,8 @@ packet, decision, and generated-view commands after each production rollout.
 
 Postgres is the only production stateful service today. The `postgres_data`
 Docker volume must have an off-box backup before the droplet is used for real
-customer data.
+customer data. DigitalOcean managed droplet backups are enabled for
+`continuous-01` as the baseline off-host recovery layer.
 
 Create a verified custom-format dump on the droplet and copy it to local
 `backups/postgres/`:
@@ -131,6 +132,14 @@ HOST=45.55.53.92 \
   LOCAL_BACKUP_DIR=backups/postgres \
   RETENTION_DAYS=14 \
   ./scripts/backup-db.sh
+```
+
+The backup script writes a `.sha256` sidecar next to the droplet dump and next
+to any local copy. Check that the latest droplet dump is fresh before a release
+or after changing recovery automation:
+
+```sh
+HOST=45.55.53.92 MAX_AGE_HOURS=26 ./scripts/check-backup-age.sh
 ```
 
 Restore is intentionally destructive and requires an explicit confirmation

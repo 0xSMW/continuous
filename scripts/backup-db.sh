@@ -3,6 +3,7 @@ set -euo pipefail
 
 HOST="${HOST:-}"
 SSH_USER="${SSH_USER:-root}"
+SSH_KEY="${SSH_KEY:-}"
 APP_DIR="${APP_DIR:-/opt/continuous}"
 REMOTE_BACKUP_DIR="${REMOTE_BACKUP_DIR:-$APP_DIR/backups/postgres}"
 LOCAL_BACKUP_DIR="${LOCAL_BACKUP_DIR:-backups/postgres}"
@@ -11,6 +12,10 @@ RETENTION_DAYS="${RETENTION_DAYS:-14}"
 COPY_TO_LOCAL="${COPY_TO_LOCAL:-true}"
 REMOTE="$SSH_USER@$HOST"
 SSH_ARGS=(-o BatchMode=yes -o ConnectTimeout=10)
+
+if [ -n "$SSH_KEY" ]; then
+  SSH_ARGS+=(-i "$SSH_KEY")
+fi
 
 if [ -z "$HOST" ]; then
   echo "Set HOST to the droplet IP or hostname." >&2
@@ -55,6 +60,8 @@ if [ "$RETENTION_DAYS" -gt 0 ] 2>/dev/null; then
 fi
 
 hash="$(sha256sum "$backup_path" | awk '{print $1}')"
+printf '%s  %s\n' "$hash" "$BACKUP_NAME" > "$backup_path.sha256"
+chmod 600 "$backup_path.sha256"
 printf '%s|%s\n' "$backup_path" "$hash"
 REMOTE_SCRIPT
 )"

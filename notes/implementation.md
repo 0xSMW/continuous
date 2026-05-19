@@ -47,6 +47,7 @@
 | Added worker continuation command | `POST /worker` `command=continue` is a generic idempotent continuation surface; V1 consumes `config.approvalId` for `revision_requested` approvals, records workflow/task/audit/evidence state, and keeps external execution blocked |
 | HTTPS is managed by Caddy | `continuoushq.com` and `getcontinuous.app` now point at the droplet, and Caddy issues and renews Let's Encrypt certificates from the persisted `caddy_data` volume |
 | Added a database recovery lane | `scripts/backup-db.sh` creates verified Postgres dumps on the droplet and copies them off-box; `scripts/restore-db.sh` performs a confirmation-gated restore, migration, restart, and health check |
+| Enabled DigitalOcean managed backups | The `continuous-01` droplet now has DO-managed backups enabled as the first off-host recovery layer; repo scripts also check custom dump age and checksum sidecars |
 
 ### Tradeoffs
 

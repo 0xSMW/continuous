@@ -15,6 +15,7 @@
 - Build the approval UI on top of the shared `approval_requests`, `audit_events`, and evidence API.
 - Create implementation-grade V1 contract docs for each future worker before coding it, using `docs/worker-contract-template.md`, and register command metadata before runtime code.
 - Keep all worker-family HTTP controls on `/worker` with registered `worker`, `command`, `idempotencyKey`, and `config` fields; do not add worker-family-specific URL shapes.
+- Add a durable object-storage target for custom Postgres dumps; DigitalOcean droplet backups are enabled, but database-level dumps still need scheduled off-host retention before customer data.
 - Complete production hardening with tag-based deploy rollback, observability/alerts, scoped tokens, non-root host access, and a restore drill before using the droplet for real customer data.
 - Extend adapter reconciliation into retry execution, failure tasks, scoped live credentials, and rollback paths before allowing external sends or money movement.
 - Extend the Revenue Worker state machine with retry, failure, reconciliation, and later approved-execution branches; broaden revision continuation into revised packet generation.
