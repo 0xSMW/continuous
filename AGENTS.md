@@ -27,3 +27,14 @@ use shadcn correctly for all UI components following their example code exactly 
 have a sense of humor with any sample content or data
 
 for the ai gateway, you can clone cleanup remove braintrust info and rework for our purposes without having to write all of the content https://github.com/braintrustdata/braintrust-proxy
+
+you can call Claude CLI for focused second opinions or monitoring; wrap the CLI call in a subagent so the streamed output does not blow the main context window:
+
+```sh
+claude -p "your prompt" \
+  --output-format stream-json \
+  --verbose \
+  --include-partial-messages \
+  --permission-mode dontAsk \
+  --allowedTools "Read,Edit, Write"
+```
