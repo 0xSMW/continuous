@@ -1,18 +1,21 @@
-import { env } from "../env";
 import type { JsonObject } from "../db/schema";
-import { reconcileAdapterLedger } from "../core/adapters";
 import {
-  decideApproval,
-  listApprovals,
-  normalizeApprovalDecision,
-} from "../core/approvals";
-import { getRevenueWorkerSnapshotSafe, runRevenueWorker } from "./revenue";
-import { normalizeIdempotencyKey } from "./security";
+  executeWorkerCommand,
+  executeWorkerView,
+  registeredWorkerCommands,
+  registeredWorkerViews,
+  type WorkerTargetInput,
+} from "./registry";
 
 export const workerTools = [
   {
     name: "worker.snapshot",
     description: "Read a worker snapshot by role, tenant, or worker id.",
+    registry: {
+      role: "revenue_operations",
+      surface: "view",
+      view: "snapshot",
+    },
     inputSchema: {
       type: "object",
       properties: {
@@ -25,6 +28,13 @@ export const workerTools = [
   {
     name: "worker.run",
     description: "Run a worker with an idempotency key and structured config.",
+    registry: {
+      role: "revenue_operations",
+      surface: "command",
+      command: "run",
+      idempotency: "required",
+      externalExecution: "blocked",
+    },
     inputSchema: {
       type: "object",
       properties: {
@@ -54,6 +64,11 @@ export const workerTools = [
   {
     name: "worker.approvals.list",
     description: "List pending or decided worker approval requests.",
+    registry: {
+      role: "revenue_operations",
+      surface: "view",
+      view: "approvals",
+    },
     inputSchema: {
       type: "object",
       properties: {
@@ -71,6 +86,13 @@ export const workerTools = [
   {
     name: "worker.approvals.decide",
     description: "Decide a worker approval request with an operator action.",
+    registry: {
+      role: "revenue_operations",
+      surface: "command",
+      command: "approval.decide",
+      idempotency: "none",
+      externalExecution: "blocked",
+    },
     inputSchema: {
       type: "object",
       properties: {
@@ -93,6 +115,14 @@ export const workerTools = [
   {
     name: "worker.adapters.reconcile",
     description: "Reconcile pending dry-run adapter runs/actions without external execution.",
+    registry: {
+      role: "revenue_operations",
+      surface: "command",
+      command: "adapters.reconcile",
+      idempotency: "none",
+      externalExecution: "blocked",
+      requiresTenant: true,
+    },
     inputSchema: {
       type: "object",
       properties: {
@@ -111,6 +141,10 @@ export const workerTools = [
 
 export const workerToolSchema = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
+  registry: {
+    commands: registeredWorkerCommands(),
+    views: registeredWorkerViews(),
+  },
   $defs: {
     workerTarget: {
       type: "object",
@@ -167,17 +201,11 @@ function stringValue(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-function targetFrom(payload: JsonObject) {
+function targetFrom(payload: JsonObject): WorkerTargetInput {
   const target = objectValue(payload.worker);
-  const role = stringValue(target.role) ?? "revenue_operations";
-
-  if (role !== "revenue_operations") {
-    throw new Error(`Worker role ${role} is not available yet.`);
-  }
-
   return {
-    role,
-    workerId: stringValue(target.id),
+    role: stringValue(target.role),
+    id: stringValue(target.id),
     tenantSlug: stringValue(target.tenantSlug),
   };
 }
@@ -185,86 +213,61 @@ function targetFrom(payload: JsonObject) {
 export async function executeWorkerTool(name: string, payload: JsonObject = {}) {
   const target = targetFrom(payload);
   const config = jsonObject(payload.config);
-  const operatorEmail = stringValue(payload.operatorEmail) ?? env.WORKER_OPERATOR_EMAIL;
+  const operatorEmail = stringValue(payload.operatorEmail) ?? process.env.WORKER_OPERATOR_EMAIL ?? "";
 
   if (name === "worker.snapshot") {
-    const result = await getRevenueWorkerSnapshotSafe({
-      role: target.role,
-      tenantSlug: target.tenantSlug,
-      workerId: target.workerId,
+    const result = await executeWorkerView({
+      view: "snapshot",
+      target,
+      operatorEmail,
     });
 
     return {
-      worker: target,
-      snapshot: result.snapshot,
+      ...result.data,
       error: result.error,
     };
   }
 
   if (name === "worker.run") {
-    const idempotency = normalizeIdempotencyKey(payload.idempotencyKey);
-
-    if (!idempotency.ok) {
-      throw new Error(idempotency.message);
-    }
-
-    return {
-      worker: target,
-      result: await runRevenueWorker({
-        idempotencyKey: idempotency.key,
-        tenantSlug: target.tenantSlug,
-        workerId: target.workerId,
-        operatorEmail,
-        config,
-      }),
-    };
+    return executeWorkerCommand({
+      command: "run",
+      target,
+      operatorEmail,
+      config,
+      idempotencyKey: payload.idempotencyKey,
+    });
   }
 
   if (name === "worker.approvals.list") {
+    const result = await executeWorkerView({
+      view: "approvals",
+      target,
+      operatorEmail,
+      state: stringValue(config.state),
+    });
+
     return {
-      worker: target,
-      result: await listApprovals({
-        operatorEmail,
-        tenantSlug: target.tenantSlug,
-        state: stringValue(config.state),
-        subject: "worker",
-      }),
+      ...result.data,
+      error: result.error,
     };
   }
 
   if (name === "worker.approvals.decide") {
-    const approvalId = stringValue(config.approvalId);
-    const action = normalizeApprovalDecision(config.action);
-
-    if (!approvalId || !action) {
-      throw new Error("config.approvalId and config.action are required.");
-    }
-
-    return {
-      worker: target,
-      result: await decideApproval({
-        approvalId,
-        operatorEmail,
-        tenantSlug: target.tenantSlug,
-        action,
-        note: stringValue(config.note),
-        subject: "worker",
-      }),
-    };
+    return executeWorkerCommand({
+      command: "approval.decide",
+      target,
+      operatorEmail,
+      config,
+    });
   }
 
   if (name === "worker.adapters.reconcile") {
-    if (!target.tenantSlug) {
-      throw new Error("worker.tenantSlug is required for adapter reconciliation.");
-    }
-
-    return {
-      worker: target,
-      result: await reconcileAdapterLedger({
-        tenantSlug: target.tenantSlug,
-        limit: typeof config.limit === "number" ? config.limit : undefined,
-      }),
-    };
+    return executeWorkerCommand({
+      command: "adapters.reconcile",
+      target,
+      operatorEmail,
+      config,
+    });
   }
 
   throw new Error(`Unknown worker tool: ${name}`);

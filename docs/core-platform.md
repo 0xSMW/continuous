@@ -188,8 +188,9 @@ policy-bound:
 | `bun run worker:tool worker.run` | Canonical local command surface using the same worker/config payload shape |
 
 Worker-specific HTTP paths are not part of the public API. New worker families
-must extend `/worker` with structured `worker`, `command`, `idempotencyKey`, and
-`config` fields rather than adding route names per worker.
+must extend `/worker` by registering role-scoped commands with structured
+`worker`, `command`, `idempotencyKey`, and `config` fields rather than adding
+route names per worker.
 
 Approvals are platform records, not worker-specific records. Worker approvals
 and workflow approvals share `approval_requests`, `audit_events`, and evidence;

@@ -88,6 +88,19 @@ Worker-family-specific routes are not part of the public API. Future workers
 must use `/worker` with role, command, idempotency, and config in structured
 fields.
 
+## Registry Entries
+
+The Revenue Worker owns the first registered `/worker` commands. HTTP commands
+and local toolbox aliases resolve to the same handlers and validation rules.
+
+| HTTP command or view | Tool alias | Required config | Idempotency | Side effects | External execution |
+|---|---|---|---|---|---|
+| `GET view=snapshot` | `worker.snapshot` | None | None | Read-only | Blocked |
+| `GET view=approvals` | `worker.approvals.list` | Optional `state` | None | Read-only | Blocked |
+| `run` | `worker.run` | `config.intake` preferred, `config.leadPacket` fallback | Required | Internal records, budget, approval, dry-run adapter receipt | Blocked |
+| `approval.decide` | `worker.approvals.decide` | `approvalId`, `action`, optional `note` | None | Approval/task/workflow evidence only | Blocked |
+| `adapters.reconcile` | `worker.adapters.reconcile` | Tenant-scoped `worker.tenantSlug`, optional integer `limit` | None | Adapter reconciliation audit/evidence | Blocked |
+
 ## Run Config
 
 `config` is the worker-specific envelope. The route does not encode a worker

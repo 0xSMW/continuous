@@ -13,8 +13,8 @@
 - Add more specialized Core commands for adapter intents and rule changes.
 - Extend `packet.prepare` coverage into new-hire, contractor, payroll, filing, termination, AI action, and rule-change workflow packet tests.
 - Build the approval UI on top of the shared `approval_requests`, `audit_events`, and evidence API.
-- Create implementation-grade V1 contract docs for each future worker before coding it, using `docs/worker-contract-template.md`.
-- Keep all worker-family HTTP controls on `/worker` with structured `worker`, `command`, `idempotencyKey`, and `config` fields; do not add worker-family-specific URL shapes.
+- Create implementation-grade V1 contract docs for each future worker before coding it, using `docs/worker-contract-template.md`, and register command metadata before runtime code.
+- Keep all worker-family HTTP controls on `/worker` with registered `worker`, `command`, `idempotencyKey`, and `config` fields; do not add worker-family-specific URL shapes.
 - Codify production infrastructure state, backup/restore, deploy rollback, observability, scoped tokens, and non-root host access before using the droplet for real customer data.
 - Extend adapter reconciliation into retry execution, failure tasks, scoped live credentials, and rollback paths before allowing external sends or money movement.
 - Convert the deterministic Revenue Worker run into the state machine defined by `docs/revenue-worker-v1-contract.md`.

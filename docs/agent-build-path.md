@@ -40,6 +40,11 @@ Useful app surfaces for worker development:
 | `POST /workflow` | Canonical workflow command surface for starts, transitions, and workflow approval decisions |
 | `bun run worker:tool` | Repo-owned JSON worker toolbox for agents and local automation |
 
+`bun run worker:tool schema` exposes the registered worker commands and local
+tool aliases. Agents should inspect that registry metadata before invoking a
+worker command, then send the same `worker`, `config`, and `idempotencyKey`
+payload shape through either the toolbox or `/worker`.
+
 ## Boundary
 
 Use the Next.js MCP bridge for Next.js diagnostics. Keep side-effecting worker

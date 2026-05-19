@@ -20,8 +20,9 @@
 | Simplified the canonical data model | Replaced early one-table-per-concept naming with smaller primitives such as Worker.kind, WorkRelationship.type, FilingArtifact.type, EvidenceItem.type, and CustomerSignal.type |
 | Revenue Worker HTTP paths are guarded | There is no auth system yet, so detailed worker reads require the operator token, and the side-effecting run endpoint is disabled by default |
 | Added canonical worker API | `/worker` is the forward control-plane route; worker role, tenant selection, command, idempotency, and config live in structured query or payload fields |
+| Added worker command registry | `/worker` and `bun run worker:tool` now share registered command metadata, role allowlisting, config validation, idempotency rules, tenant requirements, and external-execution posture |
 | Added canonical workflow API | `/workflow` validates definition-backed `start` and `transition` commands and records workflow events, audit events, and evidence |
-| Removed worker-specific HTTP wrappers | The greenfield API does not expose worker-family routes; new workers must extend `/worker` payloads rather than adding route names |
+| Removed worker-specific HTTP wrappers | The greenfield API does not expose worker-family routes; new workers must extend `/worker` through registered commands rather than adding route names |
 | Added workflow step ledger | Workflow starts and transitions now write durable step records with lease, retry, input, output, state-transition, event, evidence, and approval links |
 | Added shared approval service | Worker and workflow approvals now use a neutral approval service over `approval_requests`, with subject-scoped listing and decisions |
 | Seeded the first open-workflow set | Entity setup, hire employee, contractor engagement, termination, payroll preview, AI budget cycle, and synthetic-worker lifecycle now all have persisted definitions, runs, and steps |
@@ -92,7 +93,10 @@ state, `GET /worker?view=approvals` for approval queues, and `POST /worker`
 with `command`, `worker`, `idempotencyKey`, and `config` for side-effecting
 operations. Adapter reconciliation uses the same route with
 `command=adapters.reconcile`, a tenant-scoped `worker` target, and
-`config.limit`. Worker-family-specific HTTP routes are absent by design.
+`config.limit`. Route handlers now delegate to the worker command registry,
+which owns role allowlisting, command lookup, idempotency, config validation,
+tenant requirements, and external-execution metadata. Worker-family-specific
+HTTP routes are absent by design.
 
 Workflow execution now has the same control-plane style through `/workflow`.
 Definitions remain declarative, and the runtime validates transitions against

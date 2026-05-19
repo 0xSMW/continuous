@@ -1,23 +1,42 @@
 import { describe, expect, it } from "vitest";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { executeWorkerTool, workerToolSchema, workerTools } from "./tools";
+import { registeredWorkerCommands, registeredWorkerViews } from "./registry";
+
+function routeFiles(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+
+    if (entry.isDirectory()) {
+      return routeFiles(path);
+    }
+
+    return entry.isFile() && entry.name === "route.ts" ? [path] : [];
+  });
+}
 
 describe("worker tool contract", () => {
   it("keeps the HTTP worker surface route-generic", () => {
     const root = process.cwd();
     const routePath = join(root, "app", "worker", "route.ts");
     const routeSource = readFileSync(routePath, "utf8");
+    const appRoutes = routeFiles(join(root, "app")).map((path) => path.slice(root.length));
 
     expect(existsSync(routePath)).toBe(true);
     expect(existsSync(join(root, "app", "api", "revenue-worker", "route.ts"))).toBe(false);
-    expect(routeSource).toContain('const apiVersion = "continuous.worker.v1";');
-    expect(routeSource).toContain("const command = optionalString(body.command);");
-    expect(routeSource).toContain("const config = jsonObject(body.config);");
+    expect(appRoutes).not.toContain("/app/api/revenue-worker/route.ts");
+    expect(appRoutes).not.toContain("/app/revenue-worker/route.ts");
+    expect(appRoutes).not.toContain("/app/api/payroll-worker/route.ts");
+    expect(routeSource).toContain("executeWorkerCommand");
+    expect(routeSource).toContain("executeWorkerView");
+    expect(routeSource).not.toContain("runRevenueWorker");
+    expect(routeSource).not.toContain("reconcileAdapterLedger");
+    expect(routeSource).not.toContain("decideApproval");
   });
 
-  it("exposes the canonical repo-owned worker tools", () => {
+  it("exposes registry-backed repo-owned worker tools", () => {
     expect(workerTools.map((tool) => tool.name)).toEqual([
       "worker.snapshot",
       "worker.run",
@@ -26,7 +45,38 @@ describe("worker tool contract", () => {
       "worker.adapters.reconcile",
     ]);
     expect(workerToolSchema.tools).toBe(workerTools);
+    expect(workerToolSchema.registry.commands).toEqual(registeredWorkerCommands());
+    expect(workerToolSchema.registry.views).toEqual(registeredWorkerViews());
+    expect(workerToolSchema.registry.commands.map((command) => command.name)).toEqual([
+      "run",
+      "approval.decide",
+      "adapters.reconcile",
+    ]);
+    expect(workerToolSchema.registry.views.map((view) => view.name)).toEqual([
+      "snapshot",
+      "approvals",
+    ]);
+    expect(workerToolSchema.registry.commands).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "revenue_operations",
+          name: "run",
+          idempotency: "required",
+          externalExecution: "blocked",
+        }),
+        expect.objectContaining({
+          role: "revenue_operations",
+          name: "adapters.reconcile",
+          requiresTenant: true,
+        }),
+      ]),
+    );
     expect(workerToolSchema.$defs.workerTarget.properties.tenantSlug.type).toBe("string");
+    for (const tool of workerTools) {
+      expect(tool.description.length).toBeGreaterThan(0);
+      expect(tool.inputSchema.type).toBe("object");
+      expect(tool.inputSchema.properties.worker).toBeTruthy();
+    }
   });
 
   it("rejects unsupported worker roles before runtime work", async () => {
@@ -64,5 +114,19 @@ describe("worker tool contract", () => {
         },
       }),
     ).rejects.toThrow("worker.tenantSlug is required for adapter reconciliation.");
+  });
+
+  it("uses registry validation for adapter reconciliation limits", async () => {
+    await expect(
+      executeWorkerTool("worker.adapters.reconcile", {
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        config: {
+          limit: 1.5,
+        },
+      }),
+    ).rejects.toThrow("config.limit must be an integer between 1 and 100.");
   });
 });

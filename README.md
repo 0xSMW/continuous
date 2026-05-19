@@ -48,13 +48,15 @@ Then open `http://localhost:3000`.
   `GET /worker?view=approvals`; use `POST /worker` with `command` and `config`
   payloads for side-effecting worker commands. Revenue operations runs prefer
   persisted Core lead intake references under `config.intake`; `config.leadPacket`
-  remains a direct operator/test fallback.
+  remains a direct operator/test fallback. The route validates roles, commands,
+  idempotency, tenant requirements, and external-execution posture through the
+  worker command registry.
 - `/workflow` is the canonical workflow control-plane API. Use `GET /workflow`
   for definitions/runs/steps, `GET /workflow?view=approvals` for workflow
   approvals, and `POST /workflow` with `command=start`, `command=transition`,
   or `command=approval.decide`.
 Worker-specific HTTP routes are intentionally absent; new worker families
-extend `/worker` with structured payload fields.
+extend `/worker` by registering commands and structured payload fields.
 
 ## Docs
 

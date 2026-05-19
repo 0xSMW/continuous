@@ -161,6 +161,10 @@ bun run worker:tool worker.snapshot --payload='{"worker":{"role":"revenue_operat
 bun run worker:tool worker.adapters.reconcile --payload='{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{"limit":25}}'
 ```
 
+`worker:tool schema` is registry-backed. It exposes registered commands, local
+tool aliases, idempotency policy, tenant requirements, and external-execution
+status before a command is invoked.
+
 The same reconciliation command is available through the canonical worker API:
 
 ```sh
@@ -207,8 +211,8 @@ curl -X POST http://localhost:3000/workflow \
 ```
 
 Worker-specific HTTP paths are intentionally absent. New worker families should
-target `/worker` with role, command, idempotency, and config in the request
-payload.
+target `/worker` by registering role-scoped commands with role, command,
+idempotency, and config in the request payload.
 
 ## Notes
 

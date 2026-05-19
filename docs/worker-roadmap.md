@@ -10,6 +10,7 @@ adapters, generated UI, evidence, and evals.
 | Gate | Required proof |
 |---|---|
 | Contract | V1 contract doc defines API payloads, object fields, workflows, capabilities, adapters, evidence, views, evals, and security boundaries |
+| Command registry | Worker commands and local tool aliases are registered with role, config validation, idempotency, tenant requirements, and external-execution status |
 | Object map | Canonical records exist for the worker's operating flow |
 | Workflow | Definition, seeded run, seeded step, approval policy, and evidence packet are persisted |
 | Capabilities | Typed capability grants define read, draft, prepare, approve, and execute boundaries |
@@ -93,6 +94,7 @@ adapters, generated UI, evidence, and evals.
 ## Expansion Rule
 
 Do not add worker-specific HTTP routes. New worker families extend `/worker`
-with role, command, config schema, capability grants, workflow definitions,
-approval policies, and evals. Promotion above autonomy level 2 requires live
-adapter scopes, retry workers, reconciliation, approval UI, and receipts.
+by registering role-scoped commands, config schemas, capability grants,
+workflow definitions, approval policies, and evals. Promotion above autonomy
+level 2 requires live adapter scopes, retry workers, reconciliation, approval
+UI, and receipts.

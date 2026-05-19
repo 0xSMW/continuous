@@ -102,7 +102,8 @@ lead object, `lead.received` event, and source snapshot through `/api/core`, the
 pass those ids under `config.intake`. `GET /api/core`, `GET /worker?view=snapshot`, and
 `GET /worker?view=approvals` use the same bearer token for operator-only
 snapshots and approval review. Worker-specific HTTP paths are intentionally
-absent; expand the worker control plane through `/worker` payload fields.
+absent; expand the worker control plane through registered `/worker` commands
+and payload fields.
 The deploy workflow smokes Core lead intake before `/worker`, then covers
 `/api/core` task creation, task transition, approval request, capability grant,
 budget reserve/charge/release, object, object-link, event, evidence, document,

@@ -33,6 +33,26 @@ Define every supported command with required `config` fields, validation
 errors, idempotent replay behavior, output fields, and external-execution
 status.
 
+## Command Registry
+
+Every worker command must be registered before implementation. The registry
+entry owns the command key, tool alias, handler, config validation, target
+requirements, idempotency policy, output shape, side-effect level, and
+external-execution status. `bun run worker:tool schema` must expose enough
+metadata for agents to discover the command without adding a worker-specific
+route.
+
+| Field | Required behavior |
+|---|---|
+| Command key | Plain action name used by `POST /worker`, such as `run` or `approval.decide` |
+| Tool alias | Agent/toolbox name, such as `worker.run`, mapped to the same handler |
+| Role | Worker role allowed to execute the command |
+| Target requirements | Required `worker` fields, especially `tenantSlug` for tenant-scoped jobs |
+| Config schema | Required fields, validation errors, and defaults |
+| Idempotency | `required` for replayable work, `none` only for already-guarded decisions |
+| Side effects | Internal-only, dry-run, approved-only, or blocked external execution |
+| Output | Stable result fields and evidence/audit ids |
+
 ## Core Commands
 
 List the exact Core writes the worker needs:

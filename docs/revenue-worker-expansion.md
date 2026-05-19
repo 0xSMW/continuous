@@ -17,12 +17,13 @@ state, and object versioning without external sends or money movement.
 | Run API | `POST /worker` with `command=run` and `config.intake` Core references; direct `config.leadPacket` remains an operator/test fallback |
 | Adapter reconciliation API | `POST /worker` with `command=adapters.reconcile`, tenant-scoped and bearer-token required |
 | Operator run | `bun run worker:tool worker.run` with the same worker/config payload |
+| Command registry | `/worker` commands and `worker:*` local tool aliases share role, config, idempotency, tenant, and external-execution validation |
 | External execution | Disabled; adapter runtime records dry-run receipts and matched reconciliation only |
 
 `/worker` is the forward API. Worker role, tenant, operation config, and
 idempotency belong in query or payload fields, not in worker-family-specific URL
-paths. New worker families must add commands and config schemas, not new HTTP
-route names.
+paths. New worker families must register commands and config schemas, not new
+HTTP route names.
 
 ## Expansion Gates
 
