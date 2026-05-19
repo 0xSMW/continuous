@@ -224,7 +224,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
     const [version] = await db
       .select()
       .from(objectVersions)
-      .where(eq(objectVersions.id, objectResult.objectVersionId))
+      .where(eq(objectVersions.id, objectResult.objectVersionId ?? ""))
       .limit(1);
     const [event] = await db.select().from(events).where(eq(events.id, eventResult.eventId)).limit(1);
     const [evidenceItem] = await db
