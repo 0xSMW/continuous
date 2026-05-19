@@ -515,6 +515,89 @@ jobs:
           from audit_events where id = '$CORE_AUDIT_ID'::uuid and target_id = '$CORE_TASK_ID'::uuid;
           SQL
 
+          CORE_TASK_TRANSITION_KEY="deploy-core-task-transition-$RUN_ID"
+          CORE_TASK_TRANSITION_PAYLOAD="$(
+            /usr/bin/jq -nc --arg key "$CORE_TASK_TRANSITION_KEY" --arg taskId "$CORE_TASK_ID" '{
+              command: "task.transition",
+              core: {tenantSlug: "continuous-demo"},
+              idempotencyKey: $key,
+              config: {
+                taskId: $taskId,
+                toState: "waiting",
+                reason: "Deploy smoke task is waiting for approval.",
+                evidence: {deploySmoke: true},
+                outcome: {status: "waiting_for_approval"}
+              }
+            }'
+          )"
+          CORE_TASK_TRANSITION_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/api/core \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$CORE_TASK_TRANSITION_PAYLOAD"
+          )"
+
+          echo "$CORE_TASK_TRANSITION_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:.data.result}'
+          echo "$CORE_TASK_TRANSITION_RESPONSE" | /usr/bin/jq -e \
+            '.error == null and .data.command == "task.transition" and .data.result.transitioned == true and .data.result.task.state == "waiting" and (.data.result.evidenceId | length > 0)' \
+            >/dev/null
+
+          CORE_TASK_TRANSITION_EVENT_ID="$(echo "$CORE_TASK_TRANSITION_RESPONSE" | /usr/bin/jq -r '.data.result.eventId')"
+          CORE_TASK_TRANSITION_EVIDENCE_ID="$(echo "$CORE_TASK_TRANSITION_RESPONSE" | /usr/bin/jq -r '.data.result.evidenceId')"
+          CORE_APPROVAL_KEY="deploy-core-approval-$RUN_ID"
+          CORE_APPROVAL_PAYLOAD="$(
+            /usr/bin/jq -nc --arg key "$CORE_APPROVAL_KEY" --arg taskId "$CORE_TASK_ID" --arg eventId "$CORE_TASK_TRANSITION_EVENT_ID" --arg transitionEvidenceId "$CORE_TASK_TRANSITION_EVIDENCE_ID" '{
+              command: "approval.request",
+              core: {tenantSlug: "continuous-demo"},
+              idempotencyKey: $key,
+              config: {
+                taskId: $taskId,
+                eventId: $eventId,
+                kind: "deploy_smoke_approval",
+                title: "Approve deploy smoke task",
+                summary: "Deploy smoke approval request; external execution is blocked.",
+                priority: "high",
+                risk: "medium",
+                requestedAction: {
+                  action: "approve_deploy_smoke_task",
+                  externalExecution: "blocked"
+                },
+                evidence: {
+                  transitionEvidenceId: $transitionEvidenceId
+                },
+                policy: {
+                  externalExecution: "blocked"
+                }
+              }
+            }'
+          )"
+          CORE_APPROVAL_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/api/core \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$CORE_APPROVAL_PAYLOAD"
+          )"
+
+          echo "$CORE_APPROVAL_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:.data.result}'
+          echo "$CORE_APPROVAL_RESPONSE" | /usr/bin/jq -e \
+            '.error == null and .data.command == "approval.request" and .data.result.created == true and (.data.result.approvalRequestId | length > 0) and (.data.result.evidenceId | length > 0) and .data.result.approval.state == "pending"' \
+            >/dev/null
+
+          CORE_APPROVAL_ID="$(echo "$CORE_APPROVAL_RESPONSE" | /usr/bin/jq -r '.data.result.approvalRequestId')"
+          CORE_APPROVAL_EVIDENCE_ID="$(echo "$CORE_APPROVAL_RESPONSE" | /usr/bin/jq -r '.data.result.evidenceId')"
+          psql_db -At <<SQL
+          select 'core_task_after_approval' as kind, state, outcome->>'approvalRequestId'
+          from tasks where id = '$CORE_TASK_ID'::uuid;
+          select 'core_task_transition_evidence' as kind, kind, data->>'toState'
+          from evidence where id = '$CORE_TASK_TRANSITION_EVIDENCE_ID'::uuid;
+          select 'core_approval' as kind, state, kind, event_id
+          from approval_requests where id = '$CORE_APPROVAL_ID'::uuid;
+          select 'core_approval_evidence' as kind, kind, data->>'approvalRequestId'
+          from evidence where id = '$CORE_APPROVAL_EVIDENCE_ID'::uuid;
+          SQL
+
           CORE_OBJECT_KEY="deploy-core-object-$RUN_ID"
           CORE_OBJECT_PAYLOAD="$(
             /usr/bin/jq -nc --arg key "$CORE_OBJECT_KEY" '{

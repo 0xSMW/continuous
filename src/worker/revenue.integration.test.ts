@@ -5,6 +5,7 @@ import { and, count, eq, inArray, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { reconcileAdapterLedger } from "../core/adapters";
+import { requestApproval } from "../core/approvals";
 import {
   attachCoreEvidence,
   createCoreDocument,
@@ -14,7 +15,7 @@ import {
   recordCoreDecision,
   upsertCoreObject,
 } from "../core/primitives";
-import { createCoreTask } from "../core/tasks";
+import { createCoreTask, transitionCoreTask } from "../core/tasks";
 import { db, pool } from "../db/client";
 import {
   adapterActions,
@@ -131,6 +132,148 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(replay.created).toBe(false);
     expect(replay.taskId).toBe(first.taskId);
     expect(taskCount.value).toBe(1);
+  }, 120_000);
+
+  it("transitions headless core tasks and requests approval packets", async () => {
+    const runId = randomUUID();
+    const taskResult = await createCoreTask({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-control-task-${runId}`,
+      title: "Review agency response packet",
+      priority: "high",
+      evidence: {
+        required: ["response_packet"],
+      },
+      db,
+    });
+    const transitionResult = await transitionCoreTask({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-control-task-transition-${runId}`,
+      taskId: taskResult.taskId,
+      toState: "waiting",
+      reason: "Response packet is waiting for owner review.",
+      evidence: {
+        packetReady: true,
+      },
+      outcome: {
+        status: "waiting_on_owner",
+      },
+      db,
+    });
+
+    expect(transitionResult.transitioned).toBe(true);
+    expect(transitionResult.task.state).toBe("waiting");
+    expect(transitionResult.eventId).toBeTruthy();
+    expect(transitionResult.auditEventId).toBeTruthy();
+    expect(transitionResult.evidenceId).toBeTruthy();
+
+    const approvalResult = await requestApproval({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-core-approval-${runId}`,
+      taskId: taskResult.taskId,
+      eventId: transitionResult.eventId ?? undefined,
+      kind: "agency_notice_response_approval",
+      title: "Approve agency response packet",
+      summary: "Prepared response packet is ready for review; external submission is blocked.",
+      priority: "high",
+      risk: "medium",
+      requestedAction: {
+        action: "approve_prepared_response",
+        externalExecution: "blocked",
+      },
+      evidence: {
+        transitionEvidenceId: transitionResult.evidenceId,
+      },
+      policy: {
+        externalSubmission: "approval_required",
+      },
+      data: {
+        source: "ci.core",
+      },
+      db,
+    });
+
+    expect(approvalResult.created).toBe(true);
+    expect(approvalResult.approvalRequestId).toBeTruthy();
+    expect(approvalResult.eventId).toBe(transitionResult.eventId);
+    expect(approvalResult.auditEventId).toBeTruthy();
+    expect(approvalResult.evidenceId).toBeTruthy();
+    expect(approvalResult.approval.state).toBe("pending");
+    expect(approvalResult.approval.subject).toEqual({
+      type: "task",
+      id: taskResult.taskId,
+    });
+
+    const [task] = await db.select().from(tasks).where(eq(tasks.id, taskResult.taskId)).limit(1);
+    const [transitionEvent] = await db
+      .select()
+      .from(events)
+      .where(eq(events.id, transitionResult.eventId ?? ""))
+      .limit(1);
+    const [transitionEvidence] = await db
+      .select()
+      .from(evidence)
+      .where(eq(evidence.id, transitionResult.evidenceId ?? ""))
+      .limit(1);
+    const [approval] = await db
+      .select()
+      .from(approvalRequests)
+      .where(eq(approvalRequests.id, approvalResult.approvalRequestId))
+      .limit(1);
+    const [approvalEvidence] = await db
+      .select()
+      .from(evidence)
+      .where(eq(evidence.id, approvalResult.evidenceId ?? ""))
+      .limit(1);
+    const [auditCount] = await db
+      .select({ value: count() })
+      .from(auditEvents)
+      .where(
+        inArray(auditEvents.id, [
+          taskResult.auditEventId,
+          transitionResult.auditEventId,
+          approvalResult.auditEventId,
+        ]),
+      );
+
+    expect(task?.state).toBe("approval_required");
+    expect(objectValue(task?.outcome).approvalRequestId).toBe(approvalResult.approvalRequestId);
+    expect(transitionEvent?.type).toBe("task.transitioned");
+    expect(transitionEvidence?.kind).toBe("trace");
+    expect(objectValue(transitionEvidence?.data).toState).toBe("waiting");
+    expect(approval?.state).toBe("pending");
+    expect(approval?.eventId).toBe(transitionResult.eventId);
+    expect(objectValue(approval?.requestedAction).externalExecution).toBe("blocked");
+    expect(approvalEvidence?.kind).toBe("approval");
+    expect(objectValue(approvalEvidence?.data).approvalRequestId).toBe(approvalResult.approvalRequestId);
+    expect(auditCount.value).toBe(3);
+
+    const transitionReplay = await transitionCoreTask({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-control-task-transition-${runId}`,
+      taskId: taskResult.taskId,
+      toState: "done",
+      reason: "Different state should replay.",
+      db,
+    });
+    const approvalReplay = await requestApproval({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-core-approval-${runId}`,
+      taskId: taskResult.taskId,
+      kind: "different_kind",
+      title: "Different title should replay",
+      db,
+    });
+
+    expect(transitionReplay.transitioned).toBe(false);
+    expect(transitionReplay.taskId).toBe(taskResult.taskId);
+    expect(approvalReplay.created).toBe(false);
+    expect(approvalReplay.approvalRequestId).toBe(approvalResult.approvalRequestId);
   }, 120_000);
 
   it("persists headless core objects, events, evidence, documents, and decisions", async () => {

@@ -5,6 +5,7 @@ import {
   auditEvents,
   capabilities,
   events,
+  evidence,
   objects,
   tasks,
   users,
@@ -16,6 +17,7 @@ import { loadOperatorContext } from "./operators";
 type Database = typeof defaultDb;
 type TaskPriority = "low" | "normal" | "high" | "urgent";
 type TaskState = "draft" | "active" | "waiting" | "approval_required" | "blocked";
+type TransitionTaskState = Exclude<TaskState, "draft"> | "done" | "canceled";
 type OwnerType = "user" | "worker" | "system";
 
 const source = "continuous.core.tasks";
@@ -23,6 +25,14 @@ const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const taskPriorities = new Set<TaskPriority>(["low", "normal", "high", "urgent"]);
 const taskStates = new Set<TaskState>(["draft", "active", "waiting", "approval_required", "blocked"]);
+const transitionTaskStates = new Set<TransitionTaskState>([
+  "active",
+  "waiting",
+  "approval_required",
+  "blocked",
+  "done",
+  "canceled",
+]);
 const ownerTypes = new Set<OwnerType>(["user", "worker", "system"]);
 
 export type CoreTaskCreateInput = {
@@ -51,6 +61,37 @@ export type CoreTaskCreateResult = {
   taskId: string;
   eventId: string | null;
   auditEventId: string;
+  task: {
+    id: string;
+    title: string;
+    state: string;
+    priority: string;
+    ownerRef: string;
+    dueAt: string | null;
+  };
+};
+
+export type CoreTaskTransitionInput = {
+  operatorEmail: string;
+  idempotencyKey: string;
+  tenantSlug?: string;
+  taskId: string;
+  toState?: string;
+  state?: string;
+  reason?: string;
+  evidence?: JsonObject;
+  outcome?: JsonObject;
+  cost?: JsonObject;
+  kpi?: JsonObject;
+  db?: Database;
+};
+
+export type CoreTaskTransitionResult = {
+  transitioned: boolean;
+  taskId: string;
+  eventId: string | null;
+  auditEventId: string;
+  evidenceId: string | null;
   task: {
     id: string;
     title: string;
@@ -109,6 +150,22 @@ function parseState(value: string | undefined): TaskState {
   throw new PlatformUnavailableError(
     "task_state_invalid",
     "Task state must be draft, active, waiting, approval_required, or blocked on create.",
+    400,
+  );
+}
+
+function parseTransitionState(value: string | undefined): TransitionTaskState {
+  if (!value) {
+    throw new PlatformUnavailableError("task_state_required", "config.state is required.", 400);
+  }
+
+  if (transitionTaskStates.has(value as TransitionTaskState)) {
+    return value as TransitionTaskState;
+  }
+
+  throw new PlatformUnavailableError(
+    "task_state_invalid",
+    "config.toState must be active, waiting, approval_required, blocked, done, or canceled.",
     400,
   );
 }
@@ -182,6 +239,10 @@ function taskView(row: typeof tasks.$inferSelect) {
     ownerRef: row.ownerRef,
     dueAt: row.dueAt?.toISOString() ?? null,
   };
+}
+
+function mergeJson(base: JsonObject, update: JsonObject | undefined): JsonObject {
+  return update ? { ...base, ...update } : base;
 }
 
 export async function createCoreTask(input: CoreTaskCreateInput): Promise<CoreTaskCreateResult> {
@@ -387,6 +448,186 @@ export async function createCoreTask(input: CoreTaskCreateInput): Promise<CoreTa
       eventId: event.id,
       auditEventId: audit.id,
       task: taskView(task),
+    };
+  });
+}
+
+export async function transitionCoreTask(
+  input: CoreTaskTransitionInput,
+): Promise<CoreTaskTransitionResult> {
+  const db = input.db ?? defaultDb;
+  const taskId = optionalUuid(cleanString(input.taskId), "config.taskId");
+
+  if (!taskId) {
+    throw new PlatformUnavailableError("task_reference_invalid", "config.taskId must be a UUID.", 400);
+  }
+
+  const nextState = parseTransitionState(cleanString(input.toState) ?? cleanString(input.state));
+  const reason = cleanString(input.reason);
+
+  if (!reason) {
+    throw new PlatformUnavailableError("task_reason_required", "config.reason is required.", 400);
+  }
+
+  const operator = await loadOperatorContext({
+    db,
+    operatorEmail: input.operatorEmail,
+    tenantSlug: input.tenantSlug,
+  });
+
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${operator.tenantId}), hashtext(${`${source}:${input.idempotencyKey}`}))`,
+    );
+
+    const [existingAudit] = await tx
+      .select({
+        auditEventId: auditEvents.id,
+        eventId: auditEvents.eventId,
+        task: tasks,
+      })
+      .from(auditEvents)
+      .innerJoin(tasks, eq(auditEvents.targetId, tasks.id))
+      .where(
+        and(
+          eq(auditEvents.tenantId, operator.tenantId),
+          eq(auditEvents.source, source),
+          eq(auditEvents.idempotencyKey, `${input.idempotencyKey}:task_transitioned`),
+          eq(auditEvents.targetType, "task"),
+        ),
+      )
+      .limit(1);
+
+    if (existingAudit) {
+      const [transitionEvidence] = await tx
+        .select({ id: evidence.id })
+        .from(evidence)
+        .where(
+          and(
+            eq(evidence.tenantId, operator.tenantId),
+            sql`${evidence.data}->>'auditEventId' = ${existingAudit.auditEventId}`,
+          ),
+        )
+        .limit(1);
+
+      return {
+        transitioned: false,
+        taskId: existingAudit.task.id,
+        eventId: existingAudit.eventId,
+        auditEventId: existingAudit.auditEventId,
+        evidenceId: transitionEvidence?.id ?? null,
+        task: taskView(existingAudit.task),
+      };
+    }
+
+    const [task] = await tx
+      .select()
+      .from(tasks)
+      .where(and(eq(tasks.tenantId, operator.tenantId), eq(tasks.id, taskId)))
+      .limit(1);
+
+    if (!task) {
+      throw new PlatformUnavailableError(
+        "task_not_found",
+        "config.taskId does not match a task in this tenant.",
+        404,
+      );
+    }
+
+    if ((task.state === "done" || task.state === "canceled") && task.state !== nextState) {
+      throw new PlatformUnavailableError(
+        "task_terminal",
+        "Done or canceled tasks cannot transition to another state.",
+        409,
+      );
+    }
+
+    const now = new Date();
+    const [updatedTask] = await tx
+      .update(tasks)
+      .set({
+        state: nextState,
+        evidence: mergeJson(task.evidence, input.evidence),
+        outcome: mergeJson(task.outcome, input.outcome),
+        cost: mergeJson(task.cost, input.cost),
+        kpi: mergeJson(task.kpi, input.kpi),
+        updatedAt: now,
+        doneAt: nextState === "done" ? (task.doneAt ?? now) : task.doneAt,
+        canceledAt: nextState === "canceled" ? (task.canceledAt ?? now) : task.canceledAt,
+      })
+      .where(eq(tasks.id, task.id))
+      .returning();
+    const transition = {
+      taskId: task.id,
+      fromState: task.state,
+      toState: nextState,
+      reason,
+      externalExecution: "blocked",
+    };
+    const [event] = await tx
+      .insert(events)
+      .values({
+        tenantId: operator.tenantId,
+        type: "task.transitioned",
+        source,
+        actorType: "user",
+        actorId: operator.userId,
+        actorRef: operator.actorRef,
+        objectId: task.objectId,
+        taskId: task.id,
+        capabilityId: task.capabilityId,
+        idempotencyKey: `${input.idempotencyKey}:task_transitioned`,
+        data: transition,
+        occurredAt: now,
+      })
+      .returning({ id: events.id });
+    const [audit] = await tx
+      .insert(auditEvents)
+      .values({
+        tenantId: operator.tenantId,
+        type: "task.transitioned",
+        source,
+        actorType: "user",
+        actorId: operator.userId,
+        actorRef: operator.actorRef,
+        targetType: "task",
+        targetId: task.id,
+        taskId: task.id,
+        eventId: event.id,
+        objectId: task.objectId,
+        capabilityId: task.capabilityId,
+        risk: riskForPriority(task.priority),
+        idempotencyKey: `${input.idempotencyKey}:task_transitioned`,
+        data: transition,
+      })
+      .returning({ id: auditEvents.id });
+    const [transitionEvidence] = await tx
+      .insert(evidence)
+      .values({
+        tenantId: operator.tenantId,
+        kind: "trace",
+        name: `Task transition ${task.state} to ${nextState}`,
+        objectId: task.objectId,
+        taskId: task.id,
+        eventId: event.id,
+        capabilityId: task.capabilityId,
+        actorType: "user",
+        actorId: operator.userId,
+        hash: `${source}:${task.id}:${task.state}:${nextState}:${now.toISOString()}`,
+        data: {
+          ...transition,
+          auditEventId: audit.id,
+        },
+      })
+      .returning({ id: evidence.id });
+
+    return {
+      transitioned: true,
+      taskId: updatedTask.id,
+      eventId: event.id,
+      auditEventId: audit.id,
+      evidenceId: transitionEvidence.id,
+      task: taskView(updatedTask),
     };
   });
 }

@@ -1,4 +1,5 @@
 import { env } from "../../../src/env";
+import { requestApproval } from "../../../src/core/approvals";
 import { getHealth } from "../../../src/core/health";
 import { getCoreSummarySafe } from "../../../src/core/summary";
 import {
@@ -10,7 +11,7 @@ import {
   recordCoreDecision,
   upsertCoreObject,
 } from "../../../src/core/primitives";
-import { createCoreTask } from "../../../src/core/tasks";
+import { createCoreTask, transitionCoreTask } from "../../../src/core/tasks";
 import { PlatformUnavailableError } from "../../../src/core/errors";
 import {
   authorizeWorkerRead,
@@ -212,6 +213,58 @@ export async function POST(request: Request) {
       );
     } catch (error) {
       return coreErrorResponse(error, "core_task_create_failed");
+    }
+  }
+
+  if (command === "task.transition") {
+    const idempotency = normalizeIdempotencyKey(
+      request.headers.get("idempotency-key") ?? body.idempotencyKey,
+    );
+
+    if (!idempotency.ok) {
+      return errorResponse(
+        {
+          code: "invalid_idempotency_key",
+          message: idempotency.message,
+        },
+        400,
+      );
+    }
+
+    try {
+      const result = await transitionCoreTask({
+        operatorEmail: auth.operatorEmail,
+        idempotencyKey: idempotency.key,
+        tenantSlug,
+        taskId: optionalString(config.taskId) ?? "",
+        toState: optionalString(config.toState) ?? optionalString(config.state),
+        reason: optionalString(config.reason),
+        evidence: jsonObject(config.evidence),
+        outcome: jsonObject(config.outcome),
+        cost: jsonObject(config.cost),
+        kpi: jsonObject(config.kpi),
+      });
+
+      return Response.json(
+        {
+          api: apiVersion,
+          data: {
+            command,
+            core: {
+              tenantSlug: tenantSlug ?? null,
+            },
+            result,
+          },
+          error: null,
+        },
+        {
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    } catch (error) {
+      return coreErrorResponse(error, "core_task_transition_failed");
     }
   }
 
@@ -501,6 +554,66 @@ export async function POST(request: Request) {
     }
   }
 
+  if (command === "approval.request") {
+    const idempotency = normalizeIdempotencyKey(
+      request.headers.get("idempotency-key") ?? body.idempotencyKey,
+    );
+
+    if (!idempotency.ok) {
+      return errorResponse(
+        {
+          code: "invalid_idempotency_key",
+          message: idempotency.message,
+        },
+        400,
+      );
+    }
+
+    try {
+      const result = await requestApproval({
+        operatorEmail: auth.operatorEmail,
+        idempotencyKey: idempotency.key,
+        tenantSlug,
+        kind: optionalString(config.kind) ?? "",
+        title: optionalString(config.title) ?? "",
+        summary: optionalString(config.summary),
+        taskId: optionalString(config.taskId),
+        eventId: optionalString(config.eventId),
+        objectId: optionalString(config.objectId),
+        capabilityId: optionalString(config.capabilityId),
+        reviewerUserId: optionalString(config.reviewerUserId),
+        priority: optionalString(config.priority),
+        risk: optionalString(config.risk),
+        dueAt: optionalString(config.dueAt),
+        requestedAction: jsonObject(config.requestedAction),
+        evidence: jsonObject(config.evidence),
+        policy: jsonObject(config.policy),
+        data: jsonObject(config.data),
+      });
+
+      return Response.json(
+        {
+          api: apiVersion,
+          data: {
+            command,
+            core: {
+              tenantSlug: tenantSlug ?? null,
+            },
+            result,
+          },
+          error: null,
+        },
+        {
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    } catch (error) {
+      return coreErrorResponse(error, "core_approval_request_failed");
+    }
+  }
+
   if (command === "object.link") {
     const idempotency = normalizeIdempotencyKey(
       request.headers.get("idempotency-key") ?? body.idempotencyKey,
@@ -614,7 +727,7 @@ export async function POST(request: Request) {
     {
       code: "core_command_unsupported",
       message:
-        "Core command must be task.create, object.upsert, object.link, event.ingest, evidence.attach, document.create, decision.record, or view.publish.",
+        "Core command must be task.create, task.transition, object.upsert, object.link, event.ingest, evidence.attach, document.create, decision.record, approval.request, or view.publish.",
     },
     400,
   );

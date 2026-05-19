@@ -39,12 +39,15 @@ List the exact Core writes the worker needs:
 
 | Command | Purpose | Required fields |
 |---|---|---|
+| `task.create` | Accountable work item | `title`, optional references, owner, evidence, cost, KPI |
+| `task.transition` | Task lifecycle movement | `taskId`, `toState`, `reason`, evidence or outcome |
 | `object.upsert` | Typed business record | `type`, `name`, `source`, `externalId`, `data` |
 | `object.link` | Relationship in the business graph | `fromObjectId`, `toObjectId`, `type`, `data` |
 | `event.ingest` | Source or lifecycle event | `type`, `source`, `objectId`, `data` |
 | `evidence.attach` | Snapshot, draft, receipt, trace, approval, or note | `kind`, `name`, references, `data` |
 | `document.create` | Document or packet record | `kind`, `name`, `state`, references |
 | `decision.record` | Proposed or decided worker judgment | `kind`, `decision`, `state`, references |
+| `approval.request` | Human or manager review gate | `kind`, `title`, task/object/event refs, action, policy |
 | `view.publish` | Generated operator view | `key`, `version`, `name`, `purpose`, `contract`, `actions`, `data` |
 
 ## Objects And Links

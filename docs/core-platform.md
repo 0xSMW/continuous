@@ -179,7 +179,7 @@ policy-bound:
 
 | Surface | Behavior |
 |---|---|
-| `POST /api/core` | Canonical Core command surface for `task.create`, `object.upsert`, `object.link`, `event.ingest`, `evidence.attach`, `document.create`, `decision.record`, and `view.publish`; tenant selection and command fields live in structured `core` and `config` payloads |
+| `POST /api/core` | Canonical Core command surface for `task.create`, `task.transition`, `object.upsert`, `object.link`, `event.ingest`, `evidence.attach`, `document.create`, `decision.record`, `approval.request`, and `view.publish`; tenant selection and command fields live in structured `core` and `config` payloads |
 | `/worker?view=snapshot&role=revenue_operations` | Operator-only snapshot of worker state, active tasks, controls, budget usage, and recent events |
 | `/worker?view=approvals&role=revenue_operations` | Operator-only approval queue for worker decisions |
 | `POST /worker` | Canonical worker command surface for `run`, `approval.decide`, and `adapters.reconcile`; worker role, tenant selection, idempotency, and operation config live in structured payload fields |
@@ -206,11 +206,12 @@ a direct operator/test fallback. External sends and money movement remain
 blocked until human approval and real adapter execution are implemented.
 
 Core writes are platform-level, not worker-specific. `POST /api/core` now
-creates accountable tasks, upserts typed business objects with object versions,
-links objects into a navigable business graph, ingests events, attaches
-evidence, creates document packets, records decisions, and publishes
-renderer-neutral generated views. Every command is tenant-scoped, idempotent,
-audit-backed, and blocks external execution.
+creates and transitions accountable tasks, upserts typed business objects with
+object versions, links objects into a navigable business graph, ingests events,
+attaches evidence, creates document packets, records decisions, requests
+platform approvals, and publishes renderer-neutral generated views. Every
+command is tenant-scoped, idempotent, audit-backed, and blocks external
+execution.
 
 ## Non-Goals For The First Slice
 

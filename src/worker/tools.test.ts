@@ -1,8 +1,22 @@
 import { describe, expect, it } from "vitest";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import { executeWorkerTool, workerToolSchema, workerTools } from "./tools";
 
 describe("worker tool contract", () => {
+  it("keeps the HTTP worker surface route-generic", () => {
+    const root = process.cwd();
+    const routePath = join(root, "app", "worker", "route.ts");
+    const routeSource = readFileSync(routePath, "utf8");
+
+    expect(existsSync(routePath)).toBe(true);
+    expect(existsSync(join(root, "app", "api", "revenue-worker", "route.ts"))).toBe(false);
+    expect(routeSource).toContain('const apiVersion = "continuous.worker.v1";');
+    expect(routeSource).toContain("const command = optionalString(body.command);");
+    expect(routeSource).toContain("const config = jsonObject(body.config);");
+  });
+
   it("exposes the canonical repo-owned worker tools", () => {
     expect(workerTools.map((tool) => tool.name)).toEqual([
       "worker.snapshot",
