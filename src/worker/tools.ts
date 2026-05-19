@@ -17,7 +17,7 @@ export const workerTools = [
     name: "worker.snapshot",
     description: "Read a worker snapshot by role, tenant, or worker id.",
     registry: {
-      role: "revenue_operations",
+      role: "*",
       surface: "view",
       view: "snapshot",
     },
@@ -25,6 +25,50 @@ export const workerTools = [
       type: "object",
       properties: {
         worker: { $ref: "#/$defs/workerTarget" },
+      },
+      required: ["worker"],
+    },
+  },
+  {
+    name: "worker.owner.briefs.list",
+    description: "List generated owner briefs.",
+    registry: {
+      role: "owner_chief_of_staff",
+      surface: "view",
+      view: "briefs",
+    },
+    inputSchema: {
+      type: "object",
+      properties: {
+        worker: { $ref: "#/$defs/workerTarget" },
+        config: {
+          type: "object",
+          properties: {
+            state: { type: "string" },
+          },
+        },
+      },
+      required: ["worker"],
+    },
+  },
+  {
+    name: "worker.owner.decisions.list",
+    description: "List owner decision proposals.",
+    registry: {
+      role: "owner_chief_of_staff",
+      surface: "view",
+      view: "decisions",
+    },
+    inputSchema: {
+      type: "object",
+      properties: {
+        worker: { $ref: "#/$defs/workerTarget" },
+        config: {
+          type: "object",
+          properties: {
+            state: { type: "string" },
+          },
+        },
       },
       required: ["worker"],
     },
@@ -167,6 +211,99 @@ export const workerTools = [
       required: ["worker"],
     },
   },
+  {
+    name: "worker.owner.brief.generate",
+    description: "Generate an owner brief from tenant-scoped Core records.",
+    registry: {
+      role: "owner_chief_of_staff",
+      surface: "command",
+      command: "brief.generate",
+      idempotency: "required",
+      externalExecution: "blocked",
+      requiresTenant: true,
+    },
+    inputSchema: {
+      type: "object",
+      properties: {
+        worker: { $ref: "#/$defs/workerTarget" },
+        idempotencyKey: { type: "string" },
+        config: {
+          type: "object",
+          properties: {
+            window: { $ref: "#/$defs/window" },
+            scopes: {
+              type: "array",
+              items: {
+                enum: ["tasks", "approvals", "cash", "capacity", "obligations", "workers"],
+              },
+            },
+            includeEvidence: { type: "boolean" },
+          },
+          required: ["window", "scopes"],
+        },
+      },
+      required: ["worker", "idempotencyKey", "config"],
+    },
+  },
+  {
+    name: "worker.owner.decision_queue.prepare",
+    description: "Prepare source-backed owner decision proposals.",
+    registry: {
+      role: "owner_chief_of_staff",
+      surface: "command",
+      command: "decision_queue.prepare",
+      idempotency: "required",
+      externalExecution: "blocked",
+      requiresTenant: true,
+    },
+    inputSchema: {
+      type: "object",
+      properties: {
+        worker: { $ref: "#/$defs/workerTarget" },
+        idempotencyKey: { type: "string" },
+        config: {
+          type: "object",
+          properties: {
+            window: { $ref: "#/$defs/window" },
+            priorityFloor: { type: "string" },
+          },
+          required: ["window"],
+        },
+      },
+      required: ["worker", "idempotencyKey", "config"],
+    },
+  },
+  {
+    name: "worker.owner.anomaly.triage",
+    description: "Triage owner-facing metric anomalies without external execution.",
+    registry: {
+      role: "owner_chief_of_staff",
+      surface: "command",
+      command: "anomaly.triage",
+      idempotency: "required",
+      externalExecution: "blocked",
+      requiresTenant: true,
+    },
+    inputSchema: {
+      type: "object",
+      properties: {
+        worker: { $ref: "#/$defs/workerTarget" },
+        idempotencyKey: { type: "string" },
+        config: {
+          type: "object",
+          properties: {
+            window: { $ref: "#/$defs/window" },
+            metricKeys: {
+              type: "array",
+              items: { type: "string" },
+            },
+          },
+          required: ["window", "metricKeys"],
+        },
+      },
+      required: ["worker", "idempotencyKey", "config"],
+    },
+  },
 ] as const;
 
 export const workerToolSchema = {
@@ -224,6 +361,14 @@ export const workerToolSchema = {
         sourceEventId: { type: "string" },
       },
       additionalProperties: true,
+    },
+    window: {
+      type: "object",
+      properties: {
+        from: { type: "string", format: "date-time" },
+        to: { type: "string", format: "date-time" },
+      },
+      required: ["from", "to"],
     },
   },
   tools: workerTools,
@@ -304,6 +449,34 @@ export async function executeWorkerTool(name: string, payload: JsonObject = {}) 
     };
   }
 
+  if (name === "worker.owner.briefs.list") {
+    const result = await executeWorkerView({
+      view: "briefs",
+      target,
+      operatorEmail,
+      state: stringValue(config.state),
+    });
+
+    return {
+      ...result.data,
+      error: result.error,
+    };
+  }
+
+  if (name === "worker.owner.decisions.list") {
+    const result = await executeWorkerView({
+      view: "decisions",
+      target,
+      operatorEmail,
+      state: stringValue(config.state),
+    });
+
+    return {
+      ...result.data,
+      error: result.error,
+    };
+  }
+
   if (name === "worker.approvals.decide") {
     return executeWorkerCommand({
       command: "approval.decide",
@@ -319,6 +492,36 @@ export async function executeWorkerTool(name: string, payload: JsonObject = {}) 
       target,
       operatorEmail,
       config,
+    });
+  }
+
+  if (name === "worker.owner.brief.generate") {
+    return executeWorkerCommand({
+      command: "brief.generate",
+      target,
+      operatorEmail,
+      config,
+      idempotencyKey: payload.idempotencyKey,
+    });
+  }
+
+  if (name === "worker.owner.decision_queue.prepare") {
+    return executeWorkerCommand({
+      command: "decision_queue.prepare",
+      target,
+      operatorEmail,
+      config,
+      idempotencyKey: payload.idempotencyKey,
+    });
+  }
+
+  if (name === "worker.owner.anomaly.triage") {
+    return executeWorkerCommand({
+      command: "anomaly.triage",
+      target,
+      operatorEmail,
+      config,
+      idempotencyKey: payload.idempotencyKey,
     });
   }
 

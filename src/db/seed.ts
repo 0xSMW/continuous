@@ -63,6 +63,7 @@ const ids = {
   tenant: "11111111-1111-4111-8111-111111111111",
   owner: "22222222-2222-4222-8222-222222222222",
   worker: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  ownerWorker: "aaaaaaaa-aaaa-4aaa-8aaa-000000000002",
   adapter: "56565656-5656-4565-8565-565656565656",
   connection: "78787878-7878-4787-8787-787878787878",
   provider: "91919191-9191-4919-8919-919191919191",
@@ -72,6 +73,8 @@ const ids = {
   budgetAccount: "bbbbbbbb-bbbb-4bbb-8bbb-000000000003",
   budgetAllocation: "bbbbbbbb-bbbb-4bbb-8bbb-000000000004",
   budgetReservation: "bbbbbbbb-bbbb-4bbb-8bbb-000000000005",
+  ownerBudgetAccount: "bbbbbbbb-bbbb-4bbb-8bbb-000000000006",
+  ownerBudgetAllocation: "bbbbbbbb-bbbb-4bbb-8bbb-000000000007",
   legalEntityObject: "33333333-3333-4333-8333-000000000101",
   workLocationObject: "33333333-3333-4333-8333-000000000102",
   personObject: "33333333-3333-4333-8333-000000000103",
@@ -139,6 +142,7 @@ const ids = {
   workflowContractor: "66666666-6666-4666-8666-000000000006",
   workflowTermination: "66666666-6666-4666-8666-000000000007",
   workflowLeadToCash: "66666666-6666-4666-8666-000000000008",
+  workflowDailyOwnerBrief: "66666666-6666-4666-8666-000000000021",
   workflowOpenNewState: "66666666-6666-4666-8666-000000000009",
   workflowCompensationChange: "66666666-6666-4666-8666-000000000010",
   workflowLocationChange: "66666666-6666-4666-8666-000000000011",
@@ -246,22 +250,43 @@ async function seed() {
 
   await db
     .insert(workers)
-    .values({
-      id: ids.worker,
-      tenantId: ids.tenant,
-      managerUserId: ids.owner,
-      kind: "agent",
-      state: "training",
-      name: "Revenue Operations Worker",
-      role: "revenue_operations",
-      mission:
-        "Convert inbound demand into quoted, scheduled, invoiced, collected revenue while keeping the owner in control.",
-      autonomyLevel: 2,
-      scope: { flows: ["lead_to_cash", "quote_to_cash"], systems: ["website_form"] },
-      memory: { customer_memory: "scoped", no_memory_zones: ["payment_credentials"] },
-      policy: { money_movement: "approval_required", external_send: "approval_required" },
-      kpis: { leads_answered: 0, quotes_prepared: 1, owner_hours_saved: 0.3 },
-    })
+    .values([
+      {
+        id: ids.worker,
+        tenantId: ids.tenant,
+        managerUserId: ids.owner,
+        kind: "agent",
+        state: "training",
+        name: "Revenue Operations Worker",
+        role: "revenue_operations",
+        mission:
+          "Convert inbound demand into quoted, scheduled, invoiced, collected revenue while keeping the owner in control.",
+        autonomyLevel: 2,
+        scope: { flows: ["lead_to_cash", "quote_to_cash"], systems: ["website_form"] },
+        memory: { customer_memory: "scoped", no_memory_zones: ["payment_credentials"] },
+        policy: { money_movement: "approval_required", external_send: "approval_required" },
+        kpis: { leads_answered: 0, quotes_prepared: 1, owner_hours_saved: 0.3 },
+      },
+      {
+        id: ids.ownerWorker,
+        tenantId: ids.tenant,
+        managerUserId: ids.owner,
+        kind: "agent",
+        state: "training",
+        name: "Owner Chief-of-Staff Worker",
+        role: "owner_chief_of_staff",
+        mission:
+          "Turn Continuous Core records into a daily owner brief, decision queue, anomaly review, and source-backed routing plan.",
+        autonomyLevel: 1,
+        scope: {
+          flows: ["daily_owner_brief", "decision_queue", "anomaly_triage"],
+          reads: ["tasks", "approvals", "budget", "obligations", "workers", "events", "evidence"],
+        },
+        memory: { source_content: "quoted_only", sensitive_reveal: "approval_required" },
+        policy: { external_execution: "blocked", mutation: "core_records_only" },
+        kpis: { briefs_prepared: 0, decisions_ranked: 0, critical_items_found: 0 },
+      },
+    ])
     .onConflictDoNothing();
 
   await db
@@ -438,6 +463,33 @@ async function seed() {
     .onConflictDoNothing();
 
   await db
+    .insert(capabilityGrants)
+    .values(
+      [
+        capIds.workerRead,
+        capIds.ownerBriefGenerate,
+        capIds.approvalRequest,
+        capIds.sensitiveReveal,
+      ].map((capabilityId) => ({
+        tenantId: ids.tenant,
+        capabilityId,
+        actorType: "worker" as const,
+        actorId: ids.ownerWorker,
+        scope: {
+          tenant_id: ids.tenant,
+          reads: ["tasks", "approvals", "budget", "obligations", "workers", "events", "evidence"],
+        },
+        policy: {
+          mode: "read_only",
+          autonomy_level: 1,
+          external_execution: "blocked",
+          sensitive_reveal: "approval_required",
+        },
+      })),
+    )
+    .onConflictDoNothing();
+
+  await db
     .insert(adapters)
     .values({
       id: ids.adapter,
@@ -533,27 +585,48 @@ async function seed() {
 
   await db
     .insert(budgetAccounts)
-    .values({
-      id: ids.budgetAccount,
-      tenantId: ids.tenant,
-      policyId: ids.budgetPolicy,
-      name: "Revenue Worker monthly intelligence budget",
-      target: "worker",
-      targetId: ids.worker,
-    })
+    .values([
+      {
+        id: ids.budgetAccount,
+        tenantId: ids.tenant,
+        policyId: ids.budgetPolicy,
+        name: "Revenue Worker monthly intelligence budget",
+        target: "worker",
+        targetId: ids.worker,
+      },
+      {
+        id: ids.ownerBudgetAccount,
+        tenantId: ids.tenant,
+        policyId: ids.budgetPolicy,
+        name: "Owner Chief-of-Staff Worker monthly intelligence budget",
+        target: "worker",
+        targetId: ids.ownerWorker,
+      },
+    ])
     .onConflictDoNothing();
 
   await db
     .insert(budgetAllocations)
-    .values({
-      id: ids.budgetAllocation,
-      tenantId: ids.tenant,
-      poolId: ids.budgetPool,
-      accountId: ids.budgetAccount,
-      units: 10000000,
-      startsAt: now,
-      endsAt: nextMonth,
-    })
+    .values([
+      {
+        id: ids.budgetAllocation,
+        tenantId: ids.tenant,
+        poolId: ids.budgetPool,
+        accountId: ids.budgetAccount,
+        units: 10000000,
+        startsAt: now,
+        endsAt: nextMonth,
+      },
+      {
+        id: ids.ownerBudgetAllocation,
+        tenantId: ids.tenant,
+        poolId: ids.budgetPool,
+        accountId: ids.ownerBudgetAccount,
+        units: 1000000,
+        startsAt: now,
+        endsAt: nextMonth,
+      },
+    ])
     .onConflictDoNothing();
 
   await db
@@ -1054,6 +1127,24 @@ async function seed() {
         approvals: { required: ["owner_quote_approval"], states: { approval_requested: ["owner_quote_approval"] } },
         evidence: { packet: "lead_to_cash_packet" },
         tests: { required: ["source_snapshot", "quote_draft", "adapter_receipt", "approval_request"] },
+      },
+      {
+        id: ids.workflowDailyOwnerBrief,
+        key: "daily_owner_brief",
+        name: "Daily owner brief",
+        purpose: "Summarize tenant-scoped Core records into a review-ready owner brief without external mutation.",
+        domain: "owner_operations",
+        states: { order: ["draft", "source_review", "synthesis", "review_ready", "published"] },
+        transitions: {
+          draft: ["source_review"],
+          source_review: ["synthesis", "blocked"],
+          synthesis: ["review_ready", "blocked"],
+          review_ready: ["published"],
+        },
+        objects: { required: ["owner_brief", "decision", "metric", "task", "worker_run"] },
+        approvals: { required: ["sensitive_reveal", "route_change"], states: { review_ready: ["owner_review"] } },
+        evidence: { packet: "owner_brief_packet" },
+        tests: { required: ["source_snapshot", "redaction", "decision_rationale", "no_external_mutation"] },
       },
     ])
     .onConflictDoNothing();

@@ -33,6 +33,11 @@ adapters, generated UI, evidence, and evals.
 
 ## Phase 2: Owner Chief-of-Staff Worker
 
+Status: first read-only runtime slice is registered on `/worker` for
+`brief.generate`, `decision_queue.prepare`, `anomaly.triage`, `snapshot`,
+`briefs`, and `decisions`. Remaining work is deeper stale-source handling,
+approval/revision continuations, and broader factuality evals before promotion.
+
 | Dependency | Implementation target |
 |---|---|
 | Shared graph summary | Cross-domain task, event, budget, obligation, approval, and worker run snapshot |

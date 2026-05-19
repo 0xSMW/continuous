@@ -649,7 +649,10 @@ export const plannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       },
     ],
   },
-];
+].filter(
+  (contract): contract is PlannedWorkerContractMetadata =>
+    contract.role !== "owner_chief_of_staff",
+);
 
 export function plannedWorkerRoles() {
   return plannedWorkerContracts.map((contract) => contract.role);

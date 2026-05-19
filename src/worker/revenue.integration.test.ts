@@ -50,7 +50,7 @@ import {
   workers,
   type JsonObject,
 } from "../db/schema";
-import { revenueWorkerEvalCases, scoreRevenueWorkerRun } from "./evals";
+import { ownerBriefEvalCases, revenueWorkerEvalCases, scoreOwnerBriefRun, scoreRevenueWorkerRun } from "./evals";
 import { executeWorkerCommand } from "./registry";
 import { continueRevenueWorker, runRevenueWorker } from "./revenue";
 
@@ -1673,5 +1673,93 @@ maybeDescribe("Revenue Worker integration eval", () => {
 
     expect(auditCount.value).toBe(result.auditEventIds.length);
     expect(evidenceCount.value).toBe(result.evidenceIds.length);
+  }, 120_000);
+
+  it("runs the Owner Chief-of-Staff worker as a read-only brief generator", async () => {
+    const runId = randomUUID();
+    const result = await executeWorkerCommand({
+      command: "brief.generate",
+      target: {
+        role: "owner_chief_of_staff",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: `ci-owner-brief-${runId}`,
+      config: {
+        window: {
+          from: "2026-05-19T00:00:00.000Z",
+          to: "2026-05-20T00:00:00.000Z",
+        },
+        scopes: ["tasks", "approvals", "cash", "capacity", "obligations", "workers"],
+        includeEvidence: true,
+      },
+    });
+    const ownerResult = result.result as Awaited<ReturnType<typeof import("./owner").generateOwnerBrief>>;
+    const score = scoreOwnerBriefRun(ownerResult, ownerBriefEvalCases[0]);
+
+    expect(result.worker.role).toBe("owner_chief_of_staff");
+    expect(result.command).toBe("brief.generate");
+    expect(ownerResult.created).toBe(true);
+    expect(ownerResult.objectId).toBeTruthy();
+    expect(ownerResult.objectVersionId).toBeTruthy();
+    expect(ownerResult.evidenceId).toBeTruthy();
+    expect(ownerResult.documentId).toBeTruthy();
+    expect(ownerResult.packetId).toBeTruthy();
+    expect(ownerResult.workflowRunId).toBeTruthy();
+    expect(ownerResult.workflowStepIds).toHaveLength(3);
+    expect(ownerResult.decisionIds.length).toBeGreaterThanOrEqual(1);
+    expect(ownerResult.viewIds).toHaveLength(3);
+    expect(score.passed).toBe(true);
+
+    const [briefObject] = await db.select().from(objects).where(eq(objects.id, ownerResult.objectId ?? "")).limit(1);
+    const [version] = await db
+      .select()
+      .from(objectVersions)
+      .where(eq(objectVersions.id, ownerResult.objectVersionId ?? ""))
+      .limit(1);
+    const [packet] = await db
+      .select()
+      .from(evidencePackets)
+      .where(eq(evidencePackets.id, ownerResult.packetId ?? ""))
+      .limit(1);
+    const [run] = await db
+      .select()
+      .from(workerRuns)
+      .where(eq(workerRuns.id, ownerResult.workerRunId ?? ""))
+      .limit(1);
+    const [ownerWorker] = await db
+      .select({ id: workers.id })
+      .from(workers)
+      .where(eq(workers.role, "owner_chief_of_staff"))
+      .limit(1);
+    const replay = await executeWorkerCommand({
+      command: "brief.generate",
+      target: {
+        role: "owner_chief_of_staff",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: `ci-owner-brief-${runId}`,
+      config: {
+        window: {
+          from: "2026-05-19T00:00:00.000Z",
+          to: "2026-05-20T00:00:00.000Z",
+        },
+        scopes: ["tasks"],
+      },
+    });
+    const replayResult = replay.result as Awaited<ReturnType<typeof import("./owner").generateOwnerBrief>>;
+
+    expect(briefObject?.type).toBe("owner_brief");
+    expect(briefObject?.state).toBe("review_ready");
+    expect(version?.objectId).toBe(ownerResult.objectId);
+    expect(packet?.kind).toBe("owner_brief_packet");
+    expect(objectValue(packet?.data).externalExecution).toBe("blocked");
+    expect(run?.mode).toBe("read_only");
+    expect(run?.workerId).toBe(ownerWorker?.id);
+    expect(objectValue(ownerResult.output).externalExecution).toBe("blocked");
+    expect(objectValue(ownerResult.output).externalSend).toBe(false);
+    expect(replayResult.created).toBe(false);
+    expect(replayResult.workerRunId).toBe(ownerResult.workerRunId);
   }, 120_000);
 });

@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { revenueWorkerEvalCases, scoreRevenueWorkerRun } from "./evals";
+import {
+  ownerBriefEvalCases,
+  revenueWorkerEvalCases,
+  scoreOwnerBriefRun,
+  scoreRevenueWorkerRun,
+} from "./evals";
+import type { OwnerBriefRunResult, OwnerWorkerSnapshot } from "./owner";
 import type { RevenueWorkerRunResult, RevenueWorkerSnapshot } from "./revenue";
 
 const snapshot: RevenueWorkerSnapshot = {
@@ -90,6 +96,93 @@ const completeResult: RevenueWorkerRunResult = {
   snapshot,
 };
 
+const ownerSnapshot: OwnerWorkerSnapshot = {
+  worker: {
+    id: "owner_worker_1",
+    name: "Owner Chief-of-Staff Worker",
+    role: "owner_chief_of_staff",
+    state: "active",
+    mission: "Summarize operations for the owner",
+    autonomyLevel: 1,
+    scope: {},
+    policy: {},
+    kpis: {},
+    managerName: "Owner",
+    tenantName: "Continuous Demo",
+  },
+  budget: {
+    accountId: "owner_budget_1",
+    name: "Owner Worker monthly intelligence budget",
+    usedUnits: 4000,
+    heldUnits: 0,
+    events: 1,
+  },
+  controls: {
+    pendingApprovals: 1,
+    openDecisions: 1,
+    generatedViews: 3,
+    externalExecution: "disabled",
+  },
+  activeTasks: [],
+  recentBriefs: [],
+  recentEvents: [],
+  latestRun: {
+    id: "owner_run_1",
+    workerRunId: "owner_run_1",
+    eventId: "owner_event_1",
+    idempotencyKey: "eval-owner-daily-brief-review-ready",
+    occurredAt: new Date("2026-05-19T00:00:00.000Z").toISOString(),
+    state: "done",
+    mode: "read_only",
+  },
+};
+
+const completeOwnerResult: OwnerBriefRunResult = {
+  created: true,
+  idempotencyKey: "eval-owner-daily-brief-review-ready",
+  workerRunId: "owner_run_1",
+  eventId: "owner_event_1",
+  objectId: "owner_brief_1",
+  objectVersionId: "owner_brief_version_1",
+  evidenceId: "owner_evidence_1",
+  documentId: "owner_document_1",
+  packetId: "owner_packet_1",
+  auditEventId: "owner_audit_1",
+  reservationId: "owner_reservation_1",
+  usageEventId: "owner_usage_1",
+  workflowRunId: "owner_workflow_1",
+  workflowStepIds: ["owner_step_1", "owner_step_2", "owner_step_3"],
+  decisionIds: ["owner_decision_1"],
+  viewIds: ["owner_brief_view", "owner_decision_view", "owner_anomaly_view"],
+  output: {
+    sections: [
+      { key: "tasks" },
+      { key: "approvals" },
+      { key: "cash" },
+      { key: "capacity" },
+      { key: "obligations" },
+      { key: "workers" },
+    ],
+    sourceCounts: {
+      tasks: 2,
+      workers: 2,
+    },
+    budgetBurn: {
+      usedUnits: 4000,
+      heldUnits: 0,
+      events: 1,
+    },
+    redaction: {
+      bankAccountNumbers: "redacted",
+      payrollDetails: "redacted",
+      privateMessageBodies: "redacted",
+    },
+    externalExecution: "blocked",
+    externalSend: false,
+  },
+  snapshot: ownerSnapshot,
+};
+
 describe("Revenue Worker evals", () => {
   it("passes a run that links ledgers, blocks external execution, and requests approval", () => {
     const result = scoreRevenueWorkerRun(completeResult, revenueWorkerEvalCases[0]);
@@ -115,5 +208,31 @@ describe("Revenue Worker evals", () => {
     expect(result.dimensions.find((dimension) => dimension.id === "adapter_receipt")?.passed).toBe(
       false,
     );
+  });
+});
+
+describe("Owner Chief-of-Staff Worker evals", () => {
+  it("passes a brief that links ledgers, covers sources, redacts data, and blocks execution", () => {
+    const result = scoreOwnerBriefRun(completeOwnerResult, ownerBriefEvalCases[0]);
+
+    expect(result.passed).toBe(true);
+    expect(result.score).toBe(1);
+    expect(result.dimensions.every((dimension) => dimension.passed)).toBe(true);
+  });
+
+  it("fails when sensitive redaction proof is missing", () => {
+    const result = scoreOwnerBriefRun(
+      {
+        ...completeOwnerResult,
+        output: {
+          ...completeOwnerResult.output,
+          redaction: {},
+        },
+      },
+      ownerBriefEvalCases[0],
+    );
+
+    expect(result.passed).toBe(false);
+    expect(result.dimensions.find((dimension) => dimension.id === "redaction")?.passed).toBe(false);
   });
 });

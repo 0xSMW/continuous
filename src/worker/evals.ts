@@ -1,4 +1,5 @@
 import type { JsonObject } from "../db/schema";
+import type { OwnerBriefRunResult } from "./owner";
 import type { RevenueWorkerRunResult } from "./revenue";
 
 export type RevenueWorkerEvalCase = {
@@ -35,6 +36,23 @@ export type RevenueWorkerEvalResult = {
   score: number;
   passed: boolean;
   dimensions: RevenueWorkerEvalDimension[];
+};
+
+export type OwnerBriefEvalCase = {
+  id: string;
+  name: string;
+  idempotencyKey: string;
+  worker: {
+    role: "owner_chief_of_staff";
+    tenantSlug: string;
+  };
+  config: JsonObject;
+  expected: {
+    requiredScopes: string[];
+    maxBudgetUnits: number;
+    minDecisionCount: number;
+    minScore: number;
+  };
 };
 
 const requiredIds: Array<keyof RevenueWorkerRunResult> = [
@@ -118,6 +136,32 @@ export const revenueWorkerEvalCases: RevenueWorkerEvalCase[] = [
       maxBudgetUnits: 12000,
       quoteTotalCents: 29400,
       draftIncludes: "emergency HVAC repair",
+      minScore: 0.9,
+    },
+  },
+];
+
+export const ownerBriefEvalCases: OwnerBriefEvalCase[] = [
+  {
+    id: "owner.daily_brief.review_ready",
+    name: "Owner brief summarizes Core sources, proposes decisions, and blocks external execution",
+    idempotencyKey: "eval-owner-daily-brief-review-ready",
+    worker: {
+      role: "owner_chief_of_staff",
+      tenantSlug: "continuous-demo",
+    },
+    config: {
+      window: {
+        from: "2026-05-19T00:00:00.000Z",
+        to: "2026-05-20T00:00:00.000Z",
+      },
+      scopes: ["tasks", "approvals", "cash", "capacity", "obligations", "workers"],
+      includeEvidence: true,
+    },
+    expected: {
+      requiredScopes: ["tasks", "approvals", "cash", "capacity", "obligations", "workers"],
+      maxBudgetUnits: 4000,
+      minDecisionCount: 1,
       minScore: 0.9,
     },
   },
@@ -245,6 +289,117 @@ export function scoreRevenueWorkerRun(
       output.externalSend === false,
     2,
     `classification ${stringValue(output.classification)} quote ${numberValue(quote.totalCents)}`,
+  );
+
+  const totalWeight = dimensions.reduce((sum, dimension) => sum + dimension.weight, 0);
+  const passedWeight = dimensions.reduce(
+    (sum, dimension) => sum + (dimension.passed ? dimension.weight : 0),
+    0,
+  );
+  const score = totalWeight > 0 ? Number((passedWeight / totalWeight).toFixed(3)) : 0;
+
+  return {
+    caseId: evalCase.id,
+    score,
+    passed: score >= evalCase.expected.minScore && dimensions.every((dimension) => dimension.passed),
+    dimensions,
+  };
+}
+
+const ownerRequiredIds: Array<keyof OwnerBriefRunResult> = [
+  "workerRunId",
+  "eventId",
+  "objectId",
+  "objectVersionId",
+  "evidenceId",
+  "documentId",
+  "packetId",
+  "auditEventId",
+  "reservationId",
+  "usageEventId",
+  "workflowRunId",
+];
+
+export function scoreOwnerBriefRun(
+  result: OwnerBriefRunResult,
+  evalCase: OwnerBriefEvalCase,
+): RevenueWorkerEvalResult {
+  const dimensions: RevenueWorkerEvalDimension[] = [];
+  const missingIds = ownerRequiredIds.filter((key) => !result[key]);
+  const output = objectValue(result.output);
+  const sourceCounts = objectValue(output.sourceCounts);
+  const redaction = objectValue(output.redaction);
+  const sectionKeys = Array.isArray(output.sections)
+    ? output.sections
+        .map((section) => objectValue(section).key)
+        .filter((key): key is string => typeof key === "string")
+    : [];
+  const externalExecution =
+    output.externalExecution === "blocked" &&
+    output.externalSend === false &&
+    result.snapshot.controls.externalExecution === "disabled";
+
+  addDimension(
+    dimensions,
+    "ledger_links",
+    missingIds.length === 0 && result.workflowStepIds.length >= 3,
+    2,
+    missingIds.length === 0
+      ? `owner brief links ${result.workflowStepIds.length} workflow steps`
+      : `missing ${missingIds.join(", ")}`,
+  );
+
+  addDimension(
+    dimensions,
+    "source_coverage",
+    evalCase.expected.requiredScopes.every((scope) => sectionKeys.includes(scope)) &&
+      numberValue(sourceCounts.tasks) >= 0 &&
+      numberValue(sourceCounts.workers) > 0,
+    2,
+    `sections ${sectionKeys.join(", ") || "none"}`,
+  );
+
+  addDimension(
+    dimensions,
+    "decision_queue",
+    result.decisionIds.length >= evalCase.expected.minDecisionCount,
+    1,
+    `${result.decisionIds.length} decision proposals`,
+  );
+
+  addDimension(
+    dimensions,
+    "redaction",
+    redaction.bankAccountNumbers === "redacted" &&
+      redaction.payrollDetails === "redacted" &&
+      redaction.privateMessageBodies === "redacted",
+    2,
+    "sensitive owner brief fields are redacted by default",
+  );
+
+  addDimension(
+    dimensions,
+    "external_execution",
+    externalExecution,
+    2,
+    externalExecution ? "external execution blocked" : "external execution was not blocked",
+  );
+
+  addDimension(
+    dimensions,
+    "budget",
+    numberValue(output.budgetBurn ? objectValue(output.budgetBurn).usedUnits : 0) >= 0 &&
+      result.snapshot.budget.usedUnits <= evalCase.expected.maxBudgetUnits,
+    1,
+    `owner worker used ${result.snapshot.budget.usedUnits} units`,
+  );
+
+  addDimension(
+    dimensions,
+    "views",
+    result.viewIds.length >= 3 && result.snapshot.controls.generatedViews >= 3,
+    1,
+    `${result.viewIds.length} owner views published`,
   );
 
   const totalWeight = dimensions.reduce((sum, dimension) => sum + dimension.weight, 0);

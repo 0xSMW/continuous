@@ -47,11 +47,16 @@ describe("worker tool contract", () => {
   it("exposes registry-backed repo-owned worker tools", () => {
     expect(workerTools.map((tool) => tool.name)).toEqual([
       "worker.snapshot",
+      "worker.owner.briefs.list",
+      "worker.owner.decisions.list",
       "worker.run",
       "worker.continue",
       "worker.approvals.list",
       "worker.approvals.decide",
       "worker.adapters.reconcile",
+      "worker.owner.brief.generate",
+      "worker.owner.decision_queue.prepare",
+      "worker.owner.anomaly.triage",
     ]);
     expect(workerToolSchema.tools).toBe(workerTools);
     expect(workerToolSchema.registry.commands).toEqual(registeredWorkerCommands());
@@ -69,16 +74,6 @@ describe("worker tool contract", () => {
     );
     expect(workerToolSchema.registry.plannedCommands).toEqual(plannedWorkerCommands());
     expect(workerToolSchema.registry.plannedViews).toEqual(plannedWorkerViews());
-    expect(workerToolSchema.registry.commands.map((command) => command.name)).toEqual([
-      "run",
-      "continue",
-      "approval.decide",
-      "adapters.reconcile",
-    ]);
-    expect(workerToolSchema.registry.views.map((view) => view.name)).toEqual([
-      "snapshot",
-      "approvals",
-    ]);
     expect(workerToolSchema.registry.commands).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -98,6 +93,34 @@ describe("worker tool contract", () => {
           name: "adapters.reconcile",
           requiresTenant: true,
         }),
+        expect.objectContaining({
+          role: "owner_chief_of_staff",
+          name: "brief.generate",
+          idempotency: "required",
+          requiresTenant: true,
+          externalExecution: "blocked",
+        }),
+        expect.objectContaining({
+          role: "owner_chief_of_staff",
+          name: "decision_queue.prepare",
+          idempotency: "required",
+          requiresTenant: true,
+        }),
+        expect.objectContaining({
+          role: "owner_chief_of_staff",
+          name: "anomaly.triage",
+          idempotency: "required",
+          requiresTenant: true,
+        }),
+      ]),
+    );
+    expect(workerToolSchema.registry.views).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: "revenue_operations", name: "snapshot" }),
+        expect.objectContaining({ role: "revenue_operations", name: "approvals" }),
+        expect.objectContaining({ role: "owner_chief_of_staff", name: "snapshot" }),
+        expect.objectContaining({ role: "owner_chief_of_staff", name: "briefs" }),
+        expect.objectContaining({ role: "owner_chief_of_staff", name: "decisions" }),
       ]),
     );
     expect(workerToolSchema.$defs.workerTarget.properties.tenantSlug.type).toBe("string");
@@ -127,9 +150,8 @@ describe("worker tool contract", () => {
     ).rejects.toThrow("Worker role payroll_operations is not available yet.");
   });
 
-  it("exposes planned worker metadata without enabling future runtime handlers", async () => {
+  it("exposes planned worker metadata without enabling future runtime handlers", () => {
     expect(workerToolSchema.registry.plannedContracts.map((contract) => contract.role)).toEqual([
-      "owner_chief_of_staff",
       "dispatch_operations",
       "finance_operations",
       "workforce_operations",
@@ -138,12 +160,6 @@ describe("worker tool contract", () => {
     ]);
     expect(workerToolSchema.registry.plannedCommands).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({
-          role: "owner_chief_of_staff",
-          name: "brief.generate",
-          contractPath: "docs/owner-chief-of-staff-worker-v1-contract.md",
-          evidencePacket: "owner_brief_packet",
-        }),
         expect.objectContaining({
           role: "dispatch_operations",
           name: "schedule.propose",
@@ -161,6 +177,14 @@ describe("worker tool contract", () => {
         }),
       ]),
     );
+    expect(workerToolSchema.registry.plannedCommands).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "owner_chief_of_staff",
+          name: "brief.generate",
+        }),
+      ]),
+    );
     expect(workerToolSchema.registry.plannedViews).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -170,16 +194,6 @@ describe("worker tool contract", () => {
           evidencePacket: null,
         }),
       ]),
-    );
-
-    await expect(
-      executeWorkerTool("worker.snapshot", {
-        worker: {
-          role: "owner_chief_of_staff",
-        },
-      }),
-    ).rejects.toThrow(
-      "Worker role owner_chief_of_staff is planned but not available yet.",
     );
   });
 
@@ -206,6 +220,27 @@ describe("worker tool contract", () => {
         idempotencyKey: "bad key!",
         config: {
           approvalId: "approval_uuid",
+        },
+      }),
+    ).rejects.toThrow(
+      "Idempotency key may only contain letters, numbers, dot, underscore, colon, or dash.",
+    );
+  });
+
+  it("validates owner brief idempotency before invoking the worker", async () => {
+    await expect(
+      executeWorkerTool("worker.owner.brief.generate", {
+        worker: {
+          role: "owner_chief_of_staff",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "bad key!",
+        config: {
+          window: {
+            from: "2026-05-19T00:00:00.000Z",
+            to: "2026-05-20T00:00:00.000Z",
+          },
+          scopes: ["tasks"],
         },
       }),
     ).rejects.toThrow(

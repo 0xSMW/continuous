@@ -43,6 +43,8 @@ const contracts = [
   },
 ] as const;
 
+const runtimeRoles = new Set(["owner_chief_of_staff"]);
+
 function read(path: string) {
   return readFileSync(join(root, path), "utf8");
 }
@@ -89,15 +91,16 @@ describe("future worker contracts", () => {
     }
   });
 
-  it("has planned command metadata for every future contract", () => {
+  it("has planned command metadata for every future contract without registered runtime", () => {
     const commandRoles = new Set(plannedWorkerCommands().map((command) => command.role));
     const viewRoles = new Set(plannedWorkerViews().map((view) => view.role));
+    const plannedContracts = contracts.filter((contract) => !runtimeRoles.has(contract.role));
 
     expect(plannedWorkerContracts.map((contract) => contract.role)).toEqual(
-      contracts.map((contract) => contract.role),
+      plannedContracts.map((contract) => contract.role),
     );
 
-    for (const contract of contracts) {
+    for (const contract of plannedContracts) {
       const planned = plannedWorkerContracts.find((item) => item.role === contract.role);
 
       expect(planned?.contractPath).toBe(contract.path);

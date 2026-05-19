@@ -12,6 +12,15 @@ import {
   RevenueWorkerUnavailableError,
   runRevenueWorker,
 } from "./revenue";
+import {
+  generateOwnerBrief,
+  getOwnerWorkerSnapshotSafe,
+  listOwnerBriefs,
+  listOwnerDecisions,
+  ownerWorkerRole,
+  prepareOwnerDecisionQueue,
+  triageOwnerAnomalies,
+} from "./owner";
 import { plannedWorkerContractForRole } from "./planned-workers";
 import { normalizeIdempotencyKey } from "./security";
 
@@ -297,6 +306,180 @@ const revenueDefinition: WorkerDefinition = {
 
 const workerDefinitions: Record<string, WorkerDefinition> = {
   [revenueDefinition.role]: revenueDefinition,
+  [ownerWorkerRole]: {
+    role: ownerWorkerRole,
+    commands: {
+      "brief.generate": {
+        name: "brief.generate",
+        description: "Generate a read-only owner brief over tenant-scoped Core records.",
+        idempotency: "required",
+        sideEffects: "internal",
+        externalExecution: "blocked",
+        requiresTenant: true,
+        async handle(context) {
+          if (!context.idempotencyKey) {
+            throw new PlatformUnavailableError(
+              "invalid_idempotency_key",
+              "A string idempotency key is required.",
+              400,
+            );
+          }
+
+          return generateOwnerBrief({
+            idempotencyKey: context.idempotencyKey,
+            tenantSlug: context.target.tenantSlug,
+            workerId: context.target.workerId,
+            operatorEmail: context.operatorEmail,
+            config: context.config,
+          });
+        },
+      },
+      "decision_queue.prepare": {
+        name: "decision_queue.prepare",
+        description: "Prepare owner decision proposals from tasks, approvals, obligations, and evidence.",
+        idempotency: "required",
+        sideEffects: "internal",
+        externalExecution: "blocked",
+        requiresTenant: true,
+        async handle(context) {
+          if (!context.idempotencyKey) {
+            throw new PlatformUnavailableError(
+              "invalid_idempotency_key",
+              "A string idempotency key is required.",
+              400,
+            );
+          }
+
+          return prepareOwnerDecisionQueue({
+            idempotencyKey: context.idempotencyKey,
+            tenantSlug: context.target.tenantSlug,
+            workerId: context.target.workerId,
+            operatorEmail: context.operatorEmail,
+            config: context.config,
+          });
+        },
+      },
+      "anomaly.triage": {
+        name: "anomaly.triage",
+        description: "Triage owner-facing metric anomalies into evidence and internal review work.",
+        idempotency: "required",
+        sideEffects: "internal",
+        externalExecution: "blocked",
+        requiresTenant: true,
+        async handle(context) {
+          if (!context.idempotencyKey) {
+            throw new PlatformUnavailableError(
+              "invalid_idempotency_key",
+              "A string idempotency key is required.",
+              400,
+            );
+          }
+
+          return triageOwnerAnomalies({
+            idempotencyKey: context.idempotencyKey,
+            tenantSlug: context.target.tenantSlug,
+            workerId: context.target.workerId,
+            operatorEmail: context.operatorEmail,
+            config: context.config,
+          });
+        },
+      },
+      "approval.decide": {
+        name: "approval.decide",
+        description: "Decide an owner worker approval request without executing external actions.",
+        idempotency: "none",
+        sideEffects: "internal",
+        externalExecution: "blocked",
+        requiresTenant: true,
+        async handle(context) {
+          const approvalId = optionalString(context.config.approvalId);
+          const action = normalizeApprovalDecision(context.config.action);
+
+          if (!approvalId || !action) {
+            throw new PlatformUnavailableError(
+              "invalid_worker_command_config",
+              "config.approvalId and config.action are required for approval.decide.",
+              400,
+            );
+          }
+
+          return decideApproval({
+            approvalId,
+            operatorEmail: context.operatorEmail,
+            tenantSlug: context.target.tenantSlug,
+            action,
+            note: optionalString(context.config.note),
+            subject: "worker",
+          });
+        },
+      },
+    },
+    views: {
+      snapshot: {
+        name: "snapshot",
+        description: "Read the owner chief-of-staff worker runtime snapshot.",
+        async handle(context) {
+          const result = await getOwnerWorkerSnapshotSafe({
+            tenantSlug: context.target.tenantSlug,
+            workerId: context.target.workerId,
+            role: context.target.role,
+          });
+
+          return {
+            status: result.ok ? 200 : 500,
+            data: {
+              worker: responseTarget(context.target),
+              view: "snapshot",
+              snapshot: result.snapshot,
+            },
+            error: result.error,
+          };
+        },
+      },
+      briefs: {
+        name: "briefs",
+        description: "List generated owner briefs.",
+        async handle(context) {
+          const briefs = await listOwnerBriefs({
+            operatorEmail: context.operatorEmail,
+            tenantSlug: context.target.tenantSlug,
+            workerId: context.target.workerId,
+            state: context.state,
+          });
+
+          return {
+            data: {
+              worker: responseTarget(context.target, briefs.worker.tenantSlug),
+              view: "briefs",
+              briefs: briefs.briefs,
+            },
+            error: null,
+          };
+        },
+      },
+      decisions: {
+        name: "decisions",
+        description: "List owner decision proposals.",
+        async handle(context) {
+          const ownerDecisions = await listOwnerDecisions({
+            operatorEmail: context.operatorEmail,
+            tenantSlug: context.target.tenantSlug,
+            workerId: context.target.workerId,
+            state: context.state,
+          });
+
+          return {
+            data: {
+              worker: responseTarget(context.target, ownerDecisions.worker.tenantSlug),
+              view: "decisions",
+              decisions: ownerDecisions.decisions,
+            },
+            error: null,
+          };
+        },
+      },
+    },
+  },
 };
 
 export function registeredWorkerCommands() {

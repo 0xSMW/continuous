@@ -246,17 +246,23 @@ jobs:
             (.registry.commands | map(.name) | index("continue")) != null and
             (.registry.commands | map(.name) | index("approval.decide")) != null and
             (.registry.commands | map(.name) | index("adapters.reconcile")) != null and
+            (.registry.commands | any(.role == "owner_chief_of_staff" and .name == "brief.generate" and .idempotency == "required" and .requiresTenant == true)) and
+            (.registry.commands | any(.role == "owner_chief_of_staff" and .name == "decision_queue.prepare" and .externalExecution == "blocked")) and
+            (.registry.commands | any(.role == "owner_chief_of_staff" and .name == "anomaly.triage" and .externalExecution == "blocked")) and
             (.registry.views | map(.name) | index("snapshot")) != null and
             (.registry.views | map(.name) | index("approvals")) != null and
-            (.registry.plannedContracts | map(.role) == ["owner_chief_of_staff","dispatch_operations","finance_operations","workforce_operations","compliance_operations","systems_operations"]) and
-            (.registry.plannedCommands | length) == 33 and
-            (.registry.plannedViews | length) == 16 and
+            (.registry.views | any(.role == "owner_chief_of_staff" and .name == "briefs")) and
+            (.registry.views | any(.role == "owner_chief_of_staff" and .name == "decisions")) and
+            (.registry.plannedContracts | map(.role) == ["dispatch_operations","finance_operations","workforce_operations","compliance_operations","systems_operations"]) and
+            (.registry.plannedCommands | length) == 29 and
+            (.registry.plannedViews | length) == 13 and
             (.registry.commands | any(.name == "run" and .idempotency == "required")) and
             (.registry.commands | any(.name == "continue" and .idempotency == "required")) and
             (.registry.commands | any(.name == "adapters.reconcile" and .requiresTenant == true)) and
             (.tools | map(.name) | index("worker.run")) != null and
             (.tools | map(.name) | index("worker.continue")) != null and
-            (.tools | map(.name) | index("worker.adapters.reconcile")) != null
+            (.tools | map(.name) | index("worker.adapters.reconcile")) != null and
+            (.tools | map(.name) | index("worker.owner.brief.generate")) != null
           ' >/dev/null
 
           IDS="$(psql_db -At <<'SQL'
@@ -309,6 +315,34 @@ jobs:
 
           RUN_ID="${IDS%%|*}"
           ACTION_ID="${IDS##*|}"
+          OWNER_BRIEF_PAYLOAD="$(
+            /usr/bin/jq -nc --arg key "deploy-owner-brief-$RUN_ID" '{
+              command: "brief.generate",
+              worker: {role: "owner_chief_of_staff", tenantSlug: "continuous-demo"},
+              idempotencyKey: $key,
+              config: {
+                window: {
+                  from: "2026-05-19T00:00:00.000Z",
+                  to: "2026-05-20T00:00:00.000Z"
+                },
+                scopes: ["tasks", "approvals", "cash", "capacity", "obligations", "workers"],
+                includeEvidence: true
+              }
+            }'
+          )"
+          OWNER_BRIEF_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/worker \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$OWNER_BRIEF_PAYLOAD"
+          )"
+
+          echo "$OWNER_BRIEF_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,workerRunId:.data.result.workerRunId,objectId:.data.result.objectId,packetId:.data.result.packetId,workflowStepCount:(.data.result.workflowStepIds | length),decisionCount:(.data.result.decisionIds | length),viewCount:(.data.result.viewIds | length),externalExecution:.data.result.output.externalExecution,externalSend:.data.result.output.externalSend}}'
+          echo "$OWNER_BRIEF_RESPONSE" | /usr/bin/jq -e \
+            '.error == null and .data.command == "brief.generate" and .data.result.created == true and (.data.result.workerRunId | length > 0) and (.data.result.objectId | length > 0) and (.data.result.packetId | length > 0) and (.data.result.workflowStepIds | length) == 3 and (.data.result.decisionIds | length) >= 1 and (.data.result.viewIds | length) == 3 and .data.result.output.externalExecution == "blocked" and .data.result.output.externalSend == false and .data.result.snapshot.controls.externalExecution == "disabled"' \
+            >/dev/null
+
           RESPONSE="$(
             curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
               -X POST https://continuoushq.com/worker \
