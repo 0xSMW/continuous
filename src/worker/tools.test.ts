@@ -9,6 +9,11 @@ import {
 } from "./app-server-tools";
 import { executeWorkerTool, workerToolSchema, workerTools } from "./tools";
 import { registeredWorkerCommands, registeredWorkerViews } from "./registry";
+import {
+  plannedWorkerCommands,
+  plannedWorkerContracts,
+  plannedWorkerViews,
+} from "./planned-workers";
 
 function routeFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -51,6 +56,19 @@ describe("worker tool contract", () => {
     expect(workerToolSchema.tools).toBe(workerTools);
     expect(workerToolSchema.registry.commands).toEqual(registeredWorkerCommands());
     expect(workerToolSchema.registry.views).toEqual(registeredWorkerViews());
+    expect(workerToolSchema.registry.plannedContracts).toEqual(
+      plannedWorkerContracts.map((contract) => ({
+        role: contract.role,
+        name: contract.name,
+        contractPath: contract.contractPath,
+        firstOutcome: contract.firstOutcome,
+        autonomyLevel: contract.autonomyLevel,
+        externalExecution: contract.externalExecution,
+        evidencePacket: contract.evidencePacket,
+      })),
+    );
+    expect(workerToolSchema.registry.plannedCommands).toEqual(plannedWorkerCommands());
+    expect(workerToolSchema.registry.plannedViews).toEqual(plannedWorkerViews());
     expect(workerToolSchema.registry.commands.map((command) => command.name)).toEqual([
       "run",
       "continue",
@@ -107,6 +125,62 @@ describe("worker tool contract", () => {
         },
       }),
     ).rejects.toThrow("Worker role payroll_operations is not available yet.");
+  });
+
+  it("exposes planned worker metadata without enabling future runtime handlers", async () => {
+    expect(workerToolSchema.registry.plannedContracts.map((contract) => contract.role)).toEqual([
+      "owner_chief_of_staff",
+      "dispatch_operations",
+      "finance_operations",
+      "workforce_operations",
+      "compliance_operations",
+      "systems_operations",
+    ]);
+    expect(workerToolSchema.registry.plannedCommands).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "owner_chief_of_staff",
+          name: "brief.generate",
+          contractPath: "docs/owner-chief-of-staff-worker-v1-contract.md",
+          evidencePacket: "owner_brief_packet",
+        }),
+        expect.objectContaining({
+          role: "dispatch_operations",
+          name: "schedule.propose",
+          externalExecution: "dry_run",
+        }),
+        expect.objectContaining({
+          role: "finance_operations",
+          name: "payment_draft.prepare",
+          externalExecution: "blocked",
+        }),
+        expect.objectContaining({
+          role: "systems_operations",
+          name: "sync.repair.plan",
+          sideEffects: "dry_run",
+        }),
+      ]),
+    );
+    expect(workerToolSchema.registry.plannedViews).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "compliance_operations",
+          name: "snapshot",
+          requiresTenant: true,
+          evidencePacket: null,
+        }),
+      ]),
+    );
+
+    await expect(
+      executeWorkerTool("worker.snapshot", {
+        worker: {
+          role: "owner_chief_of_staff",
+        },
+      }),
+    ).rejects.toThrow(
+      "Worker role owner_chief_of_staff is planned but not available yet.",
+    );
   });
 
   it("validates worker run idempotency before invoking the worker", async () => {
@@ -177,6 +251,7 @@ describe("worker tool contract", () => {
     const result = executeAppServerWorkerTool("continuous.worker.schema");
 
     expect(result.registry.commands).toEqual(registeredWorkerCommands());
+    expect(result.plannedWorkers).toEqual(workerToolSchema.registry.plannedContracts);
     expect(result.workerToolSchema).toBe(workerToolSchema);
     expect(result.manifest.tools).toBe(appServerWorkerTools);
     expect(() =>

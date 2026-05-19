@@ -2,6 +2,12 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
+import {
+  plannedWorkerCommands,
+  plannedWorkerContracts,
+  plannedWorkerViews,
+} from "./planned-workers";
+
 const root = process.cwd();
 
 const contracts = [
@@ -80,6 +86,29 @@ describe("future worker contracts", () => {
       const filename = contract.path.split("/").at(-1);
 
       expect(expansion).toContain(filename);
+    }
+  });
+
+  it("has planned command metadata for every future contract", () => {
+    const commandRoles = new Set(plannedWorkerCommands().map((command) => command.role));
+    const viewRoles = new Set(plannedWorkerViews().map((view) => view.role));
+
+    expect(plannedWorkerContracts.map((contract) => contract.role)).toEqual(
+      contracts.map((contract) => contract.role),
+    );
+
+    for (const contract of contracts) {
+      const planned = plannedWorkerContracts.find((item) => item.role === contract.role);
+
+      expect(planned?.contractPath).toBe(contract.path);
+      expect(planned?.evidencePacket).toBe(contract.evidencePacket);
+      expect(commandRoles.has(contract.role)).toBe(true);
+      expect(viewRoles.has(contract.role)).toBe(true);
+      expect(
+        plannedWorkerCommands().some(
+          (command) => command.role === contract.role && command.name === "approval.decide",
+        ),
+      ).toBe(true);
     }
   });
 });

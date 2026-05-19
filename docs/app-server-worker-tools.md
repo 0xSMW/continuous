@@ -5,7 +5,7 @@ discovery:
 
 | Tool | Mode | Purpose |
 |---|---|---|
-| `continuous.worker.schema` | Read-only | Returns the registered worker command registry, worker tool schema, and integration boundary |
+| `continuous.worker.schema` | Read-only | Returns the registered Revenue runtime commands, planned future-worker metadata, worker tool schema, and integration boundary |
 
 The generated Codex app-server protocol defines a dynamic tool as `name`,
 `description`, and `inputSchema`. The local manifest in
@@ -24,6 +24,8 @@ The app-server tool is discovery-only:
 - No worker command is executed.
 - No external execution is available.
 - No production token is required.
+- Future worker metadata is discoverable but not executable until handlers are
+  registered in the runtime command registry.
 
 Side-effecting worker commands stay on the canonical operator-gated surfaces:
 

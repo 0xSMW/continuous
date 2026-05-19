@@ -12,6 +12,7 @@ import {
   RevenueWorkerUnavailableError,
   runRevenueWorker,
 } from "./revenue";
+import { plannedWorkerContractForRole } from "./planned-workers";
 import { normalizeIdempotencyKey } from "./security";
 
 export const workerApiVersion = "continuous.worker.v1";
@@ -334,6 +335,16 @@ export function resolveWorkerTarget(target: WorkerTargetInput = {}): WorkerTarge
   }
 
   if (!workerDefinitions[role]) {
+    const plannedWorker = plannedWorkerContractForRole(role);
+
+    if (plannedWorker) {
+      throw new PlatformUnavailableError(
+        "worker_role_planned",
+        `Worker role ${role} is planned but not available yet. See ${plannedWorker.contractPath}.`,
+        400,
+      );
+    }
+
     throw new PlatformUnavailableError(
       "worker_role_unsupported",
       `Worker role ${role} is not available yet.`,

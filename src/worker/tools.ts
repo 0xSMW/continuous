@@ -6,6 +6,11 @@ import {
   registeredWorkerViews,
   type WorkerTargetInput,
 } from "./registry";
+import {
+  plannedWorkerCommands,
+  plannedWorkerContracts,
+  plannedWorkerViews,
+} from "./planned-workers";
 
 export const workerTools = [
   {
@@ -169,6 +174,17 @@ export const workerToolSchema = {
   registry: {
     commands: registeredWorkerCommands(),
     views: registeredWorkerViews(),
+    plannedContracts: plannedWorkerContracts.map((contract) => ({
+      role: contract.role,
+      name: contract.name,
+      contractPath: contract.contractPath,
+      firstOutcome: contract.firstOutcome,
+      autonomyLevel: contract.autonomyLevel,
+      externalExecution: contract.externalExecution,
+      evidencePacket: contract.evidencePacket,
+    })),
+    plannedCommands: plannedWorkerCommands(),
+    plannedViews: plannedWorkerViews(),
   },
   $defs: {
     workerTarget: {

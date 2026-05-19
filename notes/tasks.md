@@ -13,7 +13,7 @@
 - Add more specialized Core commands for adapter intents and rule changes.
 - Extend `packet.prepare` coverage into new-hire, contractor, payroll, filing, termination, AI action, and rule-change workflow packet tests.
 - Build the approval UI on top of the shared `approval_requests`, `audit_events`, and evidence API.
-- Register command metadata for each future worker from its V1 contract before runtime code.
+- Implement runtime handlers and CI evals for each future worker from its registered contract metadata.
 - Keep all worker-family HTTP controls on `/worker` with registered `worker`, `command`, `idempotencyKey`, and `config` fields; do not add worker-family-specific URL shapes.
 - Add a durable object-storage target for custom Postgres dumps; DigitalOcean droplet backups are enabled, but database-level dumps still need scheduled off-host retention before customer data.
 - Complete production hardening with tag-based deploy rollback, observability/alerts, scoped tokens, non-root host access, and a restore drill before using the droplet for real customer data.

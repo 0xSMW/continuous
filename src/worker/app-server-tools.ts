@@ -45,6 +45,7 @@ export function executeAppServerWorkerTool(name: string, args: JsonObject = {}) 
   return {
     manifest: appServerWorkerToolManifest,
     registry: workerToolSchema.registry,
+    plannedWorkers: workerToolSchema.registry.plannedContracts,
     workerToolSchema,
   };
 }
