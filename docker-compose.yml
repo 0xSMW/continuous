@@ -77,7 +77,7 @@ services:
       app:
         condition: service_started
     environment:
-      SITE_HOSTS: ${SITE_HOSTS:-http://:80}
+      SITE_HOSTS: ${SITE_HOSTS:?SITE_HOSTS is required}
       ACME_EMAIL: ${ACME_EMAIL:-admin@continuoushq.com}
     ports:
       - "80:80"

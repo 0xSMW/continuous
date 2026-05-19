@@ -36,7 +36,8 @@ if [ -z "$SSH_CIDR" ]; then
   if [ -n "$public_ip" ]; then
     SSH_CIDR="$public_ip/32"
   else
-    SSH_CIDR="0.0.0.0/0"
+    echo "Could not detect operator public IP. Set SSH_CIDR explicitly." >&2
+    exit 1
   fi
 fi
 

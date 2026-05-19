@@ -2,7 +2,7 @@
 	email {$ACME_EMAIL:admin@continuoushq.com}
 }
 
-{$SITE_HOSTS:http://:80} {
+{$SITE_HOSTS} {
 	encode zstd gzip
 
 	header {

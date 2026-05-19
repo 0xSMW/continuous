@@ -37,7 +37,7 @@ Then open `http://localhost:3000`.
 ## Core APIs
 
 - `/api/health` reports Postgres-backed readiness checks.
-- `/api/core` returns persisted core counts, active tasks, and recent events.
+- `/api/core` returns persisted core counts, active tasks, and recent events for tokened operators.
 - `/api/revenue-worker` returns the persisted Revenue Worker snapshot for tokened operators.
 - `/api/revenue-worker/run` is a disabled-by-default guarded `POST` run path.
 

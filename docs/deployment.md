@@ -71,7 +71,6 @@ CI is separate and runs on pushes to `main`, pull requests, and manual dispatch.
 
 ```sh
 curl -fsS https://continuoushq.com/api/health
-curl -fsS https://continuoushq.com/api/core
 curl -fsS https://getcontinuous.app/api/health
 openssl s_client -connect 45.55.53.92:443 -servername continuoushq.com </dev/null 2>/dev/null | openssl x509 -noout -subject -issuer -dates
 ```
@@ -86,4 +85,5 @@ ssh root@45.55.53.92 'cd /opt/continuous && docker compose --profile tools run -
 
 For the HTTPS app-server path, call `POST /api/revenue-worker/run` with an
 `idempotency-key` header and the bearer token from `/opt/continuous/.env`.
-`GET /api/revenue-worker` uses the same bearer token for operator-only snapshots.
+`GET /api/core` and `GET /api/revenue-worker` use the same bearer token for
+operator-only snapshots.

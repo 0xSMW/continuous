@@ -27,6 +27,11 @@ if [ -z "$APP_URL" ]; then
   APP_URL="https://$first_host"
 fi
 
+if [[ "$SITE_HOSTS" == *"http://"* || "$APP_URL" == http://* ]]; then
+  echo "Plain HTTP deploys are disabled. Set HTTPS SITE_HOSTS and APP_URL." >&2
+  exit 1
+fi
+
 quote() {
   printf "%q" "$1"
 }

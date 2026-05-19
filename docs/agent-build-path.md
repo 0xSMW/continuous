@@ -22,7 +22,7 @@ Useful app surfaces for worker development:
 |---|---|
 | `/` | Runtime dashboard with public core state and redacted worker readiness |
 | `/api/health` | Machine health check |
-| `/api/core` | Core persisted primitive summary |
+| `/api/core` | Operator-gated persisted primitive summary |
 | `/api/revenue-worker` | Operator-gated Revenue Worker snapshot |
 | `bun run worker:revenue` | Operator CLI run path |
 

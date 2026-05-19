@@ -20,17 +20,13 @@ export function authorizeRevenueWorkerRun(input: RunAuthInput): RunAuthResult {
     };
   }
 
-  if (input.appEnv === "production" && !input.expectedToken) {
+  if (!input.expectedToken) {
     return {
       ok: false,
       status: 403,
       code: "worker_run_token_missing",
-      message: "Production worker runs require REVENUE_WORKER_RUN_TOKEN.",
+      message: "Enabled worker runs require REVENUE_WORKER_RUN_TOKEN.",
     };
-  }
-
-  if (!input.expectedToken) {
-    return { ok: true };
   }
 
   const bearer = input.authorization?.match(/^Bearer\s+(.+)$/i)?.[1];

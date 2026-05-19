@@ -57,6 +57,19 @@ jobs:
             exit 1
           fi
 
+      - name: Validate deploy inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$SITE_HOSTS" =~ ^[A-Za-z0-9.,[:space:]-]+$ ]]; then
+            echo "::error::site_hosts may only contain hostnames, commas, spaces, dots, and dashes."
+            exit 1
+          fi
+          if [[ -n "${APP_URL:-}" && ! "$APP_URL" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?(/.*)?$ ]]; then
+            echo "::error::app_url must be an https URL."
+            exit 1
+          fi
+
       - name: Open runner SSH access
         shell: bash
         run: |

@@ -17,17 +17,17 @@ describe("authorizeRevenueWorkerRun", () => {
     });
   });
 
-  it("requires a token for production runs", () => {
+  it("requires a token for enabled runs", () => {
     expect(
       authorizeRevenueWorkerRun({
         enabled: true,
-        appEnv: "production",
+        appEnv: "development",
       }),
     ).toEqual({
       ok: false,
       status: 403,
       code: "worker_run_token_missing",
-      message: "Production worker runs require REVENUE_WORKER_RUN_TOKEN.",
+      message: "Enabled worker runs require REVENUE_WORKER_RUN_TOKEN.",
     });
   });
 

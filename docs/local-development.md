@@ -42,7 +42,9 @@ and generated UI contract.
 bun run dev
 ```
 
-Open `http://localhost:3000`, `/api/health`, and `/api/core`.
+Open `http://localhost:3000` and `/api/health`. `/api/core` is an
+operator-only summary and uses the same bearer token as the Revenue Worker
+snapshot.
 
 The repo also includes `.mcp.json` for the Next.js MCP bridge. With `bun run dev`
 running, compatible coding agents can inspect routes, runtime errors, metadata,
