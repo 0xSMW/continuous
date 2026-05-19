@@ -40,6 +40,7 @@ Then open `http://localhost:3000`.
 - `/api/core` returns persisted core counts, active tasks, and recent events for tokened operators.
 - `/api/revenue-worker` returns the persisted Revenue Worker snapshot for tokened operators.
 - `/api/revenue-worker/run` is a disabled-by-default guarded `POST` run path.
+- `/api/revenue-worker/approvals` lists and decides pending worker approvals for tokened operators.
 
 ## Docs
 
@@ -47,6 +48,7 @@ Then open `http://localhost:3000`.
 - [Open workflows](docs/workflows.md)
 - [Agent build path](docs/agent-build-path.md)
 - [Revenue Worker expansion](docs/revenue-worker-expansion.md)
+- [Revenue Worker V1 contract](docs/revenue-worker-v1-contract.md)
 - [Worker expansion map](docs/worker-expansion.md)
 - [Local development](docs/local-development.md)
 - [DigitalOcean deployment](docs/deployment.md)

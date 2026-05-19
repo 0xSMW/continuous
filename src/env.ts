@@ -12,6 +12,9 @@ const envSchema = z.object({
     (value) => (value === "" ? undefined : value),
     z.string().min(1).optional(),
   ),
+  REVENUE_WORKER_OPERATOR_EMAIL: z
+    .preprocess((value) => (value === "" ? undefined : value), z.string().email().optional())
+    .default("owner@continuoushq.com"),
 });
 
 export const env = envSchema.parse({
@@ -20,4 +23,5 @@ export const env = envSchema.parse({
   DATABASE_URL: process.env.DATABASE_URL,
   REVENUE_WORKER_RUN_ENABLED: process.env.REVENUE_WORKER_RUN_ENABLED,
   REVENUE_WORKER_RUN_TOKEN: process.env.REVENUE_WORKER_RUN_TOKEN,
+  REVENUE_WORKER_OPERATOR_EMAIL: process.env.REVENUE_WORKER_OPERATOR_EMAIL,
 });

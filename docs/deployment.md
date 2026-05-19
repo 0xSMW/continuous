@@ -77,7 +77,9 @@ openssl s_client -connect 45.55.53.92:443 -servername continuoushq.com </dev/nul
 ```
 
 The deploy path enables the Revenue Worker run endpoint with a generated bearer
-token in `/opt/continuous/.env`. Use the CLI path over SSH for direct
+token in `/opt/continuous/.env`. `REVENUE_WORKER_OPERATOR_EMAIL` defaults to the
+seeded owner user and must match an active user before approval records or
+operator decisions can be written. Use the CLI path over SSH for direct
 operator-controlled smoke runs:
 
 ```sh
@@ -86,5 +88,6 @@ ssh root@45.55.53.92 'cd /opt/continuous && docker compose --profile tools run -
 
 For the HTTPS Next.js API path, call `POST /api/revenue-worker/run` with an
 `idempotency-key` header and the bearer token from `/opt/continuous/.env`.
-`GET /api/core` and `GET /api/revenue-worker` use the same bearer token for
-operator-only snapshots.
+`GET /api/core`, `GET /api/revenue-worker`, and
+`GET /api/revenue-worker/approvals` use the same bearer token for operator-only
+snapshots and approval review.

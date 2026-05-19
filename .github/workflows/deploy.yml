@@ -32,6 +32,7 @@ jobs:
       SITE_HOSTS: ${{ inputs.site_hosts }}
       ACME_EMAIL: ${{ secrets.ACME_EMAIL || 'admin@continuoushq.com' }}
       APP_URL: ${{ inputs.app_url }}
+      REVENUE_WORKER_OPERATOR_EMAIL: ${{ secrets.REVENUE_WORKER_OPERATOR_EMAIL || 'owner@continuoushq.com' }}
       DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
       DO_API_TOKEN: ${{ secrets.DO_API_TOKEN }}
       DO_FIREWALL_NAME: continuous-fw
@@ -140,7 +141,7 @@ jobs:
           fi
           app_url="${APP_URL:-https://continuoushq.com}"
           ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" \
-            "APP_DIR='$DEPLOY_PATH' SITE_HOSTS='$SITE_HOSTS' ACME_EMAIL='$ACME_EMAIL' APP_URL='$app_url' bash -s" <<'REMOTE'
+            "APP_DIR='$DEPLOY_PATH' SITE_HOSTS='$SITE_HOSTS' ACME_EMAIL='$ACME_EMAIL' APP_URL='$app_url' REVENUE_WORKER_OPERATOR_EMAIL='$REVENUE_WORKER_OPERATOR_EMAIL' bash -s" <<'REMOTE'
           set -euo pipefail
           cd "$APP_DIR"
           if [ ! -f .env ]; then
@@ -159,6 +160,7 @@ jobs:
               printf 'APP_TAG=local\n'
               printf 'REVENUE_WORKER_RUN_ENABLED=true\n'
               printf 'REVENUE_WORKER_RUN_TOKEN=%s\n' "$(openssl rand -hex 32)"
+              printf 'REVENUE_WORKER_OPERATOR_EMAIL=%s\n' "$REVENUE_WORKER_OPERATOR_EMAIL"
             } > .env
           fi
           set_env() {
@@ -180,6 +182,7 @@ jobs:
           set_env APP_URL "$APP_URL"
           set_env SITE_HOSTS "$SITE_HOSTS"
           set_env ACME_EMAIL "$ACME_EMAIL"
+          set_env REVENUE_WORKER_OPERATOR_EMAIL "$REVENUE_WORKER_OPERATOR_EMAIL"
           POSTGRES_USER="$(grep '^POSTGRES_USER=' .env | cut -d= -f2- || true)"
           POSTGRES_DB="$(grep '^POSTGRES_DB=' .env | cut -d= -f2- || true)"
           POSTGRES_USER="${POSTGRES_USER:-continuous}"

@@ -1,6 +1,8 @@
 import { db, pool } from "./client";
 import {
   adapters,
+  approvalRequests,
+  auditEvents,
   budgetAccounts,
   budgetAllocations,
   budgetPolicies,
@@ -117,6 +119,8 @@ const ids = {
   documentPayroll: "88888888-8888-4888-8888-000000000002",
   decisionQuote: "99999999-9999-4999-8999-000000000001",
   evaluationSeed: "99999999-9999-4999-8999-000000000002",
+  approvalQuote: "99999999-9999-4999-8999-000000000003",
+  auditApprovalRequested: "99999999-9999-4999-8999-000000000004",
 };
 
 const capIds = {
@@ -1070,7 +1074,11 @@ async function seed() {
         objectId: ids.quoteObject,
         capabilityId: capIds.quotePrepare,
         idempotencyKey: "seed-quote-prepared",
-        data: { state: "approval_required" },
+        data: {
+          state: "approval_required",
+          approvalRequestId: ids.approvalQuote,
+          auditEventId: ids.auditApprovalRequested,
+        },
       },
     ])
     .onConflictDoNothing();
@@ -1141,6 +1149,8 @@ async function seed() {
           eventId: ids.eventQuote,
           taskId: ids.taskQuote,
           evidenceId: ids.evidenceQuote,
+          approvalRequestId: ids.approvalQuote,
+          auditEventId: ids.auditApprovalRequested,
           classification: "quote_ready_for_owner_approval",
           externalExecution: "blocked",
           requiresApproval: true,
@@ -1179,9 +1189,81 @@ async function seed() {
         actorType: "worker",
         actorId: ids.worker,
         hash: "bootstrap-quote",
-        data: { total_cents: 24900, approval_required: true },
+        data: {
+          total_cents: 24900,
+          approval_required: true,
+          approvalRequestId: ids.approvalQuote,
+          auditEventId: ids.auditApprovalRequested,
+        },
       },
     ])
+    .onConflictDoNothing();
+
+  await db
+    .insert(approvalRequests)
+    .values({
+      id: ids.approvalQuote,
+      tenantId: ids.tenant,
+      taskId: ids.taskQuote,
+      workerRunId: ids.workerRunSeed,
+      eventId: ids.eventQuote,
+      objectId: ids.quoteObject,
+      capabilityId: capIds.quotePrepare,
+      requesterType: "worker",
+      requesterId: ids.worker,
+      requesterRef: `worker:${ids.worker}`,
+      reviewerUserId: ids.owner,
+      kind: "quote_approval",
+      state: "pending",
+      priority: "urgent",
+      risk: "medium",
+      title: "Approve prepared roof inspection quote",
+      summary: "Seeded Revenue Worker quote draft is ready for owner approval; external send is blocked.",
+      requestedAction: {
+        action: "approve_and_send",
+        externalSend: false,
+        currentMode: "simulation",
+      },
+      evidence: {
+        eventId: ids.eventQuote,
+        evidenceId: ids.evidenceQuote,
+      },
+      policy: {
+        externalSend: "approval_required",
+        moneyMovement: "blocked",
+      },
+      data: {
+        classification: "quote_ready_for_owner_approval",
+        workerRunId: ids.workerRunSeed,
+      },
+    })
+    .onConflictDoNothing();
+
+  await db
+    .insert(auditEvents)
+    .values({
+      id: ids.auditApprovalRequested,
+      tenantId: ids.tenant,
+      type: "approval.requested",
+      source: "continuous.revenue_worker",
+      actorType: "worker",
+      actorId: ids.worker,
+      actorRef: `worker:${ids.worker}`,
+      targetType: "approval_request",
+      targetId: ids.approvalQuote,
+      taskId: ids.taskQuote,
+      workerRunId: ids.workerRunSeed,
+      approvalRequestId: ids.approvalQuote,
+      eventId: ids.eventQuote,
+      objectId: ids.quoteObject,
+      capabilityId: capIds.quotePrepare,
+      risk: "medium",
+      idempotencyKey: "seed-approval-requested",
+      data: {
+        reviewerUserId: ids.owner,
+        externalExecution: "blocked",
+      },
+    })
     .onConflictDoNothing();
 
   await db
@@ -1199,7 +1281,12 @@ async function seed() {
       state: "proposed",
       decision: "request_owner_approval",
       rationale: "Prepared quote is within standard price policy but external send still requires owner approval.",
-      data: { autonomy_level: 2, external_send: "approval_required" },
+      data: {
+        autonomy_level: 2,
+        external_send: "approval_required",
+        approvalRequestId: ids.approvalQuote,
+        auditEventId: ids.auditApprovalRequested,
+      },
     })
     .onConflictDoNothing();
 

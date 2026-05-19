@@ -21,6 +21,8 @@ export type Health = {
     operatingObjects: number;
     workflows: number;
     workerRuns: number;
+    approvals: number;
+    auditEvents: number;
     tasks: number;
     events: number;
     evidence: number;
@@ -91,6 +93,8 @@ export function getHealth(input: HealthInput): Health {
     operatingObjects,
     workflows: input.counts.workflowRuns,
     workerRuns: input.counts.workerRuns,
+    approvals: input.counts.approvalRequests,
+    auditEvents: input.counts.auditEvents,
     tasks: input.counts.tasks,
     events: input.counts.events,
     evidence: input.counts.evidence,
@@ -143,6 +147,11 @@ export function getHealth(input: HealthInput): Health {
       id: "worker_run_ledger",
       state: input.counts.workerRuns > 0 ? "pass" : "warn",
       detail: `${input.counts.workerRuns} worker run lifecycle records visible`,
+    },
+    {
+      id: "authority_ledger",
+      state: input.counts.approvalRequests > 0 && input.counts.auditEvents > 0 ? "pass" : "warn",
+      detail: `${input.counts.approvalRequests} approval requests and ${input.counts.auditEvents} audit events visible`,
     },
     {
       id: "evidence",

@@ -5,6 +5,8 @@ import {
   adapterActions,
   adapterRuns,
   adapters,
+  approvalRequests,
+  auditEvents,
   bankAccounts,
   budgetAccounts,
   budgetAllocations,
@@ -75,6 +77,8 @@ export type CoreSummary = {
     workflowDefinitions: number;
     workflowRuns: number;
     workerRuns: number;
+    approvalRequests: number;
+    auditEvents: number;
     objects: number;
     objectLinks: number;
     objectVersions: number;
@@ -156,6 +160,8 @@ export async function getCoreSummary(): Promise<CoreSummary> {
     workflowDefinitionCount,
     workflowRunCount,
     workerRunCount,
+    approvalRequestCount,
+    auditEventCount,
     objectCount,
     objectLinkCount,
     objectVersionCount,
@@ -210,6 +216,8 @@ export async function getCoreSummary(): Promise<CoreSummary> {
     tableCount(db, workflowDefinitions),
     tableCount(db, workflowRuns),
     tableCount(db, workerRuns),
+    tableCount(db, approvalRequests),
+    tableCount(db, auditEvents),
     tableCount(db, objects),
     tableCount(db, objectLinks),
     tableCount(db, objectVersions),
@@ -288,6 +296,8 @@ export async function getCoreSummary(): Promise<CoreSummary> {
       workflowDefinitions: workflowDefinitionCount,
       workflowRuns: workflowRunCount,
       workerRuns: workerRunCount,
+      approvalRequests: approvalRequestCount,
+      auditEvents: auditEventCount,
       objects: objectCount,
       objectLinks: objectLinkCount,
       objectVersions: objectVersionCount,
@@ -368,6 +378,8 @@ export async function getCoreSummarySafe(): Promise<
           workflowDefinitions: 0,
           workflowRuns: 0,
           workerRuns: 0,
+          approvalRequests: 0,
+          auditEvents: 0,
           objects: 0,
           objectLinks: 0,
           objectVersions: 0,
@@ -445,6 +457,7 @@ export function summarizeCoreReadiness(summary: CoreSummary) {
     hasFilings: summary.counts.filingRequirements > 0 && summary.counts.filingDrafts > 0,
     hasWorkflows: summary.counts.workflowDefinitions > 0 && summary.counts.workflowRuns > 0,
     hasWorkerRuns: summary.counts.workerRuns > 0,
+    hasAuthority: summary.counts.approvalRequests > 0 && summary.counts.auditEvents > 0,
     hasDocuments: summary.counts.documents > 0,
     hasEvaluations: summary.counts.evaluations > 0,
   };

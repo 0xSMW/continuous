@@ -1539,6 +1539,142 @@ export const workerRuns = pgTable(
   ],
 );
 
+export const approvalRequests = pgTable(
+  "approval_requests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    taskId: uuid("task_id").references(() => tasks.id, {
+      onDelete: "set null",
+    }),
+    workerRunId: uuid("worker_run_id").references(() => workerRuns.id, {
+      onDelete: "set null",
+    }),
+    eventId: uuid("event_id").references(() => events.id, {
+      onDelete: "set null",
+    }),
+    objectId: uuid("object_id").references(() => objects.id, {
+      onDelete: "set null",
+    }),
+    capabilityId: uuid("capability_id").references(() => capabilities.id, {
+      onDelete: "set null",
+    }),
+    requesterType: actorType("requester_type").notNull().default("worker"),
+    requesterId: uuid("requester_id"),
+    requesterRef: text("requester_ref").notNull().default("system"),
+    reviewerUserId: uuid("reviewer_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    kind: text("kind").notNull(),
+    state: text("state").notNull().default("pending"),
+    priority: taskPriority("priority").notNull().default("normal"),
+    risk: riskLevel("risk").notNull().default("medium"),
+    title: text("title").notNull(),
+    summary: text("summary").notNull().default(""),
+    requestedAction: jsonb("requested_action")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    evidence: jsonb("evidence")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    policy: jsonb("policy")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    decision: jsonb("decision")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    data: jsonb("data")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    decidedByUserId: uuid("decided_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    dueAt: timestamp("due_at", { withTimezone: true }),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("approval_requests_tenant_idx").on(table.tenantId),
+    index("approval_requests_state_idx").on(table.tenantId, table.state),
+    index("approval_requests_task_idx").on(table.taskId),
+    index("approval_requests_worker_run_idx").on(table.workerRunId),
+    index("approval_requests_event_idx").on(table.eventId),
+    index("approval_requests_reviewer_idx").on(table.reviewerUserId),
+  ],
+);
+
+export const auditEvents = pgTable(
+  "audit_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    type: varchar("type", { length: 140 }).notNull(),
+    source: text("source").notNull().default("continuous"),
+    actorType: actorType("actor_type").notNull().default("system"),
+    actorId: uuid("actor_id"),
+    actorRef: text("actor_ref").notNull().default("system"),
+    targetType: text("target_type").notNull(),
+    targetId: uuid("target_id"),
+    taskId: uuid("task_id").references(() => tasks.id, {
+      onDelete: "set null",
+    }),
+    workerRunId: uuid("worker_run_id").references(() => workerRuns.id, {
+      onDelete: "set null",
+    }),
+    approvalRequestId: uuid("approval_request_id").references(
+      () => approvalRequests.id,
+      { onDelete: "set null" },
+    ),
+    eventId: uuid("event_id").references(() => events.id, {
+      onDelete: "set null",
+    }),
+    objectId: uuid("object_id").references(() => objects.id, {
+      onDelete: "set null",
+    }),
+    capabilityId: uuid("capability_id").references(() => capabilities.id, {
+      onDelete: "set null",
+    }),
+    risk: riskLevel("risk").notNull().default("medium"),
+    idempotencyKey: text("idempotency_key"),
+    data: jsonb("data")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("audit_events_tenant_idx").on(table.tenantId),
+    index("audit_events_type_idx").on(table.tenantId, table.type),
+    index("audit_events_actor_idx").on(table.actorType, table.actorId),
+    index("audit_events_target_idx").on(table.tenantId, table.targetType, table.targetId),
+    index("audit_events_task_idx").on(table.taskId),
+    index("audit_events_worker_run_idx").on(table.workerRunId),
+    index("audit_events_approval_idx").on(table.approvalRequestId),
+    index("audit_events_created_idx").on(table.tenantId, table.createdAt),
+    uniqueIndex("audit_events_idempotency_idx").on(
+      table.tenantId,
+      table.source,
+      table.idempotencyKey,
+    ),
+  ],
+);
+
 export const evidence = pgTable(
   "evidence",
   {
@@ -2033,6 +2169,8 @@ export const generatedViews = uiContracts;
 export const tenantsRelations = relations(tenants, ({ many }) => ({
   users: many(users),
   workers: many(workers),
+  approvalRequests: many(approvalRequests),
+  auditEvents: many(auditEvents),
   customers: many(customers),
   leads: many(leads),
   offers: many(offers),
@@ -2052,6 +2190,8 @@ export const usersRelations = relations(users, ({ one, many }) => ({
     references: [tenants.id],
   }),
   managedWorkers: many(workers),
+  reviewRequests: many(approvalRequests, { relationName: "reviewer" }),
+  decidedRequests: many(approvalRequests, { relationName: "decider" }),
 }));
 
 export const workersRelations = relations(workers, ({ one, many }) => ({
@@ -2250,6 +2390,8 @@ export const tasksRelations = relations(tasks, ({ one, many }) => ({
   evidence: many(evidence),
   usageEvents: many(usageEvents),
   workerRuns: many(workerRuns),
+  approvalRequests: many(approvalRequests),
+  auditEvents: many(auditEvents),
 }));
 
 export const eventsRelations = relations(events, ({ one, many }) => ({
@@ -2279,9 +2421,11 @@ export const eventsRelations = relations(events, ({ one, many }) => ({
   }),
   evidence: many(evidence),
   workerRuns: many(workerRuns),
+  approvalRequests: many(approvalRequests),
+  auditEvents: many(auditEvents),
 }));
 
-export const workerRunsRelations = relations(workerRuns, ({ one }) => ({
+export const workerRunsRelations = relations(workerRuns, ({ one, many }) => ({
   tenant: one(tenants, {
     fields: [workerRuns.tenantId],
     references: [tenants.id],
@@ -2309,6 +2453,80 @@ export const workerRunsRelations = relations(workerRuns, ({ one }) => ({
   budgetAccount: one(budgetAccounts, {
     fields: [workerRuns.budgetAccountId],
     references: [budgetAccounts.id],
+  }),
+  approvalRequests: many(approvalRequests),
+  auditEvents: many(auditEvents),
+}));
+
+export const approvalRequestsRelations = relations(
+  approvalRequests,
+  ({ one, many }) => ({
+    tenant: one(tenants, {
+      fields: [approvalRequests.tenantId],
+      references: [tenants.id],
+    }),
+    task: one(tasks, {
+      fields: [approvalRequests.taskId],
+      references: [tasks.id],
+    }),
+    workerRun: one(workerRuns, {
+      fields: [approvalRequests.workerRunId],
+      references: [workerRuns.id],
+    }),
+    event: one(events, {
+      fields: [approvalRequests.eventId],
+      references: [events.id],
+    }),
+    object: one(objects, {
+      fields: [approvalRequests.objectId],
+      references: [objects.id],
+    }),
+    capability: one(capabilities, {
+      fields: [approvalRequests.capabilityId],
+      references: [capabilities.id],
+    }),
+    reviewer: one(users, {
+      fields: [approvalRequests.reviewerUserId],
+      references: [users.id],
+      relationName: "reviewer",
+    }),
+    decider: one(users, {
+      fields: [approvalRequests.decidedByUserId],
+      references: [users.id],
+      relationName: "decider",
+    }),
+    auditEvents: many(auditEvents),
+  }),
+);
+
+export const auditEventsRelations = relations(auditEvents, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [auditEvents.tenantId],
+    references: [tenants.id],
+  }),
+  task: one(tasks, {
+    fields: [auditEvents.taskId],
+    references: [tasks.id],
+  }),
+  workerRun: one(workerRuns, {
+    fields: [auditEvents.workerRunId],
+    references: [workerRuns.id],
+  }),
+  approvalRequest: one(approvalRequests, {
+    fields: [auditEvents.approvalRequestId],
+    references: [approvalRequests.id],
+  }),
+  event: one(events, {
+    fields: [auditEvents.eventId],
+    references: [events.id],
+  }),
+  object: one(objects, {
+    fields: [auditEvents.objectId],
+    references: [objects.id],
+  }),
+  capability: one(capabilities, {
+    fields: [auditEvents.capabilityId],
+    references: [capabilities.id],
   }),
 }));
 

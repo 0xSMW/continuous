@@ -2,12 +2,13 @@ export type RunAuthInput = {
   enabled: boolean;
   appEnv: string;
   expectedToken?: string;
+  operatorEmail: string;
   authorization?: string | null;
   headerToken?: string | null;
 };
 
 export type RunAuthResult =
-  | { ok: true }
+  | { ok: true; operatorEmail: string }
   | { ok: false; status: 401 | 403; code: string; message: string };
 
 export function authorizeRevenueWorkerRun(input: RunAuthInput): RunAuthResult {
@@ -41,7 +42,7 @@ export function authorizeRevenueWorkerRun(input: RunAuthInput): RunAuthResult {
     };
   }
 
-  return { ok: true };
+  return { ok: true, operatorEmail: input.operatorEmail };
 }
 
 export function authorizeRevenueWorkerRead(input: Omit<RunAuthInput, "enabled">): RunAuthResult {
@@ -66,7 +67,7 @@ export function authorizeRevenueWorkerRead(input: Omit<RunAuthInput, "enabled">)
     };
   }
 
-  return { ok: true };
+  return { ok: true, operatorEmail: input.operatorEmail };
 }
 
 export type IdempotencyResult =

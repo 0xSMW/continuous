@@ -6,6 +6,8 @@ import { db as defaultDb } from "../db/client";
 import {
   adapterActions,
   adapterRuns,
+  approvalRequests,
+  auditEvents,
   budgetAccounts,
   budgetAllocations,
   budgetPolicies,
@@ -117,8 +119,12 @@ export type RevenueWorkerRunResult = {
   inferenceId: string | null;
   usageEventId: string | null;
   adapterActionId: string | null;
+  approvalRequestId: string | null;
+  auditEventId: string | null;
   snapshot: RevenueWorkerSnapshot;
 };
+
+type TaskPriority = "low" | "normal" | "high" | "urgent";
 
 type WorkerContext = {
   worker: {
@@ -132,12 +138,21 @@ type WorkerContext = {
     id: string;
     objectId: string | null;
     capabilityId: string | null;
+    priority: TaskPriority;
+    reviewerUserId: string | null;
   } | null;
   quoteCapabilityId: string | null;
   briefCapabilityId: string | null;
   budgetAccountId: string;
   connectionId: string;
   routeId: string | null;
+};
+
+type OperatorContext = {
+  id: string;
+  email: string;
+  name: string;
+  actorRef: string;
 };
 
 function numberValue(value: unknown) {
@@ -240,6 +255,8 @@ async function loadWorkerContext(db: Database, selector: RevenueWorkerSelector):
       id: tasks.id,
       objectId: tasks.objectId,
       capabilityId: tasks.capabilityId,
+      priority: tasks.priority,
+      reviewerUserId: tasks.reviewerUserId,
     })
     .from(tasks)
     .where(
@@ -324,6 +341,38 @@ async function loadWorkerContext(db: Database, selector: RevenueWorkerSelector):
     budgetAccountId: budgetAccount.id,
     connectionId: connection.id,
     routeId: route?.id ?? null,
+  };
+}
+
+async function loadOperator(
+  db: Database,
+  tenantId: string,
+  operatorEmail: string,
+): Promise<OperatorContext> {
+  const email = operatorEmail.trim().toLowerCase();
+  const [operator] = await db
+    .select({
+      id: users.id,
+      email: users.email,
+      name: users.name,
+    })
+    .from(users)
+    .where(and(eq(users.tenantId, tenantId), eq(users.email, email), eq(users.state, "active")))
+    .limit(1);
+
+  if (!operator) {
+    throw new RevenueWorkerUnavailableError(
+      "operator_not_found",
+      "Revenue Worker run requires an active operator user for the configured email.",
+      403,
+    );
+  }
+
+  return {
+    id: operator.id,
+    email: operator.email,
+    name: operator.name,
+    actorRef: `user:${operator.id}`,
   };
 }
 
@@ -600,6 +649,7 @@ export async function getRevenueWorkerSnapshotSafe(selector: RevenueWorkerSelect
 
 export async function runRevenueWorker(input: {
   idempotencyKey: string;
+  operatorEmail: string;
   tenantSlug?: string;
   workerId?: string;
   db?: Database;
@@ -610,6 +660,7 @@ export async function runRevenueWorker(input: {
     workerId: input.workerId,
   };
   const context = await loadWorkerContext(db, selector);
+  const operator = await loadOperator(db, context.worker.tenantId, input.operatorEmail);
 
   const result = await db.transaction(async (tx) => {
     await tx.execute(
@@ -644,6 +695,8 @@ export async function runRevenueWorker(input: {
         inferenceId: stringData(existingRun.data, "inferenceId"),
         usageEventId: stringData(existingRun.data, "usageEventId"),
         adapterActionId: stringData(existingRun.data, "adapterActionId"),
+        approvalRequestId: stringData(existingRun.data, "approvalRequestId"),
+        auditEventId: stringData(existingRun.data, "auditEventId"),
       };
     }
 
@@ -672,6 +725,8 @@ export async function runRevenueWorker(input: {
         inferenceId: stringData(existingEvent.data, "inferenceId"),
         usageEventId: stringData(existingEvent.data, "usageEventId"),
         adapterActionId: stringData(existingEvent.data, "adapterActionId"),
+        approvalRequestId: stringData(existingEvent.data, "approvalRequestId"),
+        auditEventId: stringData(existingEvent.data, "auditEventId"),
       };
       const [adoptedRun] = await tx
         .insert(workerRuns)
@@ -708,6 +763,8 @@ export async function runRevenueWorker(input: {
         inferenceId: stringData(existingEvent.data, "inferenceId"),
         usageEventId: stringData(existingEvent.data, "usageEventId"),
         adapterActionId: stringData(existingEvent.data, "adapterActionId"),
+        approvalRequestId: stringData(existingEvent.data, "approvalRequestId"),
+        auditEventId: stringData(existingEvent.data, "auditEventId"),
       };
     }
 
@@ -742,70 +799,105 @@ export async function runRevenueWorker(input: {
         "worker_budget_per_task_exceeded",
         `Revenue Worker run requires ${runUnits} units, above the per-task limit of ${perTaskUnits}.`,
       );
-	    }
+    }
 
-	    const [allocation] = await tx
-	      .select({
-	        units: sql<number>`coalesce(sum(${budgetAllocations.units}), 0)`,
-	        startsAt: sql<Date | null>`min(${budgetAllocations.startsAt})`,
-	        endsAt: sql<Date | null>`max(${budgetAllocations.endsAt})`,
-	      })
-	      .from(budgetAllocations)
-	      .where(
-	        and(
-	          eq(budgetAllocations.accountId, context.budgetAccountId),
-	          sql`${budgetAllocations.startsAt} <= ${now}`,
-	          sql`${budgetAllocations.endsAt} > ${now}`,
-	        ),
-	      );
+    const [allocation] = await tx
+      .select({
+        units: sql<number>`coalesce(sum(${budgetAllocations.units}), 0)`,
+        startsAt: sql<Date | null>`min(${budgetAllocations.startsAt})`,
+        endsAt: sql<Date | null>`max(${budgetAllocations.endsAt})`,
+      })
+      .from(budgetAllocations)
+      .where(
+        and(
+          eq(budgetAllocations.accountId, context.budgetAccountId),
+          sql`${budgetAllocations.startsAt} <= ${now}`,
+          sql`${budgetAllocations.endsAt} > ${now}`,
+        ),
+      );
 
-	    const usageConditions = [eq(usageEvents.accountId, context.budgetAccountId)];
+    const usageConditions = [eq(usageEvents.accountId, context.budgetAccountId)];
 
-	    if (allocation?.startsAt && allocation.endsAt) {
-	      usageConditions.push(sql`${usageEvents.createdAt} >= ${allocation.startsAt}`);
-	      usageConditions.push(sql`${usageEvents.createdAt} < ${allocation.endsAt}`);
-	    }
+    if (allocation?.startsAt && allocation.endsAt) {
+      usageConditions.push(sql`${usageEvents.createdAt} >= ${allocation.startsAt}`);
+      usageConditions.push(sql`${usageEvents.createdAt} < ${allocation.endsAt}`);
+    }
 
-	    const [used] = await tx
-	      .select({ units: sql<number>`coalesce(sum(${usageEvents.units}), 0)` })
-	      .from(usageEvents)
-	      .where(and(...usageConditions));
+    const [used] = await tx
+      .select({ units: sql<number>`coalesce(sum(${usageEvents.units}), 0)` })
+      .from(usageEvents)
+      .where(and(...usageConditions));
 
-	    const [held] = await tx
-	      .select({ units: sql<number>`coalesce(sum(${budgetReservations.units}), 0)` })
-	      .from(budgetReservations)
-	      .where(
-	        and(
-	          eq(budgetReservations.accountId, context.budgetAccountId),
-	          eq(budgetReservations.state, "held"),
-	          sql`(${budgetReservations.expiresAt} is null or ${budgetReservations.expiresAt} > ${now})`,
-	        ),
-	      );
+    const [held] = await tx
+      .select({ units: sql<number>`coalesce(sum(${budgetReservations.units}), 0)` })
+      .from(budgetReservations)
+      .where(
+        and(
+          eq(budgetReservations.accountId, context.budgetAccountId),
+          eq(budgetReservations.state, "held"),
+          sql`(${budgetReservations.expiresAt} is null or ${budgetReservations.expiresAt} > ${now})`,
+        ),
+      );
 
-	    const monthlyUnits = numberValue(budgetState.monthlyUnits);
-	    const allocatedUnits = numberValue(allocation?.units);
-	    const allowanceUnits =
-	      allocatedUnits > 0 && monthlyUnits > 0
-	        ? Math.min(allocatedUnits, monthlyUnits)
-	        : allocatedUnits > 0
-	          ? allocatedUnits
-	          : monthlyUnits;
-	    const hardLimit = numberValue(budgetState.hardLimit) || 100;
-	    const maxUnits = Math.floor((allowanceUnits * hardLimit) / 100);
-	    const committedUnits = numberValue(used?.units) + numberValue(held?.units);
+    const monthlyUnits = numberValue(budgetState.monthlyUnits);
+    const allocatedUnits = numberValue(allocation?.units);
+    const allowanceUnits =
+      allocatedUnits > 0 && monthlyUnits > 0
+        ? Math.min(allocatedUnits, monthlyUnits)
+        : allocatedUnits > 0
+          ? allocatedUnits
+          : monthlyUnits;
+    const hardLimit = numberValue(budgetState.hardLimit) || 100;
+    const maxUnits = Math.floor((allowanceUnits * hardLimit) / 100);
+    const committedUnits = numberValue(used?.units) + numberValue(held?.units);
 
-	    if (maxUnits <= 0 || committedUnits + runUnits > maxUnits) {
-	      throw new RevenueWorkerUnavailableError(
-	        "worker_budget_exceeded",
-	        `Revenue Worker run requires ${runUnits} units, with ${Math.max(maxUnits - committedUnits, 0)} units available.`,
-	      );
-	    }
+    if (maxUnits <= 0 || committedUnits + runUnits > maxUnits) {
+      throw new RevenueWorkerUnavailableError(
+        "worker_budget_exceeded",
+        `Revenue Worker run requires ${runUnits} units, with ${Math.max(maxUnits - committedUnits, 0)} units available.`,
+      );
+    }
 
     const task = context.task;
     const capabilityId = task?.capabilityId ?? context.quoteCapabilityId ?? context.briefCapabilityId;
 
+    if (!capabilityId) {
+      throw new RevenueWorkerUnavailableError(
+        "worker_capability_missing",
+        "Revenue Worker has no capability for the selected run.",
+      );
+    }
+
+    const [grant] = await tx
+      .select({ id: capabilityGrants.id })
+      .from(capabilityGrants)
+      .where(
+        and(
+          eq(capabilityGrants.tenantId, context.worker.tenantId),
+          eq(capabilityGrants.actorType, "worker"),
+          eq(capabilityGrants.actorId, context.worker.id),
+          eq(capabilityGrants.capabilityId, capabilityId),
+          eq(capabilityGrants.active, true),
+          sql`(${capabilityGrants.startsAt} is null or ${capabilityGrants.startsAt} <= ${now})`,
+          sql`(${capabilityGrants.endsAt} is null or ${capabilityGrants.endsAt} > ${now})`,
+        ),
+      )
+      .limit(1);
+
+    if (!grant) {
+      throw new RevenueWorkerUnavailableError(
+        "worker_capability_not_granted",
+        "Revenue Worker is not actively granted the capability required for this run.",
+        403,
+      );
+    }
+
     const runInput = {
       idempotencyKey: input.idempotencyKey,
+      operator: {
+        userId: operator.id,
+        email: operator.email,
+      },
       taskId: task?.id ?? null,
       capabilityId,
       connectionId: context.connectionId,
@@ -836,6 +928,32 @@ export async function runRevenueWorker(input: {
         updatedAt: now,
       })
       .returning({ id: workerRuns.id });
+
+    const [runAudit] = await tx
+      .insert(auditEvents)
+      .values({
+        tenantId: context.worker.tenantId,
+        type: "revenue_worker.run.requested",
+        source,
+        actorType: "user",
+        actorId: operator.id,
+        actorRef: operator.actorRef,
+        targetType: "worker_run",
+        targetId: workerRun.id,
+        taskId: task?.id,
+        workerRunId: workerRun.id,
+        objectId: task?.objectId,
+        capabilityId,
+        risk: "medium",
+        idempotencyKey: `${input.idempotencyKey}:run_requested`,
+        data: {
+          operatorEmail: operator.email,
+          operatorName: operator.name,
+          externalExecution: "blocked",
+          mode: "simulation",
+        },
+      })
+      .returning({ id: auditEvents.id });
 
     const [reservation] = await tx
       .insert(budgetReservations)
@@ -941,6 +1059,8 @@ export async function runRevenueWorker(input: {
           requiresApproval: true,
           workerRunId: workerRun.id,
           taskId: task?.id ?? null,
+          operatorUserId: operator.id,
+          auditEventId: runAudit.id,
         },
         occurredAt: now,
       })
@@ -965,32 +1085,12 @@ export async function runRevenueWorker(input: {
           inferenceId: inference.id,
           usageEventId: usage.id,
           reservationId: reservation.id,
+          runAuditId: runAudit.id,
           decision: "prepared_quote_for_owner_approval",
           guardrails: ["no_external_send", "no_money_movement", "owner_approval_required"],
         },
       })
       .returning({ id: evidence.id });
-
-    await tx
-      .insert(decisions)
-      .values({
-        tenantId: context.worker.tenantId,
-        taskId: task?.id,
-        eventId: event.id,
-        capabilityId,
-        actorType: "worker",
-        actorId: context.worker.id,
-        kind: "approval_recommendation",
-        state: "proposed",
-        decision: "request_owner_approval",
-        rationale: "External communication and money movement are blocked until owner approval.",
-        data: {
-          workerRunId: workerRun.id,
-          idempotencyKey: input.idempotencyKey,
-          classification: "quote_ready_for_owner_approval",
-          autonomyLevel: 2,
-        },
-      });
 
     const [action] = await tx
       .insert(adapterActions)
@@ -1019,6 +1119,118 @@ export async function runRevenueWorker(input: {
       })
       .returning({ id: adapterActions.id });
 
+    const [approval] = await tx
+      .insert(approvalRequests)
+      .values({
+        tenantId: context.worker.tenantId,
+        taskId: task?.id,
+        workerRunId: workerRun.id,
+        eventId: event.id,
+        objectId: task?.objectId,
+        capabilityId,
+        requesterType: "worker",
+        requesterId: context.worker.id,
+        requesterRef: `worker:${context.worker.id}`,
+        reviewerUserId: task?.reviewerUserId ?? operator.id,
+        kind: "quote_approval",
+        state: "pending",
+        priority: task?.priority ?? "high",
+        risk: "medium",
+        title: "Approve prepared quote",
+        summary:
+          "Revenue Worker prepared a customer response and quote draft; external send remains blocked until approval.",
+        requestedAction: {
+          action: "approve_and_send",
+          adapterActionId: action.id,
+          externalSend: false,
+          currentMode: "simulation",
+        },
+        evidence: {
+          eventId: event.id,
+          evidenceId: workerEvidence.id,
+          inferenceId: inference.id,
+          usageEventId: usage.id,
+          adapterActionId: action.id,
+        },
+        policy: {
+          externalSend: "approval_required",
+          moneyMovement: "blocked",
+          capabilityGrantId: grant.id,
+        },
+        data: {
+          operatorRunAuditId: runAudit.id,
+          classification: "quote_ready_for_owner_approval",
+          workerRunId: workerRun.id,
+        },
+      })
+      .returning({ id: approvalRequests.id });
+
+    const [approvalAudit] = await tx
+      .insert(auditEvents)
+      .values({
+        tenantId: context.worker.tenantId,
+        type: "approval.requested",
+        source,
+        actorType: "worker",
+        actorId: context.worker.id,
+        actorRef: `worker:${context.worker.id}`,
+        targetType: "approval_request",
+        targetId: approval.id,
+        taskId: task?.id,
+        workerRunId: workerRun.id,
+        approvalRequestId: approval.id,
+        eventId: event.id,
+        objectId: task?.objectId,
+        capabilityId,
+        risk: "medium",
+        idempotencyKey: `${input.idempotencyKey}:approval_requested`,
+        data: {
+          reviewerUserId: task?.reviewerUserId ?? operator.id,
+          operatorUserId: operator.id,
+          externalExecution: "blocked",
+          adapterActionId: action.id,
+        },
+      })
+      .returning({ id: auditEvents.id });
+
+    await tx
+      .update(evidence)
+      .set({
+        data: {
+          idempotencyKey: input.idempotencyKey,
+          workerRunId: workerRun.id,
+          inferenceId: inference.id,
+          usageEventId: usage.id,
+          reservationId: reservation.id,
+          runAuditId: runAudit.id,
+          approvalRequestId: approval.id,
+          auditEventId: approvalAudit.id,
+          decision: "prepared_quote_for_owner_approval",
+          guardrails: ["no_external_send", "no_money_movement", "owner_approval_required"],
+        },
+      })
+      .where(eq(evidence.id, workerEvidence.id));
+
+    await tx.insert(decisions).values({
+      tenantId: context.worker.tenantId,
+      taskId: task?.id,
+      eventId: event.id,
+      capabilityId,
+      actorType: "worker",
+      actorId: context.worker.id,
+      kind: "approval_recommendation",
+      state: "proposed",
+      decision: "request_owner_approval",
+      rationale: "External communication and money movement are blocked until owner approval.",
+      data: {
+        workerRunId: workerRun.id,
+        approvalRequestId: approval.id,
+        idempotencyKey: input.idempotencyKey,
+        classification: "quote_ready_for_owner_approval",
+        autonomyLevel: 2,
+      },
+    });
+
     await tx.insert(evaluations).values({
       tenantId: context.worker.tenantId,
       workerId: context.worker.id,
@@ -1029,6 +1241,7 @@ export async function runRevenueWorker(input: {
       data: {
         workerRunId: workerRun.id,
         idempotencyKey: input.idempotencyKey,
+        approvalRequestId: approval.id,
         dimensions: {
           evidence_complete: true,
           within_budget: true,
@@ -1048,6 +1261,8 @@ export async function runRevenueWorker(input: {
             workerRunId: workerRun.id,
             runEventId: event.id,
             adapterActionId: action.id,
+            approvalRequestId: approval.id,
+            auditEventId: approvalAudit.id,
           },
           cost: {
             units: runUnits,
@@ -1084,6 +1299,7 @@ export async function runRevenueWorker(input: {
           state: "approval_required",
           workerRunId: workerRun.id,
           sourceEventId: event.id,
+          approvalRequestId: approval.id,
           approvalRequired: true,
         },
         changedByType: "worker",
@@ -1118,6 +1334,8 @@ export async function runRevenueWorker(input: {
           inferenceId: inference.id,
           usageEventId: usage.id,
           adapterActionId: action.id,
+          approvalRequestId: approval.id,
+          auditEventId: approvalAudit.id,
         },
       })
       .where(eq(events.id, event.id));
@@ -1137,6 +1355,8 @@ export async function runRevenueWorker(input: {
       usageEventId: usage.id,
       adapterRunId: adapterRun.id,
       adapterActionId: action.id,
+      approvalRequestId: approval.id,
+      auditEventId: approvalAudit.id,
     };
 
     await tx
@@ -1165,6 +1385,8 @@ export async function runRevenueWorker(input: {
       inferenceId: inference.id,
       usageEventId: usage.id,
       adapterActionId: action.id,
+      approvalRequestId: approval.id,
+      auditEventId: approvalAudit.id,
     };
   });
 

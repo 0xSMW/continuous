@@ -22,6 +22,8 @@ const countLabels = {
   workflowDefinitions: "Workflow definitions",
   workflowRuns: "Workflow runs",
   workerRuns: "Worker runs",
+  approvalRequests: "Approval requests",
+  auditEvents: "Audit events",
   objects: "Objects",
   objectLinks: "Object links",
   objectVersions: "Object versions",
@@ -105,6 +107,8 @@ export default async function AdminPage() {
     summary.counts.capabilities > 0 &&
     summary.counts.budgetAccounts > 0 &&
     summary.counts.workerRuns > 0 &&
+    summary.counts.approvalRequests > 0 &&
+    summary.counts.auditEvents > 0 &&
     summary.counts.tasks > 0 &&
     summary.counts.evidence > 0 &&
     summary.counts.events > 0 &&
@@ -119,7 +123,7 @@ export default async function AdminPage() {
           <p className="label">Continuous Core</p>
           <h1>Worker platform substrate</h1>
           <p className="lede">
-            Persisted graph, task, capability, budget, adapter, generated UI, event, and evidence primitives for
+            Persisted graph, task, capability, budget, authority, adapter, generated UI, event, and evidence primitives for
             governed SMB workers.
           </p>
         </div>
@@ -171,7 +175,7 @@ export default async function AdminPage() {
                   <span className="label">Runtime</span>
                   <h3>Revenue Worker installed</h3>
                   <p>
-                    The first worker is backed by persisted worker, run, task, budget, event, evidence, and adapter records.
+                    The first worker is backed by persisted worker, run, task, budget, approval, audit, evidence, and adapter records.
                   </p>
                 </div>
               </article>
@@ -199,8 +203,8 @@ export default async function AdminPage() {
               </article>
               <article className="worker-card">
                 <span className="label">Governance</span>
-                <strong>{summary.counts.capabilities.toLocaleString()}</strong>
-                <p>{summary.counts.workerRuns.toLocaleString()} worker runs, {summary.counts.tasks.toLocaleString()} tasks, and {summary.counts.evidence.toLocaleString()} evidence records.</p>
+                <strong>{summary.counts.approvalRequests.toLocaleString()}</strong>
+                <p>{summary.counts.auditEvents.toLocaleString()} audit events, {summary.counts.workerRuns.toLocaleString()} worker runs, and {summary.counts.evidence.toLocaleString()} evidence records.</p>
               </article>
             </div>
           ) : (

@@ -2,12 +2,16 @@ import { describe, expect, it } from "vitest";
 
 import { authorizeRevenueWorkerRead, authorizeRevenueWorkerRun, normalizeIdempotencyKey } from "./security";
 
+const acceptedCredential = ["accepted", "worker", "credential"].join(".");
+const operatorEmail = "owner@continuoushq.com";
+
 describe("authorizeRevenueWorkerRun", () => {
   it("keeps worker runs disabled by default", () => {
     expect(
       authorizeRevenueWorkerRun({
         enabled: false,
         appEnv: "development",
+        operatorEmail,
       }),
     ).toEqual({
       ok: false,
@@ -22,6 +26,7 @@ describe("authorizeRevenueWorkerRun", () => {
       authorizeRevenueWorkerRun({
         enabled: true,
         appEnv: "development",
+        operatorEmail,
       }),
     ).toEqual({
       ok: false,
@@ -36,10 +41,11 @@ describe("authorizeRevenueWorkerRun", () => {
       authorizeRevenueWorkerRun({
         enabled: true,
         appEnv: "production",
-        expectedToken: "test-token",
-        authorization: "Bearer test-token",
+        expectedToken: acceptedCredential,
+        operatorEmail,
+        authorization: `Bearer ${acceptedCredential}`,
       }),
-    ).toEqual({ ok: true });
+    ).toEqual({ ok: true, operatorEmail });
   });
 });
 
@@ -61,7 +67,12 @@ describe("normalizeIdempotencyKey", () => {
 
 describe("authorizeRevenueWorkerRead", () => {
   it("requires a read token in development", () => {
-    expect(authorizeRevenueWorkerRead({ appEnv: "development" })).toEqual({
+    expect(
+      authorizeRevenueWorkerRead({
+        appEnv: "development",
+        operatorEmail,
+      }),
+    ).toEqual({
       ok: false,
       status: 403,
       code: "worker_read_token_missing",
@@ -70,7 +81,12 @@ describe("authorizeRevenueWorkerRead", () => {
   });
 
   it("requires a read token in production", () => {
-    expect(authorizeRevenueWorkerRead({ appEnv: "production" })).toEqual({
+    expect(
+      authorizeRevenueWorkerRead({
+        appEnv: "production",
+        operatorEmail,
+      }),
+    ).toEqual({
       ok: false,
       status: 403,
       code: "worker_read_token_missing",
@@ -82,7 +98,8 @@ describe("authorizeRevenueWorkerRead", () => {
     expect(
       authorizeRevenueWorkerRead({
         appEnv: "production",
-        expectedToken: "test-token",
+        expectedToken: acceptedCredential,
+        operatorEmail,
         headerToken: "wrong",
       }),
     ).toEqual({
@@ -97,9 +114,10 @@ describe("authorizeRevenueWorkerRead", () => {
     expect(
       authorizeRevenueWorkerRead({
         appEnv: "production",
-        expectedToken: "test-token",
-        authorization: "Bearer test-token",
+        expectedToken: acceptedCredential,
+        operatorEmail,
+        authorization: `Bearer ${acceptedCredential}`,
       }),
-    ).toEqual({ ok: true });
+    ).toEqual({ ok: true, operatorEmail });
   });
 });

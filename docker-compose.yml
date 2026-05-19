@@ -16,6 +16,7 @@ services:
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
       REVENUE_WORKER_RUN_ENABLED: ${REVENUE_WORKER_RUN_ENABLED:-false}
       REVENUE_WORKER_RUN_TOKEN: ${REVENUE_WORKER_RUN_TOKEN:-}
+      REVENUE_WORKER_OPERATOR_EMAIL: ${REVENUE_WORKER_OPERATOR_EMAIL:-owner@continuoushq.com}
     depends_on:
       db:
         condition: service_healthy
@@ -42,6 +43,7 @@ services:
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
       REVENUE_WORKER_RUN_ENABLED: ${REVENUE_WORKER_RUN_ENABLED:-false}
       REVENUE_WORKER_RUN_TOKEN: ${REVENUE_WORKER_RUN_TOKEN:-}
+      REVENUE_WORKER_OPERATOR_EMAIL: ${REVENUE_WORKER_OPERATOR_EMAIL:-owner@continuoushq.com}
     depends_on:
       db:
         condition: service_healthy

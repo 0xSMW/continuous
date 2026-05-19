@@ -18,8 +18,9 @@
     "db:studio": "drizzle-kit studio",
     "db:seed": "bun src/db/seed.ts",
     "worker:revenue": "bun src/worker/run-revenue.ts",
-    "app-server:start": "codex app-server daemon start",
-    "app-server:version": "codex app-server daemon version"
+    "app-server:help": "codex app-server --help",
+    "app-server:generate-ts": "codex app-server generate-ts",
+    "app-server:generate-json-schema": "codex app-server generate-json-schema"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",

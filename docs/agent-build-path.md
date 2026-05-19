@@ -1,13 +1,14 @@
 # Agent Build Path
 
-The local Codex app-server daemon is bootstrapped and running through the
-managed Codex install at `~/.codex/app-server-control/app-server-control.sock`.
-This repo does not yet define app-server-owned worker tools. Use the Next.js 16
-MCP bridge for route/runtime visibility, and add direct app-server tools only
-when worker control surfaces need repo-owned app-server methods.
+The installed Codex app-server CLI exposes protocol tooling, not a repo-owned
+daemon command. This repo does not yet define app-server-owned worker tools.
+Use the Next.js 16 MCP bridge for route/runtime visibility, and add direct
+app-server tools only when worker control surfaces need repo-owned methods.
 
 ```sh
-bun run app-server:version
+bun run app-server:help
+bun run app-server:generate-ts
+bun run app-server:generate-json-schema
 ```
 
 ## Next.js MCP
@@ -29,13 +30,16 @@ Useful app surfaces for worker development:
 | `/api/health` | Machine health check |
 | `/api/core` | Operator-gated persisted primitive summary |
 | `/api/revenue-worker` | Operator-gated Revenue Worker snapshot |
+| `/api/revenue-worker/approvals` | Operator-gated approval queue |
+| `/api/revenue-worker/approvals/:id` | Operator-gated approval decision endpoint |
 | `bun run worker:revenue` | Operator CLI run path |
 
 ## Boundary
 
 Use the Next.js MCP bridge for Next.js diagnostics. Keep side-effecting worker
-execution on explicit operator commands or guarded `POST` routes until real
-operator identity, permissions, and audit controls ship.
+execution on explicit operator commands or guarded `POST` routes. The Revenue
+Worker now records the configured operator, active capability grant, approval
+request, audit event, and evidence before any external action can be approved.
 
 ## Build Loop
 
@@ -51,6 +55,7 @@ HTTP mutation:
 bun run worker:revenue -- --idempotency-key=local-revenue-run-001
 ```
 
-When the HTTP snapshot or run path is required, start the app with
-`REVENUE_WORKER_RUN_TOKEN` and include that bearer token on both
-`GET /api/revenue-worker` and `POST /api/revenue-worker/run`.
+When the HTTP snapshot, approval, or run path is required, start the app with
+`REVENUE_WORKER_RUN_TOKEN` and include that bearer token on operator routes.
+`REVENUE_WORKER_OPERATOR_EMAIL` must match an active seeded user, defaulting to
+`owner@continuoushq.com`.

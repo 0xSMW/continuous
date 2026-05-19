@@ -3,8 +3,8 @@
 The current Revenue Worker is a deterministic persisted simulation. It proves
 worker identity, capability grants, task ownership, budget reservation, usage,
 inference logging, worker run lifecycle, event emission, evidence capture,
-adapter receipts, approval state, and object versioning without external sends
-or money movement.
+adapter receipts, approval requests, audit events, operator decisions, approval
+state, and object versioning without external sends or money movement.
 
 ## Current Runtime
 
@@ -13,6 +13,7 @@ or money movement.
 | Worker identity | `Revenue Operations Worker`, autonomy level 2, owner-managed |
 | Core loop | One operator run creates worker run, budget, inference, usage, event, evidence, adapter action, task update, and object version records |
 | Operator read API | `GET /api/revenue-worker`, bearer-token required |
+| Approval API | `GET /api/revenue-worker/approvals` and `POST /api/revenue-worker/approvals/:id`, bearer-token required |
 | Run API | `POST /api/revenue-worker/run`, disabled by default and bearer-token gated when enabled |
 | Operator run | `bun run worker:revenue -- --idempotency-key=<key>` |
 | External execution | Disabled; adapter action records simulated receipts only |
@@ -24,11 +25,11 @@ smoke test.
 
 | Gate | Required proof |
 |---|---|
-| Auth | Operator/user identity on every side-effecting run |
+| Auth | Configured operator user is bound to every side-effecting run and approval decision |
 | Idempotency | `worker_runs` owns first-class run lifecycle state, with event idempotency kept as a compatibility guard |
 | Budget | Reservation before model/tool work and usage attribution after |
 | Evidence | Source snapshot, prompt/result trace, approval, and adapter receipt |
-| Approval | Generated UI contract for approve, revise, reject, and escalate |
+| Approval | First-class `approval_requests`, approval decision evidence, and audit trail |
 | Adapter safety | Scoped credentials, dry-run mode, receipts, retries, and reconciliation |
 | Eval | Historical lead/quote cases with expected classification and action outputs |
 
@@ -77,10 +78,9 @@ smoke test.
 
 ## Milestones
 
-1. Capture authenticated operator identity on run requests.
-2. Convert the deterministic run into a small state machine.
-3. Add read-only real lead intake.
-4. Add quote approval UI backed by `ui_contracts`.
-5. Add dry-run adapter execution with reconciliation.
-6. Add eval fixtures and CI checks for lead classification and quote decisions.
-7. Raise autonomy only for read, classify, draft, and owner brief capabilities.
+1. Convert the deterministic run into a small state machine.
+2. Add read-only real lead intake.
+3. Add quote approval UI backed by `ui_contracts`.
+4. Add dry-run adapter execution with reconciliation.
+5. Add eval fixtures and CI checks for lead classification and quote decisions.
+6. Raise autonomy only for read, classify, draft, and owner brief capabilities.

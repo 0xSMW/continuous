@@ -34,7 +34,7 @@ bun run db:seed
 `db:seed` is idempotent and loads a bootstrap service-SMB lead-to-cash slice:
 tenant, owner, Revenue Operations Worker, customer, lead, quote, job, invoice,
 payment, capabilities, task, event, evidence, budget records, adapter record,
-and generated UI contract.
+approval request, audit event, and generated UI contract.
 
 ## Run
 
@@ -48,9 +48,9 @@ snapshot.
 
 The repo also includes `.mcp.json` for the Next.js MCP bridge. With `bun run dev`
 running, compatible coding agents can inspect routes, runtime errors, metadata,
-and logs through `next-devtools-mcp`. This is a Next.js diagnostics bridge, not
-a replacement for the local Codex app-server daemon; verify that daemon with
-`bun run app-server:version` when worker build tooling needs it.
+and logs through `next-devtools-mcp`. The installed Codex app-server CLI exposes
+protocol tooling for future repo-owned worker controls; inspect it with
+`bun run app-server:help` when worker build tooling needs it.
 
 ## Revenue Worker
 
@@ -79,10 +79,26 @@ curl -X POST http://localhost:3000/api/revenue-worker/run \
   -H 'idempotency-key: local-revenue-run-001'
 ```
 
+Runs are bound to `REVENUE_WORKER_OPERATOR_EMAIL`, which defaults to the seeded
+`owner@continuoushq.com` user. A successful run records an approval request and
+audit trail while keeping external send and money movement blocked.
+
 The same persisted loop can run without exposing HTTP:
 
 ```sh
 IDEMPOTENCY_KEY=local-revenue-run-002 bun run worker:revenue
+```
+
+List and decide approvals with the same bearer token:
+
+```sh
+curl http://localhost:3000/api/revenue-worker/approvals \
+  -H "authorization: Bearer $REVENUE_WORKER_RUN_TOKEN"
+
+curl -X POST http://localhost:3000/api/revenue-worker/approvals/$APPROVAL_ID \
+  -H "authorization: Bearer $REVENUE_WORKER_RUN_TOKEN" \
+  -H "content-type: application/json" \
+  -d '{"action":"approved"}'
 ```
 
 ## Notes

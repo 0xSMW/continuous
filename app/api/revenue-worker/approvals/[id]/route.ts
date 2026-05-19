@@ -1,6 +1,10 @@
-import { env } from "../../../../src/env";
-import { RevenueWorkerUnavailableError, runRevenueWorker } from "../../../../src/worker/revenue";
-import { authorizeRevenueWorkerRun, normalizeIdempotencyKey } from "../../../../src/worker/security";
+import { env } from "../../../../../src/env";
+import {
+  decideRevenueWorkerApproval,
+  normalizeApprovalDecision,
+} from "../../../../../src/worker/approvals";
+import { RevenueWorkerUnavailableError } from "../../../../../src/worker/revenue";
+import { authorizeRevenueWorkerRead } from "../../../../../src/worker/security";
 
 export const dynamic = "force-dynamic";
 
@@ -20,9 +24,11 @@ function optionalString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-export async function POST(request: Request) {
-  const auth = authorizeRevenueWorkerRun({
-    enabled: env.REVENUE_WORKER_RUN_ENABLED,
+export async function POST(
+  request: Request,
+  context: { params: Promise<{ id: string }> },
+) {
+  const auth = authorizeRevenueWorkerRead({
     appEnv: env.APP_ENV,
     expectedToken: env.REVENUE_WORKER_RUN_TOKEN,
     operatorEmail: env.REVENUE_WORKER_OPERATOR_EMAIL,
@@ -33,7 +39,8 @@ export async function POST(request: Request) {
   if (!auth.ok) {
     return Response.json(
       {
-        api: "continuous.revenue_worker.v0",
+        api: "continuous.revenue_worker.approvals.v0",
+        data: null,
         error: auth,
       },
       {
@@ -46,17 +53,16 @@ export async function POST(request: Request) {
   }
 
   const body = await readBody(request);
-  const idempotency = normalizeIdempotencyKey(
-    request.headers.get("idempotency-key") ?? body.idempotencyKey,
-  );
+  const action = normalizeApprovalDecision(body.action);
 
-  if (!idempotency.ok) {
+  if (!action) {
     return Response.json(
       {
-        api: "continuous.revenue_worker.v0",
+        api: "continuous.revenue_worker.approvals.v0",
+        data: null,
         error: {
-          code: "invalid_idempotency_key",
-          message: idempotency.message,
+          code: "invalid_approval_decision",
+          message: "Action must be approved, rejected, or revision_requested.",
         },
       },
       {
@@ -68,18 +74,22 @@ export async function POST(request: Request) {
     );
   }
 
+  const { id } = await context.params;
+  const url = new URL(request.url);
+
   try {
-    const result = await runRevenueWorker({
-      idempotencyKey: idempotency.key,
-      tenantSlug: optionalString(body.tenantSlug),
-      workerId: optionalString(body.workerId),
+    const data = await decideRevenueWorkerApproval({
+      approvalId: id,
       operatorEmail: auth.operatorEmail,
+      tenantSlug: optionalString(body.tenantSlug) ?? optionalString(url.searchParams.get("tenantSlug")),
+      action,
+      note: optionalString(body.note),
     });
 
     return Response.json(
       {
-        api: "continuous.revenue_worker.v0",
-        data: result,
+        api: "continuous.revenue_worker.approvals.v0",
+        data,
         error: null,
       },
       {
@@ -98,13 +108,13 @@ export async function POST(request: Request) {
           }
         : {
             status: 500,
-            code: "worker_run_failed",
-            message: error instanceof Error ? error.message : "Unknown Revenue Worker run error.",
+            code: "approval_decision_failed",
+            message: error instanceof Error ? error.message : "Unknown approval decision error.",
           };
 
     return Response.json(
       {
-        api: "continuous.revenue_worker.v0",
+        api: "continuous.revenue_worker.approvals.v0",
         data: null,
         error: {
           code: workerError.code,
