@@ -6,6 +6,8 @@ import {
   auditEvents,
   capabilities,
   connections,
+  customers,
+  customerSignals,
   decisions,
   documents,
   events,
@@ -50,7 +52,15 @@ const documentSource = "continuous.core.documents";
 const packetSource = "continuous.core.packets";
 const decisionSource = "continuous.core.decisions";
 const objectLinkSource = "continuous.core.object_links";
+const customerSignalSource = "continuous.core.customer_signals";
 const viewSource = "continuous.core.views";
+const customerSignalTypes = new Set([
+  "satisfaction_signal",
+  "feedback_item",
+  "complaint",
+  "testimonial",
+  "review",
+]);
 
 export type ActorInput = {
   type?: string;
@@ -177,6 +187,24 @@ export type CoreObjectLinkInput = {
   data?: JsonObject;
   effectiveAt?: string;
   endedAt?: string;
+  db?: Database;
+};
+
+export type CoreCustomerSignalRecordInput = {
+  operatorEmail: string;
+  idempotencyKey: string;
+  tenantSlug?: string;
+  type: string;
+  name: string;
+  state?: string;
+  source?: string;
+  externalId?: string;
+  customerObjectId?: string;
+  relatedObjectId?: string;
+  taskId?: string;
+  eventId?: string;
+  data?: JsonObject;
+  occurredAt?: string;
   db?: Database;
 };
 
@@ -374,6 +402,18 @@ function parseTaskState(value: string | undefined) {
   throw new PlatformUnavailableError(
     "core_task_state_invalid",
     "config.taskState must be draft, active, waiting, approval_required, blocked, done, or canceled.",
+    400,
+  );
+}
+
+function parseCustomerSignalType(value: string) {
+  if (customerSignalTypes.has(value)) {
+    return value;
+  }
+
+  throw new PlatformUnavailableError(
+    "core_customer_signal_type_invalid",
+    "config.type must be satisfaction_signal, feedback_item, complaint, testimonial, or review.",
     400,
   );
 }
@@ -1638,6 +1678,253 @@ export async function linkCoreObjects(input: CoreObjectLinkInput) {
         fromObjectId: link.fromId,
         toObjectId: link.toId,
         type: link.type,
+      },
+    };
+  });
+}
+
+export async function recordCustomerSignal(input: CoreCustomerSignalRecordInput) {
+  const db = input.db ?? defaultDb;
+  const type = parseCustomerSignalType(requiredStringMax(input.type, "config.type", 80));
+  const name = requiredString(input.name, "config.name");
+  const state = cleanString(input.state) ?? "captured";
+  const source = cleanString(input.source) ?? "operator_payload";
+  const externalId = cleanString(input.externalId);
+  const customerObjectId = optionalUuid(input.customerObjectId, "config.customerObjectId");
+  const relatedObjectId = optionalUuid(input.relatedObjectId, "config.relatedObjectId");
+  const taskId = optionalUuid(input.taskId, "config.taskId");
+  const eventId = optionalUuid(input.eventId, "config.eventId");
+  const occurredAt = optionalDate(input.occurredAt, "config.occurredAt");
+  const data = jsonObject(input.data);
+  const operator = await loadOperatorContext({
+    db,
+    operatorEmail: input.operatorEmail,
+    tenantSlug: input.tenantSlug,
+  });
+
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${operator.tenantId}), hashtext(${`${customerSignalSource}:${input.idempotencyKey}`}))`,
+    );
+
+    const [existingAudit] = await tx
+      .select({
+        auditEventId: auditEvents.id,
+        targetId: auditEvents.targetId,
+        eventId: auditEvents.eventId,
+      })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.tenantId, operator.tenantId),
+          eq(auditEvents.source, customerSignalSource),
+          eq(auditEvents.idempotencyKey, `${input.idempotencyKey}:customer_signal_recorded`),
+          eq(auditEvents.targetType, "customer_signal"),
+        ),
+      )
+      .limit(1);
+
+    if (existingAudit?.targetId) {
+      const [signal] = await tx
+        .select()
+        .from(customerSignals)
+        .where(
+          and(
+            eq(customerSignals.tenantId, operator.tenantId),
+            eq(customerSignals.id, existingAudit.targetId),
+          ),
+        )
+        .limit(1);
+
+      if (signal) {
+        return {
+          created: false,
+          signalId: signal.id,
+          objectId: signal.objectId,
+          eventId: existingAudit.eventId,
+          auditEventId: existingAudit.auditEventId,
+          signal: {
+            id: signal.id,
+            type: signal.type,
+            state: signal.state,
+            objectId: signal.objectId,
+            customerId: signal.customerId,
+          },
+        };
+      }
+    }
+
+    await Promise.all([
+      assertObject(tx, operator.tenantId, customerObjectId),
+      assertObject(tx, operator.tenantId, relatedObjectId),
+      assertTask(tx, operator.tenantId, taskId),
+      assertEvent(tx, operator.tenantId, eventId),
+    ]);
+
+    const [customer] = customerObjectId
+      ? await tx
+          .select({ id: customers.id })
+          .from(customers)
+          .where(
+            and(
+              eq(customers.tenantId, operator.tenantId),
+              eq(customers.objectId, customerObjectId),
+            ),
+          )
+          .limit(1)
+      : [];
+
+    if (customerObjectId && !customer) {
+      throw new PlatformUnavailableError(
+        "core_customer_not_found",
+        "config.customerObjectId does not match a customer in this tenant.",
+        404,
+      );
+    }
+
+    const [object] = await tx
+      .insert(objects)
+      .values({
+        tenantId: operator.tenantId,
+        type,
+        name,
+        state,
+        source,
+        externalId,
+        data,
+        createdByUserId: operator.userId,
+        effectiveAt: occurredAt,
+      })
+      .returning({ id: objects.id });
+
+    const [signal] = await tx
+      .insert(customerSignals)
+      .values({
+        tenantId: operator.tenantId,
+        objectId: object.id,
+        customerId: customer?.id,
+        type,
+        state,
+        source,
+        externalId,
+        data,
+        occurredAt,
+      })
+      .returning({ id: customerSignals.id });
+
+    const linkValues = [
+      ...(customerObjectId
+        ? [
+            {
+              tenantId: operator.tenantId,
+              fromId: object.id,
+              toId: customerObjectId,
+              type: "about_customer",
+              data: { signalType: type },
+            },
+          ]
+        : []),
+      ...(relatedObjectId
+        ? [
+            {
+              tenantId: operator.tenantId,
+              fromId: object.id,
+              toId: relatedObjectId,
+              type: "about_work_item",
+              data: { signalType: type },
+            },
+          ]
+        : []),
+    ];
+
+    if (linkValues.length > 0) {
+      await tx.insert(objectLinks).values(linkValues).onConflictDoNothing();
+    }
+
+    const now = new Date();
+    const [event] = await tx
+      .insert(events)
+      .values({
+        tenantId: operator.tenantId,
+        type: "customer_signal.recorded",
+        source: customerSignalSource,
+        actorType: "user",
+        actorId: operator.userId,
+        actorRef: operator.actorRef,
+        objectId: object.id,
+        taskId,
+        idempotencyKey: `${input.idempotencyKey}:customer_signal_recorded`,
+        data: {
+          signalId: signal.id,
+          signalType: type,
+          customerObjectId: customerObjectId ?? null,
+          relatedObjectId: relatedObjectId ?? null,
+          externalExecution: "blocked",
+        },
+        occurredAt: occurredAt ?? now,
+      })
+      .returning({ id: events.id });
+
+    const [note] = await tx
+      .insert(evidence)
+      .values({
+        tenantId: operator.tenantId,
+        kind: "note",
+        name: `Customer ${type.replaceAll("_", " ")}`,
+        objectId: object.id,
+        taskId,
+        eventId: event.id,
+        actorType: "user",
+        actorId: operator.userId,
+        data: {
+          signalId: signal.id,
+          signalType: type,
+          customerObjectId: customerObjectId ?? null,
+          relatedObjectId: relatedObjectId ?? null,
+          data,
+        },
+      })
+      .returning({ id: evidence.id });
+
+    const [audit] = await tx
+      .insert(auditEvents)
+      .values({
+        tenantId: operator.tenantId,
+        type: "customer_signal.recorded",
+        source: customerSignalSource,
+        actorType: "user",
+        actorId: operator.userId,
+        actorRef: operator.actorRef,
+        targetType: "customer_signal",
+        targetId: signal.id,
+        taskId,
+        eventId: event.id,
+        objectId: object.id,
+        risk: type === "complaint" ? "medium" : "low",
+        idempotencyKey: `${input.idempotencyKey}:customer_signal_recorded`,
+        data: {
+          signalType: type,
+          customerObjectId: customerObjectId ?? null,
+          relatedObjectId: relatedObjectId ?? null,
+          evidenceId: note.id,
+          externalExecution: "blocked",
+        },
+      })
+      .returning({ id: auditEvents.id });
+
+    return {
+      created: true,
+      signalId: signal.id,
+      objectId: object.id,
+      eventId: event.id,
+      evidenceId: note.id,
+      auditEventId: audit.id,
+      signal: {
+        id: signal.id,
+        type,
+        state,
+        objectId: object.id,
+        customerId: customer?.id ?? null,
       },
     };
   });

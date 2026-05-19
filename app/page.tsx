@@ -33,6 +33,7 @@ const countLabels = {
   evaluations: "Evaluations",
   entityIdentifiers: "Entity identifiers",
   customers: "Customers",
+  customerSignals: "Customer signals",
   leads: "Leads",
   offers: "Offers",
   quotes: "Quotes",

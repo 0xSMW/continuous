@@ -11,6 +11,7 @@ import {
   linkCoreObjects,
   prepareCorePacket,
   publishCoreView,
+  recordCustomerSignal,
   recordCoreDecision,
   upsertCoreObject,
 } from "../../../src/core/primitives";
@@ -996,11 +997,67 @@ export async function POST(request: Request) {
     }
   }
 
+  if (command === "customer_signal.record") {
+    const idempotency = normalizeIdempotencyKey(
+      request.headers.get("idempotency-key") ?? body.idempotencyKey,
+    );
+
+    if (!idempotency.ok) {
+      return errorResponse(
+        {
+          code: "invalid_idempotency_key",
+          message: idempotency.message,
+        },
+        400,
+      );
+    }
+
+    try {
+      const result = await recordCustomerSignal({
+        operatorEmail: auth.operatorEmail,
+        idempotencyKey: idempotency.key,
+        tenantSlug,
+        type: optionalString(config.type) ?? "",
+        name: optionalString(config.name) ?? "",
+        state: optionalString(config.state),
+        source: optionalString(config.source),
+        externalId: optionalString(config.externalId),
+        customerObjectId: optionalString(config.customerObjectId),
+        relatedObjectId: optionalString(config.relatedObjectId),
+        taskId: optionalString(config.taskId),
+        eventId: optionalString(config.eventId),
+        data: jsonObject(config.data),
+        occurredAt: optionalString(config.occurredAt),
+      });
+
+      return Response.json(
+        {
+          api: apiVersion,
+          data: {
+            command,
+            core: {
+              tenantSlug: tenantSlug ?? null,
+            },
+            result,
+          },
+          error: null,
+        },
+        {
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    } catch (error) {
+      return coreErrorResponse(error, "core_customer_signal_record_failed");
+    }
+  }
+
   return errorResponse(
     {
       code: "core_command_unsupported",
       message:
-        "Core command must be task.create, task.transition, object.upsert, object.link, event.ingest, evidence.attach, document.create, packet.prepare, document.packet.prepare, decision.record, approval.request, capability.grant, budget.reserve, budget.charge, budget.release, or view.publish.",
+        "Core command must be task.create, task.transition, object.upsert, object.link, event.ingest, evidence.attach, document.create, packet.prepare, document.packet.prepare, decision.record, approval.request, capability.grant, budget.reserve, budget.charge, budget.release, view.publish, or customer_signal.record.",
     },
     400,
   );

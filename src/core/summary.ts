@@ -18,6 +18,7 @@ import {
   compensationAgreements,
   connections,
   customers,
+  customerSignals,
   decisions,
   documents,
   employments,
@@ -90,6 +91,7 @@ export type CoreSummary = {
     evaluations: number;
     entityIdentifiers: number;
     customers: number;
+    customerSignals: number;
     leads: number;
     offers: number;
     quotes: number;
@@ -175,6 +177,7 @@ export async function getCoreSummary(): Promise<CoreSummary> {
     evaluationCount,
     entityIdentifierCount,
     customerCount,
+    customerSignalCount,
     leadCount,
     offerCount,
     quoteCount,
@@ -233,6 +236,7 @@ export async function getCoreSummary(): Promise<CoreSummary> {
     tableCount(db, evaluations),
     tableCount(db, entityIdentifiers),
     tableCount(db, customers),
+    tableCount(db, customerSignals),
     tableCount(db, leads),
     tableCount(db, offers),
     tableCount(db, quotes),
@@ -315,6 +319,7 @@ export async function getCoreSummary(): Promise<CoreSummary> {
       evaluations: evaluationCount,
       entityIdentifiers: entityIdentifierCount,
       customers: customerCount,
+      customerSignals: customerSignalCount,
       leads: leadCount,
       offers: offerCount,
       quotes: quoteCount,
@@ -399,6 +404,7 @@ export async function getCoreSummarySafe(): Promise<
           evaluations: 0,
           entityIdentifiers: 0,
           customers: 0,
+          customerSignals: 0,
           leads: 0,
           offers: 0,
           quotes: 0,
@@ -439,6 +445,7 @@ export function summarizeCoreReadiness(summary: CoreSummary) {
   const persistedObjects =
     summary.counts.objects +
     summary.counts.customers +
+    summary.counts.customerSignals +
     summary.counts.leads +
     summary.counts.offers +
     summary.counts.quotes +
@@ -463,6 +470,7 @@ export function summarizeCoreReadiness(summary: CoreSummary) {
       summary.counts.budgetAccounts > 0,
     hasAdapterLedger: summary.counts.adapters > 0 && summary.counts.connections > 0,
     hasEntity: summary.counts.legalEntities > 0 && summary.counts.bankAccounts > 0,
+    hasCustomerSignals: summary.counts.customerSignals > 0,
     hasWorkforce: summary.counts.people > 0 && summary.counts.employments > 0,
     hasPayroll: summary.counts.paySchedules > 0 && summary.counts.payrollRuns > 0,
     hasCompliance: summary.counts.rulePacks > 0 && summary.counts.obligations > 0,

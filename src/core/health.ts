@@ -49,6 +49,7 @@ export function getHealth(input: HealthInput): Health {
   const graphObjects =
     input.counts.objects +
     input.counts.customers +
+    input.counts.customerSignals +
     input.counts.leads +
     input.counts.offers +
     input.counts.quotes +

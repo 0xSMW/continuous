@@ -847,6 +847,48 @@ export const payments = pgTable(
   ],
 );
 
+export const customerSignals = pgTable(
+  "customer_signals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    objectId: uuid("object_id")
+      .notNull()
+      .references(() => objects.id, { onDelete: "cascade" }),
+    customerId: uuid("customer_id").references(() => customers.id, {
+      onDelete: "set null",
+    }),
+    type: varchar("type", { length: 80 }).notNull(),
+    state: text("state").notNull().default("captured"),
+    source: text("source").notNull().default("continuous"),
+    externalId: text("external_id"),
+    data: jsonb("data")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("customer_signals_tenant_idx").on(table.tenantId),
+    index("customer_signals_customer_idx").on(table.customerId),
+    index("customer_signals_type_idx").on(table.tenantId, table.type),
+    uniqueIndex("customer_signals_object_idx").on(table.objectId),
+    uniqueIndex("customer_signals_external_idx").on(
+      table.tenantId,
+      table.type,
+      table.externalId,
+    ),
+  ],
+);
+
 export const legalEntities = pgTable(
   "legal_entities",
   {
@@ -2365,6 +2407,7 @@ export const tenantsRelations = relations(tenants, ({ many }) => ({
   jobs: many(jobs),
   invoices: many(invoices),
   payments: many(payments),
+  customerSignals: many(customerSignals),
   objects: many(objects),
   tasks: many(tasks),
   events: many(events),
@@ -2455,9 +2498,10 @@ export const objectsRelations = relations(objects, ({ one, many }) => ({
   events: many(events),
   evidence: many(evidence),
   evidencePackets: many(evidencePackets),
+  customerSignals: many(customerSignals),
 }));
 
-export const customersRelations = relations(customers, ({ one }) => ({
+export const customersRelations = relations(customers, ({ one, many }) => ({
   tenant: one(tenants, {
     fields: [customers.tenantId],
     references: [tenants.id],
@@ -2466,6 +2510,7 @@ export const customersRelations = relations(customers, ({ one }) => ({
     fields: [customers.objectId],
     references: [objects.id],
   }),
+  signals: many(customerSignals),
 }));
 
 export const leadsRelations = relations(leads, ({ one }) => ({
@@ -2531,6 +2576,21 @@ export const paymentsRelations = relations(payments, ({ one }) => ({
   object: one(objects, {
     fields: [payments.objectId],
     references: [objects.id],
+  }),
+}));
+
+export const customerSignalsRelations = relations(customerSignals, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [customerSignals.tenantId],
+    references: [tenants.id],
+  }),
+  object: one(objects, {
+    fields: [customerSignals.objectId],
+    references: [objects.id],
+  }),
+  customer: one(customers, {
+    fields: [customerSignals.customerId],
+    references: [customers.id],
   }),
 }));
 

@@ -13,6 +13,7 @@ import {
   capabilityGrants,
   connections,
   customers,
+  customerSignals,
   bankAccounts,
   compensationAgreements,
   decisions,
@@ -26,6 +27,7 @@ import {
   filingDrafts,
   filingRequirements,
   generatedViews,
+  inferences,
   invoices,
   jobs,
   legalEntities,
@@ -82,6 +84,11 @@ const ids = {
   jobObject: "33333333-3333-4333-8333-000000000005",
   invoiceObject: "33333333-3333-4333-8333-000000000006",
   paymentObject: "33333333-3333-4333-8333-000000000007",
+  satisfactionSignalObject: "33333333-3333-4333-8333-000000000008",
+  feedbackItemObject: "33333333-3333-4333-8333-000000000009",
+  complaintObject: "33333333-3333-4333-8333-000000000010",
+  testimonialObject: "33333333-3333-4333-8333-000000000011",
+  reviewObject: "33333333-3333-4333-8333-000000000012",
   customer: "44444444-4444-4444-8444-000000000001",
   lead: "44444444-4444-4444-8444-000000000002",
   offer: "44444444-4444-4444-8444-000000000003",
@@ -89,6 +96,11 @@ const ids = {
   job: "44444444-4444-4444-8444-000000000005",
   invoice: "44444444-4444-4444-8444-000000000006",
   payment: "44444444-4444-4444-8444-000000000007",
+  satisfactionSignal: "44444444-4444-4444-8444-000000000008",
+  feedbackItem: "44444444-4444-4444-8444-000000000009",
+  complaint: "44444444-4444-4444-8444-000000000010",
+  testimonial: "44444444-4444-4444-8444-000000000011",
+  review: "44444444-4444-4444-8444-000000000012",
   eventLead: "cccccccc-cccc-4ccc-8ccc-000000000001",
   eventQuote: "cccccccc-cccc-4ccc-8ccc-000000000002",
   taskQuote: "dddddddd-dddd-4ddd-8ddd-000000000001",
@@ -143,6 +155,7 @@ const ids = {
   evaluationSeed: "99999999-9999-4999-8999-000000000002",
   approvalQuote: "99999999-9999-4999-8999-000000000003",
   auditApprovalRequested: "99999999-9999-4999-8999-000000000004",
+  inferenceSeed: "99999999-9999-4999-8999-000000000005",
 };
 
 const capIds = {
@@ -623,6 +636,51 @@ async function seed() {
         state: "prepared",
         externalId: "seed-payment",
         data: { amount_cents: 6225, currency: "USD", provider: "stripe" },
+      },
+      {
+        id: ids.satisfactionSignalObject,
+        tenantId: ids.tenant,
+        type: "satisfaction_signal",
+        name: "Post-job satisfaction score",
+        state: "captured",
+        externalId: "seed-satisfaction-signal",
+        data: { score: 9, scale: 10, channel: "sms" },
+      },
+      {
+        id: ids.feedbackItemObject,
+        tenantId: ids.tenant,
+        type: "feedback_item",
+        name: "Customer scheduling feedback",
+        state: "captured",
+        externalId: "seed-feedback-item",
+        data: { sentiment: "positive", topic: "scheduling" },
+      },
+      {
+        id: ids.complaintObject,
+        tenantId: ids.tenant,
+        type: "complaint",
+        name: "Customer cleanup complaint",
+        state: "needs_followup",
+        externalId: "seed-complaint",
+        data: { severity: "medium", topic: "site_cleanup" },
+      },
+      {
+        id: ids.testimonialObject,
+        tenantId: ids.tenant,
+        type: "testimonial",
+        name: "Customer testimonial draft",
+        state: "approval_required",
+        externalId: "seed-testimonial",
+        data: { publishable: false, approval_required: true },
+      },
+      {
+        id: ids.reviewObject,
+        tenantId: ids.tenant,
+        type: "review",
+        name: "Google review opportunity",
+        state: "requested",
+        externalId: "seed-review",
+        data: { platform: "google", request_status: "prepared" },
       },
     ])
     .onConflictDoNothing();
@@ -1227,6 +1285,72 @@ async function seed() {
     .onConflictDoNothing();
 
   await db
+    .insert(customerSignals)
+    .values([
+      {
+        id: ids.satisfactionSignal,
+        tenantId: ids.tenant,
+        objectId: ids.satisfactionSignalObject,
+        customerId: ids.customer,
+        type: "satisfaction_signal",
+        state: "captured",
+        source: "seed",
+        externalId: "seed-satisfaction-signal",
+        data: { score: 9, scale: 10, channel: "sms", relatedObjectId: ids.jobObject },
+        occurredAt: now,
+      },
+      {
+        id: ids.feedbackItem,
+        tenantId: ids.tenant,
+        objectId: ids.feedbackItemObject,
+        customerId: ids.customer,
+        type: "feedback_item",
+        state: "captured",
+        source: "seed",
+        externalId: "seed-feedback-item",
+        data: { sentiment: "positive", topic: "scheduling", relatedObjectId: ids.jobObject },
+        occurredAt: now,
+      },
+      {
+        id: ids.complaint,
+        tenantId: ids.tenant,
+        objectId: ids.complaintObject,
+        customerId: ids.customer,
+        type: "complaint",
+        state: "needs_followup",
+        source: "seed",
+        externalId: "seed-complaint",
+        data: { severity: "medium", topic: "site_cleanup", relatedObjectId: ids.jobObject },
+        occurredAt: now,
+      },
+      {
+        id: ids.testimonial,
+        tenantId: ids.tenant,
+        objectId: ids.testimonialObject,
+        customerId: ids.customer,
+        type: "testimonial",
+        state: "approval_required",
+        source: "seed",
+        externalId: "seed-testimonial",
+        data: { publishable: false, approvalRequired: true, relatedObjectId: ids.quoteObject },
+        occurredAt: now,
+      },
+      {
+        id: ids.review,
+        tenantId: ids.tenant,
+        objectId: ids.reviewObject,
+        customerId: ids.customer,
+        type: "review",
+        state: "requested",
+        source: "seed",
+        externalId: "seed-review",
+        data: { platform: "google", requestStatus: "prepared", relatedObjectId: ids.jobObject },
+        occurredAt: now,
+      },
+    ])
+    .onConflictDoNothing();
+
+  await db
     .insert(leads)
     .values({
       id: ids.lead,
@@ -1306,6 +1430,13 @@ async function seed() {
       { tenantId: ids.tenant, fromId: ids.jobObject, toId: ids.quoteObject, type: "from_quote" },
       { tenantId: ids.tenant, fromId: ids.invoiceObject, toId: ids.jobObject, type: "for_job" },
       { tenantId: ids.tenant, fromId: ids.paymentObject, toId: ids.invoiceObject, type: "for_invoice" },
+      { tenantId: ids.tenant, fromId: ids.satisfactionSignalObject, toId: ids.customerObject, type: "about_customer" },
+      { tenantId: ids.tenant, fromId: ids.feedbackItemObject, toId: ids.customerObject, type: "about_customer" },
+      { tenantId: ids.tenant, fromId: ids.complaintObject, toId: ids.customerObject, type: "about_customer" },
+      { tenantId: ids.tenant, fromId: ids.testimonialObject, toId: ids.customerObject, type: "about_customer" },
+      { tenantId: ids.tenant, fromId: ids.reviewObject, toId: ids.customerObject, type: "about_customer" },
+      { tenantId: ids.tenant, fromId: ids.complaintObject, toId: ids.jobObject, type: "about_work_item" },
+      { tenantId: ids.tenant, fromId: ids.reviewObject, toId: ids.jobObject, type: "about_work_item" },
     ])
     .onConflictDoNothing();
 
@@ -1720,11 +1851,48 @@ async function seed() {
     .onConflictDoNothing();
 
   await db
+    .insert(inferences)
+    .values({
+      id: ids.inferenceSeed,
+      tenantId: ids.tenant,
+      providerId: ids.provider,
+      routeId: ids.route,
+      budgetAccountId: ids.budgetAccount,
+      taskId: ids.taskQuote,
+      capabilityId: capIds.quotePrepare,
+      actorType: "worker",
+      actorId: ids.worker,
+      promptHash: "seed-revenue-worker-inference",
+      request: {
+        route: "low_cost_fast",
+        task: "classify lead and prepare quote packet",
+        externalExecution: "blocked",
+      },
+      result: {
+        classification: "quote_ready_for_owner_approval",
+        outputObjectId: ids.quoteObject,
+        approvalRequestId: ids.approvalQuote,
+      },
+      safety: {
+        externalSend: false,
+        moneyMovement: "blocked",
+        humanApprovalRequired: true,
+      },
+      promptTokens: 1200,
+      completionTokens: 420,
+      units: 50000,
+      costUsd: "0.000000",
+      latencyMs: 180,
+    })
+    .onConflictDoNothing();
+
+  await db
     .insert(usageEvents)
     .values({
       id: ids.usage,
       tenantId: ids.tenant,
       accountId: ids.budgetAccount,
+      inferenceId: ids.inferenceSeed,
       taskId: ids.taskQuote,
       capabilityId: capIds.quotePrepare,
       actorType: "worker",

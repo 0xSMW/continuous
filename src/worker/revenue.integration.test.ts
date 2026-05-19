@@ -15,6 +15,7 @@ import {
   linkCoreObjects,
   prepareCorePacket,
   publishCoreView,
+  recordCustomerSignal,
   recordCoreDecision,
   upsertCoreObject,
 } from "../core/primitives";
@@ -30,6 +31,7 @@ import {
   capabilities,
   capabilityGrants,
   connections,
+  customerSignals,
   decisions,
   documents,
   events,
@@ -817,6 +819,107 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(linkReplay.objectLinkId).toBe(link.objectLinkId);
     expect(viewReplay.created).toBe(false);
     expect(viewReplay.viewId).toBe(view.viewId);
+  }, 120_000);
+
+  it("records customer signals as headless core primitives", async () => {
+    const runId = randomUUID();
+    const [customerObject] = await db
+      .select({ id: objects.id })
+      .from(objects)
+      .where(and(eq(objects.type, "customer"), eq(objects.externalId, "seed-customer")))
+      .limit(1);
+    const [jobObject] = await db
+      .select({ id: objects.id })
+      .from(objects)
+      .where(and(eq(objects.type, "job"), eq(objects.externalId, "seed-job")))
+      .limit(1);
+
+    expect(customerObject?.id).toBeTruthy();
+    expect(jobObject?.id).toBeTruthy();
+
+    const result = await recordCustomerSignal({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-customer-signal-${runId}`,
+      type: "review",
+      name: "CI Google review request",
+      state: "requested",
+      source: "ci.core",
+      externalId: `ci-review-${runId}`,
+      customerObjectId: customerObject?.id,
+      relatedObjectId: jobObject?.id,
+      data: {
+        platform: "google",
+        requestStatus: "prepared",
+      },
+      db,
+    });
+
+    expect(result.created).toBe(true);
+    expect(result.signalId).toBeTruthy();
+    expect(result.objectId).toBeTruthy();
+    expect(result.eventId).toBeTruthy();
+    expect(result.evidenceId).toBeTruthy();
+    expect(result.auditEventId).toBeTruthy();
+
+    const [signal] = await db
+      .select()
+      .from(customerSignals)
+      .where(eq(customerSignals.id, result.signalId))
+      .limit(1);
+    const [signalObject] = await db
+      .select()
+      .from(objects)
+      .where(eq(objects.id, result.objectId))
+      .limit(1);
+    const links = await db
+      .select()
+      .from(objectLinks)
+      .where(eq(objectLinks.fromId, result.objectId));
+    const [event] = await db
+      .select()
+      .from(events)
+      .where(eq(events.id, result.eventId ?? ""))
+      .limit(1);
+    const [note] = await db
+      .select()
+      .from(evidence)
+      .where(eq(evidence.id, result.evidenceId ?? ""))
+      .limit(1);
+    const [audit] = await db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.id, result.auditEventId))
+      .limit(1);
+
+    expect(signal?.type).toBe("review");
+    expect(signal?.state).toBe("requested");
+    expect(signal?.source).toBe("ci.core");
+    expect(objectValue(signal?.data).platform).toBe("google");
+    expect(signalObject?.type).toBe("review");
+    expect(signalObject?.externalId).toBe(`ci-review-${runId}`);
+    expect(links.map((link) => link.type).sort()).toEqual(["about_customer", "about_work_item"]);
+    expect(event?.type).toBe("customer_signal.recorded");
+    expect(note?.kind).toBe("note");
+    expect(audit?.targetType).toBe("customer_signal");
+    expect(objectValue(audit?.data).externalExecution).toBe("blocked");
+
+    const replay = await recordCustomerSignal({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-customer-signal-${runId}`,
+      type: "review",
+      name: "Replay returns existing signal",
+      db,
+    });
+    const [signalCount] = await db
+      .select({ value: count() })
+      .from(customerSignals)
+      .where(eq(customerSignals.externalId, `ci-review-${runId}`));
+
+    expect(replay.created).toBe(false);
+    expect(replay.signalId).toBe(result.signalId);
+    expect(signalCount.value).toBe(1);
   }, 120_000);
 
   it("persists the golden lead-to-quote output, eval row, and idempotent replay", async () => {

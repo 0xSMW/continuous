@@ -66,8 +66,8 @@ curl -X POST http://localhost:3000/api/core \
 ```
 
 Core task transition, object, graph-link, event, evidence, document, packet,
-decision, approval-request, capability-grant, budget-ledger, and generated-view
-commands use the same `command` / `core` / `config` shape:
+decision, approval-request, capability-grant, budget-ledger, generated-view,
+and customer-signal commands use the same `command` / `core` / `config` shape:
 
 ```sh
 curl -X POST http://localhost:3000/api/core \
@@ -91,8 +91,8 @@ The additional Core write commands are `task.transition`, `object.link`,
 `event.ingest`, `evidence.attach`, `document.create`, `decision.record`,
 `packet.prepare`, `document.packet.prepare`, `approval.request`,
 `capability.grant`, `budget.reserve`, `budget.charge`, `budget.release`, and
-`view.publish`. Each command writes audit proof and keeps external execution
-blocked.
+`view.publish`, and `customer_signal.record`. Each command writes audit proof
+and keeps external execution blocked.
 
 The repo also includes `.mcp.json` for the Next.js MCP bridge. With `bun run dev`
 running, compatible coding agents can inspect routes, runtime errors, metadata,
