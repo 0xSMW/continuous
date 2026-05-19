@@ -142,9 +142,6 @@ jobs:
               printf 'REVENUE_WORKER_RUN_TOKEN=%s\n' "$(openssl rand -hex 32)"
             } > .env
           fi
-          set -a
-          . ./.env
-          set +a
           set_env() {
             key="$1"
             value="$2"
@@ -164,6 +161,11 @@ jobs:
           set_env APP_URL "$APP_URL"
           set_env SITE_HOSTS "$SITE_HOSTS"
           set_env ACME_EMAIL "$ACME_EMAIL"
+          POSTGRES_USER="$(grep '^POSTGRES_USER=' .env | cut -d= -f2- || true)"
+          POSTGRES_DB="$(grep '^POSTGRES_DB=' .env | cut -d= -f2- || true)"
+          POSTGRES_USER="${POSTGRES_USER:-continuous}"
+          POSTGRES_DB="${POSTGRES_DB:-continuous}"
+          export POSTGRES_USER POSTGRES_DB
           worker_token="$(grep '^REVENUE_WORKER_RUN_TOKEN=' .env | cut -d= -f2- || true)"
           if [ -z "$worker_token" ]; then
             worker_token="$(openssl rand -hex 32)"
