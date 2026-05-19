@@ -64,7 +64,7 @@ HOST=45.55.53.92 ./scripts/deploy.sh
 After DNS changes, refresh the Caddy site hosts without a full app deploy:
 
 ```sh
-HOST=45.55.53.92 ./scripts/configure-domain.sh
+HOST=45.55.53.92 SITE_HOSTS="continuoushq.com, getcontinuous.app" ./scripts/configure-domain.sh
 ```
 
 Caddy issues and renews the HTTPS certificates automatically for
