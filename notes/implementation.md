@@ -52,7 +52,7 @@
 | Added read-only lead source intake | `POST /worker` `command=lead.read` now persists inbound lead source records as Core object/event/evidence rows, writes a read-only worker run plus budget/usage/audit records, and returns stable `config.intake` selectors for `command=run` |
 | Rejected mixed worker intake sources | Revenue Worker now treats persisted `config.intake` Core row references as authoritative and rejects requests that also include direct `leadPacket` or `lead` payloads |
 | Added Revenue workflow spine | Revenue Worker runs now create a `lead_to_cash` workflow run plus durable workflow steps for intake, packet preparation, adapter dry-run, approval request, and approval decision continuation |
-| Added worker continuation command | `POST /worker` `command=continue` is a generic idempotent continuation surface; V1 consumes `config.approvalId` for approved or revision-requested approvals, prepares blocked no-send execution packets or revised approval packets, creates document/evidence packet records, and keeps external execution blocked |
+| Added worker continuation command | `POST /worker` `command=continue` is a generic idempotent continuation surface; V1 consumes `config.approvalId` for approved, revision-requested, or rejected approvals, prepares blocked no-send execution packets, revised approval packets, or rejected stop packets, creates document/evidence packet records, and keeps external execution blocked |
 | HTTPS is managed by Caddy | `continuoushq.com` and `getcontinuous.app` now point at the droplet, and Caddy issues and renews Let's Encrypt certificates from the persisted `caddy_data` volume |
 | Added a database recovery lane | `scripts/backup-db.sh` creates verified Postgres dumps on the droplet and copies them off-box; `scripts/restore-db.sh` performs a confirmation-gated restore, migration, restart, and health check |
 | Enabled DigitalOcean managed backups | The `continuous-01` droplet now has DO-managed backups enabled as the first off-host recovery layer; repo scripts also check custom dump age and checksum sidecars |
@@ -122,8 +122,9 @@ role and tenant selectors live under `worker`, while source records, approval
 ids, retry limits, and direct fallback payloads live under `config`. Adapter
 reconciliation and retry execution use the same route with
 `command=adapters.reconcile` or `command=adapters.retry`, a tenant-scoped
-`worker` target, and `config.limit`; revision continuation uses
-`command=continue`, an idempotency key, and `config.approvalId`. Route handlers
+`worker` target, and `config.limit`; approval continuations use
+`command=continue`, an idempotency key, and `config.approvalId` for approved,
+revision-requested, or rejected approval outcomes. Route handlers
 now delegate to the
 worker command registry,
 which owns role allowlisting, command lookup, idempotency, config validation,

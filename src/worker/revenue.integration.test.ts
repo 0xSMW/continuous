@@ -1555,6 +1555,203 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(objectValue(replay.output).revisionApprovalRequestId).toBe(revisionApprovalRequestId);
   }, 120_000);
 
+  it("continues rejected approval outcomes by closing the prepared action", async () => {
+    const runId = randomUUID();
+    const [worker] = await db
+      .select({ id: workers.id })
+      .from(workers)
+      .where(eq(workers.role, "revenue_operations"))
+      .limit(1);
+    const workerId = worker?.id ?? "";
+
+    expect(workerId).toBeTruthy();
+
+    const createdTask = await createCoreTask({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-worker-rejected-task-${runId}`,
+      title: "Rejected continuation quote task",
+      state: "active",
+      priority: "high",
+      owner: {
+        type: "worker",
+        id: workerId,
+        ref: `worker:${workerId}`,
+      },
+      db,
+    });
+    const first = await runRevenueWorker({
+      idempotencyKey: `ci-worker-rejected-${runId}`,
+      tenantSlug: "continuous-demo",
+      operatorEmail: "owner@continuoushq.com",
+      config: {
+        leadPacket: {
+          source: "rejection_test",
+          sourceEventId: `rejection-test:${runId}`,
+          customerName: "Rejected Roofing",
+          customerIntent: "roof leak inspection",
+          serviceArea: "roofing",
+          urgency: "high",
+          missingFacts: ["preferred_time_window"],
+        },
+      },
+      db,
+    });
+
+    expect(first.taskId).toBe(createdTask.taskId);
+
+    const decision = await decideApproval({
+      approvalId: first.approvalRequestId ?? "",
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      action: "rejected",
+      note: "Do not send this quote.",
+      subject: "worker",
+      db,
+    });
+
+    expect(decision.workflowRunState).toBe("rejected");
+    expect(decision.taskState).toBe("blocked");
+
+    const continuation = await continueRevenueWorker({
+      approvalId: first.approvalRequestId ?? "",
+      idempotencyKey: `ci-worker-rejected-continue-${runId}`,
+      tenantSlug: "continuous-demo",
+      operatorEmail: "owner@continuoushq.com",
+      db,
+    });
+    const output = objectValue(continuation.output);
+    const rejectedPacket = objectValue(output.rejectedPacket);
+
+    expect(continuation.created).toBe(true);
+    expect(continuation.originalWorkerRunId).toBe(first.workerRunId);
+    expect(continuation.workflowRunId).toBe(first.workflowRunId);
+    expect(output.status).toBe("rejected_closed");
+    expect(output.approvalRequestId).toBe(first.approvalRequestId);
+    expect(output.nextAction).toBe("stop_prepared_action");
+    expect(output.externalExecution).toBe("blocked");
+    expect(output.externalSend).toBe(false);
+    expect(output.requiresApproval).toBe(false);
+    expect(output.rejectedPacketEvidenceId).toBeTruthy();
+    expect(output.rejectedPacketDocumentId).toBeTruthy();
+    expect(output.rejectedEvidencePacketId).toBeTruthy();
+    expect(rejectedPacket.status).toBe("rejected_closed");
+    expect(rejectedPacket.nextAction).toBe("stop_prepared_action");
+    expect(rejectedPacket.externalExecution).toBe("blocked");
+    expect(rejectedPacket.externalSend).toBe(false);
+
+    const [workflowRun] = await db
+      .select()
+      .from(workflowRuns)
+      .where(eq(workflowRuns.id, continuation.workflowRunId ?? ""))
+      .limit(1);
+    const workflowData = objectValue(workflowRun?.data);
+    const workflowBlockers = objectValue(workflowRun?.blockers);
+    const rejectionContinuation = objectValue(workflowData.rejectionContinuation);
+
+    expect(workflowRun?.state).toBe("rejected");
+    expect(workflowRun?.completedAt).toBeTruthy();
+    expect(workflowBlockers.open).toEqual([]);
+    expect(rejectionContinuation.workerRunId).toBe(continuation.workerRunId);
+    expect(rejectionContinuation.action).toBe("rejected");
+    expect(rejectionContinuation.rejectedPacketEvidenceId).toBe(output.rejectedPacketEvidenceId);
+    expect(workflowData.workflowStepIds).toContain(continuation.workflowStepId);
+
+    const [continuationStep] = await db
+      .select()
+      .from(workflowSteps)
+      .where(eq(workflowSteps.id, continuation.workflowStepId ?? ""))
+      .limit(1);
+    const stepOutput = objectValue(continuationStep?.output);
+
+    expect(continuationStep?.kind).toBe("worker_continuation");
+    expect(continuationStep?.fromState).toBe("rejected");
+    expect(continuationStep?.toState).toBe("rejected");
+    expect(stepOutput.nextAction).toBe("stop_prepared_action");
+    expect(stepOutput.rejectedPacketEvidenceId).toBe(output.rejectedPacketEvidenceId);
+    expect(stepOutput.externalExecution).toBe("blocked");
+    expect(stepOutput.externalSend).toBe(false);
+
+    const [task] = await db
+      .select()
+      .from(tasks)
+      .where(eq(tasks.id, continuation.taskId ?? ""))
+      .limit(1);
+    const taskOutcome = objectValue(task?.outcome);
+
+    expect(task?.state).toBe("blocked");
+    expect(taskOutcome.status).toBe("rejected_closed");
+    expect(taskOutcome.approvalRequestId).toBe(first.approvalRequestId);
+    expect(taskOutcome.rejectedPacketEvidenceId).toBe(output.rejectedPacketEvidenceId);
+    expect(objectValue(taskOutcome.rejectionContinuation).workerRunId).toBe(
+      continuation.workerRunId,
+    );
+
+    const [rejectedEvidence] = await db
+      .select()
+      .from(evidence)
+      .where(eq(evidence.id, String(output.rejectedPacketEvidenceId ?? "")))
+      .limit(1);
+    const rejectedEvidenceData = objectValue(rejectedEvidence?.data);
+
+    expect(rejectedEvidence?.kind).toBe("draft");
+    expect(rejectedEvidenceData.externalExecution).toBe("blocked");
+    expect(rejectedEvidenceData.externalSend).toBe(false);
+    expect(objectValue(rejectedEvidenceData.rejectedPacket).status).toBe("rejected_closed");
+
+    const [rejectedDocument] = await db
+      .select()
+      .from(documents)
+      .where(eq(documents.id, String(output.rejectedPacketDocumentId ?? "")))
+      .limit(1);
+    const [rejectedPacketRow] = await db
+      .select()
+      .from(evidencePackets)
+      .where(eq(evidencePackets.id, String(output.rejectedEvidencePacketId ?? "")))
+      .limit(1);
+
+    expect(rejectedDocument?.state).toBe("closed");
+    expect(rejectedPacketRow?.state).toBe("closed");
+    expect(rejectedPacketRow?.documentId).toBe(output.rejectedPacketDocumentId);
+
+    const [originalWorkerRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(eq(workerRuns.id, first.workerRunId ?? ""))
+      .limit(1);
+    const originalOutput = objectValue(objectValue(originalWorkerRun?.data).output);
+
+    expect(objectValue(originalOutput.rejectionContinuation).workerRunId).toBe(
+      continuation.workerRunId,
+    );
+    expect(originalOutput.rejectedPacketEvidenceId).toBe(output.rejectedPacketEvidenceId);
+    expect(originalOutput.externalSend).toBe(false);
+
+    const [adapterAction] = await db
+      .select()
+      .from(adapterActions)
+      .where(eq(adapterActions.id, first.adapterActionId ?? ""))
+      .limit(1);
+    const adapterReceipt = objectValue(adapterAction?.receipt);
+
+    expect(adapterAction?.mode).toBe("dry_run");
+    expect(objectValue(adapterReceipt.rejectionContinuation).externalExecution).toBe("blocked");
+    expect(adapterReceipt.externalMutation).toBe(false);
+    expect(adapterReceipt.externalSend).toBe(false);
+
+    const replay = await continueRevenueWorker({
+      approvalId: first.approvalRequestId ?? "",
+      idempotencyKey: `ci-worker-rejected-continue-${runId}`,
+      tenantSlug: "continuous-demo",
+      operatorEmail: "owner@continuoushq.com",
+      db,
+    });
+
+    expect(replay.created).toBe(false);
+    expect(replay.workerRunId).toBe(continuation.workerRunId);
+    expect(objectValue(replay.output).status).toBe("rejected_closed");
+  }, 120_000);
+
   it("runs from persisted Core lead intake under config.intake", async () => {
     const runId = randomUUID();
     const leadPacket = {

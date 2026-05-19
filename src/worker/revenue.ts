@@ -1119,6 +1119,46 @@ function approvedExecutionPacketFromOriginal(params: {
   } satisfies JsonObject;
 }
 
+function rejectedPacketFromOriginal(params: {
+  originalOutput: JsonObject;
+  rejectionNote: string;
+  now: Date;
+  approvalRequestId: string;
+  originalWorkerRunId: string;
+  workerRunId: string;
+  workflowRunId: string;
+}) {
+  const revisedPacket = objectValue(params.originalOutput.revisedPacket);
+  const basePacket = Object.keys(revisedPacket).length > 0 ? revisedPacket : params.originalOutput;
+  const rejectedAt = params.now.toISOString();
+
+  return {
+    schemaVersion: "revenue_worker.rejected_packet.v1",
+    status: "rejected_closed",
+    rejection: {
+      approvalRequestId: params.approvalRequestId,
+      note: params.rejectionNote,
+      rejectedAt,
+    },
+    originalWorkerRunId: params.originalWorkerRunId,
+    workerRunId: params.workerRunId,
+    workflowRunId: params.workflowRunId,
+    source: stringValue(basePacket.source ?? params.originalOutput.source, "unknown"),
+    sourceEventId: stringValue(basePacket.sourceEventId ?? params.originalOutput.sourceEventId) || null,
+    classification: "quote_rejected_by_owner",
+    previousClassification: stringValue(
+      basePacket.classification ?? params.originalOutput.classification,
+      "quote_ready_for_owner_approval",
+    ),
+    stoppedAction: stringValue(basePacket.expectedAction ?? params.originalOutput.expectedAction, "draft_customer_response"),
+    guardrails: ["no_external_send", "no_money_movement", "prepared_action_stopped"],
+    externalExecution: "blocked",
+    externalSend: false,
+    requiresApproval: false,
+    nextAction: "stop_prepared_action",
+  } satisfies JsonObject;
+}
+
 function workerWhere(selector: RevenueWorkerSelector) {
   const conditions = [
     eq(workers.role, selector.role ?? revenueWorkerRole),
@@ -3465,10 +3505,10 @@ export async function continueRevenueWorker(input: {
       );
     }
 
-    if (!["approved", "revision_requested"].includes(approval.state)) {
+    if (!["approved", "revision_requested", "rejected"].includes(approval.state)) {
       throw new RevenueWorkerUnavailableError(
         "worker_continuation_unsupported_state",
-        "Revenue Worker continuation supports approved and revision_requested approvals.",
+        "Revenue Worker continuation supports approved, revision_requested, and rejected approvals.",
         409,
       );
     }
@@ -3996,6 +4036,512 @@ export async function continueRevenueWorker(input: {
               receipt: {
                 ...adapterRun.receipt,
                 approvedExecutionContinuation,
+                externalMutation: false,
+                externalSend: false,
+              },
+            })
+            .where(eq(adapterRuns.id, adapterRunId));
+        }
+      }
+
+      await tx
+        .update(workerRuns)
+        .set({
+          eventId: event.id,
+          state: "done",
+          endedAt: now,
+          updatedAt: now,
+          data: {
+            input: {
+              idempotencyKey: input.idempotencyKey,
+              ...continuationInput,
+              operator: {
+                userId: operator.id,
+                email: operator.email,
+              },
+            },
+            output,
+          },
+        })
+        .where(eq(workerRuns.id, workerRun.id));
+
+      return {
+        created: true as const,
+        workerRunId: workerRun.id,
+        originalWorkerRunId: originalRun.id,
+        eventId: event.id,
+        taskId: approval.taskId,
+        approvalRequestId: approval.id,
+        auditEventId: audit.id,
+        evidenceId: trace.id,
+        workflowRunId: workflow.run.id,
+        workflowStepId: workflowStep.id,
+        output,
+      };
+    }
+
+    if (approval.state === "rejected") {
+      const rejectionNote = stringValue(approvalDecision.note, "Rejected by operator.");
+      const continuationInput = {
+        approvalRequestId: approval.id,
+        originalWorkerRunId: originalRun.id,
+        workflowRunId: workflow.run.id,
+        workflowState: workflow.run.state,
+        action: "rejected",
+        note: rejectionNote,
+        originalOutput,
+        approvalContinuation,
+      };
+
+      const [workerRun] = await tx
+        .insert(workerRuns)
+        .values({
+          tenantId: context.worker.tenantId,
+          workerId: context.worker.id,
+          taskId: approval.taskId,
+          eventId: approval.eventId,
+          capabilityId: approval.capabilityId,
+          connectionId: originalRun.connectionId ?? context.connectionId,
+          budgetAccountId: originalRun.budgetAccountId ?? context.budgetAccountId,
+          source,
+          idempotencyKey: input.idempotencyKey,
+          state: "running",
+          mode: "continuation",
+          data: {
+            input: {
+              idempotencyKey: input.idempotencyKey,
+              ...continuationInput,
+              operator: {
+                userId: operator.id,
+                email: operator.email,
+              },
+            },
+            output: {},
+          },
+          startedAt: now,
+          updatedAt: now,
+        })
+        .returning({ id: workerRuns.id });
+      const rejectedPacket = rejectedPacketFromOriginal({
+        originalOutput,
+        rejectionNote,
+        now,
+        approvalRequestId: approval.id,
+        originalWorkerRunId: originalRun.id,
+        workerRunId: workerRun.id,
+        workflowRunId: workflow.run.id,
+      });
+      const rejectedPacketHash = hashObject(rejectedPacket);
+      const adapterRunId = uuidValue(approvalContinuation.adapterRunId ?? originalOutput.adapterRunId);
+      const adapterActionId = uuidValue(
+        approvalContinuation.adapterActionId ?? originalOutput.adapterActionId,
+      );
+      const adapterReceiptEvidenceId = uuidValue(
+        approvalContinuation.adapterReceiptEvidenceId ?? originalOutput.adapterReceiptEvidenceId,
+      );
+
+      const [event] = await tx
+        .insert(events)
+        .values({
+          tenantId: context.worker.tenantId,
+          type: "revenue_worker.rejection.closed",
+          source,
+          actorType: "worker",
+          actorId: context.worker.id,
+          actorRef: `worker:${context.worker.id}`,
+          objectId: approval.objectId,
+          taskId: approval.taskId,
+          capabilityId: approval.capabilityId,
+          connectionId: originalRun.connectionId ?? context.connectionId,
+          idempotencyKey: input.idempotencyKey,
+          data: {
+            approvalRequestId: approval.id,
+            originalWorkerRunId: originalRun.id,
+            workerRunId: workerRun.id,
+            workflowRunId: workflow.run.id,
+            action: "rejected",
+            status: "rejected_closed",
+            note: rejectionNote,
+            adapterRunId: adapterRunId || null,
+            adapterActionId: adapterActionId || null,
+            adapterReceiptEvidenceId: adapterReceiptEvidenceId || null,
+            rejectedPacket,
+            rejectedPacketHash,
+            nextAction: "stop_prepared_action",
+            externalExecution: "blocked",
+            externalSend: false,
+            requiresApproval: false,
+          },
+          occurredAt: now,
+        })
+        .returning({ id: events.id });
+      const [audit] = await tx
+        .insert(auditEvents)
+        .values({
+          tenantId: context.worker.tenantId,
+          type: "revenue_worker.continuation.completed",
+          source,
+          actorType: "worker",
+          actorId: context.worker.id,
+          actorRef: `worker:${context.worker.id}`,
+          targetType: "worker_run",
+          targetId: workerRun.id,
+          taskId: approval.taskId,
+          workerRunId: workerRun.id,
+          approvalRequestId: approval.id,
+          eventId: event.id,
+          objectId: approval.objectId,
+          capabilityId: approval.capabilityId,
+          risk: approval.risk,
+          idempotencyKey: `${input.idempotencyKey}:rejected_closed`,
+          data: {
+            approvalRequestId: approval.id,
+            originalWorkerRunId: originalRun.id,
+            workflowRunId: workflow.run.id,
+            workflowState: workflow.run.state,
+            action: "rejected",
+            status: "rejected_closed",
+            nextAction: "stop_prepared_action",
+            adapterRunId: adapterRunId || null,
+            adapterActionId: adapterActionId || null,
+            adapterReceiptEvidenceId: adapterReceiptEvidenceId || null,
+            rejectedPacket,
+            rejectedPacketHash,
+            externalExecution: "blocked",
+            externalSend: false,
+            requiresApproval: false,
+          },
+        })
+        .returning({ id: auditEvents.id });
+      const [trace] = await tx
+        .insert(evidence)
+        .values({
+          tenantId: context.worker.tenantId,
+          kind: "trace",
+          name: "Revenue Worker rejection continuation",
+          objectId: approval.objectId,
+          taskId: approval.taskId,
+          eventId: event.id,
+          capabilityId: approval.capabilityId,
+          actorType: "worker",
+          actorId: context.worker.id,
+          hash: traceHash(input.idempotencyKey, "rejection_continuation"),
+          data: {
+            approvalRequestId: approval.id,
+            originalWorkerRunId: originalRun.id,
+            workerRunId: workerRun.id,
+            workflowRunId: workflow.run.id,
+            auditEventId: audit.id,
+            action: "rejected",
+            note: rejectionNote,
+            originalOutput,
+            approvalContinuation,
+            adapterRunId: adapterRunId || null,
+            adapterActionId: adapterActionId || null,
+            adapterReceiptEvidenceId: adapterReceiptEvidenceId || null,
+            rejectedPacket,
+            rejectedPacketHash,
+            nextAction: "stop_prepared_action",
+            externalExecution: "blocked",
+            externalSend: false,
+            requiresApproval: false,
+          },
+        })
+        .returning({ id: evidence.id });
+      const [rejectedPacketEvidence] = await tx
+        .insert(evidence)
+        .values({
+          tenantId: context.worker.tenantId,
+          kind: "draft",
+          name: "Revenue Worker rejected packet",
+          objectId: approval.objectId,
+          taskId: approval.taskId,
+          eventId: event.id,
+          capabilityId: approval.capabilityId,
+          actorType: "worker",
+          actorId: context.worker.id,
+          hash: rejectedPacketHash,
+          data: {
+            approvalRequestId: approval.id,
+            originalWorkerRunId: originalRun.id,
+            workerRunId: workerRun.id,
+            workflowRunId: workflow.run.id,
+            traceEvidenceId: trace.id,
+            action: "rejected",
+            note: rejectionNote,
+            rejectedPacket,
+            rejectedPacketHash,
+            externalExecution: "blocked",
+            externalSend: false,
+            requiresApproval: false,
+          },
+        })
+        .returning({ id: evidence.id });
+      const [rejectedPacketDocument] = await tx
+        .insert(documents)
+        .values({
+          tenantId: context.worker.tenantId,
+          objectId: approval.objectId,
+          workflowRunId: workflow.run.id,
+          kind: "revenue_quote_rejected_packet",
+          name: "Revenue quote rejected packet",
+          state: "closed",
+          sensitivity: approval.risk,
+          hash: rejectedPacketHash,
+          data: {
+            approvalRequestId: approval.id,
+            originalWorkerRunId: originalRun.id,
+            workerRunId: workerRun.id,
+            workflowRunId: workflow.run.id,
+            eventId: event.id,
+            traceEvidenceId: trace.id,
+            rejectedPacketEvidenceId: rejectedPacketEvidence.id,
+            rejectedPacket,
+            rejectedPacketHash,
+            externalExecution: "blocked",
+            externalSend: false,
+            requiresApproval: false,
+          },
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning({ id: documents.id });
+      const [rejectedEvidencePacket] = await tx
+        .insert(evidencePackets)
+        .values({
+          tenantId: context.worker.tenantId,
+          documentId: rejectedPacketDocument.id,
+          objectId: approval.objectId,
+          taskId: approval.taskId,
+          workflowRunId: workflow.run.id,
+          eventId: event.id,
+          capabilityId: approval.capabilityId,
+          kind: "revenue_quote_rejected_packet",
+          name: "Revenue quote rejected packet",
+          state: "closed",
+          sensitivity: approval.risk,
+          evidenceIds: { ids: [trace.id, rejectedPacketEvidence.id] },
+          documentIds: { ids: [rejectedPacketDocument.id] },
+          data: {
+            approvalRequestId: approval.id,
+            originalWorkerRunId: originalRun.id,
+            workerRunId: workerRun.id,
+            workflowRunId: workflow.run.id,
+            eventId: event.id,
+            rejectedPacket,
+            rejectedPacketHash,
+            externalExecution: "blocked",
+            externalSend: false,
+            requiresApproval: false,
+          },
+          hash: rejectedPacketHash,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning({ id: evidencePackets.id });
+      const continuationLinks = {
+        rejectedPacketEvidenceId: rejectedPacketEvidence.id,
+        rejectedPacketDocumentId: rejectedPacketDocument.id,
+        rejectedEvidencePacketId: rejectedEvidencePacket.id,
+      };
+
+      const [workflowStep] = await tx
+        .insert(workflowSteps)
+        .values({
+          tenantId: context.worker.tenantId,
+          definitionId: workflow.definition.id,
+          workflowRunId: workflow.run.id,
+          eventId: event.id,
+          approvalRequestId: approval.id,
+          taskId: approval.taskId,
+          objectId: approval.objectId,
+          workerId: context.worker.id,
+          capabilityId: approval.capabilityId,
+          kind: "worker_continuation",
+          name: `${workflow.definition.key}:rejected_closed`,
+          state: "done",
+          priority: approval.priority,
+          risk: approval.risk,
+          fromState: workflow.run.state,
+          toState: "rejected",
+          attempt: 1,
+          maxAttempts: 1,
+          leaseOwner: `worker:${context.worker.id}`,
+          leasedUntil: now,
+          idempotencyKey: `${input.idempotencyKey}:rejected_closed`,
+          input: continuationInput,
+          output: {
+            approvalRequestId: approval.id,
+            originalApprovalRequestId: approval.id,
+            workerRunId: workerRun.id,
+            originalWorkerRunId: originalRun.id,
+            auditEventId: audit.id,
+            evidenceId: trace.id,
+            adapterRunId: adapterRunId || null,
+            adapterActionId: adapterActionId || null,
+            adapterReceiptEvidenceId: adapterReceiptEvidenceId || null,
+            ...continuationLinks,
+            rejectedPacket,
+            nextAction: "stop_prepared_action",
+            externalExecution: "blocked",
+            externalSend: false,
+            requiresApproval: false,
+          },
+          startedAt: now,
+          completedAt: now,
+          updatedAt: now,
+        })
+        .returning({ id: workflowSteps.id });
+
+      const output = {
+        status: "rejected_closed",
+        approvalRequestId: approval.id,
+        originalApprovalRequestId: approval.id,
+        originalWorkerRunId: originalRun.id,
+        workerRunId: workerRun.id,
+        workflowRunId: workflow.run.id,
+        workflowStepId: workflowStep.id,
+        eventId: event.id,
+        auditEventId: audit.id,
+        evidenceId: trace.id,
+        adapterRunId: adapterRunId || null,
+        adapterActionId: adapterActionId || null,
+        adapterReceiptEvidenceId: adapterReceiptEvidenceId || null,
+        ...continuationLinks,
+        rejectedPacket,
+        rejectedPacketHash,
+        nextAction: "stop_prepared_action",
+        externalExecution: "blocked",
+        externalSend: false,
+        requiresApproval: false,
+      };
+      const workflowData = objectValue(workflow.run.data);
+      const rejectionContinuation = {
+        ...output,
+        note: rejectionNote,
+        action: "rejected",
+        continuedAt: now.toISOString(),
+      };
+
+      await tx
+        .update(workflowRuns)
+        .set({
+          state: "rejected",
+          data: {
+            ...workflowData,
+            rejectionContinuation,
+            lastWorkerContinuation: rejectionContinuation,
+            workflowStepIds: appendString(workflowData.workflowStepIds, workflowStep.id),
+          },
+          blockers: {
+            ...objectValue(workflow.run.blockers),
+            open: [],
+          },
+          completedAt: workflow.run.completedAt ?? now,
+          updatedAt: now,
+        })
+        .where(eq(workflowRuns.id, workflow.run.id));
+
+      if (approval.taskId) {
+        const [task] = await tx
+          .select({ outcome: tasks.outcome })
+          .from(tasks)
+          .where(and(eq(tasks.tenantId, context.worker.tenantId), eq(tasks.id, approval.taskId)))
+          .limit(1);
+
+        await tx
+          .update(tasks)
+          .set({
+            state: "blocked",
+            outcome: {
+              ...objectValue(task?.outcome),
+              status: "rejected_closed",
+              approvalRequestId: approval.id,
+              rejectionContinuation,
+              ...continuationLinks,
+              rejectedPacket,
+              externalExecution: "blocked",
+              externalSend: false,
+            },
+            updatedAt: now,
+          })
+          .where(eq(tasks.id, approval.taskId));
+      }
+
+      await tx
+        .update(workerRuns)
+        .set({
+          data: {
+            ...objectValue(originalRun.data),
+            output: {
+              ...originalOutput,
+              rejectionContinuation,
+              ...continuationLinks,
+              rejectedPacket,
+              externalExecution: "blocked",
+              externalSend: false,
+            },
+            lastWorkerContinuation: rejectionContinuation,
+          },
+          updatedAt: now,
+        })
+        .where(eq(workerRuns.id, originalRun.id));
+
+      if (adapterActionId) {
+        const [adapterAction] = await tx
+          .select({
+            response: adapterActions.response,
+            receipt: adapterActions.receipt,
+          })
+          .from(adapterActions)
+          .where(and(eq(adapterActions.tenantId, context.worker.tenantId), eq(adapterActions.id, adapterActionId)))
+          .limit(1);
+
+        if (adapterAction) {
+          await tx
+            .update(adapterActions)
+            .set({
+              response: {
+                ...adapterAction.response,
+                rejectionContinuation,
+                rejectedPacket,
+                externalExecution: "blocked",
+                externalSend: false,
+              },
+              receipt: {
+                ...adapterAction.receipt,
+                rejectionContinuation,
+                externalMutation: false,
+                externalSend: false,
+              },
+            })
+            .where(eq(adapterActions.id, adapterActionId));
+        }
+      }
+
+      if (adapterRunId) {
+        const [adapterRun] = await tx
+          .select({
+            data: adapterRuns.data,
+            receipt: adapterRuns.receipt,
+          })
+          .from(adapterRuns)
+          .where(and(eq(adapterRuns.tenantId, context.worker.tenantId), eq(adapterRuns.id, adapterRunId)))
+          .limit(1);
+
+        if (adapterRun) {
+          await tx
+            .update(adapterRuns)
+            .set({
+              data: {
+                ...adapterRun.data,
+                rejectionContinuation,
+                externalExecution: "blocked",
+                externalSend: false,
+              },
+              receipt: {
+                ...adapterRun.receipt,
+                rejectionContinuation,
                 externalMutation: false,
                 externalSend: false,
               },
