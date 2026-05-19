@@ -24,8 +24,21 @@ quote() {
   printf "%q" "$1"
 }
 
+for attempt in $(seq 1 60); do
+  if ssh -o BatchMode=yes -o ConnectTimeout=8 "$REMOTE" "true" >/dev/null 2>&1; then
+    break
+  fi
+
+  if [ "$attempt" -eq 60 ]; then
+    echo "SSH did not become ready for $REMOTE." >&2
+    exit 1
+  fi
+
+  sleep 5
+done
+
 ssh "$REMOTE" "mkdir -p $(quote "$APP_DIR")"
-ssh "$REMOTE" "cloud-init status --wait >/dev/null 2>&1 || true; command -v docker >/dev/null; command -v rsync >/dev/null"
+ssh "$REMOTE" "cloud-init status --wait >/dev/null 2>&1 || true; command -v docker >/dev/null; docker compose version >/dev/null; command -v rsync >/dev/null"
 
 rsync -az --delete \
   --exclude ".git" \
@@ -42,12 +55,13 @@ set -euo pipefail
 cd "$APP_DIR"
 
 if [ ! -f .env ]; then
-  password="$(openssl rand -base64 36 | tr -d '\n')"
+  password="$(openssl rand -hex 32)"
   umask 077
   {
     printf 'POSTGRES_DB=%s\n' "$POSTGRES_DB"
     printf 'POSTGRES_USER=%s\n' "$POSTGRES_USER"
     printf 'POSTGRES_PASSWORD=%s\n' "$password"
+    printf 'DATABASE_URL=postgresql://%s:%s@db:5432/%s\n' "$POSTGRES_USER" "$password" "$POSTGRES_DB"
     printf 'APP_ENV=production\n'
     printf 'APP_URL=%s\n' "$APP_URL"
     printf 'SITE_HOSTS=%s\n' "$SITE_HOSTS"
@@ -60,10 +74,44 @@ else
   echo "Using existing $APP_DIR/.env"
 fi
 
+set_env() {
+  key="$1"
+  value="$2"
+  tmp="$(mktemp)"
+
+  if grep -q "^${key}=" .env; then
+    awk -v key="$key" -v value="$value" '
+      index($0, key "=") == 1 { print key "=" value; next }
+      { print }
+    ' .env > "$tmp"
+  else
+    cat .env > "$tmp"
+    printf '%s=%s\n' "$key" "$value" >> "$tmp"
+  fi
+
+  mv "$tmp" .env
+  chmod 600 .env
+}
+
+set_env APP_URL "$APP_URL"
+set_env SITE_HOSTS "$SITE_HOSTS"
+set_env ACME_EMAIL "$ACME_EMAIL"
+
 docker compose pull db caddy
 docker compose up -d db
-docker compose --profile tools run --rm migrate
-docker compose --profile tools run --rm migrate npm run db:seed
-docker compose up -d --build app caddy
+docker compose exec -T db sh -c 'until pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"; do sleep 1; done' </dev/null
+
+db_password="$(grep '^POSTGRES_PASSWORD=' .env | cut -d= -f2-)"
+if ! grep -q '^DATABASE_URL=' .env || [[ "$db_password" =~ [^A-Za-z0-9_.~-] ]]; then
+  db_password="$(openssl rand -hex 32)"
+  docker compose exec -T db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "alter user \"$POSTGRES_USER\" with password '$db_password';" </dev/null
+  set_env POSTGRES_PASSWORD "$db_password"
+  set_env DATABASE_URL "postgresql://$POSTGRES_USER:$db_password@db:5432/$POSTGRES_DB"
+fi
+
+docker compose --profile tools run --rm --build migrate bun run db:migrate </dev/null
+docker compose --profile tools run --rm --build migrate bun run db:seed </dev/null
+docker compose rm -sf app caddy >/dev/null 2>&1 || true
+docker compose up -d --build --remove-orphans app caddy
 docker compose ps
 REMOTE_SCRIPT

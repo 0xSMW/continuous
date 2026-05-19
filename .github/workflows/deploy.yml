@@ -60,7 +60,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$DEPLOY_PATH'"
+          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "cloud-init status --wait >/dev/null 2>&1 || true; command -v docker >/dev/null; docker compose version >/dev/null; command -v rsync >/dev/null; mkdir -p '$DEPLOY_PATH'"
           rsync -az --delete \
             -e "ssh -i ~/.ssh/deploy_key" \
             --exclude ".git" \
@@ -79,12 +79,13 @@ jobs:
           set -euo pipefail
           cd "$APP_DIR"
           if [ ! -f .env ]; then
-            password="$(openssl rand -base64 36 | tr -d '\n')"
+            password="$(openssl rand -hex 32)"
             umask 077
             {
               printf 'POSTGRES_DB=continuous\n'
               printf 'POSTGRES_USER=continuous\n'
               printf 'POSTGRES_PASSWORD=%s\n' "$password"
+              printf 'DATABASE_URL=postgresql://continuous:%s@db:5432/continuous\n' "$password"
               printf 'APP_ENV=production\n'
               printf 'APP_URL=%s\n' "$APP_URL"
               printf 'SITE_HOSTS=%s\n' "$SITE_HOSTS"
@@ -93,10 +94,43 @@ jobs:
               printf 'APP_TAG=local\n'
             } > .env
           fi
+          set -a
+          . ./.env
+          set +a
+          set_env() {
+            key="$1"
+            value="$2"
+            tmp="$(mktemp)"
+            if grep -q "^${key}=" .env; then
+              awk -v key="$key" -v value="$value" '
+                index($0, key "=") == 1 { print key "=" value; next }
+                { print }
+              ' .env > "$tmp"
+            else
+              cat .env > "$tmp"
+              printf '%s=%s\n' "$key" "$value" >> "$tmp"
+            fi
+            mv "$tmp" .env
+            chmod 600 .env
+          }
+          set_env APP_URL "$APP_URL"
+          set_env SITE_HOSTS "$SITE_HOSTS"
+          set_env ACME_EMAIL "$ACME_EMAIL"
           docker compose pull db caddy
           docker compose up -d db
-          docker compose run --rm migrate
-          docker compose run --rm migrate npm run db:seed
-          docker compose up -d --build app caddy
+          docker compose exec -T db sh -c 'until pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"; do sleep 1; done' </dev/null
+          db_password="$(grep '^POSTGRES_PASSWORD=' .env | cut -d= -f2-)"
+          if ! grep -q '^DATABASE_URL=' .env || [[ "$db_password" =~ [^A-Za-z0-9_.~-] ]]; then
+            db_password="$(openssl rand -hex 32)"
+            docker compose exec -T db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "alter user \"$POSTGRES_USER\" with password '$db_password';" </dev/null
+            set_env POSTGRES_PASSWORD "$db_password"
+            set_env DATABASE_URL "postgresql://$POSTGRES_USER:$db_password@db:5432/$POSTGRES_DB"
+            export POSTGRES_PASSWORD="$db_password"
+            export DATABASE_URL="postgresql://$POSTGRES_USER:$db_password@db:5432/$POSTGRES_DB"
+          fi
+          docker compose --profile tools run --rm --build migrate bun run db:migrate </dev/null
+          docker compose --profile tools run --rm --build migrate bun run db:seed </dev/null
+          docker compose rm -sf app caddy >/dev/null 2>&1 || true
+          docker compose up -d --build --remove-orphans app caddy
           docker compose ps
           REMOTE

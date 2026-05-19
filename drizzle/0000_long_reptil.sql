@@ -1,3 +1,4 @@
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";--> statement-breakpoint
 CREATE TYPE "public"."actor_type" AS ENUM('user', 'worker', 'adapter', 'system');--> statement-breakpoint
 CREATE TYPE "public"."adapter_state" AS ENUM('draft', 'active', 'paused', 'error', 'archived');--> statement-breakpoint
 CREATE TYPE "public"."budget_target" AS ENUM('tenant', 'team', 'user', 'worker', 'workflow', 'customer', 'project', 'vertical', 'risk');--> statement-breakpoint

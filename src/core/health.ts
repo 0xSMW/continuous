@@ -101,11 +101,7 @@ export function getHealth(input: HealthInput): Health {
     },
   ];
 
-  const status = checks.some((check) => check.state === "fail")
-    ? "down"
-    : checks.some((check) => check.state === "warn")
-      ? "degraded"
-      : "ok";
+  const status = checks.some((check) => check.state === "fail") ? "down" : "ok";
 
   return {
     service: "Continuous Core",

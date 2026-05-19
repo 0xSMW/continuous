@@ -1,15 +1,15 @@
 {
-    email {$ACME_EMAIL:admin@continuoushq.com}
+	email {$ACME_EMAIL:admin@continuoushq.com}
 }
 
 {$SITE_HOSTS:http://:80} {
-    encode zstd gzip
+	encode zstd gzip
 
-    header {
-        -Server
-        X-Content-Type-Options "nosniff"
-        Referrer-Policy "strict-origin-when-cross-origin"
-    }
+	header {
+		-Server
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
 
-    reverse_proxy app:3000
+	reverse_proxy app:3000
 }

@@ -1,7 +1,7 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 
-import { env } from "@/src/env";
+import { env } from "../env";
 import * as schema from "./schema";
 
 const globalForDb = globalThis as typeof globalThis & {

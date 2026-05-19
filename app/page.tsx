@@ -191,7 +191,7 @@ export default async function AdminPage() {
                 </article>
               ))
             ) : (
-              <p className="empty">No active tasks yet. Run `npm run db:seed` after migrations to load bootstrap data.</p>
+              <p className="empty">No active tasks yet. Bootstrap worker tasks will appear here after seed data is loaded.</p>
             )}
           </div>
         </section>

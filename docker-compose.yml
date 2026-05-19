@@ -13,7 +13,7 @@ services:
       NODE_ENV: production
       PORT: "3000"
       HOSTNAME: 0.0.0.0
-      DATABASE_URL: postgresql://${POSTGRES_USER:-continuous}:${POSTGRES_PASSWORD:-continuous}@db:5432/${POSTGRES_DB:-continuous}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-continuous}:${POSTGRES_PASSWORD:-continuous}@db:5432/${POSTGRES_DB:-continuous}}
     depends_on:
       db:
         condition: service_healthy
@@ -37,7 +37,7 @@ services:
     environment:
       APP_ENV: production
       NODE_ENV: production
-      DATABASE_URL: postgresql://${POSTGRES_USER:-continuous}:${POSTGRES_PASSWORD:-continuous}@db:5432/${POSTGRES_DB:-continuous}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-continuous}:${POSTGRES_PASSWORD:-continuous}@db:5432/${POSTGRES_DB:-continuous}}
     depends_on:
       db:
         condition: service_healthy

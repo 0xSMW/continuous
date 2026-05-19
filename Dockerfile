@@ -1,36 +1,29 @@
 # syntax=docker/dockerfile:1.7
 
+ARG BUN_VERSION=1.3.14
 ARG NODE_VERSION=22
 
-FROM node:${NODE_VERSION}-bookworm-slim AS base
+FROM oven/bun:${BUN_VERSION}-debian AS base
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
-    && rm -rf /var/lib/apt/lists/* \
-    && npm install -g npm@11
+    && rm -rf /var/lib/apt/lists/*
 
 FROM base AS deps
-COPY package.json package-lock.json* pnpm-lock.yaml* yarn.lock* ./
-RUN corepack enable \
-    && if [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile; \
-       elif [ -f yarn.lock ]; then yarn install --frozen-lockfile; \
-       elif [ -f package-lock.json ]; then npm ci; \
-       else npm install; fi
+COPY package.json bun.lock* ./
+RUN bun install --frozen-lockfile
 
 FROM base AS build
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NODE_ENV=production
-RUN corepack enable \
-    && if [ -f pnpm-lock.yaml ]; then pnpm build; \
-       elif [ -f yarn.lock ]; then yarn build; \
-       else npm run build; fi
+RUN bun run build
 
 FROM base AS migrate
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-CMD ["npm", "run", "db:migrate"]
+CMD ["bun", "run", "db:migrate"]
 
 FROM node:${NODE_VERSION}-bookworm-slim AS runner
 WORKDIR /app

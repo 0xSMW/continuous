@@ -6,25 +6,30 @@
 
 | Decision | Rationale |
 |---|---|
-| Added Apache License 2.0 | The repo had no existing license file and project instructions said to use Apache-2.0 unless contradicted |
-| Updated docs around the active scaffold | Source, package, Docker, infra, and CI files appeared during this pass from concurrent work; docs now reference them without modifying them |
-| Made `STRATEGY.md` the strategy source of truth | The strategy is complete and detailed; new docs should summarize and operationalize it rather than fork it |
-| Documented DigitalOcean as the deployment target | Project instructions say infrastructure will be hosted on DigitalOcean and operated with `doctl` |
-| Chose Droplet/Docker Compose as the deployment lane | The owner explicitly chose lower-level control over App Platform |
-| Chose direct documentation filenames | `core-platform.md`, `local-development.md`, and `deployment.md` are simpler than numbered or verbose names for the current repo size |
+| Used Apache-2.0 | Suitable for an open source platform and includes a patent grant |
+| Built a runnable Next/Postgres core service | The first blocker is platform substrate before worker layering |
+| Used Drizzle and concrete Postgres tables from day one | The user chose real persistence instead of mocks |
+| Chose DigitalOcean Droplet + Docker Compose | The user explicitly chose lower-level control over App Platform |
+| Kept app, Postgres, and Caddy on one droplet for now | This is the fastest controlled production shape for a greenfield platform |
+| Started with IP-only HTTP | The user owns `continuoushq.com` but DNS will be pointed later |
+| Added a manual GitHub deploy workflow | CI should be automatic, but production deploys should be explicit while the platform is young |
+| Standardized on Bun | Project instructions require Bun over npm/pnpm |
 
 ### Tradeoffs
 
 | Tradeoff | Notes |
 |---|---|
-| Shared scaffolding versus owned docs | I read source/package/deploy/CI files to keep docs accurate but did not edit them |
-| Droplet versus managed services | The first deploy keeps app and Postgres on one droplet for speed and control; managed Postgres should be reconsidered once customer data requires stronger backup/isolation operations |
-| Full docs tree versus focused seed docs | The strategy calls for a large docs tree, but this pass creates only the setup docs requested and leaves the larger tree for follow-up work |
-| Detailed schemas versus platform setup | The core platform doc names initial objects and fields but does not define full schemas yet |
+| Single droplet versus managed Postgres | Simpler and cheaper now; move Postgres out when customer data needs managed backup/isolation guarantees |
+| Docker verification | Docker is not running locally on this Mac, so full container verification is happening on the DigitalOcean droplet |
+| Domain TLS deferred | Caddy serves `http://:80` now; `configure-domain.sh` switches to hostnames and HTTPS after DNS |
+| Bootstrap seed data | Seed records prove the substrate shape but are not customer fixtures |
+| Deploy updates | The deploy script keeps Postgres and its volume in place, then recreates app/Caddy after migrations and seed data |
+| Migration runner | Drizzle Kit's container migrator failed silently, so `db:migrate` uses a small Bun/Postgres runner that records Drizzle migration history and refuses partial baselines |
 
-### Follow-Up Context
+### Current State
 
-Future implementation work should keep local commands aligned with `package.json`
-and deployment commands aligned with the DigitalOcean droplet lane. Seed data is
-now present in `src/db/seed.ts` and is intended only to prove the persisted core
-substrate before real customer connectors exist.
+The DigitalOcean stack is running on `45.55.53.92`. Continuous Core now has
+persisted graph, task, capability, event, evidence, budget, adapter, and
+generated UI primitives plus `/`, `/api/health`, and `/api/core`. Local
+Node-side validation passes; the real Bun path is verified in the droplet
+containers and GitHub CI.
