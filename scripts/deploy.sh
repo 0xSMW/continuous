@@ -10,7 +10,7 @@ APP_DIR="${APP_DIR:-/opt/continuous}"
 SITE_HOSTS="${SITE_HOSTS:-continuoushq.com, getcontinuous.app}"
 ACME_EMAIL="${ACME_EMAIL:-admin@continuoushq.com}"
 APP_URL="${APP_URL:-}"
-REVENUE_WORKER_OPERATOR_EMAIL="${REVENUE_WORKER_OPERATOR_EMAIL:-owner@continuoushq.com}"
+WORKER_OPERATOR_EMAIL="${WORKER_OPERATOR_EMAIL:-${REVENUE_WORKER_OPERATOR_EMAIL:-owner@continuoushq.com}}"
 POSTGRES_DB="${POSTGRES_DB:-continuous}"
 POSTGRES_USER="${POSTGRES_USER:-continuous}"
 REMOTE="$SSH_USER@$HOST"
@@ -62,7 +62,7 @@ rsync -az --delete \
   ./ "$REMOTE:$APP_DIR/"
 
 ssh "$REMOTE" \
-  "APP_DIR=$(quote "$APP_DIR") SITE_HOSTS=$(quote "$SITE_HOSTS") ACME_EMAIL=$(quote "$ACME_EMAIL") APP_URL=$(quote "$APP_URL") REVENUE_WORKER_OPERATOR_EMAIL=$(quote "$REVENUE_WORKER_OPERATOR_EMAIL") POSTGRES_DB=$(quote "$POSTGRES_DB") POSTGRES_USER=$(quote "$POSTGRES_USER") bash -s" <<'REMOTE_SCRIPT'
+  "APP_DIR=$(quote "$APP_DIR") SITE_HOSTS=$(quote "$SITE_HOSTS") ACME_EMAIL=$(quote "$ACME_EMAIL") APP_URL=$(quote "$APP_URL") WORKER_OPERATOR_EMAIL=$(quote "$WORKER_OPERATOR_EMAIL") POSTGRES_DB=$(quote "$POSTGRES_DB") POSTGRES_USER=$(quote "$POSTGRES_USER") bash -s" <<'REMOTE_SCRIPT'
 set -euo pipefail
 
 cd "$APP_DIR"
@@ -81,9 +81,9 @@ if [ ! -f .env ]; then
     printf 'ACME_EMAIL=%s\n' "$ACME_EMAIL"
     printf 'APP_IMAGE=continuous-app\n'
     printf 'APP_TAG=local\n'
-    printf 'REVENUE_WORKER_RUN_ENABLED=true\n'
-    printf 'REVENUE_WORKER_RUN_TOKEN=%s\n' "$(openssl rand -hex 32)"
-    printf 'REVENUE_WORKER_OPERATOR_EMAIL=%s\n' "$REVENUE_WORKER_OPERATOR_EMAIL"
+    printf 'WORKER_RUN_ENABLED=true\n'
+    printf 'WORKER_RUN_TOKEN=%s\n' "$(openssl rand -hex 32)"
+    printf 'WORKER_OPERATOR_EMAIL=%s\n' "$WORKER_OPERATOR_EMAIL"
   } > .env
   echo "Created $APP_DIR/.env"
 else
@@ -112,14 +112,17 @@ set_env() {
 set_env APP_URL "$APP_URL"
 set_env SITE_HOSTS "$SITE_HOSTS"
 set_env ACME_EMAIL "$ACME_EMAIL"
-set_env REVENUE_WORKER_OPERATOR_EMAIL "$REVENUE_WORKER_OPERATOR_EMAIL"
+set_env WORKER_OPERATOR_EMAIL "$WORKER_OPERATOR_EMAIL"
 
-worker_token="$(grep '^REVENUE_WORKER_RUN_TOKEN=' .env | cut -d= -f2- || true)"
+worker_token="$(grep '^WORKER_RUN_TOKEN=' .env | cut -d= -f2- || true)"
+if [ -z "$worker_token" ]; then
+  worker_token="$(grep '^REVENUE_WORKER_RUN_TOKEN=' .env | cut -d= -f2- || true)"
+fi
 if [ -z "$worker_token" ]; then
   worker_token="$(openssl rand -hex 32)"
-  set_env REVENUE_WORKER_RUN_TOKEN "$worker_token"
 fi
-set_env REVENUE_WORKER_RUN_ENABLED true
+set_env WORKER_RUN_TOKEN "$worker_token"
+set_env WORKER_RUN_ENABLED true
 
 docker compose pull db caddy
 docker compose up -d db

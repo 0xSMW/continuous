@@ -32,7 +32,7 @@ jobs:
       SITE_HOSTS: ${{ inputs.site_hosts }}
       ACME_EMAIL: ${{ secrets.ACME_EMAIL || 'admin@continuoushq.com' }}
       APP_URL: ${{ inputs.app_url }}
-      REVENUE_WORKER_OPERATOR_EMAIL: ${{ secrets.REVENUE_WORKER_OPERATOR_EMAIL || 'owner@continuoushq.com' }}
+      WORKER_OPERATOR_EMAIL: ${{ secrets.WORKER_OPERATOR_EMAIL || secrets.REVENUE_WORKER_OPERATOR_EMAIL || 'owner@continuoushq.com' }}
       DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
       DO_API_TOKEN: ${{ secrets.DO_API_TOKEN }}
       DO_FIREWALL_NAME: continuous-fw
@@ -144,7 +144,7 @@ jobs:
           fi
           app_url="${APP_URL:-https://continuoushq.com}"
           ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" \
-            "APP_DIR='$DEPLOY_PATH' SITE_HOSTS='$SITE_HOSTS' ACME_EMAIL='$ACME_EMAIL' APP_URL='$app_url' REVENUE_WORKER_OPERATOR_EMAIL='$REVENUE_WORKER_OPERATOR_EMAIL' bash -s" <<'REMOTE'
+            "APP_DIR='$DEPLOY_PATH' SITE_HOSTS='$SITE_HOSTS' ACME_EMAIL='$ACME_EMAIL' APP_URL='$app_url' WORKER_OPERATOR_EMAIL='$WORKER_OPERATOR_EMAIL' bash -s" <<'REMOTE'
           set -euo pipefail
           cd "$APP_DIR"
           if [ ! -f .env ]; then
@@ -161,9 +161,9 @@ jobs:
               printf 'ACME_EMAIL=%s\n' "$ACME_EMAIL"
               printf 'APP_IMAGE=continuous-app\n'
               printf 'APP_TAG=local\n'
-              printf 'REVENUE_WORKER_RUN_ENABLED=true\n'
-              printf 'REVENUE_WORKER_RUN_TOKEN=%s\n' "$(openssl rand -hex 32)"
-              printf 'REVENUE_WORKER_OPERATOR_EMAIL=%s\n' "$REVENUE_WORKER_OPERATOR_EMAIL"
+              printf 'WORKER_RUN_ENABLED=true\n'
+              printf 'WORKER_RUN_TOKEN=%s\n' "$(openssl rand -hex 32)"
+              printf 'WORKER_OPERATOR_EMAIL=%s\n' "$WORKER_OPERATOR_EMAIL"
             } > .env
           fi
           set_env() {
@@ -185,18 +185,21 @@ jobs:
           set_env APP_URL "$APP_URL"
           set_env SITE_HOSTS "$SITE_HOSTS"
           set_env ACME_EMAIL "$ACME_EMAIL"
-          set_env REVENUE_WORKER_OPERATOR_EMAIL "$REVENUE_WORKER_OPERATOR_EMAIL"
+          set_env WORKER_OPERATOR_EMAIL "$WORKER_OPERATOR_EMAIL"
           POSTGRES_USER="$(grep '^POSTGRES_USER=' .env | cut -d= -f2- || true)"
           POSTGRES_DB="$(grep '^POSTGRES_DB=' .env | cut -d= -f2- || true)"
           POSTGRES_USER="${POSTGRES_USER:-continuous}"
           POSTGRES_DB="${POSTGRES_DB:-continuous}"
           export POSTGRES_USER POSTGRES_DB
-          worker_token="$(grep '^REVENUE_WORKER_RUN_TOKEN=' .env | cut -d= -f2- || true)"
+          worker_token="$(grep '^WORKER_RUN_TOKEN=' .env | cut -d= -f2- || true)"
+          if [ -z "$worker_token" ]; then
+            worker_token="$(grep '^REVENUE_WORKER_RUN_TOKEN=' .env | cut -d= -f2- || true)"
+          fi
           if [ -z "$worker_token" ]; then
             worker_token="$(openssl rand -hex 32)"
-            set_env REVENUE_WORKER_RUN_TOKEN "$worker_token"
           fi
-          set_env REVENUE_WORKER_RUN_ENABLED true
+          set_env WORKER_RUN_TOKEN "$worker_token"
+          set_env WORKER_RUN_ENABLED true
           docker compose pull db caddy
           docker compose up -d db
           docker compose exec -T db sh -c 'until pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"; do sleep 1; done' </dev/null
@@ -228,10 +231,13 @@ jobs:
           POSTGRES_DB="$(grep '^POSTGRES_DB=' .env | cut -d= -f2- || true)"
           POSTGRES_USER="${POSTGRES_USER:-continuous}"
           POSTGRES_DB="${POSTGRES_DB:-continuous}"
-          WORKER_TOKEN="$(grep '^REVENUE_WORKER_RUN_TOKEN=' .env | cut -d= -f2- || true)"
+          WORKER_TOKEN="$(grep '^WORKER_RUN_TOKEN=' .env | cut -d= -f2- || true)"
+          if [ -z "$WORKER_TOKEN" ]; then
+            WORKER_TOKEN="$(grep '^REVENUE_WORKER_RUN_TOKEN=' .env | cut -d= -f2- || true)"
+          fi
 
           if [ -z "$WORKER_TOKEN" ]; then
-            echo "Missing REVENUE_WORKER_RUN_TOKEN in $APP_DIR/.env." >&2
+            echo "Missing WORKER_RUN_TOKEN in $APP_DIR/.env." >&2
             exit 1
           fi
 
@@ -310,6 +316,51 @@ jobs:
           select 'proof_counts' as kind,
             (select count(*) from audit_events where source='continuous.adapter_reconciliation' and data->>'operation'='deploy_reconciliation_smoke')::text,
             (select count(*) from evidence where data->>'operation'='deploy_reconciliation_smoke')::text;
+          SQL
+
+          WORKER_RUN_KEY="deploy-worker-run-$RUN_ID"
+          WORKER_RUN_PAYLOAD="$(
+            /usr/bin/jq -nc --arg key "$WORKER_RUN_KEY" '{
+              command: "run",
+              worker: {role: "revenue_operations", tenantSlug: "continuous-demo"},
+              idempotencyKey: $key,
+              config: {
+                leadPacket: {
+                  source: "deploy_smoke",
+                  sourceEventId: $key,
+                  customerName: "Deploy Smoke Customer",
+                  customerIntent: "roof leak inspection",
+                  serviceArea: "roofing",
+                  urgency: "high",
+                  missingFacts: ["preferred_time_window"]
+                }
+              }
+            }'
+          )"
+          WORKER_RUN_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/worker \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$WORKER_RUN_PAYLOAD"
+          )"
+
+          echo "$WORKER_RUN_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,workerRunId:.data.result.workerRunId,eventId:.data.result.eventId,sourceSnapshotEvidenceId:.data.result.sourceSnapshotEvidenceId,externalSend:.data.result.output.externalSend,classification:.data.result.output.classification}}'
+          echo "$WORKER_RUN_RESPONSE" | /usr/bin/jq -e \
+            '.error == null and .data.command == "run" and .data.result.created == true and (.data.result.workerRunId | length > 0) and (.data.result.eventId | length > 0) and (.data.result.sourceSnapshotEvidenceId | length > 0) and .data.result.output.externalSend == false and .data.result.output.classification == "quote_ready_for_owner_approval" and .data.result.snapshot.controls.externalExecution == "disabled"' \
+            >/dev/null
+
+          WORKER_RUN_ID="$(echo "$WORKER_RUN_RESPONSE" | /usr/bin/jq -r '.data.result.workerRunId')"
+          WORKER_EVENT_ID="$(echo "$WORKER_RUN_RESPONSE" | /usr/bin/jq -r '.data.result.eventId')"
+          SOURCE_SNAPSHOT_ID="$(echo "$WORKER_RUN_RESPONSE" | /usr/bin/jq -r '.data.result.sourceSnapshotEvidenceId')"
+
+          psql_db -At <<SQL
+          select 'worker_run' as kind, state, source, data->'output'->>'externalSend'
+          from worker_runs where id = '$WORKER_RUN_ID'::uuid;
+          select 'worker_event' as kind, type, source
+          from events where id = '$WORKER_EVENT_ID'::uuid;
+          select 'source_snapshot' as kind, kind, name, data->>'externalSend'
+          from evidence where id = '$SOURCE_SNAPSHOT_ID'::uuid;
           SQL
 
           CORE_KEY="deploy-core-task-$RUN_ID"

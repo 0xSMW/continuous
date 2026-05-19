@@ -4,8 +4,8 @@ import { getCoreSummarySafe } from "../../../src/core/summary";
 import { createCoreTask } from "../../../src/core/tasks";
 import { PlatformUnavailableError } from "../../../src/core/errors";
 import {
-  authorizeRevenueWorkerRead,
-  authorizeRevenueWorkerRun,
+  authorizeWorkerRead,
+  authorizeWorkerRun,
   normalizeIdempotencyKey,
 } from "../../../src/worker/security";
 import type { JsonObject } from "../../../src/db/schema";
@@ -80,10 +80,10 @@ function coreErrorResponse(error: unknown, fallbackCode: string) {
 }
 
 export async function GET(request: Request) {
-  const auth = authorizeRevenueWorkerRead({
+  const auth = authorizeWorkerRead({
     appEnv: env.APP_ENV,
-    expectedToken: env.REVENUE_WORKER_RUN_TOKEN,
-    operatorEmail: env.REVENUE_WORKER_OPERATOR_EMAIL,
+    expectedToken: env.WORKER_RUN_TOKEN,
+    operatorEmail: env.WORKER_OPERATOR_EMAIL,
     authorization: request.headers.get("authorization"),
     headerToken: request.headers.get("x-worker-run-token"),
   });
@@ -115,11 +115,11 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const auth = authorizeRevenueWorkerRun({
-    enabled: env.REVENUE_WORKER_RUN_ENABLED,
+  const auth = authorizeWorkerRun({
+    enabled: env.WORKER_RUN_ENABLED,
     appEnv: env.APP_ENV,
-    expectedToken: env.REVENUE_WORKER_RUN_TOKEN,
-    operatorEmail: env.REVENUE_WORKER_OPERATOR_EMAIL,
+    expectedToken: env.WORKER_RUN_TOKEN,
+    operatorEmail: env.WORKER_OPERATOR_EMAIL,
     authorization: request.headers.get("authorization"),
     headerToken: request.headers.get("x-worker-run-token"),
   });

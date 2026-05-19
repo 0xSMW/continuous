@@ -16,8 +16,8 @@
 - Keep all worker-family HTTP controls on `/worker` with structured `worker`, `command`, `idempotencyKey`, and `config` fields; do not add worker-family-specific URL shapes.
 - Extend adapter reconciliation into retry execution, failure tasks, scoped live credentials, and rollback paths before allowing external sends or money movement.
 - Convert the deterministic Revenue Worker run into the state machine defined by `docs/revenue-worker-v1-contract.md`.
-- Build the no-send lead packet to approval packet slice: source snapshot evidence, input-derived classification/draft/quote fields, and eval cases that prove changed input changes worker output while `externalSend=false`.
+- Add read-only real lead intake that feeds the same `config.leadPacket` worker contract.
 - Use `docs/revenue-worker-expansion.md` as the expansion gate list for the next worker iteration.
 - Use `docs/revenue-worker-v1-contract.md` as the machine-actionable contract for run and approval effects.
-- Extend Revenue Worker evals beyond the first lead-to-quote golden case.
+- Extend Revenue Worker evals beyond the first two lead-to-quote golden cases.
 - Keep Next MCP for Next.js diagnostics; add direct Codex app-server worker tools if/when the repo needs app-server-owned controls.

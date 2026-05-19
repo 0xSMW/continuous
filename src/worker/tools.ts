@@ -30,7 +30,21 @@ export const workerTools = [
       properties: {
         worker: { $ref: "#/$defs/workerTarget" },
         idempotencyKey: { type: "string" },
-        config: { type: "object" },
+        config: {
+          type: "object",
+          description: "Worker-specific run configuration. Revenue operations runs use leadPacket.",
+          properties: {
+            leadPacket: { $ref: "#/$defs/leadPacket" },
+            pricing: {
+              type: "object",
+              properties: {
+                baseCents: { type: "number", minimum: 0 },
+              },
+            },
+            expectedAction: { type: "string" },
+          },
+          additionalProperties: true,
+        },
       },
       required: ["worker", "idempotencyKey"],
     },
@@ -104,6 +118,22 @@ export const workerToolSchema = {
         tenantSlug: { type: "string" },
       },
     },
+    leadPacket: {
+      type: "object",
+      properties: {
+        source: { type: "string" },
+        sourceEventId: { type: "string" },
+        customerName: { type: "string" },
+        customerIntent: { type: "string" },
+        serviceArea: { type: "string" },
+        urgency: { enum: ["low", "normal", "high", "urgent", "emergency", "same_day"] },
+        missingFacts: {
+          type: "array",
+          items: { type: "string" },
+        },
+      },
+      additionalProperties: true,
+    },
   },
   tools: workerTools,
 } as const;
@@ -140,7 +170,7 @@ function targetFrom(payload: JsonObject) {
 export async function executeWorkerTool(name: string, payload: JsonObject = {}) {
   const target = targetFrom(payload);
   const config = jsonObject(payload.config);
-  const operatorEmail = stringValue(payload.operatorEmail) ?? env.REVENUE_WORKER_OPERATOR_EMAIL;
+  const operatorEmail = stringValue(payload.operatorEmail) ?? env.WORKER_OPERATOR_EMAIL;
 
   if (name === "worker.snapshot") {
     const result = await getRevenueWorkerSnapshotSafe({

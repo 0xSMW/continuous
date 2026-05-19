@@ -47,11 +47,11 @@ operator-only summary and uses the same bearer token as the canonical `/worker`
 control plane.
 
 Core side effects use a structured command payload. For local-only testing,
-start the app with `REVENUE_WORKER_RUN_ENABLED=true` and call:
+start the app with `WORKER_RUN_ENABLED=true` and call:
 
 ```sh
 curl -X POST http://localhost:3000/api/core \
-  -H "authorization: Bearer $REVENUE_WORKER_RUN_TOKEN" \
+  -H "authorization: Bearer $WORKER_RUN_TOKEN" \
   -H "content-type: application/json" \
   -d '{
     "command": "task.create",
@@ -78,33 +78,43 @@ lead-to-cash slice. Detailed snapshots are operator-only and require the worker
 token:
 
 ```sh
-read -rsp "Worker token: " REVENUE_WORKER_RUN_TOKEN
-export REVENUE_WORKER_RUN_TOKEN
+read -rsp "Worker token: " WORKER_RUN_TOKEN
+export WORKER_RUN_TOKEN
 bun run dev
 curl "http://localhost:3000/worker?view=snapshot&role=revenue_operations" \
-  -H "authorization: Bearer $REVENUE_WORKER_RUN_TOKEN"
+  -H "authorization: Bearer $WORKER_RUN_TOKEN"
 ```
 
 The run API is a guarded side-effecting `POST` and is disabled by default. For
 local-only testing, start the app with:
 
 ```sh
-read -rsp "Worker token: " REVENUE_WORKER_RUN_TOKEN
-export REVENUE_WORKER_RUN_ENABLED=true
-export REVENUE_WORKER_RUN_TOKEN
+read -rsp "Worker token: " WORKER_RUN_TOKEN
+export WORKER_RUN_ENABLED=true
+export WORKER_RUN_TOKEN
 bun run dev
 curl -X POST http://localhost:3000/worker \
-  -H "authorization: Bearer $REVENUE_WORKER_RUN_TOKEN" \
+  -H "authorization: Bearer $WORKER_RUN_TOKEN" \
   -H "content-type: application/json" \
   -d '{
     "command": "run",
     "worker": {"role": "revenue_operations"},
     "idempotencyKey": "local-revenue-run-001",
-    "config": {}
+    "config": {
+      "leadPacket": {
+        "source": "website_form",
+        "sourceEventId": "local-form-001",
+        "customerName": "Acme Roof Repair",
+        "customerIntent": "roof leak inspection",
+        "serviceArea": "roofing",
+        "urgency": "high",
+        "missingFacts": ["preferred_time_window"]
+      }
+    }
   }'
 ```
 
-Runs are bound to `REVENUE_WORKER_OPERATOR_EMAIL`, which defaults to the seeded
+Runs are bound to `WORKER_OPERATOR_EMAIL`, which defaults to the seeded
 `owner@continuoushq.com` user. A successful run records an approval request and
 audit trail while keeping external send and money movement blocked.
 
@@ -112,7 +122,7 @@ The same persisted loop can run without exposing HTTP:
 
 ```sh
 bun run worker:tool worker.run <<'JSON'
-{"worker":{"role":"revenue_operations"},"idempotencyKey":"local-revenue-run-002","config":{}}
+{"worker":{"role":"revenue_operations"},"idempotencyKey":"local-revenue-run-002","config":{"leadPacket":{"source":"operator_payload","customerName":"Beacon Bakery","customerIntent":"emergency HVAC repair","serviceArea":"hvac","urgency":"emergency","missingFacts":[]}}}
 JSON
 ```
 
@@ -128,7 +138,7 @@ The same reconciliation command is available through the canonical worker API:
 
 ```sh
 curl -X POST http://localhost:3000/worker \
-  -H "authorization: Bearer $REVENUE_WORKER_RUN_TOKEN" \
+  -H "authorization: Bearer $WORKER_RUN_TOKEN" \
   -H "content-type: application/json" \
   -d '{
     "command": "adapters.reconcile",
@@ -141,10 +151,10 @@ List and decide approvals with the same bearer token:
 
 ```sh
 curl "http://localhost:3000/worker?view=approvals&role=revenue_operations" \
-  -H "authorization: Bearer $REVENUE_WORKER_RUN_TOKEN"
+  -H "authorization: Bearer $WORKER_RUN_TOKEN"
 
 curl -X POST http://localhost:3000/worker \
-  -H "authorization: Bearer $REVENUE_WORKER_RUN_TOKEN" \
+  -H "authorization: Bearer $WORKER_RUN_TOKEN" \
   -H "content-type: application/json" \
   -d "{
     \"command\": \"approval.decide\",
@@ -157,10 +167,10 @@ Workflow approvals use the shared approval ledger:
 
 ```sh
 curl "http://localhost:3000/workflow?view=approvals&tenantSlug=continuous-demo" \
-  -H "authorization: Bearer $REVENUE_WORKER_RUN_TOKEN"
+  -H "authorization: Bearer $WORKER_RUN_TOKEN"
 
 curl -X POST http://localhost:3000/workflow \
-  -H "authorization: Bearer $REVENUE_WORKER_RUN_TOKEN" \
+  -H "authorization: Bearer $WORKER_RUN_TOKEN" \
   -H "content-type: application/json" \
   -d "{
     \"command\": \"approval.decide\",

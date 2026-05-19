@@ -82,14 +82,14 @@ curl -fsS https://getcontinuous.app/api/health
 openssl s_client -connect 45.55.53.92:443 -servername continuoushq.com </dev/null 2>/dev/null | openssl x509 -noout -subject -issuer -dates
 ```
 
-The deploy path enables the Revenue Worker run endpoint with a generated bearer
-token in `/opt/continuous/.env`. `REVENUE_WORKER_OPERATOR_EMAIL` defaults to the
+The deploy path enables the generic worker command surface with a generated
+bearer token in `/opt/continuous/.env`. `WORKER_OPERATOR_EMAIL` defaults to the
 seeded owner user and must match an active user before approval records or
 operator decisions can be written. Use the CLI path over SSH for direct
 operator-controlled smoke runs:
 
 ```sh
-ssh root@45.55.53.92 'cd /opt/continuous && docker compose --profile tools run --rm migrate bun run worker:tool worker.run --payload='"'"'{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"deploy-revenue-run-001","config":{}}'"'"''
+ssh root@45.55.53.92 'cd /opt/continuous && docker compose --profile tools run --rm migrate bun run worker:tool worker.run --payload='"'"'{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"deploy-worker-run-001","config":{"leadPacket":{"source":"deploy_smoke","customerName":"Deploy Smoke Customer","customerIntent":"roof leak inspection","serviceArea":"roofing","urgency":"high","missingFacts":["preferred_time_window"]}}}'"'"''
 ```
 
 For the HTTPS worker API path, call `POST /worker` with `command`, `worker`,

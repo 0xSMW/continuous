@@ -11,10 +11,10 @@ state, and object versioning without external sends or money movement.
 | Area | Current state |
 |---|---|
 | Worker identity | `Revenue Operations Worker`, autonomy level 2, owner-managed |
-| Core loop | One operator run creates worker run, budget, inference, usage, event, evidence, adapter run/action, task update, and object version records |
+| Core loop | One operator run creates worker run, source snapshot evidence, budget, inference, usage, event, adapter run/action, approval packet, task update, and object version records |
 | Operator read API | `GET /worker?view=snapshot&role=revenue_operations`, bearer-token required |
 | Approval API | `GET /worker?view=approvals&role=revenue_operations` and `POST /worker` with `command=approval.decide`, bearer-token required |
-| Run API | `POST /worker` with `command=run`, disabled by default and bearer-token gated when enabled |
+| Run API | `POST /worker` with `command=run` and `config.leadPacket`, disabled by default and bearer-token gated when enabled |
 | Adapter reconciliation API | `POST /worker` with `command=adapters.reconcile`, tenant-scoped and bearer-token required |
 | Operator run | `bun run worker:tool worker.run` with the same worker/config payload |
 | External execution | Disabled; adapter runtime records dry-run receipts and matched reconciliation only |
@@ -85,11 +85,8 @@ smoke test.
 ## Milestones
 
 1. Convert the deterministic run into a small state machine.
-2. Add a no-send lead packet to approval packet slice: source snapshot evidence,
-   input-derived classification, draft response, quote fields, approval packet,
-   and evals proving changed input changes output while `externalSend=false`.
-3. Add read-only real lead intake.
-4. Add quote approval UI backed by `ui_contracts`.
-5. Extend the persistence-only reconciliation worker into retry execution paths for failed or uncertain adapter results.
-6. Extend eval fixtures beyond the first CI-enforced lead-to-quote case.
-7. Raise autonomy only for read, classify, draft, and owner brief capabilities.
+2. Add read-only real lead intake feeding the same `config.leadPacket` contract.
+3. Add quote approval UI backed by `ui_contracts`.
+4. Extend the persistence-only reconciliation worker into retry execution paths for failed or uncertain adapter results.
+5. Extend eval fixtures beyond the first CI-enforced lead-to-quote cases.
+6. Raise autonomy only for read, classify, draft, and owner brief capabilities.

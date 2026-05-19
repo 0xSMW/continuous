@@ -137,11 +137,16 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .limit(1);
     const data = objectValue(workerRun?.data);
     const output = objectValue(data.output);
+    const quote = objectValue(output.quote);
 
     expect(workerRun?.state).toBe(evalCase.expected.runState);
     expect(workerRun?.mode).toBe(evalCase.expected.runMode);
     expect(output.classification).toBe(evalCase.expected.classification);
+    expect(output.sourceSnapshotEvidenceId).toBe(first.sourceSnapshotEvidenceId);
+    expect(output.draftResponse).toContain(evalCase.expected.draftIncludes);
+    expect(quote.totalCents).toBe(evalCase.expected.quoteTotalCents);
     expect(output.externalExecution).toBe("blocked");
+    expect(output.externalSend).toBe(false);
     expect(output.requiresApproval).toBe(true);
     expect(output.budgetUnits).toBe(evalCase.expected.maxBudgetUnits);
     expect(output.adapterRunId).toBe(first.adapterRunId);
@@ -165,9 +170,37 @@ maybeDescribe("Revenue Worker integration eval", () => {
 
     expect(evaluation?.score).toBe("0.860");
     expect(dimensions.evidence_complete).toBe(true);
+    expect(dimensions.source_snapshot_present).toBe(true);
+    expect(dimensions.input_derived_output).toBe(true);
     expect(dimensions.within_budget).toBe(true);
     expect(dimensions.external_execution_blocked).toBe(true);
     expect(dimensions.owner_approval_required).toBe(true);
+    expect(dimensions.external_send_blocked).toBe(true);
+
+    const [sourceSnapshot] = await db
+      .select()
+      .from(evidence)
+      .where(eq(evidence.id, first.sourceSnapshotEvidenceId ?? ""))
+      .limit(1);
+    const sourceData = objectValue(sourceSnapshot?.data);
+    const sourceLead = objectValue(sourceData.leadPacket);
+
+    expect(sourceSnapshot?.kind).toBe("snapshot");
+    expect(sourceSnapshot?.name).toBe("Lead source snapshot");
+    expect(sourceData.externalSend).toBe(false);
+    expect(sourceLead.customerIntent).toBe("roof leak inspection");
+
+    const [adapterAction] = await db
+      .select()
+      .from(adapterActions)
+      .where(eq(adapterActions.id, first.adapterActionId ?? ""))
+      .limit(1);
+    const adapterRequest = objectValue(adapterAction?.request);
+    const adapterReceipt = objectValue(adapterAction?.receipt);
+
+    expect(adapterRequest.externalSend).toBe(false);
+    expect(objectValue(adapterRequest.quote).totalCents).toBe(evalCase.expected.quoteTotalCents);
+    expect(adapterReceipt.externalMutation).toBe(false);
 
     const [runsBeforeReplay] = await db
       .select({ value: count() })
@@ -206,6 +239,33 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(replay.workerRunId).toBe(first.workerRunId);
     expect(runsAfterReplay.value).toBe(runsBeforeReplay.value);
     expect(evalsAfterReplay.value).toBe(evalsBeforeReplay.value);
+
+    const secondCase = revenueWorkerEvalCases[1];
+    const second = await runRevenueWorker({
+      idempotencyKey: secondCase.idempotencyKey,
+      tenantSlug: secondCase.worker.tenantSlug,
+      operatorEmail: "owner@continuoushq.com",
+      config: secondCase.config,
+    });
+    const secondScored = scoreRevenueWorkerRun(second, secondCase);
+
+    expect(second.created).toBe(true);
+    expect(secondScored.passed).toBe(true);
+
+    const [secondWorkerRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(eq(workerRuns.id, second.workerRunId ?? ""))
+      .limit(1);
+    const secondOutput = objectValue(objectValue(secondWorkerRun?.data).output);
+
+    expect(secondOutput.classification).toBe(secondCase.expected.classification);
+    expect(secondOutput.draftResponse).toContain(secondCase.expected.draftIncludes);
+    expect(objectValue(secondOutput.quote).totalCents).toBe(secondCase.expected.quoteTotalCents);
+    expect(secondOutput.externalSend).toBe(false);
+    expect(secondOutput.classification).not.toBe(output.classification);
+    expect(secondOutput.draftResponse).not.toEqual(output.draftResponse);
+    expect(secondOutput.quote).not.toEqual(output.quote);
   }, 120_000);
 
   it("reconciles pending dry-run adapter rows without external execution", async () => {

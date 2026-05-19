@@ -63,6 +63,7 @@ const completeResult: RevenueWorkerRunResult = {
   workerRunId: "worker_run_1",
   eventId: "event_1",
   taskId: "task_1",
+  sourceSnapshotEvidenceId: "source_snapshot_1",
   evidenceId: "evidence_1",
   reservationId: "reservation_1",
   inferenceId: "inference_1",
@@ -72,6 +73,16 @@ const completeResult: RevenueWorkerRunResult = {
   adapterReceiptEvidenceId: "receipt_1",
   approvalRequestId: "approval_1",
   auditEventId: "audit_1",
+  output: {
+    sourceSnapshotEvidenceId: "source_snapshot_1",
+    classification: "quote_ready_for_owner_approval",
+    draftResponse: "Prepared roof leak inspection quote for owner approval.",
+    quote: {
+      totalCents: 27400,
+      currency: "USD",
+    },
+    externalSend: false,
+  },
   snapshot,
 };
 

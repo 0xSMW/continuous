@@ -61,13 +61,13 @@ HTTP mutation:
 
 ```sh
 bun run worker:tool worker.run <<'JSON'
-{"worker":{"role":"revenue_operations"},"idempotencyKey":"local-revenue-run-001","config":{}}
+{"worker":{"role":"revenue_operations"},"idempotencyKey":"local-revenue-run-001","config":{"leadPacket":{"source":"website_form","sourceEventId":"local-form-001","customerName":"Acme Roof Repair","customerIntent":"roof leak inspection","serviceArea":"roofing","urgency":"high","missingFacts":["preferred_time_window"]}}}
 JSON
 ```
 
 When the HTTP snapshot, approval, or run path is required, start the app with
-`REVENUE_WORKER_RUN_TOKEN` and include that bearer token on operator routes.
-`REVENUE_WORKER_OPERATOR_EMAIL` must match an active seeded user, defaulting to
+`WORKER_RUN_TOKEN` and include that bearer token on operator routes.
+`WORKER_OPERATOR_EMAIL` must match an active seeded user, defaulting to
 `owner@continuoushq.com`. Keep worker-specific config in the JSON payload:
 
 ```json
@@ -78,7 +78,17 @@ When the HTTP snapshot, approval, or run path is required, start the app with
     "tenantSlug": "continuous-demo"
   },
   "idempotencyKey": "local-revenue-run-001",
-  "config": {}
+  "config": {
+    "leadPacket": {
+      "source": "website_form",
+      "sourceEventId": "local-form-001",
+      "customerName": "Acme Roof Repair",
+      "customerIntent": "roof leak inspection",
+      "serviceArea": "roofing",
+      "urgency": "high",
+      "missingFacts": ["preferred_time_window"]
+    }
+  }
 }
 ```
 

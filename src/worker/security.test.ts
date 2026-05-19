@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { authorizeRevenueWorkerRead, authorizeRevenueWorkerRun, normalizeIdempotencyKey } from "./security";
+import { authorizeWorkerRead, authorizeWorkerRun, normalizeIdempotencyKey } from "./security";
 
 const acceptedCredential = ["accepted", "worker", "credential"].join(".");
 const operatorEmail = "owner@continuoushq.com";
 
-describe("authorizeRevenueWorkerRun", () => {
+describe("authorizeWorkerRun", () => {
   it("keeps worker runs disabled by default", () => {
     expect(
-      authorizeRevenueWorkerRun({
+      authorizeWorkerRun({
         enabled: false,
         appEnv: "development",
         operatorEmail,
@@ -17,13 +17,13 @@ describe("authorizeRevenueWorkerRun", () => {
       ok: false,
       status: 403,
       code: "worker_run_disabled",
-      message: "Revenue Worker runs are disabled.",
+      message: "Worker runs are disabled.",
     });
   });
 
   it("requires a token for enabled runs", () => {
     expect(
-      authorizeRevenueWorkerRun({
+      authorizeWorkerRun({
         enabled: true,
         appEnv: "development",
         operatorEmail,
@@ -32,13 +32,13 @@ describe("authorizeRevenueWorkerRun", () => {
       ok: false,
       status: 403,
       code: "worker_run_token_missing",
-      message: "Enabled worker runs require REVENUE_WORKER_RUN_TOKEN.",
+      message: "Enabled worker runs require WORKER_RUN_TOKEN.",
     });
   });
 
   it("accepts a matching bearer token", () => {
     expect(
-      authorizeRevenueWorkerRun({
+      authorizeWorkerRun({
         enabled: true,
         appEnv: "production",
         expectedToken: acceptedCredential,
@@ -65,10 +65,10 @@ describe("normalizeIdempotencyKey", () => {
   });
 });
 
-describe("authorizeRevenueWorkerRead", () => {
+describe("authorizeWorkerRead", () => {
   it("requires a read token in development", () => {
     expect(
-      authorizeRevenueWorkerRead({
+      authorizeWorkerRead({
         appEnv: "development",
         operatorEmail,
       }),
@@ -76,13 +76,13 @@ describe("authorizeRevenueWorkerRead", () => {
       ok: false,
       status: 403,
       code: "worker_read_token_missing",
-      message: "Revenue Worker reads require REVENUE_WORKER_RUN_TOKEN.",
+      message: "Worker reads require WORKER_RUN_TOKEN.",
     });
   });
 
   it("requires a read token in production", () => {
     expect(
-      authorizeRevenueWorkerRead({
+      authorizeWorkerRead({
         appEnv: "production",
         operatorEmail,
       }),
@@ -90,13 +90,13 @@ describe("authorizeRevenueWorkerRead", () => {
       ok: false,
       status: 403,
       code: "worker_read_token_missing",
-      message: "Revenue Worker reads require REVENUE_WORKER_RUN_TOKEN.",
+      message: "Worker reads require WORKER_RUN_TOKEN.",
     });
   });
 
   it("rejects an invalid read token", () => {
     expect(
-      authorizeRevenueWorkerRead({
+      authorizeWorkerRead({
         appEnv: "production",
         expectedToken: acceptedCredential,
         operatorEmail,
@@ -106,13 +106,13 @@ describe("authorizeRevenueWorkerRead", () => {
       ok: false,
       status: 401,
       code: "worker_read_unauthorized",
-      message: "Revenue Worker read token is invalid.",
+      message: "Worker read token is invalid.",
     });
   });
 
   it("accepts a matching read bearer token", () => {
     expect(
-      authorizeRevenueWorkerRead({
+      authorizeWorkerRead({
         appEnv: "production",
         expectedToken: acceptedCredential,
         operatorEmail,

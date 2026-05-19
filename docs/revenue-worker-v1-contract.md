@@ -11,6 +11,7 @@ raising autonomy or permitting external sends.
 | `operatorEmail` | Yes | Must match an active user in the tenant |
 | `tenantSlug` | No | Required when an operator email spans tenants |
 | `workerId` | No | Required when multiple Revenue Workers match |
+| `config.leadPacket` | Yes for useful runs | Source lead payload used to derive classification, draft, quote, evidence, and approval packet |
 
 ## API Shape
 
@@ -25,7 +26,17 @@ The canonical worker control-plane route is `/worker`.
     "tenantSlug": "continuous-demo"
   },
   "idempotencyKey": "rev-worker-001",
-  "config": {}
+  "config": {
+    "leadPacket": {
+      "source": "website_form",
+      "sourceEventId": "form-2026-05-19-001",
+      "customerName": "Acme Roof Repair",
+      "customerIntent": "roof leak inspection",
+      "serviceArea": "roofing",
+      "urgency": "high",
+      "missingFacts": ["preferred_time_window"]
+    }
+  }
 }
 ```
 
@@ -60,9 +71,42 @@ Adapter reconciliation also stays on the same command surface:
 }
 ```
 
-Worker-family-specific routes such as `/api/revenue-worker/run` are not part of
-the public API. Future workers must use `/worker` with role, command,
-idempotency, and config in structured fields.
+Worker-family-specific routes are not part of the public API. Future workers
+must use `/worker` with role, command, idempotency, and config in structured
+fields.
+
+## Run Config
+
+`config` is the worker-specific envelope. The route does not encode a worker
+family, operation target, customer, source system, or draft type in the URL.
+
+| Field | Required | Notes |
+|---|---:|---|
+| `leadPacket.source` | No | Defaults to `operator_payload`; use connector names such as `website_form` or `gmail` |
+| `leadPacket.sourceEventId` | No | External event or message id when available |
+| `leadPacket.customerName` | No | Defaults to `Customer` |
+| `leadPacket.customerIntent` | No | Drives draft wording and quote line |
+| `leadPacket.serviceArea` | No | Drives packet title and quote context |
+| `leadPacket.urgency` | No | `low`, `normal`, `high`, `urgent`, `emergency`, or `same_day` |
+| `leadPacket.missingFacts` | No | Array of facts required before any customer send |
+| `pricing.baseCents` | No | Optional deterministic quote override for evals and controlled tests |
+
+`config.externalSend=true` or `config.leadPacket.externalSend=true` is rejected.
+The first runtime only prepares owner-review packets.
+
+## Run Output
+
+`POST /worker` with `command=run` returns a generic command response whose
+`result.output` contains worker-derived data:
+
+| Output | Required behavior |
+|---|---|
+| `sourceSnapshotEvidenceId` | Points to persisted source snapshot evidence |
+| `classification` | Derived from lead urgency and missing facts |
+| `draftResponse` | Owner-review draft; not externally sent |
+| `quote` | Deterministic quote with lines, total, currency, and blocked money movement policy |
+| `externalSend` | Always `false` in this runtime |
+| `inputHash` | Canonical hash binding idempotency key to the normalized input payload |
 
 ## Preconditions
 

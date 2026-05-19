@@ -13,6 +13,7 @@ const keyInput =
 const tenantSlug = process.env.TENANT_SLUG ?? argValue("tenant-slug");
 const workerId = process.env.WORKER_ID ?? argValue("worker-id");
 const operatorEmail =
+  process.env.WORKER_OPERATOR_EMAIL ??
   process.env.REVENUE_WORKER_OPERATOR_EMAIL ??
   process.env.OPERATOR_EMAIL ??
   argValue("operator-email") ??

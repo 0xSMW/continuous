@@ -41,7 +41,8 @@ Then open `http://localhost:3000`.
   `POST /api/core` accepts structured core commands such as `task.create`.
 - `/worker` is the canonical worker control-plane API. Use `GET /worker?view=snapshot` or
   `GET /worker?view=approvals`; use `POST /worker` with `command` and `config`
-  payloads for side-effecting worker commands.
+  payloads for side-effecting worker commands. Revenue operations runs provide
+  lead input under `config.leadPacket`.
 - `/workflow` is the canonical workflow control-plane API. Use `GET /workflow`
   for definitions/runs/steps, `GET /workflow?view=approvals` for workflow
   approvals, and `POST /workflow` with `command=start`, `command=transition`,

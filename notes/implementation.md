@@ -21,7 +21,7 @@
 | Revenue Worker HTTP paths are guarded | There is no auth system yet, so detailed worker reads require the operator token, and the side-effecting run endpoint is disabled by default |
 | Added canonical worker API | `/worker` is the forward control-plane route; worker role, tenant selection, command, idempotency, and config live in structured query or payload fields |
 | Added canonical workflow API | `/workflow` validates definition-backed `start` and `transition` commands and records workflow events, audit events, and evidence |
-| Removed worker-specific HTTP wrappers | The greenfield API no longer exposes `/api/revenue-worker*`; new workers must extend `/worker` payloads rather than adding route names |
+| Removed worker-specific HTTP wrappers | The greenfield API does not expose worker-family routes; new workers must extend `/worker` payloads rather than adding route names |
 | Added workflow step ledger | Workflow starts and transitions now write durable step records with lease, retry, input, output, state-transition, event, evidence, and approval links |
 | Added shared approval service | Worker and workflow approvals now use a neutral approval service over `approval_requests`, with subject-scoped listing and decisions |
 | Seeded the first open-workflow set | Entity setup, hire employee, contractor engagement, termination, payroll preview, AI budget cycle, and synthetic-worker lifecycle now all have persisted definitions, runs, and steps |
@@ -32,6 +32,7 @@
 | Agent build path uses app-server protocol tooling plus Next.js MCP | The installed Codex app-server CLI exposes protocol generation/help commands; `.mcp.json` keeps the Next.js 16 MCP bridge for route/runtime diagnostics |
 | Added the first authority ledger | Revenue Worker runs now create approval requests and audit events, and approval decisions create evidence before any external action is allowed |
 | Added first-class adapter dry-runs | Revenue Worker runs now create linked adapter runs/actions, receipt evidence, attempt metadata, and reconciliation state while external mutation remains disabled |
+| Added input-derived no-send worker packets | `POST /worker` `command=run` now takes `config.leadPacket`, stores source snapshot evidence, hashes normalized input for idempotency, and derives classification, draft response, quote, and approval packet output from the payload |
 | HTTPS is managed by Caddy | `continuoushq.com` and `getcontinuous.app` now point at the droplet, and Caddy issues and renews Let's Encrypt certificates from the persisted `caddy_data` volume |
 
 ### Tradeoffs
@@ -84,8 +85,7 @@ state, `GET /worker?view=approvals` for approval queues, and `POST /worker`
 with `command`, `worker`, `idempotencyKey`, and `config` for side-effecting
 operations. Adapter reconciliation uses the same route with
 `command=adapters.reconcile`, a tenant-scoped `worker` target, and
-`config.limit`. Worker-specific HTTP routes such as `/api/revenue-worker*` are
-absent by design.
+`config.limit`. Worker-family-specific HTTP routes are absent by design.
 
 Workflow execution now has the same control-plane style through `/workflow`.
 Definitions remain declarative, and the runtime validates transitions against

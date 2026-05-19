@@ -195,11 +195,12 @@ Approvals are platform records, not worker-specific records. Worker approvals
 and workflow approvals share `approval_requests`, `audit_events`, and evidence;
 the route decides which subject can be listed or decided.
 
-One run persists the received config in the run ledger, reserves budget, records
-a simulated inference, writes usage, emits an
-idempotent `revenue_worker.run.completed` event, captures trace evidence,
-records a no-external-send adapter receipt, updates the task to
-`approval_required`, and versions the quote object. External sends and money
+One run accepts a `config.leadPacket` payload, stores a source snapshot, binds
+the idempotency key to a canonical input hash, derives classification, draft
+response, and quote fields from that input, reserves budget, records inference
+and usage, emits an idempotent `revenue_worker.run.completed` event, captures
+trace and receipt evidence, creates an owner approval packet, updates the task
+to `approval_required`, and versions the quote object. External sends and money
 movement remain blocked until human approval and real adapter execution are
 implemented.
 

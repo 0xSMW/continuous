@@ -17,6 +17,8 @@ export type RevenueWorkerEvalCase = {
     runMode: string;
     externalExecution: "disabled";
     maxBudgetUnits: number;
+    quoteTotalCents: number;
+    draftIncludes: string;
     minScore: number;
   };
 };
@@ -39,6 +41,7 @@ const requiredIds: Array<keyof RevenueWorkerRunResult> = [
   "workerRunId",
   "eventId",
   "taskId",
+  "sourceSnapshotEvidenceId",
   "evidenceId",
   "reservationId",
   "inferenceId",
@@ -60,10 +63,13 @@ export const revenueWorkerEvalCases: RevenueWorkerEvalCase[] = [
       tenantSlug: "continuous-demo",
     },
     config: {
-      lead: {
+      leadPacket: {
         source: "website_form",
+        sourceEventId: "eval-form-lead-to-quote",
+        customerName: "Acme Roof Repair",
         customerIntent: "roof leak inspection",
         urgency: "high",
+        serviceArea: "roofing",
         missingFacts: ["preferred_time_window"],
       },
       expectedAction: "draft_customer_response",
@@ -76,6 +82,41 @@ export const revenueWorkerEvalCases: RevenueWorkerEvalCase[] = [
       runMode: "simulation",
       externalExecution: "disabled",
       maxBudgetUnits: 12000,
+      quoteTotalCents: 27400,
+      draftIncludes: "roof leak inspection",
+      minScore: 0.9,
+    },
+  },
+  {
+    id: "revenue.urgent_service.approval_blocked",
+    name: "Urgent lead packet changes classification, draft, and quote while blocking send",
+    idempotencyKey: "eval-revenue-urgent-service-approval-blocked",
+    worker: {
+      role: "revenue_operations",
+      tenantSlug: "continuous-demo",
+    },
+    config: {
+      leadPacket: {
+        source: "website_form",
+        sourceEventId: "eval-form-urgent-service",
+        customerName: "Beacon Bakery",
+        customerIntent: "emergency HVAC repair",
+        urgency: "emergency",
+        serviceArea: "hvac",
+        missingFacts: [],
+      },
+      expectedAction: "draft_customer_response",
+      externalSend: false,
+    },
+    expected: {
+      classification: "urgent_quote_ready_for_owner_approval",
+      taskState: "approval_required",
+      runState: "done",
+      runMode: "simulation",
+      externalExecution: "disabled",
+      maxBudgetUnits: 12000,
+      quoteTotalCents: 29400,
+      draftIncludes: "emergency HVAC repair",
       minScore: 0.9,
     },
   },
@@ -123,6 +164,8 @@ export function scoreRevenueWorkerRun(
   });
   const matchingTaskOutcome = objectValue(matchingTask?.outcome);
   const matchingTaskCost = objectValue(matchingTask?.cost);
+  const output = objectValue(result.output);
+  const quote = objectValue(output.quote);
   const budgetUnits = numberValue(matchingTaskCost.units);
 
   addDimension(
@@ -177,6 +220,18 @@ export function scoreRevenueWorkerRun(
     Boolean(result.adapterRunId && result.adapterActionId && result.adapterReceiptEvidenceId),
     2,
     result.adapterReceiptEvidenceId ? "adapter dry-run receipt evidence is linked" : "adapter receipt is missing",
+  );
+
+  addDimension(
+    dimensions,
+    "input_derived_packet",
+    result.sourceSnapshotEvidenceId === stringValue(output.sourceSnapshotEvidenceId) &&
+      stringValue(output.classification) === evalCase.expected.classification &&
+      stringValue(output.draftResponse).includes(evalCase.expected.draftIncludes) &&
+      numberValue(quote.totalCents) === evalCase.expected.quoteTotalCents &&
+      output.externalSend === false,
+    2,
+    `classification ${stringValue(output.classification)} quote ${numberValue(quote.totalCents)}`,
   );
 
   const totalWeight = dimensions.reduce((sum, dimension) => sum + dimension.weight, 0);

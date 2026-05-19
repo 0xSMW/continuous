@@ -11,13 +11,13 @@ export type RunAuthResult =
   | { ok: true; operatorEmail: string }
   | { ok: false; status: 401 | 403; code: string; message: string };
 
-export function authorizeRevenueWorkerRun(input: RunAuthInput): RunAuthResult {
+export function authorizeWorkerRun(input: RunAuthInput): RunAuthResult {
   if (!input.enabled) {
     return {
       ok: false,
       status: 403,
       code: "worker_run_disabled",
-      message: "Revenue Worker runs are disabled.",
+      message: "Worker runs are disabled.",
     };
   }
 
@@ -26,7 +26,7 @@ export function authorizeRevenueWorkerRun(input: RunAuthInput): RunAuthResult {
       ok: false,
       status: 403,
       code: "worker_run_token_missing",
-      message: "Enabled worker runs require REVENUE_WORKER_RUN_TOKEN.",
+      message: "Enabled worker runs require WORKER_RUN_TOKEN.",
     };
   }
 
@@ -38,20 +38,20 @@ export function authorizeRevenueWorkerRun(input: RunAuthInput): RunAuthResult {
       ok: false,
       status: 401,
       code: "worker_run_unauthorized",
-      message: "Revenue Worker run token is invalid.",
+      message: "Worker run token is invalid.",
     };
   }
 
   return { ok: true, operatorEmail: input.operatorEmail };
 }
 
-export function authorizeRevenueWorkerRead(input: Omit<RunAuthInput, "enabled">): RunAuthResult {
+export function authorizeWorkerRead(input: Omit<RunAuthInput, "enabled">): RunAuthResult {
   if (!input.expectedToken) {
     return {
       ok: false,
       status: 403,
       code: "worker_read_token_missing",
-      message: "Revenue Worker reads require REVENUE_WORKER_RUN_TOKEN.",
+      message: "Worker reads require WORKER_RUN_TOKEN.",
     };
   }
 
@@ -63,7 +63,7 @@ export function authorizeRevenueWorkerRead(input: Omit<RunAuthInput, "enabled">)
       ok: false,
       status: 401,
       code: "worker_read_unauthorized",
-      message: "Revenue Worker read token is invalid.",
+      message: "Worker read token is invalid.",
     };
   }
 
