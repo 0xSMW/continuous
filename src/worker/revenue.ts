@@ -749,6 +749,63 @@ function revisedPacketFromOriginal(params: {
   } satisfies JsonObject;
 }
 
+function approvedExecutionPacketFromOriginal(params: {
+  originalOutput: JsonObject;
+  approvalNote: string;
+  now: Date;
+  approvalRequestId: string;
+  originalWorkerRunId: string;
+  workerRunId: string;
+  workflowRunId: string;
+}) {
+  const approvedPacket = objectValue(params.originalOutput.revisedPacket);
+  const basePacket = Object.keys(approvedPacket).length > 0 ? approvedPacket : params.originalOutput;
+  const quote = objectValue(basePacket.quote ?? params.originalOutput.quote);
+  const draftResponse = stringValue(
+    basePacket.draftResponse ?? params.originalOutput.draftResponse,
+    "Approved customer response is ready, but external execution is disabled.",
+  );
+  const approvedAt = params.now.toISOString();
+
+  return {
+    schemaVersion: "revenue_worker.approved_execution_packet.v1",
+    status: "approved_execution_blocked",
+    approval: {
+      approvalRequestId: params.approvalRequestId,
+      note: params.approvalNote,
+      approvedAt,
+    },
+    originalWorkerRunId: params.originalWorkerRunId,
+    workerRunId: params.workerRunId,
+    workflowRunId: params.workflowRunId,
+    source: stringValue(basePacket.source ?? params.originalOutput.source, "unknown"),
+    sourceEventId: stringValue(basePacket.sourceEventId ?? params.originalOutput.sourceEventId) || null,
+    classification: "approved_quote_ready_for_blocked_execution",
+    draftResponse,
+    quote: {
+      ...quote,
+      policy: {
+        ...objectValue(quote.policy),
+        approvalRequired: false,
+        externalSend: false,
+        moneyMovement: "blocked",
+      },
+    },
+    preparedAction: stringValue(basePacket.expectedAction ?? params.originalOutput.expectedAction, "draft_customer_response"),
+    adapterMode: "dry_run",
+    guardrails: [
+      "no_external_send",
+      "no_money_movement",
+      "scoped_live_credentials_required",
+      "rollback_plan_required",
+    ],
+    externalExecution: "blocked",
+    externalSend: false,
+    requiresApproval: false,
+    nextAction: "enable_scoped_adapter_execution",
+  } satisfies JsonObject;
+}
+
 function workerWhere(selector: RevenueWorkerSelector) {
   const conditions = [
     eq(workers.role, selector.role ?? revenueWorkerRole),
@@ -2597,10 +2654,10 @@ export async function continueRevenueWorker(input: {
       );
     }
 
-    if (approval.state !== "revision_requested") {
+    if (!["approved", "revision_requested"].includes(approval.state)) {
       throw new RevenueWorkerUnavailableError(
         "worker_continuation_unsupported_state",
-        "Revenue Worker continuation currently supports revision_requested approvals.",
+        "Revenue Worker continuation supports approved and revision_requested approvals.",
         409,
       );
     }
@@ -2665,6 +2722,513 @@ export async function continueRevenueWorker(input: {
     const approvalDecision = objectValue(approval.decision);
     const approvalContinuation = objectValue(approvalDecision.continuation);
     const originalOutput = outputData(originalRun.data);
+
+    if (approval.state === "approved") {
+      const approvalNote = stringValue(approvalDecision.note, "Approved by operator.");
+      const continuationInput = {
+        approvalRequestId: approval.id,
+        originalWorkerRunId: originalRun.id,
+        workflowRunId: workflow.run.id,
+        workflowState: workflow.run.state,
+        action: "approved",
+        note: approvalNote,
+        originalOutput,
+        approvalContinuation,
+      };
+
+      const [workerRun] = await tx
+        .insert(workerRuns)
+        .values({
+          tenantId: context.worker.tenantId,
+          workerId: context.worker.id,
+          taskId: approval.taskId,
+          eventId: approval.eventId,
+          capabilityId: approval.capabilityId,
+          connectionId: originalRun.connectionId ?? context.connectionId,
+          budgetAccountId: originalRun.budgetAccountId ?? context.budgetAccountId,
+          source,
+          idempotencyKey: input.idempotencyKey,
+          state: "running",
+          mode: "continuation",
+          data: {
+            input: {
+              idempotencyKey: input.idempotencyKey,
+              ...continuationInput,
+              operator: {
+                userId: operator.id,
+                email: operator.email,
+              },
+            },
+            output: {},
+          },
+          startedAt: now,
+          updatedAt: now,
+        })
+        .returning({ id: workerRuns.id });
+      const approvedExecutionPacket = approvedExecutionPacketFromOriginal({
+        originalOutput,
+        approvalNote,
+        now,
+        approvalRequestId: approval.id,
+        originalWorkerRunId: originalRun.id,
+        workerRunId: workerRun.id,
+        workflowRunId: workflow.run.id,
+      });
+      const approvedExecutionHash = hashObject(approvedExecutionPacket);
+      const adapterRunId = uuidValue(approvalContinuation.adapterRunId ?? originalOutput.adapterRunId);
+      const adapterActionId = uuidValue(
+        approvalContinuation.adapterActionId ?? originalOutput.adapterActionId,
+      );
+      const adapterReceiptEvidenceId = uuidValue(
+        approvalContinuation.adapterReceiptEvidenceId ?? originalOutput.adapterReceiptEvidenceId,
+      );
+
+      const [event] = await tx
+        .insert(events)
+        .values({
+          tenantId: context.worker.tenantId,
+          type: "revenue_worker.approved_execution.blocked",
+          source,
+          actorType: "worker",
+          actorId: context.worker.id,
+          actorRef: `worker:${context.worker.id}`,
+          objectId: approval.objectId,
+          taskId: approval.taskId,
+          capabilityId: approval.capabilityId,
+          connectionId: originalRun.connectionId ?? context.connectionId,
+          idempotencyKey: input.idempotencyKey,
+          data: {
+            approvalRequestId: approval.id,
+            originalWorkerRunId: originalRun.id,
+            workerRunId: workerRun.id,
+            workflowRunId: workflow.run.id,
+            action: "approved",
+            status: "approved_execution_blocked",
+            note: approvalNote,
+            adapterRunId: adapterRunId || null,
+            adapterActionId: adapterActionId || null,
+            adapterReceiptEvidenceId: adapterReceiptEvidenceId || null,
+            approvedExecutionPacket,
+            approvedExecutionHash,
+            nextAction: "enable_scoped_adapter_execution",
+            externalExecution: "blocked",
+            externalSend: false,
+            requiresApproval: false,
+          },
+          occurredAt: now,
+        })
+        .returning({ id: events.id });
+      const [audit] = await tx
+        .insert(auditEvents)
+        .values({
+          tenantId: context.worker.tenantId,
+          type: "revenue_worker.continuation.completed",
+          source,
+          actorType: "worker",
+          actorId: context.worker.id,
+          actorRef: `worker:${context.worker.id}`,
+          targetType: "worker_run",
+          targetId: workerRun.id,
+          taskId: approval.taskId,
+          workerRunId: workerRun.id,
+          approvalRequestId: approval.id,
+          eventId: event.id,
+          objectId: approval.objectId,
+          capabilityId: approval.capabilityId,
+          risk: approval.risk,
+          idempotencyKey: `${input.idempotencyKey}:approved_execution_blocked`,
+          data: {
+            approvalRequestId: approval.id,
+            originalWorkerRunId: originalRun.id,
+            workflowRunId: workflow.run.id,
+            workflowState: workflow.run.state,
+            action: "approved",
+            status: "approved_execution_blocked",
+            nextAction: "enable_scoped_adapter_execution",
+            adapterRunId: adapterRunId || null,
+            adapterActionId: adapterActionId || null,
+            adapterReceiptEvidenceId: adapterReceiptEvidenceId || null,
+            approvedExecutionPacket,
+            approvedExecutionHash,
+            externalExecution: "blocked",
+            externalSend: false,
+            requiresApproval: false,
+          },
+        })
+        .returning({ id: auditEvents.id });
+      const [trace] = await tx
+        .insert(evidence)
+        .values({
+          tenantId: context.worker.tenantId,
+          kind: "trace",
+          name: "Revenue Worker approved execution continuation",
+          objectId: approval.objectId,
+          taskId: approval.taskId,
+          eventId: event.id,
+          capabilityId: approval.capabilityId,
+          actorType: "worker",
+          actorId: context.worker.id,
+          hash: traceHash(input.idempotencyKey, "approved_execution_continuation"),
+          data: {
+            approvalRequestId: approval.id,
+            originalWorkerRunId: originalRun.id,
+            workerRunId: workerRun.id,
+            workflowRunId: workflow.run.id,
+            auditEventId: audit.id,
+            action: "approved",
+            note: approvalNote,
+            originalOutput,
+            approvalContinuation,
+            adapterRunId: adapterRunId || null,
+            adapterActionId: adapterActionId || null,
+            adapterReceiptEvidenceId: adapterReceiptEvidenceId || null,
+            approvedExecutionPacket,
+            approvedExecutionHash,
+            nextAction: "enable_scoped_adapter_execution",
+            externalExecution: "blocked",
+            externalSend: false,
+            requiresApproval: false,
+          },
+        })
+        .returning({ id: evidence.id });
+      const [approvedExecutionEvidence] = await tx
+        .insert(evidence)
+        .values({
+          tenantId: context.worker.tenantId,
+          kind: "draft",
+          name: "Revenue Worker approved execution packet",
+          objectId: approval.objectId,
+          taskId: approval.taskId,
+          eventId: event.id,
+          capabilityId: approval.capabilityId,
+          actorType: "worker",
+          actorId: context.worker.id,
+          hash: approvedExecutionHash,
+          data: {
+            approvalRequestId: approval.id,
+            originalWorkerRunId: originalRun.id,
+            workerRunId: workerRun.id,
+            workflowRunId: workflow.run.id,
+            traceEvidenceId: trace.id,
+            action: "approved",
+            note: approvalNote,
+            approvedExecutionPacket,
+            approvedExecutionHash,
+            externalExecution: "blocked",
+            externalSend: false,
+            requiresApproval: false,
+          },
+        })
+        .returning({ id: evidence.id });
+      const [approvedExecutionDocument] = await tx
+        .insert(documents)
+        .values({
+          tenantId: context.worker.tenantId,
+          objectId: approval.objectId,
+          workflowRunId: workflow.run.id,
+          kind: "revenue_quote_approved_execution_packet",
+          name: "Revenue quote approved execution packet",
+          state: "blocked",
+          sensitivity: approval.risk,
+          hash: approvedExecutionHash,
+          data: {
+            approvalRequestId: approval.id,
+            originalWorkerRunId: originalRun.id,
+            workerRunId: workerRun.id,
+            workflowRunId: workflow.run.id,
+            eventId: event.id,
+            traceEvidenceId: trace.id,
+            approvedExecutionEvidenceId: approvedExecutionEvidence.id,
+            approvedExecutionPacket,
+            approvedExecutionHash,
+            externalExecution: "blocked",
+            externalSend: false,
+            requiresApproval: false,
+          },
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning({ id: documents.id });
+      const [approvedEvidencePacket] = await tx
+        .insert(evidencePackets)
+        .values({
+          tenantId: context.worker.tenantId,
+          documentId: approvedExecutionDocument.id,
+          objectId: approval.objectId,
+          taskId: approval.taskId,
+          workflowRunId: workflow.run.id,
+          eventId: event.id,
+          capabilityId: approval.capabilityId,
+          kind: "revenue_quote_approved_execution_packet",
+          name: "Revenue quote approved execution packet",
+          state: "blocked",
+          sensitivity: approval.risk,
+          evidenceIds: { ids: [trace.id, approvedExecutionEvidence.id] },
+          documentIds: { ids: [approvedExecutionDocument.id] },
+          data: {
+            approvalRequestId: approval.id,
+            originalWorkerRunId: originalRun.id,
+            workerRunId: workerRun.id,
+            workflowRunId: workflow.run.id,
+            eventId: event.id,
+            approvedExecutionPacket,
+            approvedExecutionHash,
+            externalExecution: "blocked",
+            externalSend: false,
+            requiresApproval: false,
+          },
+          hash: approvedExecutionHash,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning({ id: evidencePackets.id });
+      const continuationLinks = {
+        approvedExecutionEvidenceId: approvedExecutionEvidence.id,
+        approvedExecutionDocumentId: approvedExecutionDocument.id,
+        approvedEvidencePacketId: approvedEvidencePacket.id,
+      };
+
+      const [workflowStep] = await tx
+        .insert(workflowSteps)
+        .values({
+          tenantId: context.worker.tenantId,
+          definitionId: workflow.definition.id,
+          workflowRunId: workflow.run.id,
+          eventId: event.id,
+          approvalRequestId: approval.id,
+          taskId: approval.taskId,
+          objectId: approval.objectId,
+          workerId: context.worker.id,
+          capabilityId: approval.capabilityId,
+          kind: "worker_continuation",
+          name: `${workflow.definition.key}:approved_execution_blocked`,
+          state: "done",
+          priority: approval.priority,
+          risk: approval.risk,
+          fromState: workflow.run.state,
+          toState: "execution_blocked",
+          attempt: 1,
+          maxAttempts: 1,
+          leaseOwner: `worker:${context.worker.id}`,
+          leasedUntil: now,
+          idempotencyKey: `${input.idempotencyKey}:execution_blocked`,
+          input: continuationInput,
+          output: {
+            approvalRequestId: approval.id,
+            originalApprovalRequestId: approval.id,
+            workerRunId: workerRun.id,
+            originalWorkerRunId: originalRun.id,
+            auditEventId: audit.id,
+            evidenceId: trace.id,
+            adapterRunId: adapterRunId || null,
+            adapterActionId: adapterActionId || null,
+            adapterReceiptEvidenceId: adapterReceiptEvidenceId || null,
+            ...continuationLinks,
+            approvedExecutionPacket,
+            nextAction: "enable_scoped_adapter_execution",
+            externalExecution: "blocked",
+            externalSend: false,
+            requiresApproval: false,
+          },
+          startedAt: now,
+          completedAt: now,
+          updatedAt: now,
+        })
+        .returning({ id: workflowSteps.id });
+
+      const output = {
+        status: "approved_execution_blocked",
+        approvalRequestId: approval.id,
+        originalApprovalRequestId: approval.id,
+        originalWorkerRunId: originalRun.id,
+        workerRunId: workerRun.id,
+        workflowRunId: workflow.run.id,
+        workflowStepId: workflowStep.id,
+        eventId: event.id,
+        auditEventId: audit.id,
+        evidenceId: trace.id,
+        adapterRunId: adapterRunId || null,
+        adapterActionId: adapterActionId || null,
+        adapterReceiptEvidenceId: adapterReceiptEvidenceId || null,
+        ...continuationLinks,
+        approvedExecutionPacket,
+        approvedExecutionHash,
+        nextAction: "enable_scoped_adapter_execution",
+        externalExecution: "blocked",
+        externalSend: false,
+        requiresApproval: false,
+      };
+      const workflowData = objectValue(workflow.run.data);
+      const approvedExecutionContinuation = {
+        ...output,
+        note: approvalNote,
+        action: "approved",
+        continuedAt: now.toISOString(),
+      };
+
+      await tx
+        .update(workflowRuns)
+        .set({
+          state: "execution_blocked",
+          data: {
+            ...workflowData,
+            approvedExecutionContinuation,
+            lastWorkerContinuation: approvedExecutionContinuation,
+            workflowStepIds: appendString(workflowData.workflowStepIds, workflowStep.id),
+          },
+          blockers: {
+            ...objectValue(workflow.run.blockers),
+            open: ["external_execution_blocked", "scoped_live_credentials_required"],
+          },
+          completedAt: null,
+          updatedAt: now,
+        })
+        .where(eq(workflowRuns.id, workflow.run.id));
+
+      if (approval.taskId) {
+        const [task] = await tx
+          .select({ outcome: tasks.outcome })
+          .from(tasks)
+          .where(and(eq(tasks.tenantId, context.worker.tenantId), eq(tasks.id, approval.taskId)))
+          .limit(1);
+
+        await tx
+          .update(tasks)
+          .set({
+            state: "waiting",
+            outcome: {
+              ...objectValue(task?.outcome),
+              status: "approved_execution_blocked",
+              approvalRequestId: approval.id,
+              approvedExecutionContinuation,
+              ...continuationLinks,
+              approvedExecutionPacket,
+              externalExecution: "blocked",
+              externalSend: false,
+            },
+            updatedAt: now,
+          })
+          .where(eq(tasks.id, approval.taskId));
+      }
+
+      await tx
+        .update(workerRuns)
+        .set({
+          data: {
+            ...objectValue(originalRun.data),
+            output: {
+              ...originalOutput,
+              approvedExecutionContinuation,
+              ...continuationLinks,
+              approvedExecutionPacket,
+              externalExecution: "blocked",
+              externalSend: false,
+            },
+            lastWorkerContinuation: approvedExecutionContinuation,
+          },
+          updatedAt: now,
+        })
+        .where(eq(workerRuns.id, originalRun.id));
+
+      if (adapterActionId) {
+        const [adapterAction] = await tx
+          .select({
+            response: adapterActions.response,
+            receipt: adapterActions.receipt,
+          })
+          .from(adapterActions)
+          .where(and(eq(adapterActions.tenantId, context.worker.tenantId), eq(adapterActions.id, adapterActionId)))
+          .limit(1);
+
+        if (adapterAction) {
+          await tx
+            .update(adapterActions)
+            .set({
+              response: {
+                ...adapterAction.response,
+                approvedExecutionContinuation,
+                approvedExecutionPacket,
+                externalExecution: "blocked",
+                externalSend: false,
+              },
+              receipt: {
+                ...adapterAction.receipt,
+                approvedExecutionContinuation,
+                externalMutation: false,
+                externalSend: false,
+              },
+            })
+            .where(eq(adapterActions.id, adapterActionId));
+        }
+      }
+
+      if (adapterRunId) {
+        const [adapterRun] = await tx
+          .select({
+            data: adapterRuns.data,
+            receipt: adapterRuns.receipt,
+          })
+          .from(adapterRuns)
+          .where(and(eq(adapterRuns.tenantId, context.worker.tenantId), eq(adapterRuns.id, adapterRunId)))
+          .limit(1);
+
+        if (adapterRun) {
+          await tx
+            .update(adapterRuns)
+            .set({
+              data: {
+                ...adapterRun.data,
+                approvedExecutionContinuation,
+                externalExecution: "blocked",
+                externalSend: false,
+              },
+              receipt: {
+                ...adapterRun.receipt,
+                approvedExecutionContinuation,
+                externalMutation: false,
+                externalSend: false,
+              },
+            })
+            .where(eq(adapterRuns.id, adapterRunId));
+        }
+      }
+
+      await tx
+        .update(workerRuns)
+        .set({
+          eventId: event.id,
+          state: "done",
+          endedAt: now,
+          updatedAt: now,
+          data: {
+            input: {
+              idempotencyKey: input.idempotencyKey,
+              ...continuationInput,
+              operator: {
+                userId: operator.id,
+                email: operator.email,
+              },
+            },
+            output,
+          },
+        })
+        .where(eq(workerRuns.id, workerRun.id));
+
+      return {
+        created: true as const,
+        workerRunId: workerRun.id,
+        originalWorkerRunId: originalRun.id,
+        eventId: event.id,
+        taskId: approval.taskId,
+        approvalRequestId: approval.id,
+        auditEventId: audit.id,
+        evidenceId: trace.id,
+        workflowRunId: workflow.run.id,
+        workflowStepId: workflowStep.id,
+        output,
+      };
+    }
+
     const revisionNote = stringValue(approvalDecision.note, "Revision requested by operator.");
     const continuationInput = {
       approvalRequestId: approval.id,

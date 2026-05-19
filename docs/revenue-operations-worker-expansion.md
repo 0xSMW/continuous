@@ -15,7 +15,7 @@ state, workflow state, and object versioning without external sends or money mov
 | Operator read API | `GET /worker?view=snapshot&role=revenue_operations`, bearer-token required |
 | Approval API | `GET /worker?view=approvals&role=revenue_operations` and `POST /worker` with `command=approval.decide`, bearer-token required |
 | Run API | `POST /worker` with `command=run` and `config.intake` Core references; direct `config.leadPacket` remains an operator/test fallback |
-| Continuation API | `POST /worker` with `command=continue`, `idempotencyKey`, and `config.approvalId`; V1 turns `revision_requested` decisions into a revised no-send packet, persisted document/evidence packet, and fresh pending owner approval |
+| Continuation API | `POST /worker` with `command=continue`, `idempotencyKey`, and `config.approvalId`; V1 turns `approved` decisions into blocked no-send execution packets and `revision_requested` decisions into revised packets plus fresh pending owner approval |
 | Adapter reconciliation API | `POST /worker` with `command=adapters.reconcile`, tenant-scoped and bearer-token required |
 | Operator run | `bun run worker:tool worker.run` with the same worker/config payload |
 | Command registry | `/worker` commands and `worker:*` local tool aliases share role, config, idempotency, tenant, and external-execution validation |
@@ -86,7 +86,7 @@ smoke test.
 
 ## Milestones
 
-1. Extend the Revenue Worker state machine with retry, failure, reconciliation, and approved-execution continuation branches without enabling external execution.
+1. Extend the Revenue Worker state machine with retry, failure, and reconciliation branches without enabling external execution.
 2. Expand read-only real lead intake beyond Core object/event/evidence references into connected source readers.
 3. Add quote approval UI backed by `ui_contracts`.
 4. Extend persistence-only reconciliation tasks into live retry execution paths for failed or uncertain adapter results.

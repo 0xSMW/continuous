@@ -118,7 +118,7 @@ and local toolbox aliases resolve to the same handlers and validation rules.
 | `GET view=snapshot` | `worker.snapshot` | None | None | Read-only | Blocked |
 | `GET view=approvals` | `worker.approvals.list` | Optional `state` | None | Read-only | Blocked |
 | `run` | `worker.run` | `config.intake` preferred, `config.leadPacket` fallback | Required | Internal records, budget, approval, dry-run adapter receipt | Blocked |
-| `continue` | `worker.continue` | `approvalId` | Required | Worker continuation records, workflow step, task outcome, audit/evidence | Blocked |
+| `continue` | `worker.continue` | `approvalId` | Required | Approved execution packet or revised approval packet, workflow step, task outcome, audit/evidence | Blocked |
 | `approval.decide` | `worker.approvals.decide` | `approvalId`, `action`, optional `note` | None | Approval/task/workflow evidence only | Blocked |
 | `adapters.reconcile` | `worker.adapters.reconcile` | Tenant-scoped `worker.tenantSlug`, optional integer `limit` | None | Adapter reconciliation audit/evidence plus retry/review system tasks | Blocked |
 
@@ -196,17 +196,20 @@ The first runtime only prepares owner-review packets.
 
 `POST /worker` with `command=continue` creates a separate idempotent
 `worker_runs` continuation record and `workflow_steps.kind=worker_continuation`
-entry. V1 supports `revision_requested` approvals only; it prepares a revised
-no-send quote packet, stores the revised packet evidence/document packet,
-creates a fresh pending `quote_revision_approval`, moves the workflow back to
-`approval_requested`, updates the task back to `approval_required`, and keeps
-adapter execution blocked.
+entry. V1 supports `approved` and `revision_requested` approvals. Approved
+continuation prepares a no-send execution packet, stores evidence/document
+packet records, moves the workflow to `execution_blocked`, leaves the task in
+`waiting`, and keeps adapter execution blocked. Revision continuation prepares
+a revised no-send quote packet, stores the revised packet evidence/document
+packet, creates a fresh pending `quote_revision_approval`, moves the workflow
+back to `approval_requested`, updates the task back to `approval_required`, and
+keeps adapter execution blocked.
 
 ## Approval Actions
 
 | Action | Approval state | Task state | Workflow state | External behavior |
 |---|---|---|---|---|
-| `approved` | `approved` | `waiting` | `approved` when the definition allows it | Still blocked until real adapter execution exists |
+| `approved` | `approved` | `waiting`; after `command=continue`, still `waiting` on live execution prerequisites | `approved`; after `command=continue`, `execution_blocked` | `command=continue` prepares an approved no-send execution packet and blocks on scoped live credentials/rollback readiness |
 | `revision_requested` | `revision_requested`; after `command=continue`, a new `quote_revision_approval` is `pending` | `approval_required` after the revised packet is prepared | `approval_requested` after the revised packet is prepared | `command=continue` prepares a revised no-send packet and requests owner approval again |
 | `rejected` | `rejected` | `blocked` | `rejected` when the definition allows it | Worker should stop the prepared action |
 

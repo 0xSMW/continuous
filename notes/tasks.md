@@ -20,7 +20,7 @@
 - Provision the production object-storage bucket/key, run `scripts/install-backup-timer.sh`, and prove scheduled off-host Postgres dump retention before customer data.
 - Complete production hardening with tag-based deploy rollback, observability/alerts, scoped tokens, non-root host access, and a restore drill before using the droplet for real customer data.
 - Extend adapter reconciliation tasks into live retry execution, scoped live credentials, and rollback paths before allowing external sends or money movement.
-- Extend the Revenue Worker state machine with retry, failure, reconciliation, and later approved-execution branches after the revised-packet continuation path.
+- Extend the Revenue Worker state machine with retry, failure, and reconciliation branches after the approved and revision continuation paths.
 - Expand read-only real lead intake from `config.intake` Core references into connected source readers.
 - Use `docs/revenue-operations-worker-expansion.md` as the expansion gate list for the next worker iteration.
 - Use `docs/revenue-operations-worker-v1-contract.md` as the machine-actionable contract for run and approval effects.

@@ -1201,6 +1201,125 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(adapterAction?.mode).toBe("dry_run");
     expect(adapterReceipt.externalMutation).toBe(false);
     expect(objectValue(adapterReceipt.continuation).externalExecution).toBe("blocked");
+
+    const approvedContinuation = await continueRevenueWorker({
+      approvalId: first.approvalRequestId ?? "",
+      idempotencyKey: `ci-worker-approved-continue-${runId}`,
+      tenantSlug: "continuous-demo",
+      operatorEmail: "owner@continuoushq.com",
+      db,
+    });
+    const approvedOutput = objectValue(approvedContinuation.output);
+    const approvedExecutionPacket = objectValue(approvedOutput.approvedExecutionPacket);
+
+    expect(approvedContinuation.created).toBe(true);
+    expect(approvedContinuation.originalWorkerRunId).toBe(first.workerRunId);
+    expect(approvedContinuation.workflowRunId).toBe(first.workflowRunId);
+    expect(approvedOutput.status).toBe("approved_execution_blocked");
+    expect(approvedOutput.approvalRequestId).toBe(first.approvalRequestId);
+    expect(approvedOutput.nextAction).toBe("enable_scoped_adapter_execution");
+    expect(approvedOutput.externalExecution).toBe("blocked");
+    expect(approvedOutput.externalSend).toBe(false);
+    expect(approvedOutput.requiresApproval).toBe(false);
+    expect(approvedOutput.approvedExecutionEvidenceId).toBeTruthy();
+    expect(approvedOutput.approvedExecutionDocumentId).toBeTruthy();
+    expect(approvedOutput.approvedEvidencePacketId).toBeTruthy();
+    expect(approvedExecutionPacket.status).toBe("approved_execution_blocked");
+    expect(approvedExecutionPacket.externalExecution).toBe("blocked");
+    expect(approvedExecutionPacket.externalSend).toBe(false);
+
+    const [executionWorkflowRun] = await db
+      .select()
+      .from(workflowRuns)
+      .where(eq(workflowRuns.id, first.workflowRunId ?? ""))
+      .limit(1);
+    const executionWorkflowData = objectValue(executionWorkflowRun?.data);
+    const approvedExecutionContinuation = objectValue(
+      executionWorkflowData.approvedExecutionContinuation,
+    );
+
+    expect(executionWorkflowRun?.state).toBe("execution_blocked");
+    expect(approvedExecutionContinuation.workerRunId).toBe(approvedContinuation.workerRunId);
+    expect(approvedExecutionContinuation.action).toBe("approved");
+    expect(approvedExecutionContinuation.approvedExecutionEvidenceId).toBe(
+      approvedOutput.approvedExecutionEvidenceId,
+    );
+    expect(executionWorkflowData.workflowStepIds).toContain(approvedContinuation.workflowStepId);
+
+    const [approvedContinuationStep] = await db
+      .select()
+      .from(workflowSteps)
+      .where(eq(workflowSteps.id, approvedContinuation.workflowStepId ?? ""))
+      .limit(1);
+    const approvedStepOutput = objectValue(approvedContinuationStep?.output);
+
+    expect(approvedContinuationStep?.kind).toBe("worker_continuation");
+    expect(approvedContinuationStep?.fromState).toBe("approved");
+    expect(approvedContinuationStep?.toState).toBe("execution_blocked");
+    expect(approvedStepOutput.nextAction).toBe("enable_scoped_adapter_execution");
+    expect(approvedStepOutput.externalExecution).toBe("blocked");
+    expect(approvedStepOutput.externalSend).toBe(false);
+
+    const [approvedExecutionEvidence] = await db
+      .select()
+      .from(evidence)
+      .where(eq(evidence.id, String(approvedOutput.approvedExecutionEvidenceId ?? "")))
+      .limit(1);
+    const approvedExecutionEvidenceData = objectValue(approvedExecutionEvidence?.data);
+    const [approvedExecutionDocument] = await db
+      .select()
+      .from(documents)
+      .where(eq(documents.id, String(approvedOutput.approvedExecutionDocumentId ?? "")))
+      .limit(1);
+    const [approvedEvidencePacket] = await db
+      .select()
+      .from(evidencePackets)
+      .where(eq(evidencePackets.id, String(approvedOutput.approvedEvidencePacketId ?? "")))
+      .limit(1);
+
+    expect(approvedExecutionEvidence?.kind).toBe("draft");
+    expect(approvedExecutionEvidenceData.externalExecution).toBe("blocked");
+    expect(approvedExecutionEvidenceData.externalSend).toBe(false);
+    expect(approvedExecutionDocument?.state).toBe("blocked");
+    expect(approvedEvidencePacket?.state).toBe("blocked");
+    expect(approvedEvidencePacket?.documentId).toBe(approvedOutput.approvedExecutionDocumentId);
+
+    const [continuedOriginalRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(eq(workerRuns.id, first.workerRunId ?? ""))
+      .limit(1);
+    const continuedOriginalOutput = objectValue(objectValue(continuedOriginalRun?.data).output);
+
+    expect(objectValue(continuedOriginalOutput.approvedExecutionContinuation).workerRunId).toBe(
+      approvedContinuation.workerRunId,
+    );
+    expect(continuedOriginalOutput.externalSend).toBe(false);
+
+    const [continuedAdapterAction] = await db
+      .select()
+      .from(adapterActions)
+      .where(eq(adapterActions.id, first.adapterActionId ?? ""))
+      .limit(1);
+    const continuedAdapterReceipt = objectValue(continuedAdapterAction?.receipt);
+
+    expect(objectValue(continuedAdapterReceipt.approvedExecutionContinuation).externalExecution).toBe(
+      "blocked",
+    );
+    expect(continuedAdapterReceipt.externalMutation).toBe(false);
+    expect(continuedAdapterReceipt.externalSend).toBe(false);
+
+    const approvedReplay = await continueRevenueWorker({
+      approvalId: first.approvalRequestId ?? "",
+      idempotencyKey: `ci-worker-approved-continue-${runId}`,
+      tenantSlug: "continuous-demo",
+      operatorEmail: "owner@continuoushq.com",
+      db,
+    });
+
+    expect(approvedReplay.created).toBe(false);
+    expect(approvedReplay.workerRunId).toBe(approvedContinuation.workerRunId);
+    expect(objectValue(approvedReplay.output).status).toBe("approved_execution_blocked");
   }, 120_000);
 
   it("continues revision-requested approval outcomes through the worker command spine", async () => {
