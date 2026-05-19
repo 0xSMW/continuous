@@ -26,7 +26,8 @@ commands.
 `POST /api/core` is the operator-gated headless Core command surface. It
 supports `task.create`, `task.transition`, `object.upsert`, `object.link`,
 `event.ingest`, `evidence.attach`, `document.create`, `decision.record`,
-`approval.request`, and `view.publish`, all with the same bearer token used by
+`approval.request`, `capability.grant`, `budget.reserve`, `budget.charge`,
+`budget.release`, and `view.publish`, all with the same bearer token used by
 worker and workflow commands.
 
 ## First Deploy
@@ -102,6 +103,6 @@ pass those ids under `config.intake`. `GET /api/core`, `GET /worker?view=snapsho
 snapshots and approval review. Worker-specific HTTP paths are intentionally
 absent; expand the worker control plane through `/worker` payload fields.
 The deploy workflow smokes Core lead intake before `/worker`, then covers
-`/api/core` task creation, task transition, approval request, object,
-object-link, event, evidence, document, decision, and generated-view commands
-after each production rollout.
+`/api/core` task creation, task transition, approval request, capability grant,
+budget reserve/charge/release, object, object-link, event, evidence, document,
+decision, and generated-view commands after each production rollout.

@@ -1,5 +1,7 @@
 import { env } from "../../../src/env";
 import { requestApproval } from "../../../src/core/approvals";
+import { reserveBudget, chargeBudget, releaseBudget } from "../../../src/core/budgets";
+import { grantCapability } from "../../../src/core/capabilities";
 import { getHealth } from "../../../src/core/health";
 import { getCoreSummarySafe } from "../../../src/core/summary";
 import {
@@ -614,6 +616,216 @@ export async function POST(request: Request) {
     }
   }
 
+  if (command === "capability.grant") {
+    const idempotency = normalizeIdempotencyKey(
+      request.headers.get("idempotency-key") ?? body.idempotencyKey,
+    );
+
+    if (!idempotency.ok) {
+      return errorResponse(
+        {
+          code: "invalid_idempotency_key",
+          message: idempotency.message,
+        },
+        400,
+      );
+    }
+
+    try {
+      const result = await grantCapability({
+        operatorEmail: auth.operatorEmail,
+        idempotencyKey: idempotency.key,
+        tenantSlug,
+        capabilityId: optionalString(config.capabilityId),
+        capabilityKey: optionalString(config.capabilityKey),
+        capabilityVersion: optionalString(config.capabilityVersion),
+        actor: jsonObject(config.actor),
+        scope: jsonObject(config.scope),
+        policy: jsonObject(config.policy),
+        active: optionalBoolean(config.active),
+        startsAt: optionalString(config.startsAt),
+        endsAt: optionalString(config.endsAt),
+        approvalRequestId: optionalString(config.approvalRequestId),
+        reason: optionalString(config.reason),
+      });
+
+      return Response.json(
+        {
+          api: apiVersion,
+          data: {
+            command,
+            core: {
+              tenantSlug: tenantSlug ?? null,
+            },
+            result,
+          },
+          error: null,
+        },
+        {
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    } catch (error) {
+      return coreErrorResponse(error, "core_capability_grant_failed");
+    }
+  }
+
+  if (command === "budget.reserve") {
+    const idempotency = normalizeIdempotencyKey(
+      request.headers.get("idempotency-key") ?? body.idempotencyKey,
+    );
+
+    if (!idempotency.ok) {
+      return errorResponse(
+        {
+          code: "invalid_idempotency_key",
+          message: idempotency.message,
+        },
+        400,
+      );
+    }
+
+    try {
+      const result = await reserveBudget({
+        operatorEmail: auth.operatorEmail,
+        idempotencyKey: idempotency.key,
+        tenantSlug,
+        budgetAccountId: optionalString(config.budgetAccountId) ?? "",
+        units: config.units,
+        taskId: optionalString(config.taskId),
+        capabilityId: optionalString(config.capabilityId),
+        expiresAt: optionalString(config.expiresAt),
+        reason: optionalString(config.reason),
+        data: jsonObject(config.data),
+      });
+
+      return Response.json(
+        {
+          api: apiVersion,
+          data: {
+            command,
+            core: {
+              tenantSlug: tenantSlug ?? null,
+            },
+            result,
+          },
+          error: null,
+        },
+        {
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    } catch (error) {
+      return coreErrorResponse(error, "core_budget_reserve_failed");
+    }
+  }
+
+  if (command === "budget.charge") {
+    const idempotency = normalizeIdempotencyKey(
+      request.headers.get("idempotency-key") ?? body.idempotencyKey,
+    );
+
+    if (!idempotency.ok) {
+      return errorResponse(
+        {
+          code: "invalid_idempotency_key",
+          message: idempotency.message,
+        },
+        400,
+      );
+    }
+
+    try {
+      const result = await chargeBudget({
+        operatorEmail: auth.operatorEmail,
+        idempotencyKey: idempotency.key,
+        tenantSlug,
+        reservationId: optionalString(config.reservationId) ?? "",
+        units: config.units,
+        costUsd: config.costUsd,
+        actor: jsonObject(config.actor),
+        taskId: optionalString(config.taskId),
+        capabilityId: optionalString(config.capabilityId),
+        inferenceId: optionalString(config.inferenceId),
+        reason: optionalString(config.reason),
+        data: jsonObject(config.data),
+      });
+
+      return Response.json(
+        {
+          api: apiVersion,
+          data: {
+            command,
+            core: {
+              tenantSlug: tenantSlug ?? null,
+            },
+            result,
+          },
+          error: null,
+        },
+        {
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    } catch (error) {
+      return coreErrorResponse(error, "core_budget_charge_failed");
+    }
+  }
+
+  if (command === "budget.release") {
+    const idempotency = normalizeIdempotencyKey(
+      request.headers.get("idempotency-key") ?? body.idempotencyKey,
+    );
+
+    if (!idempotency.ok) {
+      return errorResponse(
+        {
+          code: "invalid_idempotency_key",
+          message: idempotency.message,
+        },
+        400,
+      );
+    }
+
+    try {
+      const result = await releaseBudget({
+        operatorEmail: auth.operatorEmail,
+        idempotencyKey: idempotency.key,
+        tenantSlug,
+        reservationId: optionalString(config.reservationId) ?? "",
+        reason: optionalString(config.reason),
+        data: jsonObject(config.data),
+      });
+
+      return Response.json(
+        {
+          api: apiVersion,
+          data: {
+            command,
+            core: {
+              tenantSlug: tenantSlug ?? null,
+            },
+            result,
+          },
+          error: null,
+        },
+        {
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    } catch (error) {
+      return coreErrorResponse(error, "core_budget_release_failed");
+    }
+  }
+
   if (command === "object.link") {
     const idempotency = normalizeIdempotencyKey(
       request.headers.get("idempotency-key") ?? body.idempotencyKey,
@@ -727,7 +939,7 @@ export async function POST(request: Request) {
     {
       code: "core_command_unsupported",
       message:
-        "Core command must be task.create, task.transition, object.upsert, object.link, event.ingest, evidence.attach, document.create, decision.record, approval.request, or view.publish.",
+        "Core command must be task.create, task.transition, object.upsert, object.link, event.ingest, evidence.attach, document.create, decision.record, approval.request, capability.grant, budget.reserve, budget.charge, budget.release, or view.publish.",
     },
     400,
   );

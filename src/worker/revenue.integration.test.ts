@@ -6,6 +6,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { reconcileAdapterLedger } from "../core/adapters";
 import { requestApproval } from "../core/approvals";
+import { reserveBudget, chargeBudget, releaseBudget } from "../core/budgets";
+import { grantCapability } from "../core/capabilities";
 import {
   attachCoreEvidence,
   createCoreDocument,
@@ -22,6 +24,10 @@ import {
   adapterRuns,
   approvalRequests,
   auditEvents,
+  budgetAccounts,
+  budgetReservations,
+  capabilities,
+  capabilityGrants,
   connections,
   decisions,
   documents,
@@ -33,7 +39,9 @@ import {
   objectVersions,
   tasks,
   generatedViews,
+  usageEvents,
   workerRuns,
+  workers,
   type JsonObject,
 } from "../db/schema";
 import { revenueWorkerEvalCases, scoreRevenueWorkerRun } from "./evals";
@@ -274,6 +282,228 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(transitionReplay.taskId).toBe(taskResult.taskId);
     expect(approvalReplay.created).toBe(false);
     expect(approvalReplay.approvalRequestId).toBe(approvalResult.approvalRequestId);
+  }, 120_000);
+
+  it("grants capabilities and moves budget through reserve charge and release", async () => {
+    const runId = randomUUID();
+    const [capability] = await db
+      .select()
+      .from(capabilities)
+      .where(and(eq(capabilities.key, "worker.read"), eq(capabilities.active, true)))
+      .limit(1);
+    const [worker] = await db.select().from(workers).where(eq(workers.role, "revenue_operations")).limit(1);
+
+    expect(capability).toBeDefined();
+    expect(worker).toBeDefined();
+
+    const [budgetAccount] = await db
+      .select()
+      .from(budgetAccounts)
+      .where(
+        and(
+          eq(budgetAccounts.tenantId, worker.tenantId),
+          eq(budgetAccounts.target, "worker"),
+          eq(budgetAccounts.targetId, worker.id),
+          eq(budgetAccounts.active, true),
+        ),
+      )
+      .limit(1);
+
+    expect(budgetAccount).toBeDefined();
+
+    const grantResult = await grantCapability({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-capability-grant-${runId}`,
+      capabilityId: capability.id,
+      actor: {
+        type: "worker",
+        id: worker.id,
+      },
+      scope: {
+        flow: "ci_budget_control",
+      },
+      policy: {
+        autonomyLevel: 1,
+        externalExecution: "blocked",
+      },
+      reason: "CI grants a scoped worker capability through Core.",
+      db,
+    });
+
+    expect(grantResult.granted).toBe(true);
+    expect(grantResult.capabilityGrantId).toBeTruthy();
+    expect(grantResult.eventId).toBeTruthy();
+    expect(grantResult.auditEventId).toBeTruthy();
+    expect(grantResult.evidenceId).toBeTruthy();
+    expect(grantResult.grant.actor.type).toBe("worker");
+    expect(grantResult.grant.capabilityKey).toBe("worker.read");
+
+    const taskResult = await createCoreTask({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-budget-task-${runId}`,
+      title: "Review budget control packet",
+      capabilityId: capability.id,
+      evidence: {
+        required: ["budget_trace"],
+      },
+      db,
+    });
+    const reserveResult = await reserveBudget({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-budget-reserve-${runId}`,
+      budgetAccountId: budgetAccount.id,
+      taskId: taskResult.taskId,
+      capabilityId: capability.id,
+      units: 1200,
+      reason: "Reserve budget before worker action.",
+      data: {
+        source: "ci.core",
+      },
+      db,
+    });
+
+    expect(reserveResult.reserved).toBe(true);
+    expect(reserveResult.reservation.state).toBe("held");
+    expect(reserveResult.reservation.units).toBe(1200);
+    expect(reserveResult.eventId).toBeTruthy();
+    expect(reserveResult.auditEventId).toBeTruthy();
+    expect(reserveResult.evidenceId).toBeTruthy();
+
+    const chargeResult = await chargeBudget({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-budget-charge-${runId}`,
+      reservationId: reserveResult.reservationId,
+      actor: {
+        type: "worker",
+        id: worker.id,
+      },
+      taskId: taskResult.taskId,
+      capabilityId: capability.id,
+      costUsd: "0.000000",
+      reason: "Charge the reserved budget after the worker action.",
+      data: {
+        source: "ci.core",
+      },
+      db,
+    });
+
+    expect(chargeResult.charged).toBe(true);
+    expect(chargeResult.usage.units).toBe(1200);
+    expect(chargeResult.usage.reservationId).toBe(reserveResult.reservationId);
+    expect(chargeResult.eventId).toBeTruthy();
+    expect(chargeResult.auditEventId).toBeTruthy();
+    expect(chargeResult.evidenceId).toBeTruthy();
+
+    const releaseReserve = await reserveBudget({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-budget-release-reserve-${runId}`,
+      budgetAccountId: budgetAccount.id,
+      taskId: taskResult.taskId,
+      capabilityId: capability.id,
+      units: 600,
+      reason: "Reserve budget for a canceled worker action.",
+      db,
+    });
+    const releaseResult = await releaseBudget({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-budget-release-${runId}`,
+      reservationId: releaseReserve.reservationId,
+      reason: "Release unused budget after canceling the action.",
+      data: {
+        source: "ci.core",
+      },
+      db,
+    });
+
+    expect(releaseResult.released).toBe(true);
+    expect(releaseResult.reservation.state).toBe("released");
+    expect(releaseResult.eventId).toBeTruthy();
+    expect(releaseResult.auditEventId).toBeTruthy();
+    expect(releaseResult.evidenceId).toBeTruthy();
+
+    const [grant] = await db
+      .select()
+      .from(capabilityGrants)
+      .where(eq(capabilityGrants.id, grantResult.capabilityGrantId))
+      .limit(1);
+    const [chargedReservation] = await db
+      .select()
+      .from(budgetReservations)
+      .where(eq(budgetReservations.id, reserveResult.reservationId))
+      .limit(1);
+    const [releasedReservation] = await db
+      .select()
+      .from(budgetReservations)
+      .where(eq(budgetReservations.id, releaseReserve.reservationId))
+      .limit(1);
+    const [usage] = await db
+      .select()
+      .from(usageEvents)
+      .where(eq(usageEvents.id, chargeResult.usageEventId))
+      .limit(1);
+    const [auditCount] = await db
+      .select({ value: count() })
+      .from(auditEvents)
+      .where(
+        inArray(auditEvents.id, [
+          grantResult.auditEventId,
+          reserveResult.auditEventId,
+          chargeResult.auditEventId,
+          releaseResult.auditEventId,
+        ]),
+      );
+
+    expect(grant?.active).toBe(true);
+    expect(objectValue(grant?.policy).externalExecution).toBe("blocked");
+    expect(chargedReservation?.state).toBe("used");
+    expect(releasedReservation?.state).toBe("released");
+    expect(usage?.reservationId).toBe(reserveResult.reservationId);
+    expect(usage?.actorType).toBe("worker");
+    expect(usage?.actorId).toBe(worker.id);
+    expect(auditCount.value).toBe(4);
+
+    const reserveReplay = await reserveBudget({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-budget-reserve-${runId}`,
+      budgetAccountId: budgetAccount.id,
+      units: 999,
+      reason: "Replay should return the first reservation.",
+      db,
+    });
+    const chargeReplay = await chargeBudget({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-budget-charge-${runId}`,
+      reservationId: reserveResult.reservationId,
+      actor: {
+        type: "worker",
+        id: worker.id,
+      },
+      reason: "Replay should return the first usage event.",
+      db,
+    });
+    const releaseReplay = await releaseBudget({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-budget-release-${runId}`,
+      reservationId: releaseReserve.reservationId,
+      reason: "Replay should return the first release.",
+      db,
+    });
+
+    expect(reserveReplay.reserved).toBe(false);
+    expect(reserveReplay.reservationId).toBe(reserveResult.reservationId);
+    expect(chargeReplay.charged).toBe(false);
+    expect(chargeReplay.usageEventId).toBe(chargeResult.usageEventId);
+    expect(releaseReplay.released).toBe(false);
+    expect(releaseReplay.reservationId).toBe(releaseReserve.reservationId);
   }, 120_000);
 
   it("persists headless core objects, events, evidence, documents, and decisions", async () => {

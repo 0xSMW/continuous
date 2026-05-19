@@ -721,13 +721,13 @@ async function loadWorkerContext(db: Database, selector: RevenueWorkerSelector):
   const [quoteCapability] = await db
     .select({ id: capabilities.id })
     .from(capabilities)
-    .where(eq(capabilities.key, "quote.prepare"))
+    .where(and(eq(capabilities.key, "quote.prepare"), eq(capabilities.active, true)))
     .limit(1);
 
   const [briefCapability] = await db
     .select({ id: capabilities.id })
     .from(capabilities)
-    .where(eq(capabilities.key, "owner_brief.generate"))
+    .where(and(eq(capabilities.key, "owner_brief.generate"), eq(capabilities.active, true)))
     .limit(1);
 
   const [budgetAccount] = await db
@@ -892,12 +892,14 @@ export async function getRevenueWorkerSnapshot(
     db
       .select({ value: count() })
       .from(capabilityGrants)
+      .innerJoin(capabilities, eq(capabilityGrants.capabilityId, capabilities.id))
       .where(
         and(
           eq(capabilityGrants.tenantId, workerRow.tenantId),
           eq(capabilityGrants.actorType, "worker"),
           eq(capabilityGrants.actorId, workerRow.id),
           eq(capabilityGrants.active, true),
+          eq(capabilities.active, true),
         ),
       ),
     db
@@ -1386,6 +1388,7 @@ export async function runRevenueWorker(input: {
     const [grant] = await tx
       .select({ id: capabilityGrants.id })
       .from(capabilityGrants)
+      .innerJoin(capabilities, eq(capabilityGrants.capabilityId, capabilities.id))
       .where(
         and(
           eq(capabilityGrants.tenantId, context.worker.tenantId),
@@ -1393,6 +1396,7 @@ export async function runRevenueWorker(input: {
           eq(capabilityGrants.actorId, context.worker.id),
           eq(capabilityGrants.capabilityId, capabilityId),
           eq(capabilityGrants.active, true),
+          eq(capabilities.active, true),
           sql`(${capabilityGrants.startsAt} is null or ${capabilityGrants.startsAt} <= ${now})`,
           sql`(${capabilityGrants.endsAt} is null or ${capabilityGrants.endsAt} > ${now})`,
         ),

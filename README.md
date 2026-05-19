@@ -41,7 +41,8 @@ Then open `http://localhost:3000`.
   `POST /api/core` accepts structured core commands: `task.create`,
   `task.transition`, `object.upsert`, `object.link`, `event.ingest`,
   `evidence.attach`, `document.create`, `decision.record`,
-  `approval.request`, and `view.publish`.
+  `approval.request`, `capability.grant`, `budget.reserve`,
+  `budget.charge`, `budget.release`, and `view.publish`.
 - `/worker` is the canonical worker control-plane API. Use `GET /worker?view=snapshot` or
   `GET /worker?view=approvals`; use `POST /worker` with `command` and `config`
   payloads for side-effecting worker commands. Revenue operations runs prefer

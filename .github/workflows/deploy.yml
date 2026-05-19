@@ -598,6 +598,232 @@ jobs:
           from evidence where id = '$CORE_APPROVAL_EVIDENCE_ID'::uuid;
           SQL
 
+          CORE_CONTROL_IDS="$(psql_db -At <<'SQL'
+          select w.id || '|' || c.id || '|' || ba.id
+          from workers w
+          inner join tenants t on t.id = w.tenant_id
+          inner join capabilities c on c.key = 'worker.read' and c.active = true
+          inner join budget_accounts ba on ba.tenant_id = w.tenant_id
+            and ba.target = 'worker'
+            and ba.target_id = w.id
+            and ba.active = true
+          where t.slug = 'continuous-demo'
+            and w.role = 'revenue_operations'
+            and w.state in ('training', 'active', 'paused')
+          order by w.created_at
+          limit 1;
+          SQL
+          )"
+
+          if [ -z "$CORE_CONTROL_IDS" ]; then
+            echo "Missing worker, capability, or budget account for Core control smoke." >&2
+            exit 1
+          fi
+
+          CORE_WORKER_ID="${CORE_CONTROL_IDS%%|*}"
+          REST="${CORE_CONTROL_IDS#*|}"
+          CORE_CAPABILITY_ID="${REST%%|*}"
+          CORE_BUDGET_ACCOUNT_ID="${REST##*|}"
+
+          CORE_CAPABILITY_GRANT_KEY="deploy-core-capability-grant-$RUN_ID"
+          CORE_CAPABILITY_GRANT_PAYLOAD="$(
+            /usr/bin/jq -nc \
+              --arg key "$CORE_CAPABILITY_GRANT_KEY" \
+              --arg workerId "$CORE_WORKER_ID" \
+              --arg capabilityId "$CORE_CAPABILITY_ID" '{
+                command: "capability.grant",
+                core: {tenantSlug: "continuous-demo"},
+                idempotencyKey: $key,
+                config: {
+                  capabilityId: $capabilityId,
+                  actor: {
+                    type: "worker",
+                    id: $workerId
+                  },
+                  scope: {
+                    source: "deploy_smoke"
+                  },
+                  policy: {
+                    autonomyLevel: 1,
+                    externalExecution: "blocked"
+                  },
+                  reason: "Deploy smoke grants a scoped worker capability through Core."
+                }
+              }'
+          )"
+          CORE_CAPABILITY_GRANT_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/api/core \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$CORE_CAPABILITY_GRANT_PAYLOAD"
+          )"
+
+          echo "$CORE_CAPABILITY_GRANT_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:.data.result}'
+          echo "$CORE_CAPABILITY_GRANT_RESPONSE" | /usr/bin/jq -e \
+            '.error == null and .data.command == "capability.grant" and .data.result.granted == true and (.data.result.capabilityGrantId | length > 0) and (.data.result.evidenceId | length > 0)' \
+            >/dev/null
+
+          CORE_CAPABILITY_GRANT_ID="$(echo "$CORE_CAPABILITY_GRANT_RESPONSE" | /usr/bin/jq -r '.data.result.capabilityGrantId')"
+          CORE_CAPABILITY_GRANT_EVIDENCE_ID="$(echo "$CORE_CAPABILITY_GRANT_RESPONSE" | /usr/bin/jq -r '.data.result.evidenceId')"
+
+          CORE_BUDGET_RESERVE_KEY="deploy-core-budget-reserve-$RUN_ID"
+          CORE_BUDGET_RESERVE_PAYLOAD="$(
+            /usr/bin/jq -nc \
+              --arg key "$CORE_BUDGET_RESERVE_KEY" \
+              --arg accountId "$CORE_BUDGET_ACCOUNT_ID" \
+              --arg taskId "$CORE_TASK_ID" \
+              --arg capabilityId "$CORE_CAPABILITY_ID" '{
+                command: "budget.reserve",
+                core: {tenantSlug: "continuous-demo"},
+                idempotencyKey: $key,
+                config: {
+                  budgetAccountId: $accountId,
+                  taskId: $taskId,
+                  capabilityId: $capabilityId,
+                  units: 1000,
+                  reason: "Deploy smoke reserves budget before worker action.",
+                  data: {
+                    source: "deploy_smoke"
+                  }
+                }
+              }'
+          )"
+          CORE_BUDGET_RESERVE_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/api/core \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$CORE_BUDGET_RESERVE_PAYLOAD"
+          )"
+
+          echo "$CORE_BUDGET_RESERVE_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:.data.result}'
+          echo "$CORE_BUDGET_RESERVE_RESPONSE" | /usr/bin/jq -e \
+            '.error == null and .data.command == "budget.reserve" and .data.result.reserved == true and .data.result.reservation.state == "held" and .data.result.reservation.units == 1000 and (.data.result.evidenceId | length > 0)' \
+            >/dev/null
+
+          CORE_BUDGET_RESERVATION_ID="$(echo "$CORE_BUDGET_RESERVE_RESPONSE" | /usr/bin/jq -r '.data.result.reservationId')"
+          CORE_BUDGET_CHARGE_KEY="deploy-core-budget-charge-$RUN_ID"
+          CORE_BUDGET_CHARGE_PAYLOAD="$(
+            /usr/bin/jq -nc \
+              --arg key "$CORE_BUDGET_CHARGE_KEY" \
+              --arg reservationId "$CORE_BUDGET_RESERVATION_ID" \
+              --arg workerId "$CORE_WORKER_ID" \
+              --arg taskId "$CORE_TASK_ID" \
+              --arg capabilityId "$CORE_CAPABILITY_ID" '{
+                command: "budget.charge",
+                core: {tenantSlug: "continuous-demo"},
+                idempotencyKey: $key,
+                config: {
+                  reservationId: $reservationId,
+                  actor: {
+                    type: "worker",
+                    id: $workerId
+                  },
+                  taskId: $taskId,
+                  capabilityId: $capabilityId,
+                  costUsd: "0.000000",
+                  reason: "Deploy smoke charges reserved budget after worker action.",
+                  data: {
+                    source: "deploy_smoke"
+                  }
+                }
+              }'
+          )"
+          CORE_BUDGET_CHARGE_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/api/core \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$CORE_BUDGET_CHARGE_PAYLOAD"
+          )"
+
+          echo "$CORE_BUDGET_CHARGE_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:.data.result}'
+          echo "$CORE_BUDGET_CHARGE_RESPONSE" | /usr/bin/jq -e \
+            '.error == null and .data.command == "budget.charge" and .data.result.charged == true and .data.result.usage.units == 1000 and (.data.result.usageEventId | length > 0) and (.data.result.evidenceId | length > 0)' \
+            >/dev/null
+
+          CORE_BUDGET_USAGE_ID="$(echo "$CORE_BUDGET_CHARGE_RESPONSE" | /usr/bin/jq -r '.data.result.usageEventId')"
+
+          CORE_BUDGET_RELEASE_RESERVE_KEY="deploy-core-budget-release-reserve-$RUN_ID"
+          CORE_BUDGET_RELEASE_RESERVE_PAYLOAD="$(
+            /usr/bin/jq -nc \
+              --arg key "$CORE_BUDGET_RELEASE_RESERVE_KEY" \
+              --arg accountId "$CORE_BUDGET_ACCOUNT_ID" \
+              --arg taskId "$CORE_TASK_ID" \
+              --arg capabilityId "$CORE_CAPABILITY_ID" '{
+                command: "budget.reserve",
+                core: {tenantSlug: "continuous-demo"},
+                idempotencyKey: $key,
+                config: {
+                  budgetAccountId: $accountId,
+                  taskId: $taskId,
+                  capabilityId: $capabilityId,
+                  units: 500,
+                  reason: "Deploy smoke reserves budget for release coverage.",
+                  data: {
+                    source: "deploy_smoke"
+                  }
+                }
+              }'
+          )"
+          CORE_BUDGET_RELEASE_RESERVE_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/api/core \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$CORE_BUDGET_RELEASE_RESERVE_PAYLOAD"
+          )"
+
+          echo "$CORE_BUDGET_RELEASE_RESERVE_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:.data.result}'
+          echo "$CORE_BUDGET_RELEASE_RESERVE_RESPONSE" | /usr/bin/jq -e \
+            '.error == null and .data.command == "budget.reserve" and .data.result.reserved == true and .data.result.reservation.state == "held"' \
+            >/dev/null
+
+          CORE_BUDGET_RELEASE_RESERVATION_ID="$(echo "$CORE_BUDGET_RELEASE_RESERVE_RESPONSE" | /usr/bin/jq -r '.data.result.reservationId')"
+          CORE_BUDGET_RELEASE_KEY="deploy-core-budget-release-$RUN_ID"
+          CORE_BUDGET_RELEASE_PAYLOAD="$(
+            /usr/bin/jq -nc \
+              --arg key "$CORE_BUDGET_RELEASE_KEY" \
+              --arg reservationId "$CORE_BUDGET_RELEASE_RESERVATION_ID" '{
+                command: "budget.release",
+                core: {tenantSlug: "continuous-demo"},
+                idempotencyKey: $key,
+                config: {
+                  reservationId: $reservationId,
+                  reason: "Deploy smoke releases unused budget.",
+                  data: {
+                    source: "deploy_smoke"
+                  }
+                }
+              }'
+          )"
+          CORE_BUDGET_RELEASE_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/api/core \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$CORE_BUDGET_RELEASE_PAYLOAD"
+          )"
+
+          echo "$CORE_BUDGET_RELEASE_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:.data.result}'
+          echo "$CORE_BUDGET_RELEASE_RESPONSE" | /usr/bin/jq -e \
+            '.error == null and .data.command == "budget.release" and .data.result.released == true and .data.result.reservation.state == "released" and (.data.result.evidenceId | length > 0)' \
+            >/dev/null
+
+          psql_db -At <<SQL
+          select 'core_capability_grant' as kind, active, actor_type, actor_id
+          from capability_grants where id = '$CORE_CAPABILITY_GRANT_ID'::uuid;
+          select 'core_capability_grant_evidence' as kind, kind, data->>'capabilityGrantId'
+          from evidence where id = '$CORE_CAPABILITY_GRANT_EVIDENCE_ID'::uuid;
+          select 'core_budget_charged_reservation' as kind, state, units::text
+          from budget_reservations where id = '$CORE_BUDGET_RESERVATION_ID'::uuid;
+          select 'core_budget_usage' as kind, units::text, actor_type, actor_id
+          from usage_events where id = '$CORE_BUDGET_USAGE_ID'::uuid;
+          select 'core_budget_released_reservation' as kind, state, units::text
+          from budget_reservations where id = '$CORE_BUDGET_RELEASE_RESERVATION_ID'::uuid;
+          SQL
+
           CORE_OBJECT_KEY="deploy-core-object-$RUN_ID"
           CORE_OBJECT_PAYLOAD="$(
             /usr/bin/jq -nc --arg key "$CORE_OBJECT_KEY" '{

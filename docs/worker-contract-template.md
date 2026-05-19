@@ -48,6 +48,10 @@ List the exact Core writes the worker needs:
 | `document.create` | Document or packet record | `kind`, `name`, `state`, references |
 | `decision.record` | Proposed or decided worker judgment | `kind`, `decision`, `state`, references |
 | `approval.request` | Human or manager review gate | `kind`, `title`, task/object/event refs, action, policy |
+| `capability.grant` | Scoped worker or user authority | `capabilityId` or `capabilityKey`, actor, reason, scope, policy |
+| `budget.reserve` | Hold AI budget before work | `budgetAccountId`, `units`, reason, optional task/capability refs |
+| `budget.charge` | Convert a reservation into usage | `reservationId`, actor, reason, optional task/capability/inference refs |
+| `budget.release` | Release unused held budget | `reservationId`, reason |
 | `view.publish` | Generated operator view | `key`, `version`, `name`, `purpose`, `contract`, `actions`, `data` |
 
 ## Objects And Links
