@@ -118,14 +118,6 @@ function requiredInteger(value: unknown, field: string, fallback?: number) {
   return candidate;
 }
 
-function optionalInteger(value: unknown, field: string) {
-  if (value === undefined || value === null) {
-    return undefined;
-  }
-
-  return requiredInteger(value, field);
-}
-
 function optionalDate(value: unknown, field: string) {
   const input = cleanString(value);
 
