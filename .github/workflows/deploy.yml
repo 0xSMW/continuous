@@ -4,13 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       site_hosts:
-        description: "Caddy site hosts, for example http://:80 before DNS or continuoushq.com after DNS"
+        description: "Caddy site hosts, for example continuoushq.com, getcontinuous.app"
         required: false
-        default: "http://:80"
+        default: "continuoushq.com, getcontinuous.app"
       app_url:
         description: "Canonical external app URL"
         required: false
-        default: ""
+        default: "https://continuoushq.com"
 
 permissions:
   contents: read
@@ -119,7 +119,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          app_url="${APP_URL:-http://$DEPLOY_HOST}"
+          app_url="${APP_URL:-https://continuoushq.com}"
           ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" \
             "APP_DIR='$DEPLOY_PATH' SITE_HOSTS='$SITE_HOSTS' ACME_EMAIL='$ACME_EMAIL' APP_URL='$app_url' bash -s" <<'REMOTE'
           set -euo pipefail
