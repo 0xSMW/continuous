@@ -365,17 +365,31 @@ async function resolveLeadIntake(
 ) {
   const directLeadPacket = objectValue(config.leadPacket);
   const directLead = objectValue(config.lead);
+  const hasDirectLeadPayload =
+    Object.keys(directLeadPacket).length > 0 || Object.keys(directLead).length > 0;
+  const intake = objectValue(config.intake);
+  const explicitEvidenceId = uuidValue(intake.evidenceId ?? config.evidenceId);
+  const explicitEventId = uuidValue(intake.eventId);
+  const explicitObjectId = uuidValue(intake.objectId ?? config.objectId);
+  const hasExplicitCoreIntake = Boolean(explicitEvidenceId || explicitEventId || explicitObjectId);
 
-  if (Object.keys(directLeadPacket).length > 0 || Object.keys(directLead).length > 0) {
+  if (hasDirectLeadPayload && hasExplicitCoreIntake) {
+    throw new RevenueWorkerUnavailableError(
+      "worker_intake_conflict",
+      "config.intake Core references cannot be combined with config.leadPacket or config.lead; send one authoritative intake source.",
+      400,
+    );
+  }
+
+  if (hasDirectLeadPayload) {
     return { config, intake: {} as JsonObject };
   }
 
-  const intake = objectValue(config.intake);
   const requestedEvidenceId = uuidValue(
-    intake.evidenceId ?? config.evidenceId ?? fallback.evidenceId,
+    explicitEvidenceId || fallback.evidenceId,
   );
-  const requestedEventId = uuidValue(intake.eventId ?? fallback.eventId);
-  const requestedObjectId = uuidValue(intake.objectId ?? config.objectId ?? fallback.objectId);
+  const requestedEventId = uuidValue(explicitEventId || fallback.eventId);
+  const requestedObjectId = uuidValue(explicitObjectId || fallback.objectId);
 
   if (!requestedEventId && !requestedObjectId && !requestedEvidenceId) {
     return { config, intake: {} as JsonObject };

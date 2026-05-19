@@ -134,6 +134,11 @@ family, operation target, customer, source system, or draft type in the URL.
 | `leadPacket.*` | No | Backward-compatible direct payload alias for evals and operator tests |
 | `pricing.baseCents` | No | Optional deterministic quote override for evals and controlled tests |
 
+If `config.intake` includes Core row references, do not also send
+`config.leadPacket` or `config.lead`. Mixed authoritative sources are rejected
+with `worker_intake_conflict`; direct payloads are fallback-only when no Core
+intake refs are present.
+
 `config.externalSend=true` or `config.leadPacket.externalSend=true` is rejected.
 The first runtime only prepares owner-review packets.
 

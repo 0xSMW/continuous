@@ -51,6 +51,7 @@ import {
   type JsonObject,
 } from "../db/schema";
 import { revenueWorkerEvalCases, scoreRevenueWorkerRun } from "./evals";
+import { executeWorkerCommand } from "./registry";
 import { continueRevenueWorker, runRevenueWorker } from "./revenue";
 
 const runIntegration = Boolean(process.env.CI && process.env.DATABASE_URL);
@@ -1495,6 +1496,91 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(replay.workerRunId).toBe(first.workerRunId);
     expect(replayOutput.sourceEventRowId).toBe(eventResult.eventId);
     expect(objectValue(replayOutput.intake).evidenceId).toBe(evidenceResult.evidenceId);
+  }, 120_000);
+
+  it("rejects mixed persisted intake and direct lead payloads through the worker registry", async () => {
+    const runId = randomUUID();
+    const leadPacket = {
+      source: "website_form",
+      sourceEventId: `website_form:${runId}`,
+      customerName: "Core Intake Authority",
+      customerIntent: "roof leak inspection",
+      serviceArea: "roofing",
+      urgency: "high",
+      missingFacts: ["preferred_time_window"],
+    };
+    const objectResult = await upsertCoreObject({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-conflict-lead-object-${runId}`,
+      type: "lead",
+      name: leadPacket.customerName,
+      state: "received",
+      source: leadPacket.source,
+      externalId: leadPacket.sourceEventId,
+      data: leadPacket,
+      reason: "Core lead intake conflict integration test",
+      db,
+    });
+    const eventResult = await ingestCoreEvent({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-conflict-lead-event-${runId}`,
+      type: "lead.received",
+      source: leadPacket.source,
+      objectId: objectResult.objectId,
+      data: leadPacket,
+      db,
+    });
+    const evidenceResult = await attachCoreEvidence({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-conflict-lead-evidence-${runId}`,
+      kind: "snapshot",
+      name: "Core lead intake authority snapshot",
+      objectId: objectResult.objectId,
+      eventId: eventResult.eventId,
+      data: leadPacket,
+      db,
+    });
+    const idempotencyKey = `ci-worker-intake-conflict-${runId}`;
+
+    await expect(
+      executeWorkerCommand({
+        command: "run",
+        target: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        operatorEmail: "owner@continuoushq.com",
+        idempotencyKey,
+        config: {
+          intake: {
+            objectId: objectResult.objectId,
+            eventId: eventResult.eventId,
+            evidenceId: evidenceResult.evidenceId,
+          },
+          leadPacket: {
+            source: "manual_override",
+            sourceEventId: `manual_override:${runId}`,
+            customerName: "Conflicting Payload",
+            customerIntent: "discounted window replacement",
+            serviceArea: "windows",
+            urgency: "low",
+          },
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "worker_intake_conflict",
+      status: 400,
+    });
+
+    const [workerRunCount] = await db
+      .select({ count: count() })
+      .from(workerRuns)
+      .where(eq(workerRuns.idempotencyKey, idempotencyKey));
+
+    expect(workerRunCount.count).toBe(0);
   }, 120_000);
 
   it("reconciles pending dry-run adapter rows without external execution", async () => {
