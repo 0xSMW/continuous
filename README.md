@@ -58,8 +58,9 @@ Then open `http://localhost:3000`.
   for definitions/runs/steps, `GET /workflow?view=approvals` for workflow
   approvals, and `POST /workflow` with `command=start`, `command=transition`,
   or `command=approval.decide`.
-Worker-specific HTTP routes are intentionally absent; new worker families
-extend `/worker` by registering commands and structured payload fields.
+Worker-specific HTTP routes and local mutation shortcuts are intentionally
+absent; new worker families extend `/worker` and `worker:tool` by registering
+commands and structured payload fields.
 
 ## Docs
 

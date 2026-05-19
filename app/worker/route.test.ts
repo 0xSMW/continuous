@@ -146,6 +146,50 @@ describe("/worker route", () => {
     );
   });
 
+  it("does not lift legacy top-level worker fields into the command envelope", async () => {
+    mocks.executeWorkerCommand.mockResolvedValue({
+      worker: {
+        role: "revenue_operations",
+        id: null,
+        tenantSlug: null,
+      },
+      command: "run",
+      result: {},
+    });
+
+    const { POST } = await import("./route");
+    await POST(
+      new Request("http://localhost/worker", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "run",
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+          leadPacket: {
+            customerName: "Acme Roof Repair",
+          },
+          idempotencyKey: "legacy-top-level-001",
+        }),
+      }),
+    );
+
+    expect(mocks.executeWorkerCommand).toHaveBeenCalledWith({
+      command: "run",
+      target: {
+        role: undefined,
+        id: undefined,
+        tenantSlug: undefined,
+      },
+      config: undefined,
+      idempotencyKey: "legacy-top-level-001",
+      operatorEmail: "operator@example.com",
+    });
+  });
+
   it("routes GET views through role-scoped worker selectors", async () => {
     const viewResult = {
       data: {

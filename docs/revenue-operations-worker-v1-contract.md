@@ -102,9 +102,11 @@ Adapter reconciliation also stays on the same command surface:
 }
 ```
 
-Worker-family-specific routes are not part of the public API. Future workers
-must use `/worker` with role, command, idempotency, and config in structured
-fields.
+Worker-family-specific routes are not part of the public API. There is no
+Revenue Operations compatibility path or worker-specific local mutation
+shortcut; HTTP and CLI callers both go through the registered `/worker` command
+envelope. Future workers must use `/worker` with role, command, idempotency,
+and config in structured fields.
 
 ## Registry Entries
 

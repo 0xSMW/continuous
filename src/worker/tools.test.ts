@@ -44,6 +44,40 @@ describe("worker tool contract", () => {
     expect(routeSource).not.toContain("decideApproval");
   });
 
+  it("keeps local mutation entrypoints registry-generic", () => {
+    const pkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")) as {
+      scripts: Record<string, string>;
+    };
+
+    expect(pkg.scripts["worker:tool"]).toBe("bun src/worker/run-tool.ts");
+
+    for (const scriptName of Object.keys(pkg.scripts)) {
+      expect(scriptName).not.toMatch(/^worker:[a-z0-9-]+-(?:worker|operations)$/);
+      expect(pkg.scripts[scriptName]).not.toContain("run-revenue");
+    }
+  });
+
+  it("keeps command tool inputs inside the worker command envelope", () => {
+    for (const tool of workerTools) {
+      if (tool.registry.surface !== "command") {
+        continue;
+      }
+
+      const properties = tool.inputSchema.properties as Record<string, unknown>;
+
+      expect(properties.worker).toBeTruthy();
+      expect(Object.keys(properties)).not.toEqual(
+        expect.arrayContaining(["role", "tenantSlug", "leadPacket", "approvalId", "limit"]),
+      );
+      if (tool.registry.idempotency === "required") {
+        expect(properties.idempotencyKey).toBeTruthy();
+      }
+      if (properties.config) {
+        expect((properties.config as { type?: string }).type).toBe("object");
+      }
+    }
+  });
+
   it("exposes registry-backed repo-owned worker tools", () => {
     expect(workerTools.map((tool) => tool.name)).toEqual([
       "worker.snapshot",
