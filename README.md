@@ -49,11 +49,13 @@ Then open `http://localhost:3000`.
   `GET /worker?view=snapshot&role=revenue_operations` or
   `GET /worker?view=approvals&role=revenue_operations`; use `POST /worker` with
   explicit `worker.role`, `command`, `idempotencyKey` when required, and
-  `config` payloads for side-effecting worker commands. Revenue operations runs prefer
-  persisted Core lead intake references under `config.intake`; `config.leadPacket`
-  remains a direct operator/test fallback. The route validates roles, commands,
-  idempotency, tenant requirements, and external-execution posture through the
-  worker command registry.
+  `config` payloads for side-effecting worker commands. Revenue operations runs
+  prefer persisted Core lead intake selectors under `config.intake`, using
+  `source` plus `sourceEventId` for external callers or exact Core row ids for
+  internal workflow handlers; `config.leadPacket` remains a direct operator/test
+  fallback. The route validates roles, commands, idempotency, tenant
+  requirements, and external-execution posture through the worker command
+  registry.
 - `/workflow` is the canonical workflow control-plane API. Use `GET /workflow`
   for definitions/runs/steps, `GET /workflow?view=approvals` for workflow
   approvals, and `POST /workflow` with `command=start`, `command=transition`,

@@ -12,7 +12,7 @@ raising autonomy or permitting external sends.
 | `worker.role` | Yes | Explicit worker family selector; no default role is assumed |
 | `worker.tenantSlug` | No | Required when an operator email spans tenants |
 | `worker.id` | No | Required when multiple Revenue Workers match |
-| `config.intake` | Preferred for useful runs | References persisted Core lead object/event/evidence rows used to derive classification, draft, quote, evidence, and approval packet |
+| `config.intake` | Preferred for useful runs | References persisted Core lead source identity or object/event/evidence rows used to derive classification, draft, quote, evidence, and approval packet |
 | `config.leadPacket` | Fallback only | Direct source payload for operator tests and controlled evals |
 
 ## API Shape
@@ -30,10 +30,29 @@ The canonical worker control-plane route is `/worker`.
   "idempotencyKey": "rev-worker-001",
   "config": {
     "intake": {
+      "source": "website_form",
+      "sourceEventId": "form-2026-05-19-001"
+    }
+  }
+}
+```
+
+Internal workflow handlers that already hold Core row ids can send exact
+references in the same `config.intake` object:
+
+```json
+{
+  "command": "run",
+  "worker": {
+    "role": "revenue_operations",
+    "tenantSlug": "continuous-demo"
+  },
+  "idempotencyKey": "rev-worker-row-001",
+  "config": {
+    "intake": {
       "objectId": "lead_object_uuid",
       "eventId": "lead_received_event_uuid",
-      "evidenceId": "lead_snapshot_evidence_uuid",
-      "sourceEventId": "form-2026-05-19-001"
+      "evidenceId": "lead_snapshot_evidence_uuid"
     }
   }
 }
@@ -146,17 +165,18 @@ family, operation target, customer, source system, or draft type in the URL.
 
 | Field | Required | Notes |
 |---|---:|---|
-| `intake.objectId` | Preferred | Core `objects.id` for the lead spine |
-| `intake.eventId` | Preferred | Core `events.id` for the `lead.received` event; this is not the external source event id |
-| `intake.evidenceId` | Preferred | Core `evidence.id` for the source snapshot |
-| `intake.sourceEventId` | No | External event or message id when available; trace metadata, not the DB event id |
+| `intake.source` | Preferred for external callers | Source system name, for example `website_form`, used with `intake.sourceEventId` to resolve persisted Core records |
+| `intake.sourceEventId` | Preferred for external callers | External event or message id; this is not the DB event id |
+| `intake.objectId` | Internal workflows | Core `objects.id` for the lead spine |
+| `intake.eventId` | Internal workflows | Core `events.id` for the `lead.received` event |
+| `intake.evidenceId` | Internal workflows | Core `evidence.id` for the source snapshot |
 | `leadPacket.*` | No | Backward-compatible direct payload alias for evals and operator tests |
 | `pricing.baseCents` | No | Optional deterministic quote override for evals and controlled tests |
 
-If `config.intake` includes Core row references, do not also send
-`config.leadPacket` or `config.lead`. Mixed authoritative sources are rejected
-with `worker_intake_conflict`; direct payloads are fallback-only when no Core
-intake refs are present.
+If `config.intake` includes a source selector or Core row references, do not
+also send `config.leadPacket` or `config.lead`. Mixed authoritative sources are
+rejected with `worker_intake_conflict`; direct payloads are fallback-only when
+no Core intake selector is present.
 
 `config.externalSend=true` or `config.leadPacket.externalSend=true` is rejected.
 The first runtime only prepares owner-review packets.

@@ -377,7 +377,7 @@ export const workerToolSchema = {
     intake: {
       type: "object",
       description:
-        "Persisted Core lead intake selector. eventId/objectId/evidenceId are internal Core row ids; sourceEventId is the external origin id.",
+        "Persisted Core lead intake selector. Prefer source plus sourceEventId for external callers; eventId/objectId/evidenceId are internal Core row ids.",
       properties: {
         eventId: { type: "string" },
         objectId: { type: "string" },

@@ -99,7 +99,27 @@ For the HTTPS worker API path, call `POST /worker` with `command`, `worker`,
 `config`, and `idempotencyKey` fields as required by the command plus the bearer
 token from `/opt/continuous/.env`. Revenue Worker runs should first create the
 lead object, `lead.received` event, and source snapshot through `/api/core`, then
-pass those ids under `config.intake`. `GET /api/core`,
+pass the stable source selector under `config.intake`:
+
+```json
+{
+  "command": "run",
+  "worker": {
+    "role": "revenue_operations",
+    "tenantSlug": "continuous-demo"
+  },
+  "idempotencyKey": "deploy-worker-run-001",
+  "config": {
+    "intake": {
+      "source": "website_form",
+      "sourceEventId": "lead_source_event_id"
+    }
+  }
+}
+```
+
+Workflow handlers that already hold Core UUIDs can pass those ids under
+`config.intake`. `GET /api/core`,
 `GET /worker?view=snapshot&role=revenue_operations`, and
 `GET /worker?view=approvals&role=revenue_operations` use the same bearer token for operator-only
 snapshots and approval review. Worker-specific HTTP paths are intentionally

@@ -359,6 +359,130 @@ function firstStringList(...values: unknown[]) {
   return [];
 }
 
+async function lookupLeadIntakeBySource(
+  db: Database,
+  tenantId: string,
+  sourceName: string,
+  sourceEventId: string,
+) {
+  const [eventByIdempotencyKey] = await db
+    .select({
+      id: events.id,
+      objectId: events.objectId,
+    })
+    .from(events)
+    .where(
+      and(
+        eq(events.tenantId, tenantId),
+        eq(events.source, sourceName),
+        eq(events.idempotencyKey, sourceEventId),
+      ),
+    )
+    .orderBy(desc(events.occurredAt))
+    .limit(1);
+  let event = eventByIdempotencyKey;
+
+  const [objectByEvent] = event?.objectId
+    ? await db
+        .select({ id: objects.id })
+        .from(objects)
+        .where(and(eq(objects.tenantId, tenantId), eq(objects.id, event.objectId)))
+        .limit(1)
+    : [];
+  const [objectByExternalId] =
+    objectByEvent
+      ? []
+      : await db
+          .select({ id: objects.id })
+          .from(objects)
+          .where(
+            and(
+              eq(objects.tenantId, tenantId),
+              eq(objects.source, sourceName),
+              eq(objects.externalId, sourceEventId),
+            ),
+          )
+          .orderBy(desc(objects.updatedAt))
+          .limit(1);
+  let object = objectByEvent ?? objectByExternalId;
+
+  if (!event) {
+    const [eventByData] = await db
+      .select({
+        id: events.id,
+        objectId: events.objectId,
+      })
+      .from(events)
+      .where(
+        and(
+          eq(events.tenantId, tenantId),
+          eq(events.source, sourceName),
+          sql`${events.data}->>'sourceEventId' = ${sourceEventId}`,
+        ),
+      )
+      .orderBy(desc(events.occurredAt))
+      .limit(1);
+    event = eventByData;
+  }
+
+  if (!object) {
+    const [objectByData] = await db
+      .select({ id: objects.id })
+      .from(objects)
+      .where(
+        and(
+          eq(objects.tenantId, tenantId),
+          eq(objects.source, sourceName),
+          sql`${objects.data}->>'sourceEventId' = ${sourceEventId}`,
+        ),
+      )
+      .orderBy(desc(objects.updatedAt))
+      .limit(1);
+    object = objectByData;
+  }
+
+  if (!object && event?.objectId) {
+    const [objectByEventData] = await db
+      .select({ id: objects.id })
+      .from(objects)
+      .where(and(eq(objects.tenantId, tenantId), eq(objects.id, event.objectId)))
+      .limit(1);
+    object = objectByEventData;
+  }
+
+  if (!event && object?.id) {
+    const [eventByObject] = await db
+      .select({
+        id: events.id,
+        objectId: events.objectId,
+      })
+      .from(events)
+      .where(
+        and(
+          eq(events.tenantId, tenantId),
+          eq(events.source, sourceName),
+          eq(events.objectId, object.id),
+        ),
+      )
+      .orderBy(desc(events.occurredAt))
+      .limit(1);
+    event = eventByObject;
+  }
+
+  if (!event && !object) {
+    throw new RevenueWorkerUnavailableError(
+      "worker_intake_source_not_found",
+      "config.intake.source and config.intake.sourceEventId do not match persisted Core intake for this tenant.",
+      404,
+    );
+  }
+
+  return {
+    objectId: object?.id ?? event?.objectId ?? null,
+    eventId: event?.id ?? null,
+  };
+}
+
 async function resolveLeadIntake(
   db: Database,
   tenantId: string,
@@ -373,9 +497,20 @@ async function resolveLeadIntake(
   const explicitEvidenceId = uuidValue(intake.evidenceId ?? config.evidenceId);
   const explicitEventId = uuidValue(intake.eventId);
   const explicitObjectId = uuidValue(intake.objectId ?? config.objectId);
+  const sourceSelectorSource = stringValue(intake.source);
+  const sourceSelectorEventId = stringValue(intake.sourceEventId);
   const hasExplicitCoreIntake = Boolean(explicitEvidenceId || explicitEventId || explicitObjectId);
+  const hasSourceSelector = Boolean(sourceSelectorSource && sourceSelectorEventId);
 
-  if (hasDirectLeadPayload && hasExplicitCoreIntake) {
+  if (!hasExplicitCoreIntake && (sourceSelectorSource || sourceSelectorEventId) && !hasSourceSelector) {
+    throw new RevenueWorkerUnavailableError(
+      "worker_intake_source_selector_invalid",
+      "config.intake.source and config.intake.sourceEventId are both required for source-based worker intake.",
+      400,
+    );
+  }
+
+  if (hasDirectLeadPayload && (hasExplicitCoreIntake || hasSourceSelector)) {
     throw new RevenueWorkerUnavailableError(
       "worker_intake_conflict",
       "config.intake Core references cannot be combined with config.leadPacket or config.lead; send one authoritative intake source.",
@@ -387,11 +522,24 @@ async function resolveLeadIntake(
     return { config, intake: {} as JsonObject };
   }
 
+  const sourceLookup =
+    !hasExplicitCoreIntake && hasSourceSelector
+      ? await lookupLeadIntakeBySource(
+          db,
+          tenantId,
+          sourceSelectorSource,
+          sourceSelectorEventId,
+        )
+      : null;
   const requestedEvidenceId = uuidValue(
     explicitEvidenceId || fallback.evidenceId,
   );
-  const requestedEventId = uuidValue(explicitEventId || fallback.eventId);
-  const requestedObjectId = uuidValue(explicitObjectId || fallback.objectId);
+  const requestedEventId = uuidValue(
+    explicitEventId || sourceLookup?.eventId || (!sourceLookup ? fallback.eventId : ""),
+  );
+  const requestedObjectId = uuidValue(
+    explicitObjectId || sourceLookup?.objectId || (!sourceLookup ? fallback.objectId : ""),
+  );
 
   if (!requestedEventId && !requestedObjectId && !requestedEvidenceId) {
     return { config, intake: {} as JsonObject };
@@ -582,7 +730,7 @@ async function resolveLeadIntake(
       leadPacket,
     },
     intake: {
-      mode: "core_read",
+      mode: sourceLookup ? "core_source_lookup" : "core_read",
       objectId: object?.id ?? null,
       eventId: event?.id ?? null,
       evidenceId: evidenceRecord?.id ?? null,

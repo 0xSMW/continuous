@@ -1700,6 +1700,113 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(objectValue(replayOutput.intake).evidenceId).toBe(evidenceResult.evidenceId);
   }, 120_000);
 
+  it("runs from source-based lead intake under config.intake", async () => {
+    const runId = randomUUID();
+    const leadPacket = {
+      source: "website_form",
+      sourceEventId: `website_form:source-lookup:${runId}`,
+      customerName: "Source Lookup Roofing",
+      customerIntent: "roof leak inspection",
+      serviceArea: "roofing",
+      urgency: "high",
+      missingFacts: ["preferred_time_window"],
+    };
+    const objectResult = await upsertCoreObject({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-source-lookup-object-${runId}`,
+      type: "lead",
+      name: leadPacket.customerName,
+      state: "received",
+      source: leadPacket.source,
+      externalId: leadPacket.sourceEventId,
+      data: leadPacket,
+      reason: "Core lead intake source lookup integration test",
+      db,
+    });
+    const eventResult = await ingestCoreEvent({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: leadPacket.sourceEventId,
+      type: "lead.received",
+      source: leadPacket.source,
+      objectId: objectResult.objectId,
+      data: leadPacket,
+      db,
+    });
+    const evidenceResult = await attachCoreEvidence({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-source-lookup-evidence-${runId}`,
+      kind: "snapshot",
+      name: "Core lead source lookup snapshot",
+      objectId: objectResult.objectId,
+      eventId: eventResult.eventId,
+      data: {
+        leadPacket,
+        source: leadPacket.source,
+        sourceEventId: leadPacket.sourceEventId,
+      },
+      db,
+    });
+
+    const first = await runRevenueWorker({
+      idempotencyKey: `ci-worker-source-lookup-${runId}`,
+      tenantSlug: "continuous-demo",
+      operatorEmail: "owner@continuoushq.com",
+      config: {
+        intake: {
+          source: leadPacket.source,
+          sourceEventId: leadPacket.sourceEventId,
+        },
+      },
+    });
+    const output = objectValue(first.output);
+    const intake = objectValue(output.intake);
+
+    expect(first.created).toBe(true);
+    expect(output.source).toBe(leadPacket.source);
+    expect(output.sourceEventId).toBe(leadPacket.sourceEventId);
+    expect(output.sourceObjectId).toBe(objectResult.objectId);
+    expect(output.sourceEventRowId).toBe(eventResult.eventId);
+    expect(output.sourceEvidenceId).toBe(evidenceResult.evidenceId);
+    expect(intake.mode).toBe("core_source_lookup");
+    expect(intake.objectId).toBe(objectResult.objectId);
+    expect(intake.eventId).toBe(eventResult.eventId);
+    expect(intake.evidenceId).toBe(evidenceResult.evidenceId);
+    expect(output.classification).toBe("quote_ready_for_owner_approval");
+    expect(output.externalSend).toBe(false);
+
+    const [workerRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(eq(workerRuns.id, first.workerRunId ?? ""))
+      .limit(1);
+    const runInput = objectValue(objectValue(workerRun?.data).input);
+
+    expect(objectValue(runInput.config).intake).toEqual({
+      source: leadPacket.source,
+      sourceEventId: leadPacket.sourceEventId,
+    });
+    expect(objectValue(runInput.resolvedConfig).leadPacket).toMatchObject({
+      customerName: leadPacket.customerName,
+      customerIntent: leadPacket.customerIntent,
+      source: leadPacket.source,
+      sourceEventId: leadPacket.sourceEventId,
+    });
+
+    const [sourceSnapshot] = await db
+      .select()
+      .from(evidence)
+      .where(eq(evidence.id, first.sourceSnapshotEvidenceId ?? ""))
+      .limit(1);
+    const sourceData = objectValue(sourceSnapshot?.data);
+
+    expect(sourceData.sourceObjectId).toBe(objectResult.objectId);
+    expect(sourceData.sourceEventRowId).toBe(eventResult.eventId);
+    expect(sourceData.sourceEvidenceId).toBe(evidenceResult.evidenceId);
+  }, 120_000);
+
   it("rejects mixed persisted intake and direct lead payloads through the worker registry", async () => {
     const runId = randomUUID();
     const leadPacket = {
