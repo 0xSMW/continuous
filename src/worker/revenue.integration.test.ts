@@ -1807,6 +1807,113 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(sourceData.sourceEvidenceId).toBe(evidenceResult.evidenceId);
   }, 120_000);
 
+  it("reads inbound lead source records before running from the returned selector", async () => {
+    const runId = randomUUID();
+    const sourceEventId = `website_form:lead-read:${runId}`;
+    const read = await executeWorkerCommand({
+      command: "lead.read",
+      target: {
+        role: "revenue_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: `ci-worker-lead-read-${runId}`,
+      config: {
+        source: "website_form",
+        records: [
+          {
+            sourceEventId,
+            customerName: "Lead Read Roofing",
+            customerIntent: "roof leak inspection",
+            serviceArea: "roofing",
+            urgency: "high",
+            missingFacts: ["preferred_time_window"],
+            payload: {
+              formId: runId,
+            },
+          },
+        ],
+      },
+    });
+    const readResult = objectValue(read.result);
+    const selectors = Array.isArray(readResult.selectors)
+      ? readResult.selectors.map((selector) => objectValue(selector))
+      : [];
+    const selector = selectors[0] ?? {};
+
+    expect(read.command).toBe("lead.read");
+    expect(readResult.created).toBe(true);
+    expect(readResult.readCount).toBe(1);
+    expect(selector.source).toBe("website_form");
+    expect(selector.sourceEventId).toBe(sourceEventId);
+    expect(selector.objectId).toBeTruthy();
+    expect(selector.eventId).toBeTruthy();
+    expect(selector.evidenceId).toBeTruthy();
+    expect(objectValue(selector.intake)).toEqual({
+      source: "website_form",
+      sourceEventId,
+    });
+
+    const replay = await executeWorkerCommand({
+      command: "lead.read",
+      target: {
+        role: "revenue_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: `ci-worker-lead-read-${runId}`,
+      config: {
+        source: "website_form",
+        records: [
+          {
+            sourceEventId,
+            customerName: "Lead Read Roofing",
+            customerIntent: "roof leak inspection",
+            serviceArea: "roofing",
+            urgency: "high",
+            missingFacts: ["preferred_time_window"],
+            payload: {
+              formId: runId,
+            },
+          },
+        ],
+      },
+    });
+
+    expect(objectValue(replay.result).created).toBe(false);
+
+    const run = await runRevenueWorker({
+      idempotencyKey: `ci-worker-run-from-lead-read-${runId}`,
+      tenantSlug: "continuous-demo",
+      operatorEmail: "owner@continuoushq.com",
+      config: {
+        intake: objectValue(selector.intake),
+      },
+    });
+    const output = objectValue(run.output);
+    const intake = objectValue(output.intake);
+
+    expect(run.created).toBe(true);
+    expect(output.source).toBe("website_form");
+    expect(output.sourceEventId).toBe(sourceEventId);
+    expect(output.sourceObjectId).toBe(selector.objectId);
+    expect(output.sourceEventRowId).toBe(selector.eventId);
+    expect(output.sourceEvidenceId).toBe(selector.evidenceId);
+    expect(intake.mode).toBe("core_source_lookup");
+    expect(output.externalSend).toBe(false);
+
+    const [readRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(eq(workerRuns.id, stringList([readResult.workerRunId])[0] ?? ""))
+      .limit(1);
+    const readRunData = objectValue(readRun?.data);
+
+    expect(readRun?.mode).toBe("read_only");
+    expect(objectValue(readRunData.input).command).toBe("lead.read");
+    expect(objectValue(readRunData.output).readCount).toBe(1);
+  }, 120_000);
+
   it("rejects mixed persisted intake and direct lead payloads through the worker registry", async () => {
     const runId = randomUUID();
     const leadPacket = {

@@ -141,15 +141,19 @@ curl -X POST http://localhost:3000/worker \
 
 Runs are bound to `WORKER_OPERATOR_EMAIL`, which defaults to the seeded
 `owner@continuoushq.com` user. A successful run records an approval request and
-audit trail while keeping external send and money movement blocked. Create the
-lead object/event/evidence through `/api/core` first; `config.leadPacket` is only
-the direct fallback for controlled local tests.
+audit trail while keeping external send and money movement blocked. Use
+`worker.lead.read` to persist source lead records before `worker.run`;
+`config.leadPacket` is only the direct fallback for controlled local tests.
 
 The same persisted loop can run without exposing HTTP:
 
 ```sh
+bun run worker:tool worker.lead.read <<'JSON'
+{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-lead-read-001","config":{"source":"website_form","records":[{"sourceEventId":"form-local-001","customerName":"Acme Roof Repair","customerIntent":"roof leak inspection","serviceArea":"roofing","urgency":"high"}]}}
+JSON
+
 bun run worker:tool worker.run <<'JSON'
-{"worker":{"role":"revenue_operations"},"idempotencyKey":"local-revenue-run-002","config":{"intake":{"objectId":"lead_object_uuid","eventId":"lead_received_event_uuid","evidenceId":"lead_snapshot_evidence_uuid"}}}
+{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-revenue-run-002","config":{"intake":{"source":"website_form","sourceEventId":"form-local-001"}}}
 JSON
 ```
 
@@ -158,6 +162,7 @@ Agent-facing local automation can use the repo-owned worker toolbox:
 ```sh
 bun run worker:tool schema
 bun run worker:tool worker.snapshot --payload='{"worker":{"role":"revenue_operations"}}'
+bun run worker:tool worker.lead.read --payload='{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-lead-read-002","config":{"source":"website_form","records":[{"sourceEventId":"form-local-002","customerName":"Acme Roof Repair"}]}}'
 bun run worker:tool worker.adapters.reconcile --payload='{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{"limit":25}}'
 bun run worker:tool worker.adapters.retry --payload='{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{"limit":25}}'
 ```

@@ -243,6 +243,7 @@ jobs:
           echo "$SCHEMA" | /usr/bin/jq -c '{commands:.registry.commands, views:.registry.views, planned:[.registry.plannedContracts[].role], plannedCommandCount:(.registry.plannedCommands|length), plannedViewCount:(.registry.plannedViews|length), tools:[.tools[].name]}'
           echo "$SCHEMA" | /usr/bin/jq -e '
             (.registry.commands | map(.name) | index("run")) != null and
+            (.registry.commands | any(.role == "revenue_operations" and .name == "lead.read" and .idempotency == "required" and .requiresTenant == true)) and
             (.registry.commands | map(.name) | index("continue")) != null and
             (.registry.commands | map(.name) | index("approval.decide")) != null and
             (.registry.commands | map(.name) | index("adapters.reconcile")) != null and
@@ -260,6 +261,7 @@ jobs:
             (.registry.commands | any(.name == "continue" and .idempotency == "required")) and
             (.registry.commands | any(.name == "adapters.reconcile" and .requiresTenant == true)) and
             (.tools | map(.name) | index("worker.run")) != null and
+            (.tools | map(.name) | index("worker.lead.read")) != null and
             (.tools | map(.name) | index("worker.continue")) != null and
             (.tools | map(.name) | index("worker.adapters.reconcile")) != null and
             (.tools | map(.name) | index("worker.owner.brief.generate")) != null
@@ -367,6 +369,49 @@ jobs:
           SQL
 
           LEAD_SOURCE_EVENT_ID="deploy-smoke:$RUN_ID"
+          LEAD_READ_SOURCE_EVENT_ID="deploy-lead-read:$RUN_ID"
+          LEAD_READ_KEY="deploy-lead-read-$RUN_ID"
+          LEAD_READ_PAYLOAD="$(
+            /usr/bin/jq -nc --arg key "$LEAD_READ_KEY" --arg sourceEventId "$LEAD_READ_SOURCE_EVENT_ID" '{
+              command: "lead.read",
+              worker: {role: "revenue_operations", tenantSlug: "continuous-demo"},
+              idempotencyKey: $key,
+              config: {
+                source: "deploy_smoke",
+                records: [
+                  {
+                    sourceEventId: $sourceEventId,
+                    customerName: "Deploy Smoke Source Reader",
+                    customerIntent: "roof leak inspection",
+                    serviceArea: "roofing",
+                    urgency: "high",
+                    missingFacts: ["preferred_time_window"],
+                    payload: {form: "deploy_smoke"}
+                  }
+                ]
+              }
+            }'
+          )"
+          LEAD_READ_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/worker \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$LEAD_READ_PAYLOAD"
+          )"
+
+          echo "$LEAD_READ_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,workerRunId:.data.result.workerRunId,readCount:.data.result.readCount,selectors:.data.result.selectors}}'
+          echo "$LEAD_READ_RESPONSE" | /usr/bin/jq -e \
+            --arg sourceEventId "$LEAD_READ_SOURCE_EVENT_ID" \
+            '.error == null and .data.command == "lead.read" and .data.result.created == true and (.data.result.workerRunId | length > 0) and .data.result.readCount == 1 and (.data.result.selectors | length) == 1 and .data.result.output.externalSend == false and .data.result.selectors[0].source == "deploy_smoke" and .data.result.selectors[0].sourceEventId == $sourceEventId and (.data.result.selectors[0].objectId | length > 0) and (.data.result.selectors[0].eventId | length > 0) and (.data.result.selectors[0].evidenceId | length > 0)' \
+            >/dev/null
+
+          LEAD_READ_WORKER_RUN_ID="$(echo "$LEAD_READ_RESPONSE" | /usr/bin/jq -r '.data.result.workerRunId')"
+          psql_db -At <<SQL
+          select 'lead_read_worker_run' as kind, state, mode, data->'output'->>'readCount', data->'output'->>'externalSend'
+          from worker_runs where id = '$LEAD_READ_WORKER_RUN_ID'::uuid;
+          SQL
+
           LEAD_OBJECT_KEY="deploy-lead-object-$RUN_ID"
           LEAD_OBJECT_PAYLOAD="$(
             /usr/bin/jq -nc --arg key "$LEAD_OBJECT_KEY" --arg sourceEventId "$LEAD_SOURCE_EVENT_ID" '{
@@ -480,17 +525,20 @@ jobs:
             >/dev/null
 
           LEAD_EVIDENCE_ID="$(echo "$LEAD_EVIDENCE_RESPONSE" | /usr/bin/jq -r '.data.result.evidenceId')"
+          LEAD_SOURCE_EVENT_ID="$LEAD_READ_SOURCE_EVENT_ID"
+          LEAD_OBJECT_ID="$(echo "$LEAD_READ_RESPONSE" | /usr/bin/jq -r '.data.result.selectors[0].objectId')"
+          LEAD_EVENT_ID="$(echo "$LEAD_READ_RESPONSE" | /usr/bin/jq -r '.data.result.selectors[0].eventId')"
+          LEAD_EVIDENCE_ID="$(echo "$LEAD_READ_RESPONSE" | /usr/bin/jq -r '.data.result.selectors[0].evidenceId')"
           WORKER_RUN_KEY="deploy-worker-run-$RUN_ID"
           WORKER_RUN_PAYLOAD="$(
-            /usr/bin/jq -nc --arg key "$WORKER_RUN_KEY" --arg objectId "$LEAD_OBJECT_ID" --arg eventId "$LEAD_EVENT_ID" --arg evidenceId "$LEAD_EVIDENCE_ID" '{
+            /usr/bin/jq -nc --arg key "$WORKER_RUN_KEY" --arg sourceEventId "$LEAD_SOURCE_EVENT_ID" '{
               command: "run",
               worker: {role: "revenue_operations", tenantSlug: "continuous-demo"},
               idempotencyKey: $key,
               config: {
                 intake: {
-                  objectId: $objectId,
-                  eventId: $eventId,
-                  evidenceId: $evidenceId
+                  source: "deploy_smoke",
+                  sourceEventId: $sourceEventId
                 }
               }
             }'

@@ -9,6 +9,7 @@ import type { JsonObject } from "../db/schema";
 import {
   continueRevenueWorker,
   getRevenueWorkerSnapshotSafe,
+  readRevenueLeads,
   RevenueWorkerUnavailableError,
   runRevenueWorker,
 } from "./revenue";
@@ -177,6 +178,39 @@ const revenueDefinition: WorkerDefinition = {
         }
 
         return runRevenueWorker({
+          idempotencyKey: context.idempotencyKey,
+          tenantSlug: context.target.tenantSlug,
+          workerId: context.target.workerId,
+          operatorEmail: context.operatorEmail,
+          config: context.config,
+        });
+      },
+    },
+    "lead.read": {
+      name: "lead.read",
+      description: "Read inbound lead source records into persisted Core intake selectors.",
+      idempotency: "required",
+      sideEffects: "internal",
+      externalExecution: "blocked",
+      requiresTenant: true,
+      async handle(context) {
+        if (!context.idempotencyKey) {
+          throw new PlatformUnavailableError(
+            "invalid_idempotency_key",
+            "A string idempotency key is required.",
+            400,
+          );
+        }
+
+        if (!context.target.tenantSlug) {
+          throw new PlatformUnavailableError(
+            "invalid_worker_target",
+            "worker.tenantSlug is required for lead.read.",
+            400,
+          );
+        }
+
+        return readRevenueLeads({
           idempotencyKey: context.idempotencyKey,
           tenantSlug: context.target.tenantSlug,
           workerId: context.target.workerId,

@@ -182,10 +182,10 @@ policy-bound:
 | `POST /api/core` | Canonical Core command surface for `task.create`, `task.transition`, `object.upsert`, `object.link`, `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`, `document.packet.prepare`, `decision.record`, `approval.request`, `capability.grant`, `budget.reserve`, `budget.charge`, `budget.release`, `view.publish`, and `customer_signal.record`; tenant selection and command fields live in structured `core` and `config` payloads |
 | `/worker?view=snapshot&role=revenue_operations` | Operator-only snapshot of worker state, active tasks, controls, budget usage, and recent events |
 | `/worker?view=approvals&role=revenue_operations` | Operator-only approval queue for worker decisions |
-| `POST /worker` | Canonical worker command surface for `run`, `continue`, `approval.decide`, `adapters.reconcile`, and `adapters.retry`; worker role, tenant selection, idempotency, and operation config live in structured payload fields |
+| `POST /worker` | Canonical worker command surface for `lead.read`, `run`, `continue`, `approval.decide`, `adapters.reconcile`, and `adapters.retry`; worker role, tenant selection, idempotency, and operation config live in structured payload fields |
 | `/workflow` | Canonical workflow command surface for listing definitions/runs/steps and executing validated `start` / `transition` / `approval.decide` commands |
 | `/workflow?view=approvals` | Operator-only approval queue for workflow decisions backed by the shared approval service |
-| `bun run worker:tool worker.run` | Canonical local command surface using the same worker/config payload shape |
+| `bun run worker:tool worker.lead.read` / `worker.run` | Canonical local command surfaces using the same worker/config payload shape |
 
 Worker-specific HTTP paths are not part of the public API. New worker families
 must extend `/worker` by registering role-scoped commands with structured
@@ -196,16 +196,18 @@ Approvals are platform records, not worker-specific records. Worker approvals
 and workflow approvals share `approval_requests`, `audit_events`, and evidence;
 the route decides which subject can be listed or decided.
 
-One run accepts `config.intake` source selectors for persisted Core lead intake,
-or exact Core object/event/evidence row references when an internal workflow
-already holds them. The worker stores a source snapshot, binds the idempotency
-key to a canonical input hash, derives classification, draft response, and
-quote fields from the resolved intake packet, reserves budget, records inference
-and usage, emits an idempotent `revenue_worker.run.completed` event, captures
-trace and receipt evidence, creates an owner approval packet, updates the task
-to `approval_required`, and versions the quote object. `config.leadPacket`
-remains a direct operator/test fallback. External sends and money movement
-remain blocked until human approval and real adapter execution are implemented.
+`command=lead.read` accepts source records, stores Core lead object/event/evidence
+rows, writes a read-only worker run, attributes budget/usage, and returns stable
+`config.intake` selectors. One `command=run` then accepts those selectors, or
+exact Core object/event/evidence row references when an internal workflow already
+holds them. The worker stores a source snapshot, binds the idempotency key to a
+canonical input hash, derives classification, draft response, and quote fields
+from the resolved intake packet, reserves budget, records inference and usage,
+emits an idempotent `revenue_worker.run.completed` event, captures trace and
+receipt evidence, creates an owner approval packet, updates the task to
+`approval_required`, and versions the quote object. `config.leadPacket` remains
+a direct operator/test fallback. External sends and money movement remain
+blocked until human approval and real adapter execution are implemented.
 
 Core writes are platform-level, not worker-specific. `POST /api/core` now
 creates and transitions accountable tasks, upserts typed business objects with

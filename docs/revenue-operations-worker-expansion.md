@@ -14,6 +14,7 @@ state, workflow state, and object versioning without external sends or money mov
 | Core loop | One operator run creates workflow run/steps, worker run, source snapshot evidence, budget, inference, usage, event, adapter run/action, approval packet, task update, and object version records |
 | Operator read API | `GET /worker?view=snapshot&role=revenue_operations`, bearer-token required |
 | Approval API | `GET /worker?view=approvals&role=revenue_operations` and `POST /worker` with `command=approval.decide`, bearer-token required |
+| Source read API | `POST /worker` with `command=lead.read`, `idempotencyKey`, `config.source`, and `config.records[]`; persists Core lead object/event/evidence rows and returns `config.intake` selectors |
 | Run API | `POST /worker` with `command=run` and `config.intake` source selectors or Core references; direct `config.leadPacket` remains an operator/test fallback |
 | Continuation API | `POST /worker` with `command=continue`, `idempotencyKey`, and `config.approvalId`; V1 turns `approved` decisions into blocked no-send execution packets and `revision_requested` decisions into revised packets plus fresh pending owner approval |
 | Adapter reconciliation API | `POST /worker` with `command=adapters.reconcile` and `command=adapters.retry`, tenant-scoped and bearer-token required |
@@ -45,7 +46,7 @@ smoke test.
 
 | Capability | Autonomy | Notes |
 |---|---|---|
-| `lead.read` | Allowed | Connect real inbound source after scoped auth |
+| `lead.read` | Allowed | Website-form source record intake is persisted; scoped external source readers come next |
 | `lead.classify` | Allowed | Add eval set before real routing |
 | `response.draft` | Allowed | Draft only until send policy exists |
 | `quote.prepare` | Approval required | Keep threshold, discount, and margin rules explicit |
@@ -56,7 +57,7 @@ smoke test.
 
 ## Adapter Order
 
-1. Website form intake with stored source snapshots.
+1. Website form intake with stored source snapshots. Present through `command=lead.read`.
 2. Gmail or Google Workspace lead inbox read-only.
 3. Calendar availability read-only.
 4. CRM or spreadsheet write-back in dry-run mode.
@@ -87,7 +88,7 @@ smoke test.
 ## Milestones
 
 1. Extend the Revenue Worker state machine with failure and post-retry reconciliation branches without enabling external execution.
-2. Expand read-only real lead intake beyond persisted source selectors into connected source readers.
+2. Expand read-only real lead intake beyond website-form source records into authenticated inbox and CRM source readers.
 3. Add quote approval UI backed by `ui_contracts`.
 4. Extend blocked retry execution into scoped live credential checks and rollback paths for failed or uncertain adapter results.
 5. Extend eval fixtures beyond the first CI-enforced lead-to-quote cases.

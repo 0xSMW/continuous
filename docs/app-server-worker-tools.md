@@ -30,7 +30,11 @@ The app-server tool is discovery-only:
 Side-effecting worker commands stay on the canonical operator-gated surfaces:
 
 ```sh
-bun run worker:tool worker.run --payload='{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-run-001","config":{"intake":{"objectId":"lead_object_uuid","eventId":"lead_event_uuid","evidenceId":"lead_evidence_uuid"}}}'
+bun run worker:tool worker.lead.read --payload='{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-lead-read-001","config":{"source":"website_form","records":[{"sourceEventId":"form-001","customerName":"Acme Roof Repair","customerIntent":"roof leak inspection","serviceArea":"roofing","urgency":"high"}]}}'
+```
+
+```sh
+bun run worker:tool worker.run --payload='{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-run-001","config":{"intake":{"source":"website_form","sourceEventId":"form-001"}}}'
 ```
 
 ```sh

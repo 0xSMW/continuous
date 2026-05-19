@@ -66,12 +66,16 @@ bun run dev
 ```
 
 For worker runtime changes, prefer the CLI path first because it does not expose
-HTTP mutation. Create the lead object/event/evidence through Core first, then
-run the worker from those persisted references:
+HTTP mutation. Read the lead source records into Core first, then run the worker
+from the returned source selector:
 
 ```sh
+bun run worker:tool worker.lead.read <<'JSON'
+{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-lead-read-001","config":{"source":"website_form","records":[{"sourceEventId":"form-001","customerName":"Acme Roof Repair","customerIntent":"roof leak inspection","serviceArea":"roofing","urgency":"high"}]}}
+JSON
+
 bun run worker:tool worker.run <<'JSON'
-{"worker":{"role":"revenue_operations"},"idempotencyKey":"local-revenue-run-001","config":{"intake":{"objectId":"lead_object_uuid","eventId":"lead_received_event_uuid","evidenceId":"lead_snapshot_evidence_uuid"}}}
+{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-revenue-run-001","config":{"intake":{"source":"website_form","sourceEventId":"form-001"}}}
 JSON
 ```
 

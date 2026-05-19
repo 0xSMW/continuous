@@ -92,14 +92,36 @@ operator decisions can be written. Use the CLI path over SSH for direct
 operator-controlled smoke runs:
 
 ```sh
-ssh root@45.55.53.92 'cd /opt/continuous && docker compose --profile tools run --rm migrate bun run worker:tool worker.run --payload='"'"'{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"deploy-worker-run-001","config":{"intake":{"objectId":"lead_object_uuid","eventId":"lead_received_event_uuid","evidenceId":"lead_snapshot_evidence_uuid"}}}'"'"''
+ssh root@45.55.53.92 'cd /opt/continuous && docker compose --profile tools run --rm migrate bun run worker:tool worker.lead.read --payload='"'"'{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"deploy-lead-read-001","config":{"source":"website_form","records":[{"sourceEventId":"deploy-form-001","customerName":"Acme Roof Repair","customerIntent":"roof leak inspection","serviceArea":"roofing","urgency":"high"}]}}'"'"''
+ssh root@45.55.53.92 'cd /opt/continuous && docker compose --profile tools run --rm migrate bun run worker:tool worker.run --payload='"'"'{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"deploy-worker-run-001","config":{"intake":{"source":"website_form","sourceEventId":"deploy-form-001"}}}'"'"''
 ```
 
 For the HTTPS worker API path, call `POST /worker` with `command`, `worker`,
 `config`, and `idempotencyKey` fields as required by the command plus the bearer
 token from `/opt/continuous/.env`. Revenue Worker runs should first create the
-lead object, `lead.received` event, and source snapshot through `/api/core`, then
-pass the stable source selector under `config.intake`:
+lead object, `lead.received` event, and source snapshot through
+`command=lead.read`, then pass the stable source selector under `config.intake`:
+
+```json
+{
+  "command": "lead.read",
+  "worker": {
+    "role": "revenue_operations",
+    "tenantSlug": "continuous-demo"
+  },
+  "idempotencyKey": "deploy-lead-read-001",
+  "config": {
+    "source": "website_form",
+    "records": [
+      {
+        "sourceEventId": "lead_source_event_id",
+        "customerName": "Acme Roof Repair",
+        "customerIntent": "roof leak inspection"
+      }
+    ]
+  }
+}
+```
 
 ```json
 {
@@ -125,10 +147,11 @@ Workflow handlers that already hold Core UUIDs can pass those ids under
 snapshots and approval review. Worker-specific HTTP paths are intentionally
 absent; expand the worker control plane through registered `/worker` commands
 and payload fields.
-The deploy workflow smokes Core lead intake before `/worker`, then covers
-`/api/core` task creation, task transition, approval request, capability grant,
-budget reserve/charge/release, object, object-link, event, evidence, document,
-packet, decision, and generated-view commands after each production rollout.
+The deploy workflow smokes `lead.read`, the source-selector `run` path, adapter
+reconciliation, continuation, and `/api/core` task creation, task transition,
+approval request, capability grant, budget reserve/charge/release, object,
+object-link, event, evidence, document, packet, decision, and generated-view
+commands after each production rollout.
 
 ## Database Backup And Restore
 

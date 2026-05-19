@@ -67,7 +67,7 @@ describe("worker tool contract", () => {
 
       expect(properties.worker).toBeTruthy();
       expect(Object.keys(properties)).not.toEqual(
-        expect.arrayContaining(["role", "tenantSlug", "leadPacket", "approvalId", "limit"]),
+        expect.arrayContaining(["role", "tenantSlug", "leadPacket", "approvalId", "limit", "source", "records"]),
       );
       if (tool.registry.idempotency === "required") {
         expect(properties.idempotencyKey).toBeTruthy();
@@ -84,6 +84,7 @@ describe("worker tool contract", () => {
       "worker.owner.briefs.list",
       "worker.owner.decisions.list",
       "worker.run",
+      "worker.lead.read",
       "worker.continue",
       "worker.approvals.list",
       "worker.approvals.decide",
@@ -115,6 +116,13 @@ describe("worker tool contract", () => {
           role: "revenue_operations",
           name: "run",
           idempotency: "required",
+          externalExecution: "blocked",
+        }),
+        expect.objectContaining({
+          role: "revenue_operations",
+          name: "lead.read",
+          idempotency: "required",
+          requiresTenant: true,
           externalExecution: "blocked",
         }),
         expect.objectContaining({
@@ -251,6 +259,29 @@ describe("worker tool contract", () => {
     );
   });
 
+  it("validates lead read idempotency before invoking the worker", async () => {
+    await expect(
+      executeWorkerTool("worker.lead.read", {
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "bad key!",
+        config: {
+          source: "website_form",
+          records: [
+            {
+              sourceEventId: "source-event-001",
+              customerName: "Acme Roof Repair",
+            },
+          ],
+        },
+      }),
+    ).rejects.toThrow(
+      "Idempotency key may only contain letters, numbers, dot, underscore, colon, or dash.",
+    );
+  });
+
   it("validates worker continuation idempotency before invoking the worker", async () => {
     await expect(
       executeWorkerTool("worker.continue", {
@@ -299,6 +330,26 @@ describe("worker tool contract", () => {
         },
       }),
     ).rejects.toThrow("worker.tenantSlug is required for adapters.reconcile.");
+  });
+
+  it("requires tenant scope for lead source reads", async () => {
+    await expect(
+      executeWorkerTool("worker.lead.read", {
+        worker: {
+          role: "revenue_operations",
+        },
+        idempotencyKey: "lead-read-001",
+        config: {
+          source: "website_form",
+          records: [
+            {
+              sourceEventId: "source-event-001",
+              customerName: "Acme Roof Repair",
+            },
+          ],
+        },
+      }),
+    ).rejects.toThrow("worker.tenantSlug is required for lead.read.");
   });
 
   it("requires tenant scope for adapter retry execution", async () => {

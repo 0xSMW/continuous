@@ -44,6 +44,7 @@ const revenueWorkerRole = "revenue_operations";
 const revenueWorkflowKey = "lead_to_cash";
 const source = "continuous.revenue_worker";
 const runUnits = 12000;
+const leadReadUnits = 1000;
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -139,6 +140,20 @@ export type RevenueWorkerRunResult = {
   snapshot: RevenueWorkerSnapshot;
 };
 
+export type RevenueLeadReadResult = {
+  created: boolean;
+  idempotencyKey: string;
+  workerRunId: string | null;
+  eventId: string | null;
+  reservationId: string | null;
+  usageEventId: string | null;
+  auditEventId: string | null;
+  readCount: number;
+  selectors: JsonObject[];
+  output: JsonObject;
+  snapshot: RevenueWorkerSnapshot;
+};
+
 export type RevenueWorkerContinuationResult = {
   created: boolean;
   idempotencyKey: string;
@@ -173,6 +188,7 @@ type WorkerContext = {
     priority: TaskPriority;
     reviewerUserId: string | null;
   } | null;
+  leadReadCapabilityId: string | null;
   quoteCapabilityId: string | null;
   briefCapabilityId: string | null;
   budgetAccountId: string;
@@ -831,6 +847,155 @@ function leadPacketFromConfig(config: JsonObject) {
   };
 }
 
+type ParsedLeadSourceRecord = {
+  sourceEventId: string;
+  occurredAt: Date | null;
+  leadPacket: JsonObject;
+};
+
+function configRecords(config: JsonObject) {
+  const record = objectValue(config.record);
+
+  if (Object.keys(record).length > 0) {
+    return [record];
+  }
+
+  const records = config.records ?? config.items ?? config.leads;
+
+  if (!Array.isArray(records)) {
+    throw new RevenueWorkerUnavailableError(
+      "worker_lead_read_records_missing",
+      "config.records must be a non-empty array for lead.read.",
+      400,
+    );
+  }
+
+  const objects = records.map((item) => objectValue(item));
+
+  if (objects.length === 0 || objects.some((item) => Object.keys(item).length === 0)) {
+    throw new RevenueWorkerUnavailableError(
+      "worker_lead_read_records_missing",
+      "config.records must contain at least one source record object.",
+      400,
+    );
+  }
+
+  if (objects.length > 25) {
+    throw new RevenueWorkerUnavailableError(
+      "worker_lead_read_records_limit",
+      "lead.read accepts at most 25 source records per command.",
+      400,
+    );
+  }
+
+  return objects;
+}
+
+function optionalRecordDate(value: unknown, field: string) {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+
+  const date = new Date(stringValue(value));
+
+  if (Number.isNaN(date.getTime())) {
+    throw new RevenueWorkerUnavailableError(
+      "worker_lead_read_date_invalid",
+      `${field} must be an ISO date when provided.`,
+      400,
+    );
+  }
+
+  return date;
+}
+
+function parseLeadSourceRecords(config: JsonObject) {
+  const sourceName = stringValue(config.source ?? objectValue(config.intake).source);
+
+  if (!sourceName) {
+    throw new RevenueWorkerUnavailableError(
+      "worker_lead_read_source_missing",
+      "config.source is required for lead.read.",
+      400,
+    );
+  }
+
+  if (booleanValue(config.externalSend) || booleanValue(config.externalExecution)) {
+    throw new RevenueWorkerUnavailableError(
+      "worker_external_send_blocked",
+      "Revenue Worker lead.read cannot execute external actions.",
+      403,
+    );
+  }
+
+  const records = configRecords(config).map((record, index): ParsedLeadSourceRecord => {
+    const payload = objectValue(record.payload ?? record.data ?? record.raw);
+    const lead = objectValue(record.leadPacket ?? record.lead);
+    const sourceEventId = firstStringValue(
+      record.sourceEventId,
+      record.externalId,
+      record.messageId,
+      record.id,
+      lead.sourceEventId,
+      payload.sourceEventId,
+    );
+
+    if (!sourceEventId) {
+      throw new RevenueWorkerUnavailableError(
+        "worker_lead_read_source_event_missing",
+        `config.records[${index}].sourceEventId is required for lead.read.`,
+        400,
+      );
+    }
+
+    const customerName = firstStringValue(
+      lead.customerName,
+      lead.name,
+      record.customerName,
+      record.name,
+      payload.customerName,
+      payload.name,
+      "Customer",
+    );
+    const customerIntent = firstStringValue(
+      lead.customerIntent,
+      lead.intent,
+      record.customerIntent,
+      record.intent,
+      payload.customerIntent,
+      payload.intent,
+      "service request",
+    );
+    const serviceArea = firstStringValue(
+      lead.serviceArea,
+      record.serviceArea,
+      payload.serviceArea,
+      "field service",
+    );
+    const missingFacts = firstStringList(lead.missingFacts, record.missingFacts, payload.missingFacts);
+
+    return {
+      sourceEventId,
+      occurredAt: optionalRecordDate(record.occurredAt ?? payload.occurredAt, `config.records[${index}].occurredAt`),
+      leadPacket: {
+        source: sourceName,
+        sourceEventId,
+        customerName,
+        customerIntent,
+        serviceArea,
+        urgency: normalizedUrgency(lead.urgency ?? record.urgency ?? payload.urgency),
+        missingFacts,
+        raw: {
+          record,
+          payload,
+        },
+      },
+    };
+  });
+
+  return { sourceName, records };
+}
+
 function revisedPacketFromOriginal(params: {
   originalOutput: JsonObject;
   revisionNote: string;
@@ -1041,6 +1206,12 @@ async function loadWorkerContext(db: Database, selector: RevenueWorkerSelector):
     .where(and(eq(capabilities.key, "quote.prepare"), eq(capabilities.active, true)))
     .limit(1);
 
+  const [leadReadCapability] = await db
+    .select({ id: capabilities.id })
+    .from(capabilities)
+    .where(and(eq(capabilities.key, "lead.read"), eq(capabilities.active, true)))
+    .limit(1);
+
   const [briefCapability] = await db
     .select({ id: capabilities.id })
     .from(capabilities)
@@ -1098,6 +1269,7 @@ async function loadWorkerContext(db: Database, selector: RevenueWorkerSelector):
     },
     tenantName: workerRow.tenantName,
     task: taskRow ?? null,
+    leadReadCapabilityId: leadReadCapability?.id ?? null,
     quoteCapabilityId: quoteCapability?.id ?? null,
     briefCapabilityId: briefCapability?.id ?? null,
     budgetAccountId: budgetAccount.id,
@@ -1409,6 +1581,497 @@ export async function getRevenueWorkerSnapshotSafe(selector: RevenueWorkerSelect
       error: error instanceof Error ? error.message : "Unknown Revenue Worker error",
     };
   }
+}
+
+function replayedLeadReadResult(
+  run: typeof workerRuns.$inferSelect,
+  snapshot: RevenueWorkerSnapshot,
+): RevenueLeadReadResult {
+  const output = outputData(run.data);
+  const selectors = Array.isArray(output.selectors)
+    ? output.selectors.map((selector) => objectValue(selector))
+    : [];
+
+  return {
+    created: false,
+    idempotencyKey: run.idempotencyKey,
+    workerRunId: run.id,
+    eventId: run.eventId ?? stringData(run.data, "eventId"),
+    reservationId: stringData(run.data, "reservationId"),
+    usageEventId: stringData(run.data, "usageEventId"),
+    auditEventId: stringData(run.data, "auditEventId"),
+    readCount: numberValue(output.readCount),
+    selectors,
+    output,
+    snapshot,
+  };
+}
+
+export async function readRevenueLeads(input: {
+  idempotencyKey: string;
+  operatorEmail: string;
+  tenantSlug?: string;
+  workerId?: string;
+  config?: JsonObject;
+  db?: Database;
+}): Promise<RevenueLeadReadResult> {
+  const db = input.db ?? defaultDb;
+  const requestConfig = input.config ?? {};
+  const { sourceName, records } = parseLeadSourceRecords(requestConfig);
+  const context = await loadWorkerContext(db, {
+    tenantSlug: input.tenantSlug,
+    workerId: input.workerId,
+  });
+  const operator = await loadOperator(db, context.worker.tenantId, input.operatorEmail);
+  const capabilityId = context.leadReadCapabilityId;
+
+  if (!capabilityId) {
+    throw new RevenueWorkerUnavailableError(
+      "worker_capability_missing",
+      "Revenue Worker requires the lead.read capability for lead.read.",
+      409,
+    );
+  }
+
+  const inputHash = hashObject({
+    schemaVersion: "revenue_worker.lead_read.v1",
+    idempotencyKey: input.idempotencyKey,
+    tenantId: context.worker.tenantId,
+    workerId: context.worker.id,
+    operatorUserId: operator.id,
+    config: requestConfig,
+    source: sourceName,
+    records: records.map((record) => record.leadPacket),
+  });
+
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${source}:${input.idempotencyKey}`}))`,
+    );
+
+    const [existingRun] = await tx
+      .select()
+      .from(workerRuns)
+      .where(
+        and(
+          eq(workerRuns.tenantId, context.worker.tenantId),
+          eq(workerRuns.source, source),
+          eq(workerRuns.idempotencyKey, input.idempotencyKey),
+        ),
+      )
+      .limit(1);
+
+    if (existingRun) {
+      const existingInput = objectValue(existingRun.data.input);
+      const existingHash = stringValue(existingInput.inputHash);
+
+      if (stringValue(existingInput.command) !== "lead.read" || (existingHash && existingHash !== inputHash)) {
+        throw new RevenueWorkerUnavailableError(
+          "worker_idempotency_conflict",
+          "This idempotency key was already used with different worker input.",
+          409,
+        );
+      }
+
+      return {
+        created: false as const,
+        run: existingRun,
+        output: outputData(existingRun.data),
+        eventId: existingRun.eventId ?? stringData(existingRun.data, "eventId"),
+        reservationId: stringData(existingRun.data, "reservationId"),
+        usageEventId: stringData(existingRun.data, "usageEventId"),
+        auditEventId: stringData(existingRun.data, "auditEventId"),
+      };
+    }
+
+    const now = new Date();
+    const [grant] = await tx
+      .select({ id: capabilityGrants.id })
+      .from(capabilityGrants)
+      .innerJoin(capabilities, eq(capabilityGrants.capabilityId, capabilities.id))
+      .where(
+        and(
+          eq(capabilityGrants.tenantId, context.worker.tenantId),
+          eq(capabilityGrants.actorType, "worker"),
+          eq(capabilityGrants.actorId, context.worker.id),
+          eq(capabilityGrants.capabilityId, capabilityId),
+          eq(capabilityGrants.active, true),
+          eq(capabilities.active, true),
+          sql`(${capabilityGrants.startsAt} is null or ${capabilityGrants.startsAt} <= ${now})`,
+          sql`(${capabilityGrants.endsAt} is null or ${capabilityGrants.endsAt} > ${now})`,
+        ),
+      )
+      .limit(1);
+
+    if (!grant) {
+      throw new RevenueWorkerUnavailableError(
+        "worker_capability_not_granted",
+        "Revenue Worker is not actively granted lead.read.",
+        403,
+      );
+    }
+
+    const [reservation] = await tx
+      .insert(budgetReservations)
+      .values({
+        tenantId: context.worker.tenantId,
+        accountId: context.budgetAccountId,
+        units: leadReadUnits,
+        state: "used",
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: budgetReservations.id });
+    const [usage] = await tx
+      .insert(usageEvents)
+      .values({
+        tenantId: context.worker.tenantId,
+        accountId: context.budgetAccountId,
+        reservationId: reservation.id,
+        capabilityId,
+        actorType: "worker",
+        actorId: context.worker.id,
+        units: leadReadUnits,
+        costUsd: "0.000000",
+        data: {
+          command: "lead.read",
+          source: sourceName,
+          readCount: records.length,
+          externalExecution: "blocked",
+        },
+        createdAt: now,
+      })
+      .returning({ id: usageEvents.id });
+    const [run] = await tx
+      .insert(workerRuns)
+      .values({
+        tenantId: context.worker.tenantId,
+        workerId: context.worker.id,
+        capabilityId,
+        budgetAccountId: context.budgetAccountId,
+        source,
+        idempotencyKey: input.idempotencyKey,
+        state: "running",
+        mode: "read_only",
+        data: {
+          input: {
+            command: "lead.read",
+            inputHash,
+            config: requestConfig,
+            source: sourceName,
+            operator: {
+              userId: operator.id,
+              email: operator.email,
+            },
+          },
+          reservationId: reservation.id,
+          usageEventId: usage.id,
+          externalExecution: "blocked",
+        },
+        startedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: workerRuns.id });
+
+    const selectors = [] as JsonObject[];
+
+    for (const record of records) {
+      const leadPacket = record.leadPacket;
+      const sourceEventId = record.sourceEventId;
+      const objectData = {
+        ...leadPacket,
+        leadPacket,
+        sourceRead: {
+          workerRunId: run.id,
+          idempotencyKey: input.idempotencyKey,
+          command: "lead.read",
+          readAt: now.toISOString(),
+        },
+        externalExecution: "blocked",
+        externalSend: false,
+      };
+      const [existingObject] = await tx
+        .select()
+        .from(objects)
+        .where(
+          and(
+            eq(objects.tenantId, context.worker.tenantId),
+            eq(objects.source, sourceName),
+            eq(objects.externalId, sourceEventId),
+          ),
+        )
+        .limit(1);
+      const [object] = existingObject
+        ? await tx
+            .update(objects)
+            .set({
+              type: "lead",
+              name: stringValue(leadPacket.customerName, "Lead"),
+              state: "received",
+              data: objectData,
+              updatedAt: now,
+            })
+            .where(eq(objects.id, existingObject.id))
+            .returning()
+        : await tx
+            .insert(objects)
+            .values({
+              tenantId: context.worker.tenantId,
+              type: "lead",
+              name: stringValue(leadPacket.customerName, "Lead"),
+              state: "received",
+              source: sourceName,
+              externalId: sourceEventId,
+              data: objectData,
+              createdByWorkerId: context.worker.id,
+              effectiveAt: record.occurredAt ?? now,
+              createdAt: now,
+              updatedAt: now,
+            })
+            .returning();
+      const [nextVersion] = await tx
+        .select({
+          value: sql<number>`coalesce(max(${objectVersions.version}), 0) + 1`,
+        })
+        .from(objectVersions)
+        .where(eq(objectVersions.objectId, object.id));
+
+      await tx.insert(objectVersions).values({
+        tenantId: context.worker.tenantId,
+        objectId: object.id,
+        version: Number(nextVersion?.value ?? 1),
+        data: objectData,
+        changedByType: "worker",
+        changedById: context.worker.id,
+        reason: "Revenue Worker read a lead source record.",
+        createdAt: now,
+      });
+
+      const eventData = {
+        ...leadPacket,
+        leadPacket,
+        sourceRead: {
+          workerRunId: run.id,
+          command: "lead.read",
+          readAt: now.toISOString(),
+        },
+        externalExecution: "blocked",
+        externalSend: false,
+      };
+      const [existingEvent] = await tx
+        .select({ id: events.id })
+        .from(events)
+        .where(
+          and(
+            eq(events.tenantId, context.worker.tenantId),
+            eq(events.source, sourceName),
+            eq(events.idempotencyKey, sourceEventId),
+          ),
+        )
+        .limit(1);
+      const eventId =
+        existingEvent?.id ??
+        (
+          await tx
+            .insert(events)
+            .values({
+              tenantId: context.worker.tenantId,
+              type: "lead.received",
+              source: sourceName,
+              actorType: "worker",
+              actorId: context.worker.id,
+              actorRef: `worker:${context.worker.id}`,
+              objectId: object.id,
+              capabilityId,
+              idempotencyKey: sourceEventId,
+              data: eventData,
+              occurredAt: record.occurredAt ?? now,
+              createdAt: now,
+            })
+            .returning({ id: events.id })
+        )[0].id;
+      const [sourceSnapshot] = await tx
+        .insert(evidence)
+        .values({
+          tenantId: context.worker.tenantId,
+          kind: "snapshot",
+          name: "Lead source snapshot",
+          objectId: object.id,
+          eventId,
+          capabilityId,
+          actorType: "worker",
+          actorId: context.worker.id,
+          hash: hashObject(leadPacket),
+          data: {
+            ...leadPacket,
+            leadPacket,
+            sourceObjectId: object.id,
+            sourceEventRowId: eventId,
+            source: sourceName,
+            sourceEventId,
+            workerRunId: run.id,
+            externalExecution: "blocked",
+            externalSend: false,
+          },
+          redaction: {
+            raw: "retained_internal",
+            externalSend: false,
+          },
+          createdAt: now,
+        })
+        .returning({ id: evidence.id });
+
+      selectors.push({
+        source: sourceName,
+        sourceEventId,
+        objectId: object.id,
+        eventId,
+        evidenceId: sourceSnapshot.id,
+        intake: {
+          source: sourceName,
+          sourceEventId,
+        },
+      });
+    }
+
+    const output = {
+      command: "lead.read",
+      source: sourceName,
+      readCount: records.length,
+      selectors,
+      objectIds: selectors.map((selector) => selector.objectId),
+      eventIds: selectors.map((selector) => selector.eventId),
+      evidenceIds: selectors.map((selector) => selector.evidenceId),
+      reservationId: reservation.id,
+      usageEventId: usage.id,
+      externalExecution: "blocked",
+      externalSend: false,
+    };
+    const [event] = await tx
+      .insert(events)
+      .values({
+        tenantId: context.worker.tenantId,
+        type: "revenue_worker.lead_read.completed",
+        source,
+        actorType: "worker",
+        actorId: context.worker.id,
+        actorRef: `worker:${context.worker.id}`,
+        capabilityId,
+        idempotencyKey: `${input.idempotencyKey}:lead_read_completed`,
+        data: {
+          workerRunId: run.id,
+          output,
+          externalExecution: "blocked",
+        },
+        occurredAt: now,
+        createdAt: now,
+      })
+      .returning({ id: events.id });
+    const [audit] = await tx
+      .insert(auditEvents)
+      .values({
+        tenantId: context.worker.tenantId,
+        type: "revenue_worker.lead_read.completed",
+        source,
+        actorType: "worker",
+        actorId: context.worker.id,
+        actorRef: `worker:${context.worker.id}`,
+        targetType: "worker_run",
+        targetId: run.id,
+        workerRunId: run.id,
+        eventId: event.id,
+        capabilityId,
+        risk: "low",
+        idempotencyKey: `${input.idempotencyKey}:lead_read_completed`,
+        data: {
+          source: sourceName,
+          readCount: records.length,
+          selectors,
+          reservationId: reservation.id,
+          usageEventId: usage.id,
+          externalExecution: "blocked",
+        },
+        createdAt: now,
+      })
+      .returning({ id: auditEvents.id });
+
+    await tx
+      .update(workerRuns)
+      .set({
+        eventId: event.id,
+        state: "done",
+        data: {
+          input: {
+            command: "lead.read",
+            inputHash,
+            config: requestConfig,
+            source: sourceName,
+            operator: {
+              userId: operator.id,
+              email: operator.email,
+            },
+          },
+          output,
+          reservationId: reservation.id,
+          usageEventId: usage.id,
+          auditEventId: audit.id,
+          eventId: event.id,
+          externalExecution: "blocked",
+        },
+        endedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(workerRuns.id, run.id));
+    await tx
+      .update(workers)
+      .set({
+        kpis: {
+          ...context.worker.kpis,
+          lastLeadReadAt: now.toISOString(),
+          leads_read: numberValue(context.worker.kpis.leads_read) + records.length,
+        },
+        updatedAt: now,
+      })
+      .where(eq(workers.id, context.worker.id));
+
+    return {
+      created: true as const,
+      workerRunId: run.id,
+      eventId: event.id,
+      reservationId: reservation.id,
+      usageEventId: usage.id,
+      auditEventId: audit.id,
+      output,
+    };
+  });
+  const snapshot = await getRevenueWorkerSnapshot(db, {
+    tenantSlug: input.tenantSlug,
+    workerId: context.worker.id,
+    role: revenueWorkerRole,
+  });
+
+  if (!result.created) {
+    return replayedLeadReadResult(result.run, snapshot);
+  }
+
+  const selectors = Array.isArray(result.output.selectors)
+    ? result.output.selectors.map((selector) => objectValue(selector))
+    : [];
+
+  return {
+    created: true,
+    idempotencyKey: input.idempotencyKey,
+    workerRunId: result.workerRunId,
+    eventId: result.eventId,
+    reservationId: result.reservationId,
+    usageEventId: result.usageEventId,
+    auditEventId: result.auditEventId,
+    readCount: records.length,
+    selectors,
+    output: result.output,
+    snapshot,
+  };
 }
 
 export async function runRevenueWorker(input: {

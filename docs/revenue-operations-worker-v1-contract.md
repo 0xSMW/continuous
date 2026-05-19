@@ -12,12 +12,42 @@ raising autonomy or permitting external sends.
 | `worker.role` | Yes | Explicit worker family selector; no default role is assumed |
 | `worker.tenantSlug` | No | Required when an operator email spans tenants |
 | `worker.id` | No | Required when multiple Revenue Workers match |
+| `config.source` + `config.records[]` | Required for `lead.read` | Reads inbound lead records into persisted Core source object/event/evidence rows |
 | `config.intake` | Preferred for useful runs | References persisted Core lead source identity or object/event/evidence rows used to derive classification, draft, quote, evidence, and approval packet |
 | `config.leadPacket` | Fallback only | Direct source payload for operator tests and controlled evals |
 
 ## API Shape
 
 The canonical worker control-plane route is `/worker`.
+
+Read inbound lead source records before running the worker:
+
+```json
+{
+  "command": "lead.read",
+  "worker": {
+    "role": "revenue_operations",
+    "tenantSlug": "continuous-demo"
+  },
+  "idempotencyKey": "lead-read-001",
+  "config": {
+    "source": "website_form",
+    "records": [
+      {
+        "sourceEventId": "form-2026-05-19-001",
+        "customerName": "Acme Roof Repair",
+        "customerIntent": "roof leak inspection",
+        "serviceArea": "roofing",
+        "urgency": "high",
+        "missingFacts": ["preferred_time_window"]
+      }
+    ]
+  }
+}
+```
+
+The command returns `result.selectors[]`; pass one selector's
+`intake.source` and `intake.sourceEventId` to `command=run`:
 
 ```json
 {
@@ -152,6 +182,7 @@ and local toolbox aliases resolve to the same handlers and validation rules.
 |---|---|---|---|---|---|
 | `GET view=snapshot` | `worker.snapshot` | None | None | Read-only | Blocked |
 | `GET view=approvals` | `worker.approvals.list` | Optional `state` | None | Read-only | Blocked |
+| `lead.read` | `worker.lead.read` | `source`, `records[]` or `record` | Required | Core lead object/event/evidence, worker run, budget/usage, audit | Blocked |
 | `run` | `worker.run` | `config.intake` preferred, `config.leadPacket` fallback | Required | Internal records, budget, approval, dry-run adapter receipt | Blocked |
 | `continue` | `worker.continue` | `approvalId` | Required | Approved execution packet or revised approval packet, workflow step, task outcome, audit/evidence | Blocked |
 | `approval.decide` | `worker.approvals.decide` | `approvalId`, `action`, optional `note` | None | Approval/task/workflow evidence only | Blocked |
@@ -162,6 +193,19 @@ and local toolbox aliases resolve to the same handlers and validation rules.
 
 `config` is the command payload envelope. The route does not encode a worker
 family, operation target, customer, source system, or draft type in the URL.
+
+For `command=lead.read`, use:
+
+| Field | Required | Notes |
+|---|---:|---|
+| `source` | Yes | Source system name, for example `website_form` or later `gmail` |
+| `records[].sourceEventId` | Yes | Stable external source event, form, message, or row id |
+| `records[].customerName` | No | Used to name the Core lead object; defaults to `Customer` |
+| `records[].customerIntent` | No | Used for downstream classification; defaults to `service request` |
+| `records[].serviceArea` | No | Used for quote defaults; defaults to `field service` |
+| `records[].urgency` | No | `low`, `normal`, `high`, `urgent`, `emergency`, or `same_day` |
+| `records[].missingFacts` | No | Missing facts carried forward to the approval packet |
+| `records[].payload` | No | Raw source payload retained in evidence with external execution blocked |
 
 | Field | Required | Notes |
 |---|---:|---|
@@ -182,6 +226,18 @@ no Core intake selector is present.
 The first runtime only prepares owner-review packets.
 
 ## Run Output
+
+`POST /worker` with `command=lead.read` returns a generic command response
+whose `result.output.selectors[]` contains:
+
+| Output | Required behavior |
+|---|---|
+| `source` | Source system name used for lookup |
+| `sourceEventId` | External source id used as the stable selector |
+| `objectId` | Core lead object row persisted from the source record |
+| `eventId` | Core `lead.received` event row persisted or reused for the source record |
+| `evidenceId` | Source snapshot evidence row |
+| `intake` | Minimal `{source, sourceEventId}` payload for a later `command=run` |
 
 `POST /worker` with `command=run` returns a generic command response whose
 `result.output` contains worker-derived data:
@@ -216,15 +272,15 @@ The first runtime only prepares owner-review packets.
 
 | Record | Required behavior |
 |---|---|
-| `worker_runs` | Owns lifecycle, idempotency, run input, and run output |
+| `worker_runs` | Owns lifecycle, idempotency, lead-read input/output, run input/output, and continuations |
 | `workflow_runs` | Owns the lead-to-cash state machine for the prepared worker action |
 | `workflow_steps` | Records intake resolved, packet prepared, adapter dry-run recorded, approval requested, and approval decision transitions |
 | `budget_reservations` | Reserves and marks deterministic simulation units as used |
 | `adapter_runs` | Records dry-run adapter execution, attempt metadata, retry execution, receipt state, and reconciliation state |
 | `inferences` | Stores prompt/result/safety trace |
 | `usage_events` | Attributes units to budget, task, capability, and worker |
-| `events` | Emits `revenue_worker.run.completed` with linked output ids |
-| `evidence` | Stores trace, adapter receipt, and later approval decision evidence |
+| `events` | Emits source `lead.received`, `revenue_worker.lead_read.completed`, and `revenue_worker.run.completed` records with linked output ids |
+| `evidence` | Stores source snapshots, trace, adapter receipt, and later approval decision evidence |
 | `adapter_actions` | Links to the adapter run and drafts customer-response intent with `externalSend=false` |
 | `approval_requests` | Creates pending operator approval for the prepared action |
 | `audit_events` | Records run request, approval request, and approval decision |
