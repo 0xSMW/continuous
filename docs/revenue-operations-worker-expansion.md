@@ -19,7 +19,7 @@ state, workflow state, and object versioning without external sends or money mov
 | Adapter reconciliation API | `POST /worker` with `command=adapters.reconcile`, tenant-scoped and bearer-token required |
 | Operator run | `bun run worker:tool worker.run` with the same worker/config payload |
 | Command registry | `/worker` commands and `worker:*` local tool aliases share role, config, idempotency, tenant, and external-execution validation |
-| External execution | Disabled; adapter runtime records dry-run receipts and matched reconciliation only |
+| External execution | Disabled; adapter runtime records dry-run receipts, reconciliation states, and retry/review system tasks only |
 
 `/worker` is the forward API. Worker role, tenant, operation config, and
 idempotency belong in payload fields for mutation commands, not in
@@ -38,7 +38,7 @@ smoke test.
 | Budget | Reservation before model/tool work and usage attribution after |
 | Evidence | Source snapshot, prompt/result trace, approval, and adapter receipt |
 | Approval | First-class `approval_requests`, approval decision evidence, audit trail, and allowed workflow advancement while external execution remains blocked |
-| Adapter safety | Dry-run mode, receipt evidence, attempt metadata, reconciliation worker output, and audit/evidence records are persisted; scoped live credentials are still blocked |
+| Adapter safety | Dry-run mode, receipt evidence, attempt metadata, reconciliation worker output, retry/review system tasks, and audit/evidence records are persisted; scoped live credentials are still blocked |
 | Eval | Golden lead/quote cases with expected classification, approval, budget, adapter receipt, and idempotency outputs pass in CI |
 
 ## Next Capabilities
@@ -89,6 +89,6 @@ smoke test.
 1. Extend the Revenue Worker state machine with retry, failure, and reconciliation branches without enabling external execution; broaden revision continuation into revised packet generation.
 2. Expand read-only real lead intake beyond Core object/event/evidence references into connected source readers.
 3. Add quote approval UI backed by `ui_contracts`.
-4. Extend the persistence-only reconciliation worker into retry execution paths for failed or uncertain adapter results.
+4. Extend persistence-only reconciliation tasks into live retry execution paths for failed or uncertain adapter results.
 5. Extend eval fixtures beyond the first CI-enforced lead-to-quote cases.
 6. Raise autonomy only for read, classify, draft, and owner brief capabilities.

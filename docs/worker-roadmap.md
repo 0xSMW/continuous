@@ -16,7 +16,7 @@ adapters, generated UI, evidence, and evals.
 | Capabilities | Typed capability grants define read, draft, prepare, approve, and execute boundaries |
 | Budget | Worker budget account, reservation path, usage event, and overage policy are present |
 | Approval | Shared `approval_requests` route supports the worker's approval subject |
-| Adapter | Dry-run action, receipt evidence, retry policy, and reconciliation state are present |
+| Adapter | Dry-run action, receipt evidence, retry policy, reconciliation state, and retry/review system-task creation are present |
 | Eval | Golden cases cover classification, missing facts, risk, cost, and approval behavior |
 | UI | Generated approval, brief, exception, and evidence views can be rendered from data |
 | Launch | Production smoke proves no external mutation without approval and receipt capture |
@@ -27,7 +27,7 @@ adapters, generated UI, evidence, and evals.
 |---|---|
 | Lead-to-cash simulation | Run creates task, worker run, workflow run/steps, budget reservation, inference, usage, adapter dry-run, approval, audit, evidence, object version |
 | Approval execution | Approval decision uses shared approval service, advances the allowed workflow state, and leaves external execution blocked |
-| Adapter hardening | Persistence-only reconciliation writes audit/evidence records; live credentials, retry execution, and failure tasks remain gated |
+| Adapter hardening | Persistence-only reconciliation writes audit/evidence records and retry/review system tasks; live credentials and retry execution remain gated |
 | Eval harness | CI-enforced lead-to-quote case proves classification, approval, budget, adapter receipt, and idempotency replay |
 | First controlled send | Approved external message sends through adapter with receipt and rollback/escalation evidence |
 

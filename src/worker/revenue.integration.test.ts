@@ -1675,6 +1675,248 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(evidenceCount.value).toBe(result.evidenceIds.length);
   }, 120_000);
 
+  it("creates retry tasks for failed adapter rows that still have attempts remaining", async () => {
+    const [connection] = await db.select().from(connections).limit(1);
+    expect(connection).toBeDefined();
+
+    const runId = randomUUID();
+    const actionId = randomUUID();
+    const key = `ci-adapter-retry-${runId}`;
+    const createdAt = new Date("2000-01-01T00:00:00.000Z");
+    const now = new Date("2026-05-19T00:00:00.000Z");
+    const nextAttemptAt = new Date("2026-05-19T00:05:00.000Z");
+
+    await db.insert(adapterRuns).values({
+      id: runId,
+      tenantId: connection.tenantId,
+      connectionId: connection.id,
+      mode: "dry_run",
+      operation: "ci_retry_check",
+      idempotencyKey: `${key}:run`,
+      state: "failed",
+      attempt: 1,
+      maxAttempts: 3,
+      reconciliationState: "pending",
+      readCount: 1,
+      writeCount: 0,
+      receipt: {
+        externalMutation: false,
+      },
+      error: {
+        code: "adapter_timeout",
+      },
+      data: {
+        dryRun: true,
+        externalMutation: false,
+      },
+      startedAt: now,
+      createdAt,
+    });
+    await db.insert(adapterActions).values({
+      id: actionId,
+      tenantId: connection.tenantId,
+      connectionId: connection.id,
+      adapterRunId: runId,
+      idempotencyKey: `${key}:action`,
+      state: "failed",
+      mode: "dry_run",
+      operation: "ci_retry_check",
+      attempt: 1,
+      maxAttempts: 3,
+      reconciliationState: "pending",
+      request: {
+        dryRun: true,
+        externalSend: false,
+      },
+      receipt: {
+        externalMutation: false,
+      },
+      error: {
+        code: "adapter_timeout",
+      },
+      createdAt,
+      updatedAt: createdAt,
+    });
+
+    const result = await reconcileAdapterLedger({
+      tenantSlug: "continuous-demo",
+      limit: 1,
+      now,
+      db,
+    });
+
+    expect(result.processed).toBe(2);
+    expect(result.retryScheduled).toBe(2);
+    expect(result.needsReview).toBe(0);
+    expect(result.retryTaskIds).toHaveLength(2);
+    expect(result.reviewTaskIds).toHaveLength(0);
+    expect(result.taskIds).toEqual(expect.arrayContaining(result.retryTaskIds));
+
+    const [run] = await db.select().from(adapterRuns).where(eq(adapterRuns.id, runId)).limit(1);
+    const [action] = await db
+      .select()
+      .from(adapterActions)
+      .where(eq(adapterActions.id, actionId))
+      .limit(1);
+    const retryTasks = await db.select().from(tasks).where(inArray(tasks.id, result.retryTaskIds));
+    const retryEvents = await db.select().from(events).where(inArray(events.taskId, result.retryTaskIds));
+    const retryEvidence = await db
+      .select()
+      .from(evidence)
+      .where(inArray(evidence.taskId, result.retryTaskIds));
+
+    expect(run?.state).toBe("queued");
+    expect(run?.attempt).toBe(2);
+    expect(run?.reconciliationState).toBe("retry_scheduled");
+    expect(run?.nextAttemptAt?.toISOString()).toBe(nextAttemptAt.toISOString());
+    expect(objectValue(run?.receipt).externalMutation).toBe(false);
+    expect(action?.state).toBe("queued");
+    expect(action?.attempt).toBe(2);
+    expect(action?.reconciliationState).toBe("retry_scheduled");
+    expect(action?.nextAttemptAt?.toISOString()).toBe(nextAttemptAt.toISOString());
+    expect(objectValue(action?.receipt).externalMutation).toBe(false);
+
+    expect(retryTasks).toHaveLength(2);
+    for (const task of retryTasks) {
+      expect(task.state).toBe("waiting");
+      expect(task.priority).toBe("normal");
+      expect(task.ownerType).toBe("system");
+      expect(task.ownerRef).toBe("system:adapter-reconciliation");
+      expect(task.dueAt?.toISOString()).toBe(nextAttemptAt.toISOString());
+      expect(objectValue(task.outcome).decision).toBe("retry_scheduled");
+      expect(objectValue(task.outcome).externalExecution).toBe("blocked");
+      expect(objectValue(task.outcome).executable).toBe(false);
+    }
+    expect(retryEvents).toHaveLength(2);
+    expect(retryEvents.every((event) => event.type === "adapter.retry_task.created")).toBe(true);
+    expect(retryEvidence).toHaveLength(2);
+    expect(retryEvidence.every((item) => objectValue(item.data).externalExecution === "blocked")).toBe(
+      true,
+    );
+  }, 120_000);
+
+  it("creates review tasks for failed adapter rows that exhausted retries", async () => {
+    const [connection] = await db.select().from(connections).limit(1);
+    expect(connection).toBeDefined();
+
+    const runId = randomUUID();
+    const actionId = randomUUID();
+    const key = `ci-adapter-review-${runId}`;
+    const createdAt = new Date("2000-01-01T00:01:00.000Z");
+    const now = new Date("2026-05-19T00:00:00.000Z");
+
+    await db.insert(adapterRuns).values({
+      id: runId,
+      tenantId: connection.tenantId,
+      connectionId: connection.id,
+      mode: "dry_run",
+      operation: "ci_review_check",
+      idempotencyKey: `${key}:run`,
+      state: "failed",
+      attempt: 3,
+      maxAttempts: 3,
+      reconciliationState: "pending",
+      readCount: 1,
+      writeCount: 0,
+      receipt: {
+        externalMutation: false,
+      },
+      error: {
+        code: "max_retries_exhausted",
+      },
+      data: {
+        dryRun: true,
+        externalMutation: false,
+      },
+      startedAt: now,
+      createdAt,
+    });
+    await db.insert(adapterActions).values({
+      id: actionId,
+      tenantId: connection.tenantId,
+      connectionId: connection.id,
+      adapterRunId: runId,
+      idempotencyKey: `${key}:action`,
+      state: "failed",
+      mode: "dry_run",
+      operation: "ci_review_check",
+      attempt: 3,
+      maxAttempts: 3,
+      reconciliationState: "pending",
+      request: {
+        dryRun: true,
+        externalSend: false,
+      },
+      receipt: {
+        externalMutation: false,
+      },
+      error: {
+        code: "max_retries_exhausted",
+      },
+      createdAt,
+      updatedAt: createdAt,
+    });
+
+    const result = await reconcileAdapterLedger({
+      tenantSlug: "continuous-demo",
+      limit: 1,
+      now,
+      db,
+    });
+
+    expect(result.processed).toBe(2);
+    expect(result.retryScheduled).toBe(0);
+    expect(result.needsReview).toBe(2);
+    expect(result.reviewTaskIds).toHaveLength(2);
+    expect(result.retryTaskIds).toHaveLength(0);
+    expect(result.taskIds).toEqual(expect.arrayContaining(result.reviewTaskIds));
+
+    const [run] = await db.select().from(adapterRuns).where(eq(adapterRuns.id, runId)).limit(1);
+    const [action] = await db
+      .select()
+      .from(adapterActions)
+      .where(eq(adapterActions.id, actionId))
+      .limit(1);
+    const reviewTasks = await db.select().from(tasks).where(inArray(tasks.id, result.reviewTaskIds));
+    const reviewEvents = await db
+      .select()
+      .from(events)
+      .where(inArray(events.taskId, result.reviewTaskIds));
+    const reviewEvidence = await db
+      .select()
+      .from(evidence)
+      .where(inArray(evidence.taskId, result.reviewTaskIds));
+
+    expect(run?.state).toBe("failed");
+    expect(run?.attempt).toBe(3);
+    expect(run?.reconciliationState).toBe("needs_review");
+    expect(run?.nextAttemptAt).toBeNull();
+    expect(objectValue(run?.receipt).externalMutation).toBe(false);
+    expect(action?.state).toBe("failed");
+    expect(action?.attempt).toBe(3);
+    expect(action?.reconciliationState).toBe("needs_review");
+    expect(action?.nextAttemptAt).toBeNull();
+    expect(objectValue(action?.receipt).externalMutation).toBe(false);
+
+    expect(reviewTasks).toHaveLength(2);
+    for (const task of reviewTasks) {
+      expect(task.state).toBe("blocked");
+      expect(task.priority).toBe("high");
+      expect(task.ownerType).toBe("system");
+      expect(task.ownerRef).toBe("system:adapter-reconciliation");
+      expect(task.dueAt?.toISOString()).toBe(now.toISOString());
+      expect(objectValue(task.outcome).decision).toBe("needs_review");
+      expect(objectValue(task.outcome).externalExecution).toBe("blocked");
+      expect(objectValue(task.outcome).executable).toBe(false);
+    }
+    expect(reviewEvents).toHaveLength(2);
+    expect(reviewEvents.every((event) => event.type === "adapter.review_task.created")).toBe(true);
+    expect(reviewEvidence).toHaveLength(2);
+    expect(reviewEvidence.every((item) => objectValue(item.data).externalExecution === "blocked")).toBe(
+      true,
+    );
+  }, 120_000);
+
   it("runs the Owner Chief-of-Staff worker as a read-only brief generator", async () => {
     const runId = randomUUID();
     const result = await executeWorkerCommand({

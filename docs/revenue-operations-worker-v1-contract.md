@@ -120,7 +120,7 @@ and local toolbox aliases resolve to the same handlers and validation rules.
 | `run` | `worker.run` | `config.intake` preferred, `config.leadPacket` fallback | Required | Internal records, budget, approval, dry-run adapter receipt | Blocked |
 | `continue` | `worker.continue` | `approvalId` | Required | Worker continuation records, workflow step, task outcome, audit/evidence | Blocked |
 | `approval.decide` | `worker.approvals.decide` | `approvalId`, `action`, optional `note` | None | Approval/task/workflow evidence only | Blocked |
-| `adapters.reconcile` | `worker.adapters.reconcile` | Tenant-scoped `worker.tenantSlug`, optional integer `limit` | None | Adapter reconciliation audit/evidence | Blocked |
+| `adapters.reconcile` | `worker.adapters.reconcile` | Tenant-scoped `worker.tenantSlug`, optional integer `limit` | None | Adapter reconciliation audit/evidence plus retry/review system tasks | Blocked |
 
 ## Run Config
 
@@ -191,7 +191,7 @@ The first runtime only prepares owner-review packets.
 | `adapter_actions` | Links to the adapter run and drafts customer-response intent with `externalSend=false` |
 | `approval_requests` | Creates pending operator approval for the prepared action |
 | `audit_events` | Records run request, approval request, and approval decision |
-| `tasks` | Moves active work to `approval_required`; decision later moves to `waiting`, `active`, or `blocked` |
+| `tasks` | Moves active work to `approval_required`; decision later moves to `waiting`, `active`, or `blocked`; reconciliation creates non-executable retry/review system tasks |
 | `object_versions` | Records approval-required state against the object spine |
 
 `POST /worker` with `command=continue` creates a separate idempotent

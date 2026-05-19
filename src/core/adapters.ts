@@ -1,4 +1,4 @@
-import { and, asc, eq, isNotNull, or, sql } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 
 import { db as defaultDb } from "../db/client";
 import {
@@ -6,6 +6,8 @@ import {
   adapterRuns,
   auditEvents,
   evidence,
+  events,
+  tasks,
   tenants,
   type JsonObject,
 } from "../db/schema";
@@ -27,6 +29,9 @@ export type AdapterReconciliationResult = {
   matched: number;
   retryScheduled: number;
   needsReview: number;
+  taskIds: string[];
+  retryTaskIds: string[];
+  reviewTaskIds: string[];
   auditEventIds: string[];
   evidenceIds: string[];
 };
@@ -69,18 +74,12 @@ function incrementedAttempt(decision: ReconciliationDecision, attempt: number) {
   return decision === "retry_scheduled" ? attempt + 1 : attempt;
 }
 
-function pendingWhere(now: Date) {
-  return or(
-    eq(adapterRuns.reconciliationState, "pending"),
-    and(isNotNull(adapterRuns.nextAttemptAt), sql`${adapterRuns.nextAttemptAt} <= ${now}`),
-  );
+function pendingWhere() {
+  return eq(adapterRuns.reconciliationState, "pending");
 }
 
-function pendingActionWhere(now: Date) {
-  return or(
-    eq(adapterActions.reconciliationState, "pending"),
-    and(isNotNull(adapterActions.nextAttemptAt), sql`${adapterActions.nextAttemptAt} <= ${now}`),
-  );
+function pendingActionWhere() {
+  return eq(adapterActions.reconciliationState, "pending");
 }
 
 async function tenantIdFor(db: Database, tenantSlug?: string) {
@@ -172,6 +171,158 @@ async function recordDecision(
   return { auditEventId: audit.id, evidenceId: proof.id };
 }
 
+async function createFollowupTask(
+  db: DatabaseExecutor,
+  input: {
+    tenantId: string;
+    targetType: "adapter_run" | "adapter_action";
+    targetId: string;
+    connectionId: string;
+    workerRunId?: string | null;
+    sourceEventId?: string | null;
+    sourceTaskId?: string | null;
+    capabilityId?: string | null;
+    decision: Exclude<ReconciliationDecision, "matched">;
+    attempt: number;
+    maxAttempts: number;
+    operation: string;
+    nextAttemptAt?: Date | null;
+    now: Date;
+  },
+) {
+  const isRetry = input.decision === "retry_scheduled";
+  const title = isRetry
+    ? `Retry adapter ${input.targetType === "adapter_run" ? "run" : "action"} ${input.operation}`
+    : `Review adapter ${input.targetType === "adapter_run" ? "run" : "action"} ${input.operation}`;
+  const idempotencyKey = `${input.targetType}:${input.targetId}:${input.decision}:task:${input.attempt}`;
+  const [task] = await db
+    .insert(tasks)
+    .values({
+      tenantId: input.tenantId,
+      capabilityId: input.capabilityId,
+      triggerEventId: input.sourceEventId,
+      title,
+      state: isRetry ? "waiting" : "blocked",
+      priority: isRetry ? "normal" : "high",
+      ownerType: "system",
+      ownerRef: "system:adapter-reconciliation",
+      dueAt: input.nextAttemptAt ?? input.now,
+      evidence: {
+        required: isRetry ? ["adapter_retry_receipt"] : ["adapter_failure_review"],
+        targetType: input.targetType,
+        targetId: input.targetId,
+        connectionId: input.connectionId,
+        workerRunId: input.workerRunId ?? null,
+        sourceTaskId: input.sourceTaskId ?? null,
+        sourceEventId: input.sourceEventId ?? null,
+      },
+      outcome: {
+        decision: input.decision,
+        attempt: input.attempt,
+        maxAttempts: input.maxAttempts,
+        operation: input.operation,
+        externalExecution: "blocked",
+        executable: false,
+      },
+      kpi: {
+        risk: isRetry ? "adapter_retry_pending" : "adapter_review_required",
+      },
+      createdAt: input.now,
+      updatedAt: input.now,
+    })
+    .returning({ id: tasks.id });
+  const [event] = await db
+    .insert(events)
+    .values({
+      tenantId: input.tenantId,
+      type: isRetry ? "adapter.retry_task.created" : "adapter.review_task.created",
+      source,
+      actorType: "system",
+      actorRef: "system:adapter-reconciliation",
+      taskId: task.id,
+      capabilityId: input.capabilityId,
+      connectionId: input.connectionId,
+      idempotencyKey: `${idempotencyKey}:event`,
+      data: {
+        taskId: task.id,
+        targetType: input.targetType,
+        targetId: input.targetId,
+        workerRunId: input.workerRunId ?? null,
+        sourceTaskId: input.sourceTaskId ?? null,
+        sourceEventId: input.sourceEventId ?? null,
+        decision: input.decision,
+        attempt: input.attempt,
+        maxAttempts: input.maxAttempts,
+        operation: input.operation,
+        externalExecution: "blocked",
+        executable: false,
+      },
+      occurredAt: input.now,
+    })
+    .returning({ id: events.id });
+  const [audit] = await db
+    .insert(auditEvents)
+    .values({
+      tenantId: input.tenantId,
+      type: "task.created",
+      source,
+      actorType: "system",
+      actorRef: "system:adapter-reconciliation",
+      targetType: "task",
+      targetId: task.id,
+      taskId: task.id,
+      workerRunId: input.workerRunId,
+      eventId: event.id,
+      capabilityId: input.capabilityId,
+      risk: isRetry ? "medium" : "high",
+      idempotencyKey: `${idempotencyKey}:task_created`,
+      data: {
+        targetType: input.targetType,
+        targetId: input.targetId,
+        connectionId: input.connectionId,
+        workerRunId: input.workerRunId ?? null,
+        sourceTaskId: input.sourceTaskId ?? null,
+        decision: input.decision,
+        attempt: input.attempt,
+        maxAttempts: input.maxAttempts,
+        externalExecution: "blocked",
+        executable: false,
+      },
+    })
+    .returning({ id: auditEvents.id });
+  const [proof] = await db
+    .insert(evidence)
+    .values({
+      tenantId: input.tenantId,
+      kind: "trace",
+      name: isRetry ? "Adapter retry task created" : "Adapter review task created",
+      taskId: task.id,
+      eventId: event.id,
+      capabilityId: input.capabilityId,
+      actorType: "system",
+      hash: `${source}:${idempotencyKey}:${input.now.toISOString()}`,
+      data: {
+        taskId: task.id,
+        auditEventId: audit.id,
+        targetType: input.targetType,
+        targetId: input.targetId,
+        decision: input.decision,
+        attempt: input.attempt,
+        maxAttempts: input.maxAttempts,
+        externalExecution: "blocked",
+        executable: false,
+      },
+    })
+    .returning({ id: evidence.id });
+
+  return {
+    taskId: task.id,
+    eventId: event.id,
+    auditEventId: audit.id,
+    evidenceId: proof.id,
+  };
+}
+
 async function reconcileAction(db: DatabaseExecutor, row: AdapterActionRow, now: Date) {
   const decision = decisionFor({
     mode: row.mode,
@@ -183,6 +334,7 @@ async function reconcileAction(db: DatabaseExecutor, row: AdapterActionRow, now:
     error: row.error,
   });
   const attempt = incrementedAttempt(decision, row.attempt);
+  const nextAttemptAt = decision === "retry_scheduled" ? nextAttemptTime(now, row.attempt) : null;
   const receipt = {
     ...row.receipt,
     reconciliationState: decision,
@@ -196,18 +348,40 @@ async function reconcileAction(db: DatabaseExecutor, row: AdapterActionRow, now:
   const state =
     decision === "matched" ? "done" : decision === "retry_scheduled" ? "queued" : row.state;
 
-  await db
+  const updated = await db
     .update(adapterActions)
     .set({
       state,
       attempt,
       reconciliationState: decision,
-      nextAttemptAt: decision === "retry_scheduled" ? nextAttemptTime(now, attempt) : null,
+      nextAttemptAt,
       receipt,
       error,
       updatedAt: now,
     })
-    .where(eq(adapterActions.id, row.id));
+    .where(and(eq(adapterActions.id, row.id), eq(adapterActions.reconciliationState, "pending")))
+    .returning({ id: adapterActions.id });
+  if (!updated.length) {
+    return null;
+  }
+  const followup =
+    decision === "matched"
+      ? null
+      : await createFollowupTask(db, {
+          tenantId: row.tenantId,
+          targetType: "adapter_action",
+          targetId: row.id,
+          connectionId: row.connectionId,
+          sourceEventId: row.eventId,
+          sourceTaskId: row.taskId,
+          capabilityId: row.capabilityId,
+          decision,
+          attempt,
+          maxAttempts: row.maxAttempts,
+          operation: row.operation,
+          nextAttemptAt,
+          now,
+        });
 
   const evidenceResult = await recordDecision(db, {
     tenantId: row.tenantId,
@@ -215,7 +389,7 @@ async function reconcileAction(db: DatabaseExecutor, row: AdapterActionRow, now:
     targetId: row.id,
     connectionId: row.connectionId,
     eventId: row.eventId,
-    taskId: row.taskId,
+    taskId: followup?.taskId ?? row.taskId,
     capabilityId: row.capabilityId,
     decision,
     attempt,
@@ -226,7 +400,7 @@ async function reconcileAction(db: DatabaseExecutor, row: AdapterActionRow, now:
     now,
   });
 
-  return { decision, ...evidenceResult };
+  return { decision, followup, ...evidenceResult };
 }
 
 async function reconcileRun(db: DatabaseExecutor, row: AdapterRunRow, now: Date) {
@@ -240,6 +414,7 @@ async function reconcileRun(db: DatabaseExecutor, row: AdapterRunRow, now: Date)
     error: row.error,
   });
   const attempt = incrementedAttempt(decision, row.attempt);
+  const nextAttemptAt = decision === "retry_scheduled" ? nextAttemptTime(now, row.attempt) : null;
   const receipt = {
     ...row.receipt,
     reconciliationState: decision,
@@ -253,18 +428,39 @@ async function reconcileRun(db: DatabaseExecutor, row: AdapterRunRow, now: Date)
   const state =
     decision === "matched" ? "done" : decision === "retry_scheduled" ? "queued" : row.state;
 
-  await db
+  const updated = await db
     .update(adapterRuns)
     .set({
       state,
       attempt,
       reconciliationState: decision,
-      nextAttemptAt: decision === "retry_scheduled" ? nextAttemptTime(now, attempt) : null,
+      nextAttemptAt,
       receipt,
       error,
       endedAt: decision === "matched" ? now : row.endedAt,
     })
-    .where(eq(adapterRuns.id, row.id));
+    .where(and(eq(adapterRuns.id, row.id), eq(adapterRuns.reconciliationState, "pending")))
+    .returning({ id: adapterRuns.id });
+  if (!updated.length) {
+    return null;
+  }
+  const followup =
+    decision === "matched"
+      ? null
+      : await createFollowupTask(db, {
+          tenantId: row.tenantId,
+          targetType: "adapter_run",
+          targetId: row.id,
+          connectionId: row.connectionId,
+          workerRunId: row.workerRunId,
+          sourceEventId: row.eventId,
+          decision,
+          attempt,
+          maxAttempts: row.maxAttempts,
+          operation: row.operation,
+          nextAttemptAt,
+          now,
+        });
 
   const evidenceResult = await recordDecision(db, {
     tenantId: row.tenantId,
@@ -273,6 +469,7 @@ async function reconcileRun(db: DatabaseExecutor, row: AdapterRunRow, now: Date)
     connectionId: row.connectionId,
     workerRunId: row.workerRunId,
     eventId: row.eventId,
+    taskId: followup?.taskId,
     decision,
     attempt,
     maxAttempts: row.maxAttempts,
@@ -282,7 +479,7 @@ async function reconcileRun(db: DatabaseExecutor, row: AdapterRunRow, now: Date)
     now,
   });
 
-  return { decision, ...evidenceResult };
+  return { decision, followup, ...evidenceResult };
 }
 
 export async function reconcileAdapterLedger(input: {
@@ -302,12 +499,15 @@ export async function reconcileAdapterLedger(input: {
     matched: 0,
     retryScheduled: 0,
     needsReview: 0,
+    taskIds: [],
+    retryTaskIds: [],
+    reviewTaskIds: [],
     auditEventIds: [],
     evidenceIds: [],
   };
 
-  const actionConditions = [pendingActionWhere(now)];
-  const runConditions = [pendingWhere(now)];
+  const actionConditions = [pendingActionWhere()];
+  const runConditions = [pendingWhere()];
 
   if (tenantId) {
     actionConditions.push(eq(adapterActions.tenantId, tenantId));
@@ -330,33 +530,61 @@ export async function reconcileAdapterLedger(input: {
 
     for (const row of actionRows) {
       const decision = await reconcileAction(tx, row, now);
+      if (!decision) {
+        continue;
+      }
       result.processed += 1;
       result.actions += 1;
       result.auditEventIds.push(decision.auditEventId);
       result.evidenceIds.push(decision.evidenceId);
+      if (decision.followup) {
+        result.taskIds.push(decision.followup.taskId);
+        result.auditEventIds.push(decision.followup.auditEventId);
+        result.evidenceIds.push(decision.followup.evidenceId);
+      }
 
       if (decision.decision === "matched") {
         result.matched += 1;
       } else if (decision.decision === "retry_scheduled") {
         result.retryScheduled += 1;
+        if (decision.followup) {
+          result.retryTaskIds.push(decision.followup.taskId);
+        }
       } else {
         result.needsReview += 1;
+        if (decision.followup) {
+          result.reviewTaskIds.push(decision.followup.taskId);
+        }
       }
     }
 
     for (const row of runRows) {
       const decision = await reconcileRun(tx, row, now);
+      if (!decision) {
+        continue;
+      }
       result.processed += 1;
       result.runs += 1;
       result.auditEventIds.push(decision.auditEventId);
       result.evidenceIds.push(decision.evidenceId);
+      if (decision.followup) {
+        result.taskIds.push(decision.followup.taskId);
+        result.auditEventIds.push(decision.followup.auditEventId);
+        result.evidenceIds.push(decision.followup.evidenceId);
+      }
 
       if (decision.decision === "matched") {
         result.matched += 1;
       } else if (decision.decision === "retry_scheduled") {
         result.retryScheduled += 1;
+        if (decision.followup) {
+          result.retryTaskIds.push(decision.followup.taskId);
+        }
       } else {
         result.needsReview += 1;
+        if (decision.followup) {
+          result.reviewTaskIds.push(decision.followup.taskId);
+        }
       }
     }
   });
