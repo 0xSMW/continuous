@@ -7,7 +7,7 @@
 ## Agent
 
 - Continue canonical entity/workforce/filing/payment/AI-ops object coverage before widening the Revenue Worker runtime; payroll preview now has persisted statements, lines, liabilities, traces, and a Core record command.
-- Extend payroll preview approval decisions into payroll-run state transitions and later funding/tax execution handoff; variance reports, pay statement documents, approval packets, and blocked funding/tax draft rows now exist before any submission or money movement.
+- Extend approved payroll handoffs into scoped live credential checks, rollback paths, and dual-control execution workers before any submission or money movement.
 - Extend customer-signal workflows, generated views, and eval fixtures beyond the seeded SatisfactionSignal, FeedbackItem, Complaint, Testimonial, and Review primitives.
 - Wire implementation handlers, retries, approvals, packets, and generated views into the expanded operating workflow catalog.
 - Wire workflow step handlers into capability execution and retry workers.

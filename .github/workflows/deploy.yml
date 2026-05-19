@@ -243,6 +243,7 @@ jobs:
             docker compose exec -T db psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"
           }
 
+          SMOKE_RUN_ID="$(date -u +%Y%m%d%H%M%S)"
           PAYROLL_KEY="deploy-payroll-preview-smoke"
           PAYROLL_PAYLOAD="$(
             /usr/bin/jq -nc --arg key "$PAYROLL_KEY" --arg externalId "$PAYROLL_KEY" '{
@@ -291,7 +292,7 @@ jobs:
             '.error == null and .data.command == "payroll.preview.record" and (.data.result.recorded | type) == "boolean" and (.data.result.statementId | length > 0) and (.data.result.lineIds | length) == 2 and (.data.result.liabilityIds | length) == 1 and (.data.result.traceId | length > 0) and (.data.result.evidenceId | length > 0)' \
             >/dev/null
 
-          PAYROLL_PACKET_KEY="deploy-payroll-preview-packet-smoke"
+          PAYROLL_PACKET_KEY="deploy-payroll-preview-packet-smoke-$SMOKE_RUN_ID"
           PAYROLL_PACKET_PAYLOAD="$(
             /usr/bin/jq -nc --arg key "$PAYROLL_PACKET_KEY" '{
               command: "payroll.preview.packet.prepare",
@@ -316,6 +317,34 @@ jobs:
           echo "$PAYROLL_PACKET_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{prepared:.data.result.prepared,packetId:.data.result.packetId,packetDocumentId:.data.result.packetDocumentId,varianceDocumentId:.data.result.varianceDocumentId,payStatementDocumentCount:(.data.result.payStatementDocumentIds | length),paymentInstructionCount:(.data.result.paymentInstructionIds | length),filingDraftId:.data.result.filingDraftId,approvalRequestId:.data.result.approvalRequestId,evidenceId:.data.result.evidenceId,externalExecution:.data.result.externalExecution}}'
           echo "$PAYROLL_PACKET_RESPONSE" | /usr/bin/jq -e \
             '.error == null and .data.command == "payroll.preview.packet.prepare" and (.data.result.prepared | type) == "boolean" and (.data.result.packetId | length > 0) and (.data.result.packetDocumentId | length > 0) and (.data.result.varianceDocumentId | length > 0) and (.data.result.payStatementDocumentIds | length) >= 1 and (.data.result.paymentInstructionIds | length) == 2 and (.data.result.filingDraftId | length > 0) and (.data.result.approvalRequestId | length > 0) and (.data.result.evidenceId | length > 0) and .data.result.externalExecution == "blocked"' \
+            >/dev/null
+
+          PAYROLL_APPROVAL_ID="$(echo "$PAYROLL_PACKET_RESPONSE" | /usr/bin/jq -r '.data.result.approvalRequestId')"
+          PAYROLL_APPROVAL_DECISION_PAYLOAD="$(
+            /usr/bin/jq -nc --arg approvalId "$PAYROLL_APPROVAL_ID" '{
+              command: "approval.decide",
+              approval: {
+                id: $approvalId,
+                tenantSlug: "continuous-demo",
+                subject: "all"
+              },
+              config: {
+                action: "approved",
+                note: "Deploy smoke payroll preview approval; external execution remains blocked."
+              }
+            }'
+          )"
+          PAYROLL_APPROVAL_DECISION_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/approval \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$PAYROLL_APPROVAL_DECISION_PAYLOAD"
+          )"
+
+          echo "$PAYROLL_APPROVAL_DECISION_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{approvalState:.data.result.approval.state,payrollState:.data.result.payrollHandoff.state,draftState:.data.result.payrollHandoff.draftState,externalExecution:.data.result.payrollHandoff.externalExecution,moneyMovement:.data.result.payrollHandoff.moneyMovement,submission:.data.result.payrollHandoff.submission}}'
+          echo "$PAYROLL_APPROVAL_DECISION_RESPONSE" | /usr/bin/jq -e \
+            '.error == null and .data.command == "approval.decide" and .data.result.approval.state == "approved" and .data.result.payrollHandoff.state == "approved" and .data.result.payrollHandoff.draftState == "approved_blocked" and .data.result.payrollHandoff.externalExecution == "blocked" and .data.result.payrollHandoff.moneyMovement == "blocked" and .data.result.payrollHandoff.submission == "blocked"' \
             >/dev/null
 
           APPROVAL_INBOX_RESPONSE="$(

@@ -43,6 +43,7 @@ smoke test.
 | Approval | First-class `approval_requests`, approval decision evidence, audit trail, and allowed workflow advancement while external execution remains blocked |
 | Adapter safety | Dry-run mode, receipt evidence, attempt metadata, reconciliation worker output, due retry execution, retry/review system tasks, workflow retry/review/post-retry states, and audit/evidence records are persisted; scoped live credentials are still blocked |
 | Eval | Golden lead/quote cases with expected classification, approval, budget, adapter receipt, and idempotency outputs pass in CI |
+| Launch | Production smoke proves no external mutation without approval and receipt capture |
 
 ## Next Capabilities
 
@@ -55,7 +56,6 @@ smoke test.
 | `schedule.propose` | Approval required | Do not commit external calendars yet |
 | `invoice.prepare` | Approval required | Tie to job closeout evidence |
 | `payment_link.prepare` | Human approval | No autonomous money movement |
-| `owner_brief.generate` | Allowed | Daily summary can be low-risk and read-only |
 
 ## Adapter Order
 
@@ -81,7 +81,7 @@ smoke test.
 
 | Surface | Purpose |
 |---|---|
-| Owner brief | Leads, quotes, cash, blocked work, decisions needed |
+| Revenue brief input | Leads, quotes, cash, blocked work, and decisions needed for the Owner Chief-of-Staff worker |
 | Quote approval | Scope, price, margin, evidence, draft response, approve/revise/reject |
 | Exception console | Missing facts, budget overage, adapter failure, policy conflict |
 | Evidence packet | Source message, inference trace, approval, receipt, object versions |
@@ -93,4 +93,4 @@ smoke test.
 2. Add quote approval UI backed by `ui_contracts`.
 3. Extend blocked retry execution into scoped live credential checks and rollback paths for failed or uncertain adapter results.
 4. Extend eval fixtures beyond the first CI-enforced lead-to-quote cases.
-5. Raise autonomy only for read, classify, draft, and owner brief capabilities.
+5. Raise autonomy only for Revenue read, classify, and draft capabilities; owner brief generation belongs to the Owner Chief-of-Staff worker.

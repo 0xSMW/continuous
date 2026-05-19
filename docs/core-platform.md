@@ -223,8 +223,12 @@ writes pay statements, payroll lines, liabilities, calculation traces, audit
 events, and trace evidence without submission or money movement.
 `payroll.preview.packet.prepare` turns those preview artifacts into variance
 reports, pay statement documents, an approval packet, approval request, and
-blocked funding/tax handoff drafts. Every command is tenant-scoped, idempotent,
-audit-backed, and blocks external execution.
+blocked funding/tax handoff drafts. A shared approval decision applies the
+payroll outcome to the payroll run, funding drafts, tax draft, filing draft,
+packet document, evidence packet, audit trail, and handoff metadata while
+external execution, submission, and money movement remain blocked. Every
+command is tenant-scoped, idempotent, audit-backed, and blocks external
+execution.
 
 ## Non-Goals For The First Slice
 

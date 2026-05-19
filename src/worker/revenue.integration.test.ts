@@ -457,6 +457,87 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(replay.packetId).toBe(first.packetId);
     expect(replay.approvalRequestId).toBe(first.approvalRequestId);
     expect(auditCount.value).toBe(1);
+
+    const decision = await decideApproval({
+      approvalId: first.approvalRequestId ?? "",
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      action: "approved",
+      note: "CI payroll preview approval; execution remains blocked.",
+      db,
+    });
+
+    expect(decision.approval.state).toBe("approved");
+    expect(objectValue(decision.payrollHandoff).externalExecution).toBe("blocked");
+
+    const [approvedPayrollRun] = await db
+      .select()
+      .from(payrollRuns)
+      .where(eq(payrollRuns.id, payrollRunId))
+      .limit(1);
+    const approvedPaymentDrafts = await db
+      .select()
+      .from(paymentInstructions)
+      .where(inArray(paymentInstructions.id, first.paymentInstructionIds));
+    const [approvedFilingDraft] = await db
+      .select()
+      .from(filingDrafts)
+      .where(eq(filingDrafts.id, first.filingDraftId ?? ""))
+      .limit(1);
+    const [approvedPacket] = await db
+      .select()
+      .from(evidencePackets)
+      .where(eq(evidencePackets.id, first.packetId))
+      .limit(1);
+    const [approvedPacketDocument] = await db
+      .select()
+      .from(documents)
+      .where(eq(documents.id, first.packetDocumentId ?? ""))
+      .limit(1);
+    const [handoffEvent] = await db
+      .select()
+      .from(events)
+      .where(
+        and(
+          eq(events.type, "payroll.preview.approval.applied"),
+          sql`${events.data}->>'approvalRequestId' = ${first.approvalRequestId}`,
+        ),
+      )
+      .limit(1);
+    const [handoffAudit] = await db
+      .select()
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.type, "payroll.preview.approval.applied"),
+          eq(auditEvents.targetType, "payroll_run"),
+          eq(auditEvents.targetId, payrollRunId),
+        ),
+      )
+      .limit(1);
+
+    const payrollHandoff = objectValue(approvedPayrollRun?.data).handoff;
+    expect(approvedPayrollRun?.state).toBe("approved");
+    expect(objectValue(payrollHandoff).approvalRequestId).toBe(first.approvalRequestId);
+    expect(objectValue(payrollHandoff).externalExecution).toBe("blocked");
+    expect(objectValue(payrollHandoff).moneyMovement).toBe("blocked");
+    expect(approvedPaymentDrafts.every((draft) => draft.state === "approved_blocked")).toBe(true);
+    expect(
+      approvedPaymentDrafts.every((draft) => objectValue(objectValue(draft.data).approvalDecision).action === "approved"),
+    ).toBe(true);
+    expect(
+      approvedPaymentDrafts.every((draft) => objectValue(objectValue(draft.data).handoff).moneyMovement === "blocked"),
+    ).toBe(true);
+    expect(approvedFilingDraft?.state).toBe("approved_blocked");
+    expect(objectValue(objectValue(approvedFilingDraft?.data).handoff).submission).toBe("blocked");
+    expect(approvedPacket?.state).toBe("approved");
+    expect(objectValue(objectValue(approvedPacket?.data).handoff).approvalRequestId).toBe(first.approvalRequestId);
+    expect(approvedPacketDocument?.state).toBe("approved");
+    expect(objectValue(objectValue(approvedPacketDocument?.data).handoff).approvalRequestId).toBe(
+      first.approvalRequestId,
+    );
+    expect(handoffEvent?.source).toBe("continuous.approvals");
+    expect(handoffAudit?.risk).toBe("high");
   }, 120_000);
 
   it("transitions headless core tasks and requests approval packets", async () => {

@@ -29,7 +29,7 @@ adapters, generated UI, evidence, and evals.
 | Lead-to-cash simulation | Run creates task, worker run, workflow run/steps, budget reservation, inference, usage, adapter dry-run, approval, audit, evidence, object version |
 | Approval execution | Approval decision uses shared approval service, advances the allowed workflow state, and leaves external execution blocked |
 | Adapter hardening | Reconciliation writes audit/evidence records and retry/review system tasks; due dry-run retries execute with blocked receipts; live credentials remain gated |
-| Eval harness | CI-enforced lead-to-quote case proves classification, approval, budget, adapter receipt, and idempotency replay |
+| Eval harness | CI-enforced lead-to-quote cases prove classification, approval, budget, adapter receipt, and idempotency replay |
 | First controlled send | Approved external message sends through adapter with receipt and rollback/escalation evidence |
 
 ## Phase 2: Owner Chief-of-Staff Worker

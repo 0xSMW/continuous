@@ -156,8 +156,8 @@ The deploy workflow smokes `lead.read`, the source-selector `run` path, adapter
 reconciliation, continuation, and `/api/core` task creation, task transition,
 approval request, capability grant, budget reserve/charge/release, object,
 object-link, event, evidence, document, packet, decision, generated-view,
-shared approval inbox route, and payroll preview packet handoff after each
-production rollout.
+shared approval inbox route, payroll preview packet handoff, and payroll
+approval handoff after each production rollout.
 
 ## Database Backup And Restore
 

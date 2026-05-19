@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 
 import { db as defaultDb } from "../db/client";
 import {
@@ -6,9 +6,14 @@ import {
   auditEvents,
   adapterActions,
   capabilities,
+  documents,
   evidence,
+  evidencePackets,
   events,
+  filingDrafts,
   objects,
+  paymentInstructions,
+  payrollRuns,
   tasks,
   users,
   workflowDefinitions,
@@ -277,6 +282,34 @@ function workflowStateForDecision(action: ApprovalDecisionAction) {
   }
 
   return action;
+}
+
+function payrollRunStateForDecision(action: ApprovalDecisionAction) {
+  if (action === "approved") {
+    return "approved";
+  }
+
+  if (action === "revision_requested") {
+    return "review_required";
+  }
+
+  return "blocked";
+}
+
+function payrollDraftStateForDecision(action: ApprovalDecisionAction) {
+  if (action === "approved") {
+    return "approved_blocked";
+  }
+
+  if (action === "revision_requested") {
+    return "revision_requested";
+  }
+
+  return "blocked";
+}
+
+function uuidList(value: unknown) {
+  return stringArray(value).filter((item) => uuidPattern.test(item));
 }
 
 export function normalizeApprovalDecision(value: unknown): ApprovalDecisionAction | null {
@@ -850,6 +883,7 @@ export async function decideApproval(input: {
 
     let workflowRunState: string | null = null;
     let workflowStepId: string | null = null;
+    let payrollHandoff: JsonObject | null = null;
 
     if (approval.workflowRunId) {
       const [workflow] = await tx
@@ -1018,6 +1052,172 @@ export async function decideApproval(input: {
       }
     }
 
+    const payrollRunId = uuidValue(approvalData.payrollRunId ?? approvalEvidenceData.payrollRunId);
+
+    if (approval.kind === "payroll_preview_approval") {
+      if (!payrollRunId) {
+        throw new PlatformUnavailableError(
+          "payroll_approval_run_required",
+          "Payroll approval is missing its payroll run reference.",
+          409,
+        );
+      }
+
+      const [payrollRun] = await tx
+        .select({ id: payrollRuns.id, data: payrollRuns.data })
+        .from(payrollRuns)
+        .where(and(eq(payrollRuns.tenantId, operator.tenantId), eq(payrollRuns.id, payrollRunId)))
+        .limit(1);
+
+      if (!payrollRun) {
+        throw new PlatformUnavailableError(
+          "payroll_approval_run_not_found",
+          "Payroll approval does not reference a payroll run in this tenant.",
+          404,
+        );
+      }
+
+      const packetId = uuidValue(approvalData.packetId ?? approvalEvidenceData.packetId);
+      const packetDocumentId = uuidValue(approvalData.packetDocumentId ?? approvalEvidenceData.packetDocumentId);
+      const filingDraftId = uuidValue(approvalData.filingDraftId ?? approvalEvidenceData.filingDraftId);
+      const paymentInstructionIds = uuidList(
+        approvalEvidenceData.paymentInstructionIds ?? approvalData.paymentInstructionIds,
+      );
+      const payrollRunState = payrollRunStateForDecision(input.action);
+      const draftState = payrollDraftStateForDecision(input.action);
+      const handoff = {
+        action: input.action,
+        state: payrollRunState,
+        draftState,
+        approvalRequestId: approval.id,
+        auditEventId: audit.id,
+        evidenceId: approvalEvidence.id,
+        packetId: packetId ?? null,
+        packetDocumentId: packetDocumentId ?? null,
+        filingDraftId: filingDraftId ?? null,
+        paymentInstructionIds,
+        externalExecution: "blocked",
+        moneyMovement: "blocked",
+        submission: "blocked",
+        decidedAt: now.toISOString(),
+      };
+
+      payrollHandoff = handoff;
+
+      await tx
+        .update(payrollRuns)
+        .set({
+          state: payrollRunState,
+          data: {
+            ...objectValue(payrollRun.data),
+            approvalDecision: decision,
+            handoff,
+          },
+          updatedAt: now,
+        })
+        .where(and(eq(payrollRuns.tenantId, operator.tenantId), eq(payrollRuns.id, payrollRun.id)));
+
+      if (paymentInstructionIds.length > 0) {
+        await tx
+          .update(paymentInstructions)
+          .set({
+            state: draftState,
+            data: sql`jsonb_set(jsonb_set(jsonb_set(${paymentInstructions.data}, '{approvalDecision}', ${JSON.stringify(decision)}::jsonb, true), '{handoff}', ${JSON.stringify(handoff)}::jsonb, true), '{externalExecution}', '"blocked"'::jsonb, true)`,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(paymentInstructions.tenantId, operator.tenantId),
+              inArray(paymentInstructions.id, paymentInstructionIds),
+            ),
+          );
+      }
+
+      if (filingDraftId) {
+        await tx
+          .update(filingDrafts)
+          .set({
+            state: draftState,
+            data: sql`jsonb_set(jsonb_set(jsonb_set(${filingDrafts.data}, '{approvalDecision}', ${JSON.stringify(decision)}::jsonb, true), '{handoff}', ${JSON.stringify(handoff)}::jsonb, true), '{externalExecution}', '"blocked"'::jsonb, true)`,
+            updatedAt: now,
+          })
+          .where(and(eq(filingDrafts.tenantId, operator.tenantId), eq(filingDrafts.id, filingDraftId)));
+      }
+
+      if (packetId) {
+        await tx
+          .update(evidencePackets)
+          .set({
+            state: input.action,
+            data: sql`jsonb_set(jsonb_set(${evidencePackets.data}, '{approvalDecision}', ${JSON.stringify(decision)}::jsonb, true), '{handoff}', ${JSON.stringify(handoff)}::jsonb, true)`,
+            updatedAt: now,
+          })
+          .where(and(eq(evidencePackets.tenantId, operator.tenantId), eq(evidencePackets.id, packetId)));
+      }
+
+      if (packetDocumentId) {
+        await tx
+          .update(documents)
+          .set({
+            state: input.action,
+            data: sql`jsonb_set(jsonb_set(${documents.data}, '{approvalDecision}', ${JSON.stringify(decision)}::jsonb, true), '{handoff}', ${JSON.stringify(handoff)}::jsonb, true)`,
+            updatedAt: now,
+          })
+          .where(and(eq(documents.tenantId, operator.tenantId), eq(documents.id, packetDocumentId)));
+      }
+
+      const [payrollEvent] = await tx
+        .insert(events)
+        .values({
+          tenantId: operator.tenantId,
+          type: "payroll.preview.approval.applied",
+          source,
+          actorType: "user",
+          actorId: operator.userId,
+          actorRef: operator.actorRef,
+          objectId: approval.objectId,
+          idempotencyKey: `${approval.id}:payroll_preview_approval:${input.action}`,
+          data: handoff,
+          occurredAt: now,
+        })
+        .returning({ id: events.id });
+      const [payrollAudit] = await tx
+        .insert(auditEvents)
+        .values({
+          tenantId: operator.tenantId,
+          type: "payroll.preview.approval.applied",
+          source,
+          actorType: "user",
+          actorId: operator.userId,
+          actorRef: operator.actorRef,
+          targetType: "payroll_run",
+          targetId: payrollRun.id,
+          approvalRequestId: approval.id,
+          eventId: payrollEvent.id,
+          objectId: approval.objectId,
+          risk: "high",
+          idempotencyKey: `${approval.id}:payroll_preview_approval:${input.action}`,
+          data: handoff,
+        })
+        .returning({ id: auditEvents.id });
+
+      await tx.insert(evidence).values({
+        tenantId: operator.tenantId,
+        kind: "approval",
+        name: `Payroll preview approval ${input.action}`,
+        objectId: approval.objectId,
+        eventId: payrollEvent.id,
+        actorType: "user",
+        actorId: operator.userId,
+        hash: `${source}:${approval.id}:payroll:${input.action}:${now.toISOString()}`,
+        data: {
+          ...handoff,
+          auditEventId: payrollAudit.id,
+          approvalDecisionEvidenceId: approvalEvidence.id,
+        },
+      });
+    }
+
     const [updatedApproval] = await tx
       .select()
       .from(approvalRequests)
@@ -1031,6 +1231,7 @@ export async function decideApproval(input: {
       taskState,
       workflowRunState,
       workflowStepId,
+      payrollHandoff,
     };
   });
 }
