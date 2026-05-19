@@ -182,12 +182,17 @@ policy-bound:
 | `/worker?view=snapshot&role=revenue_operations` | Operator-only snapshot of worker state, active tasks, controls, budget usage, and recent events |
 | `/worker?view=approvals&role=revenue_operations` | Operator-only approval queue for worker decisions |
 | `POST /worker` | Canonical worker command surface; worker role, tenant selection, idempotency, and operation config live in structured payload fields |
-| `/workflow` | Canonical workflow command surface for listing definitions/runs/steps and executing validated `start` / `transition` commands |
+| `/workflow` | Canonical workflow command surface for listing definitions/runs/steps and executing validated `start` / `transition` / `approval.decide` commands |
+| `/workflow?view=approvals` | Operator-only approval queue for workflow decisions backed by the shared approval service |
 | `bun run worker:tool worker.run` | Canonical local command surface using the same worker/config payload shape |
 
 Worker-specific HTTP paths are not part of the public API. New worker families
 must extend `/worker` with structured `worker`, `command`, `idempotencyKey`, and
 `config` fields rather than adding route names per worker.
+
+Approvals are platform records, not worker-specific records. Worker approvals
+and workflow approvals share `approval_requests`, `audit_events`, and evidence;
+the route decides which subject can be listed or decided.
 
 One run persists the received config in the run ledger, reserves budget, records
 a simulated inference, writes usage, emits an

@@ -203,3 +203,24 @@ and creates a pending approval packet when a definition moves into an approval
 state. `GET /workflow` returns active definitions, runs, and the recent step
 ledger; `POST /workflow` returns the `stepId` created for the command. Do not
 add workflow-specific URL paths for individual business processes.
+
+Workflow approvals use the same platform approval ledger as worker approvals:
+
+```json
+{
+  "command": "approval.decide",
+  "workflow": {
+    "tenantSlug": "continuous-demo"
+  },
+  "config": {
+    "approvalId": "approval_uuid",
+    "action": "approved",
+    "note": "optional operator note"
+  }
+}
+```
+
+`GET /workflow?view=approvals` lists workflow-scoped approvals only. A workflow
+approval decision writes approval evidence and an audit event; when the
+definition allows `awaiting_approval -> approved`, an approved decision advances
+the run to `approved`.

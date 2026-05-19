@@ -1,9 +1,11 @@
 import { env } from "../../src/env";
 import {
-  decideRevenueWorkerApproval,
-  listRevenueWorkerApprovals,
+  decideApproval,
+  listApprovals,
   normalizeApprovalDecision,
-} from "../../src/worker/approvals";
+} from "../../src/core/approvals";
+import { PlatformUnavailableError } from "../../src/core/errors";
+import type { JsonObject } from "../../src/db/schema";
 import {
   getRevenueWorkerSnapshotSafe,
   RevenueWorkerUnavailableError,
@@ -14,7 +16,6 @@ import {
   authorizeRevenueWorkerRun,
   normalizeIdempotencyKey,
 } from "../../src/worker/security";
-import type { JsonObject } from "../../src/db/schema";
 
 export const dynamic = "force-dynamic";
 
@@ -112,7 +113,7 @@ function errorResponse(error: { code: string; message: string }, status: number)
 
 function workerErrorResponse(error: unknown, fallbackCode: string) {
   const workerError =
-    error instanceof RevenueWorkerUnavailableError
+    error instanceof RevenueWorkerUnavailableError || error instanceof PlatformUnavailableError
       ? {
           status: error.status,
           code: error.code,
@@ -156,10 +157,11 @@ export async function GET(request: Request) {
 
   try {
     if (view === "approvals") {
-      const approvals = await listRevenueWorkerApprovals({
+      const approvals = await listApprovals({
         operatorEmail: auth.operatorEmail,
         tenantSlug: target.target.tenantSlug,
         state: optionalString(url.searchParams.get("state")),
+        subject: "worker",
       });
 
       return Response.json(
@@ -313,12 +315,13 @@ export async function POST(request: Request) {
     }
 
     try {
-      const result = await decideRevenueWorkerApproval({
+      const result = await decideApproval({
         approvalId,
         operatorEmail: auth.operatorEmail,
         tenantSlug: target.target.tenantSlug,
         action,
         note: optionalString(config.note),
+        subject: "worker",
       });
 
       return Response.json(

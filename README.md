@@ -42,10 +42,11 @@ Then open `http://localhost:3000`.
   `GET /worker?view=approvals`; use `POST /worker` with `command` and `config`
   payloads for side-effecting worker commands.
 - `/workflow` is the canonical workflow control-plane API. Use `GET /workflow`
-  for definitions/runs and `POST /workflow` with `command=start` or
-  `command=transition`.
-- `/api/revenue-worker*` routes remain temporary compatibility wrappers for the
-  first worker only; new worker families should use `/worker`.
+  for definitions/runs/steps, `GET /workflow?view=approvals` for workflow
+  approvals, and `POST /workflow` with `command=start`, `command=transition`,
+  or `command=approval.decide`.
+Worker-specific HTTP routes are intentionally absent; new worker families
+extend `/worker` with structured payload fields.
 
 ## Docs
 
@@ -55,6 +56,7 @@ Then open `http://localhost:3000`.
 - [Revenue Worker expansion](docs/revenue-worker-expansion.md)
 - [Revenue Worker V1 contract](docs/revenue-worker-v1-contract.md)
 - [Worker expansion map](docs/worker-expansion.md)
+- [Worker execution roadmap](docs/worker-roadmap.md)
 - [Local development](docs/local-development.md)
 - [DigitalOcean deployment](docs/deployment.md)
 - [Infrastructure notes](infra/README.md)

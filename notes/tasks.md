@@ -8,10 +8,10 @@
 
 - Implement canonical entity/workforce/payroll/filing/payment/AI-ops objects before widening the Revenue Worker runtime.
 - Add customer satisfaction and feedback entities: SatisfactionSignal, FeedbackItem, Complaint, Testimonial, and Review.
-- Implement open workflow state machines for entity setup, hire employee, contractor engagement, termination, payroll preview, AI budget cycle, and synthetic-worker lifecycle.
+- Extend the broader workflow catalog beyond the first seven seeded workflows: open new state, compensation change, location change, payroll run, off-cycle payroll, quarter close, year-end, leave, injury/incident, benefits renewal, and agency notice.
 - Wire workflow step handlers into capability execution, retry workers, and adapter reconciliation.
 - Add document/evidence packet support for new-hire, contractor, payroll, filing, termination, AI action, and rule-change workflows.
-- Build the approval UI on top of the persisted `approval_requests` and `audit_events` API.
+- Build the approval UI on top of the shared `approval_requests`, `audit_events`, and evidence API.
 - Keep all worker-family HTTP controls on `/worker` with structured `worker`, `command`, `idempotencyKey`, and `config` fields; do not add worker-family-specific URL shapes.
 - Add live adapter credential scopes, retry workers, and failure reconciliation before allowing external sends or money movement.
 - Convert the deterministic Revenue Worker run into the state machine defined by `docs/revenue-worker-v1-contract.md`.

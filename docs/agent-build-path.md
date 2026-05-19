@@ -35,6 +35,8 @@ Useful app surfaces for worker development:
 | `/worker?view=snapshot` | Canonical operator-gated worker snapshot |
 | `/worker?view=approvals` | Canonical operator-gated worker approval queue |
 | `POST /worker` | Canonical command surface with `command`, `worker`, `config`, and `idempotencyKey` payload fields |
+| `/workflow?view=approvals` | Canonical operator-gated workflow approval queue |
+| `POST /workflow` | Canonical workflow command surface for starts, transitions, and workflow approval decisions |
 | `bun run worker:tool` | Repo-owned JSON worker toolbox for agents and local automation |
 
 ## Boundary
@@ -43,6 +45,8 @@ Use the Next.js MCP bridge for Next.js diagnostics. Keep side-effecting worker
 execution on explicit operator commands or guarded `POST` routes. The Revenue
 Worker now records the configured operator, active capability grant, approval
 request, audit event, and evidence before any external action can be approved.
+The shared approval service decides worker and workflow approvals by subject so
+new worker families do not need their own approval route or table.
 
 ## Build Loop
 

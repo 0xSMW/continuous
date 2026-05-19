@@ -1,5 +1,11 @@
 import { env } from "../../src/env";
 import {
+  decideApproval,
+  listApprovals,
+  normalizeApprovalDecision,
+} from "../../src/core/approvals";
+import { PlatformUnavailableError } from "../../src/core/errors";
+import {
   listWorkflows,
   startWorkflowRun,
   transitionWorkflowRun,
@@ -60,7 +66,7 @@ function errorResponse(error: { code: string; message: string }, status: number)
 
 function workflowErrorResponse(error: unknown, fallbackCode: string) {
   const workflowError =
-    error instanceof RevenueWorkerUnavailableError
+    error instanceof RevenueWorkerUnavailableError || error instanceof PlatformUnavailableError
       ? {
           status: error.status,
           code: error.code,
@@ -95,8 +101,44 @@ export async function GET(request: Request) {
   }
 
   const url = new URL(request.url);
+  const view = optionalString(url.searchParams.get("view")) ?? "overview";
 
   try {
+    if (view === "approvals") {
+      const approvals = await listApprovals({
+        operatorEmail: auth.operatorEmail,
+        tenantSlug: optionalString(url.searchParams.get("tenantSlug")),
+        state: optionalString(url.searchParams.get("state")),
+        subject: "workflow",
+      });
+
+      return Response.json(
+        {
+          api: apiVersion,
+          data: {
+            view,
+            approvals,
+          },
+          error: null,
+        },
+        {
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    }
+
+    if (view !== "overview") {
+      return errorResponse(
+        {
+          code: "workflow_view_unsupported",
+          message: "Workflow view must be overview or approvals.",
+        },
+        400,
+      );
+    }
+
     const data = await listWorkflows({
       operatorEmail: auth.operatorEmail,
       tenantSlug: optionalString(url.searchParams.get("tenantSlug")),
@@ -247,10 +289,57 @@ export async function POST(request: Request) {
     }
   }
 
+  if (command === "approval.decide") {
+    const approvalId = optionalString(config.approvalId);
+    const action = normalizeApprovalDecision(config.action);
+
+    if (!approvalId || !action) {
+      return errorResponse(
+        {
+          code: "invalid_workflow_approval_decision",
+          message: "config.approvalId and config.action are required for approval.decide.",
+        },
+        400,
+      );
+    }
+
+    try {
+      const result = await decideApproval({
+        approvalId,
+        operatorEmail: auth.operatorEmail,
+        tenantSlug: optionalString(workflow.tenantSlug),
+        action,
+        note: optionalString(config.note),
+        subject: "workflow",
+      });
+
+      return Response.json(
+        {
+          api: apiVersion,
+          data: {
+            command,
+            workflow: {
+              tenantSlug: optionalString(workflow.tenantSlug) ?? null,
+            },
+            result,
+          },
+          error: null,
+        },
+        {
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    } catch (error) {
+      return workflowErrorResponse(error, "workflow_approval_decision_failed");
+    }
+  }
+
   return errorResponse(
     {
       code: "workflow_command_unsupported",
-      message: "Workflow command must be start or transition.",
+      message: "Workflow command must be start, transition, or approval.decide.",
     },
     400,
   );

@@ -1,17 +1,26 @@
 import { and, desc, eq, sql } from "drizzle-orm";
 
 import { db as defaultDb } from "../db/client";
-import { loadOperatorContext } from "../core/operators";
-import { approvalRequests, auditEvents, evidence, tasks, type JsonObject } from "../db/schema";
-import { RevenueWorkerUnavailableError } from "./revenue";
+import {
+  approvalRequests,
+  auditEvents,
+  evidence,
+  tasks,
+  workflowDefinitions,
+  workflowRuns,
+  type JsonObject,
+} from "../db/schema";
+import { PlatformUnavailableError } from "./errors";
+import { loadOperatorContext } from "./operators";
 
 type Database = typeof defaultDb;
 
-const source = "continuous.revenue_worker";
+const source = "continuous.approvals";
 
 export type ApprovalDecisionAction = "approved" | "rejected" | "revision_requested";
+export type ApprovalSubject = "all" | "worker" | "workflow" | "task";
 
-export type RevenueWorkerApprovalRecord = {
+export type ApprovalRecord = {
   id: string;
   state: string;
   kind: string;
@@ -19,8 +28,13 @@ export type RevenueWorkerApprovalRecord = {
   risk: string;
   title: string;
   summary: string;
+  subject: {
+    type: "approval_request" | "task" | "worker_run" | "workflow_run";
+    id: string;
+  };
   taskId: string | null;
   workerRunId: string | null;
+  workflowRunId: string | null;
   eventId: string | null;
   objectId: string | null;
   capabilityId: string | null;
@@ -35,7 +49,23 @@ export type RevenueWorkerApprovalRecord = {
   decidedAt: string | null;
 };
 
-function approvalRecord(row: typeof approvalRequests.$inferSelect): RevenueWorkerApprovalRecord {
+function approvalSubject(row: typeof approvalRequests.$inferSelect): ApprovalRecord["subject"] {
+  if (row.workflowRunId) {
+    return { type: "workflow_run", id: row.workflowRunId };
+  }
+
+  if (row.workerRunId) {
+    return { type: "worker_run", id: row.workerRunId };
+  }
+
+  if (row.taskId) {
+    return { type: "task", id: row.taskId };
+  }
+
+  return { type: "approval_request", id: row.id };
+}
+
+function approvalRecord(row: typeof approvalRequests.$inferSelect): ApprovalRecord {
   return {
     id: row.id,
     state: row.state,
@@ -44,8 +74,10 @@ function approvalRecord(row: typeof approvalRequests.$inferSelect): RevenueWorke
     risk: row.risk,
     title: row.title,
     summary: row.summary,
+    subject: approvalSubject(row),
     taskId: row.taskId,
     workerRunId: row.workerRunId,
+    workflowRunId: row.workflowRunId,
     eventId: row.eventId,
     objectId: row.objectId,
     capabilityId: row.capabilityId,
@@ -73,6 +105,34 @@ function taskStateForDecision(action: ApprovalDecisionAction) {
   return "blocked";
 }
 
+function subjectCondition(subject: ApprovalSubject) {
+  if (subject === "worker") {
+    return sql`${approvalRequests.workerRunId} is not null`;
+  }
+
+  if (subject === "workflow") {
+    return sql`${approvalRequests.workflowRunId} is not null`;
+  }
+
+  if (subject === "task") {
+    return sql`${approvalRequests.taskId} is not null`;
+  }
+
+  return undefined;
+}
+
+function stringArray(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function canTransition(transitions: JsonObject, fromState: string, toState: string) {
+  return stringArray(transitions[fromState]).includes(toState);
+}
+
+function isTerminal(transitions: JsonObject, state: string) {
+  return stringArray(transitions[state]).length === 0;
+}
+
 export function normalizeApprovalDecision(value: unknown): ApprovalDecisionAction | null {
   if (value === "approved" || value === "rejected" || value === "revision_requested") {
     return value;
@@ -81,10 +141,11 @@ export function normalizeApprovalDecision(value: unknown): ApprovalDecisionActio
   return null;
 }
 
-export async function listRevenueWorkerApprovals(input: {
+export async function listApprovals(input: {
   operatorEmail: string;
   tenantSlug?: string;
   state?: string;
+  subject?: ApprovalSubject;
   db?: Database;
 }) {
   const db = input.db ?? defaultDb;
@@ -93,10 +154,16 @@ export async function listRevenueWorkerApprovals(input: {
     operatorEmail: input.operatorEmail,
     tenantSlug: input.tenantSlug,
   });
+  const subject = input.subject ?? "all";
   const conditions = [eq(approvalRequests.tenantId, operator.tenantId)];
+  const scopedCondition = subjectCondition(subject);
 
   if (input.state) {
     conditions.push(eq(approvalRequests.state, input.state));
+  }
+
+  if (scopedCondition) {
+    conditions.push(scopedCondition);
   }
 
   const rows = await db
@@ -104,7 +171,7 @@ export async function listRevenueWorkerApprovals(input: {
     .from(approvalRequests)
     .where(and(...conditions))
     .orderBy(desc(approvalRequests.createdAt))
-    .limit(25);
+    .limit(50);
 
   return {
     operator: {
@@ -114,16 +181,18 @@ export async function listRevenueWorkerApprovals(input: {
       email: operator.email,
       name: operator.name,
     },
+    subject,
     approvals: rows.map(approvalRecord),
   };
 }
 
-export async function decideRevenueWorkerApproval(input: {
+export async function decideApproval(input: {
   approvalId: string;
   operatorEmail: string;
   tenantSlug?: string;
   action: ApprovalDecisionAction;
   note?: string;
+  subject?: ApprovalSubject;
   db?: Database;
 }) {
   const db = input.db ?? defaultDb;
@@ -132,32 +201,43 @@ export async function decideRevenueWorkerApproval(input: {
     operatorEmail: input.operatorEmail,
     tenantSlug: input.tenantSlug,
   });
+  const subject = input.subject ?? "all";
   const now = new Date();
   const taskState = taskStateForDecision(input.action);
 
   return db.transaction(async (tx) => {
     await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtext(${operator.tenantId}), hashtext(${`${source}:approval:${input.approvalId}`}))`,
+      sql`select pg_advisory_xact_lock(hashtext(${operator.tenantId}), hashtext(${`${source}:${input.approvalId}`}))`,
     );
+
+    const conditions = [
+      eq(approvalRequests.tenantId, operator.tenantId),
+      eq(approvalRequests.id, input.approvalId),
+    ];
+    const scopedCondition = subjectCondition(subject);
+
+    if (scopedCondition) {
+      conditions.push(scopedCondition);
+    }
 
     const [approval] = await tx
       .select()
       .from(approvalRequests)
-      .where(and(eq(approvalRequests.tenantId, operator.tenantId), eq(approvalRequests.id, input.approvalId)))
+      .where(and(...conditions))
       .limit(1);
 
     if (!approval) {
-      throw new RevenueWorkerUnavailableError(
+      throw new PlatformUnavailableError(
         "approval_not_found",
-        "No Revenue Worker approval request matches this id.",
+        "No approval request matches this id and subject.",
         404,
       );
     }
 
     if (approval.state !== "pending") {
-      throw new RevenueWorkerUnavailableError(
+      throw new PlatformUnavailableError(
         "approval_already_decided",
-        "Revenue Worker approval request is no longer pending.",
+        "Approval request is no longer pending.",
         409,
       );
     }
@@ -200,7 +280,12 @@ export async function decideRevenueWorkerApproval(input: {
         objectId: approval.objectId,
         capabilityId: approval.capabilityId,
         risk: approval.risk,
-        data: decision,
+        data: {
+          ...decision,
+          subject: approvalSubject(approval),
+          workflowRunId: approval.workflowRunId,
+          workerRunId: approval.workerRunId,
+        },
       })
       .returning({ id: auditEvents.id });
 
@@ -209,7 +294,7 @@ export async function decideRevenueWorkerApproval(input: {
       .values({
         tenantId: operator.tenantId,
         kind: "approval",
-        name: `Revenue Worker approval ${input.action}`,
+        name: `Approval ${input.action}`,
         objectId: approval.objectId,
         taskId: approval.taskId,
         eventId: approval.eventId,
@@ -220,6 +305,9 @@ export async function decideRevenueWorkerApproval(input: {
         data: {
           approvalRequestId: approval.id,
           auditEventId: audit.id,
+          subject: approvalSubject(approval),
+          workflowRunId: approval.workflowRunId,
+          workerRunId: approval.workerRunId,
           decision,
         },
       })
@@ -242,6 +330,55 @@ export async function decideRevenueWorkerApproval(input: {
         .where(eq(tasks.id, approval.taskId));
     }
 
+    let workflowRunState: string | null = null;
+
+    if (approval.workflowRunId) {
+      const [workflow] = await tx
+        .select({
+          run: workflowRuns,
+          definition: workflowDefinitions,
+        })
+        .from(workflowRuns)
+        .innerJoin(workflowDefinitions, eq(workflowRuns.definitionId, workflowDefinitions.id))
+        .where(
+          and(
+            eq(workflowRuns.tenantId, operator.tenantId),
+            eq(workflowRuns.id, approval.workflowRunId),
+          ),
+        )
+        .limit(1);
+
+      if (workflow) {
+        const nextState =
+          input.action === "approved" &&
+          canTransition(workflow.definition.transitions, workflow.run.state, "approved")
+            ? "approved"
+            : workflow.run.state;
+
+        workflowRunState = nextState;
+
+        await tx
+          .update(workflowRuns)
+          .set({
+            state: nextState,
+            data: {
+              ...workflow.run.data,
+              lastApprovalDecision: {
+                approvalRequestId: approval.id,
+                auditEventId: audit.id,
+                evidenceId: approvalEvidence.id,
+                ...decision,
+              },
+            },
+            updatedAt: now,
+            completedAt: isTerminal(workflow.definition.transitions, nextState)
+              ? (workflow.run.completedAt ?? now)
+              : workflow.run.completedAt,
+          })
+          .where(eq(workflowRuns.id, workflow.run.id));
+      }
+    }
+
     const [updatedApproval] = await tx
       .select()
       .from(approvalRequests)
@@ -253,6 +390,7 @@ export async function decideRevenueWorkerApproval(input: {
       auditEventId: audit.id,
       evidenceId: approvalEvidence.id,
       taskState,
+      workflowRunState,
     };
   });
 }

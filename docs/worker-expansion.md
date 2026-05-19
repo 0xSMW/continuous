@@ -6,6 +6,9 @@ evidence layer. A new worker ships only after its object map, capability grants,
 workflow states, adapter posture, evidence packet, eval set, and autonomy gate
 are explicit.
 
+Use [Worker execution roadmap](worker-roadmap.md) for the phase-by-phase
+implementation gates from the first worker to the broader worker catalog.
+
 ## Launch Order
 
 | Order | Worker | First outcome | Launch gate |

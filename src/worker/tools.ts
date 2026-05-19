@@ -1,10 +1,10 @@
 import { env } from "../env";
 import type { JsonObject } from "../db/schema";
 import {
-  decideRevenueWorkerApproval,
-  listRevenueWorkerApprovals,
+  decideApproval,
+  listApprovals,
   normalizeApprovalDecision,
-} from "./approvals";
+} from "../core/approvals";
 import { getRevenueWorkerSnapshotSafe, runRevenueWorker } from "./revenue";
 import { normalizeIdempotencyKey } from "./security";
 
@@ -160,10 +160,11 @@ export async function executeWorkerTool(name: string, payload: JsonObject = {}) 
   if (name === "worker.approvals.list") {
     return {
       worker: target,
-      result: await listRevenueWorkerApprovals({
+      result: await listApprovals({
         operatorEmail,
         tenantSlug: target.tenantSlug,
         state: stringValue(config.state),
+        subject: "worker",
       }),
     };
   }
@@ -178,12 +179,13 @@ export async function executeWorkerTool(name: string, payload: JsonObject = {}) 
 
     return {
       worker: target,
-      result: await decideRevenueWorkerApproval({
+      result: await decideApproval({
         approvalId,
         operatorEmail,
         tenantSlug: target.tenantSlug,
         action,
         note: stringValue(config.note),
+        subject: "worker",
       }),
     };
   }

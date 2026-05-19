@@ -117,6 +117,22 @@ curl -X POST http://localhost:3000/worker \
     \"command\": \"approval.decide\",
     \"worker\": {\"role\": \"revenue_operations\"},
     \"config\": {\"approvalId\": \"$APPROVAL_ID\", \"action\": \"approved\"}
+}"
+```
+
+Workflow approvals use the shared approval ledger:
+
+```sh
+curl "http://localhost:3000/workflow?view=approvals&tenantSlug=continuous-demo" \
+  -H "authorization: Bearer $REVENUE_WORKER_RUN_TOKEN"
+
+curl -X POST http://localhost:3000/workflow \
+  -H "authorization: Bearer $REVENUE_WORKER_RUN_TOKEN" \
+  -H "content-type: application/json" \
+  -d "{
+    \"command\": \"approval.decide\",
+    \"workflow\": {\"tenantSlug\": \"continuous-demo\"},
+    \"config\": {\"approvalId\": \"$APPROVAL_ID\", \"action\": \"approved\"}
   }"
 ```
 
