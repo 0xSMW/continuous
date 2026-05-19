@@ -19,6 +19,8 @@
 | Added open workflow documentation | Hiring, contractor engagement, termination, payroll, filings, AI budget, and synthetic-worker lifecycle now have explicit document, approval, state, and evidence requirements |
 | Simplified the canonical data model | Replaced early one-table-per-concept naming with smaller primitives such as Worker.kind, WorkRelationship.type, FilingArtifact.type, EvidenceItem.type, and CustomerSignal.type |
 | Revenue Worker HTTP paths are guarded | There is no auth system yet, so detailed worker reads require the operator token, and the side-effecting run endpoint is disabled by default |
+| Added canonical worker API | `/worker` is the forward control-plane route; worker role, tenant selection, command, idempotency, and config live in structured query or payload fields |
+| Added canonical workflow API | `/workflow` validates definition-backed `start` and `transition` commands and records workflow events, audit events, and evidence |
 | Agent build path uses app-server protocol tooling plus Next.js MCP | The installed Codex app-server CLI exposes protocol generation/help commands; `.mcp.json` keeps the Next.js 16 MCP bridge for route/runtime diagnostics |
 | Added the first authority ledger | Revenue Worker runs now create approval requests and audit events, and approval decisions create evidence before any external action is allowed |
 | HTTPS is managed by Caddy | `continuoushq.com` and `getcontinuous.app` now point at the droplet, and Caddy issues and renews Let's Encrypt certificates from the persisted `caddy_data` volume |
@@ -66,3 +68,13 @@ worker capability grant and budget before spend, creates durable
 budget/evidence/event/approval/audit records, marks the quote task as
 `approval_required`, and leaves external execution disabled until real adapter
 execution and approval UI are in place.
+
+The canonical HTTP shape is now `/worker`: `GET /worker?view=snapshot` for
+state, `GET /worker?view=approvals` for approval queues, and `POST /worker`
+with `command`, `worker`, `idempotencyKey`, and `config` for side-effecting
+operations. `/api/revenue-worker*` remains a compatibility layer only.
+
+Workflow execution now has the same control-plane style through `/workflow`.
+Definitions remain declarative, and the runtime validates transitions against
+their JSON transition maps before updating `workflow_runs` and writing replayable
+event, audit, and evidence records.

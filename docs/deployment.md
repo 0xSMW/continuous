@@ -86,8 +86,9 @@ operator-controlled smoke runs:
 ssh root@45.55.53.92 'cd /opt/continuous && docker compose --profile tools run --rm migrate bun run worker:revenue -- --idempotency-key=deploy-revenue-run-001'
 ```
 
-For the HTTPS Next.js API path, call `POST /api/revenue-worker/run` with an
-`idempotency-key` header and the bearer token from `/opt/continuous/.env`.
-`GET /api/core`, `GET /api/revenue-worker`, and
-`GET /api/revenue-worker/approvals` use the same bearer token for operator-only
-snapshots and approval review.
+For the HTTPS worker API path, call `POST /worker` with `command`, `worker`,
+`config`, and `idempotencyKey` fields plus the bearer token from
+`/opt/continuous/.env`. `GET /api/core`, `GET /worker?view=snapshot`, and
+`GET /worker?view=approvals` use the same bearer token for operator-only
+snapshots and approval review. The older `/api/revenue-worker*` routes remain
+compatibility wrappers while the first worker is being hardened.

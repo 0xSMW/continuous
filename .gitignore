@@ -6,6 +6,7 @@
 node_modules/
 coverage/
 dist/
+generated/app-server/
 *.log
 *.tsbuildinfo
 .claude/settings.local.json

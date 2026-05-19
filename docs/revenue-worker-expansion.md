@@ -12,11 +12,16 @@ state, and object versioning without external sends or money movement.
 |---|---|
 | Worker identity | `Revenue Operations Worker`, autonomy level 2, owner-managed |
 | Core loop | One operator run creates worker run, budget, inference, usage, event, evidence, adapter action, task update, and object version records |
-| Operator read API | `GET /api/revenue-worker`, bearer-token required |
-| Approval API | `GET /api/revenue-worker/approvals` and `POST /api/revenue-worker/approvals/:id`, bearer-token required |
-| Run API | `POST /api/revenue-worker/run`, disabled by default and bearer-token gated when enabled |
+| Operator read API | `GET /worker?view=snapshot&role=revenue_operations`, bearer-token required |
+| Approval API | `GET /worker?view=approvals&role=revenue_operations` and `POST /worker` with `command=approval.decide`, bearer-token required |
+| Run API | `POST /worker` with `command=run`, disabled by default and bearer-token gated when enabled |
 | Operator run | `bun run worker:revenue -- --idempotency-key=<key>` |
 | External execution | Disabled; adapter action records simulated receipts only |
+
+`/worker` is the forward API. Worker role, tenant, operation config, and
+idempotency belong in query or payload fields, not in worker-family-specific URL
+paths. `/api/revenue-worker*` remains a temporary compatibility layer for the
+first worker only.
 
 ## Expansion Gates
 

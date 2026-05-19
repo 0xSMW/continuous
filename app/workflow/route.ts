@@ -1,0 +1,257 @@
+import { env } from "../../src/env";
+import {
+  listWorkflows,
+  startWorkflowRun,
+  transitionWorkflowRun,
+} from "../../src/core/workflows";
+import type { JsonObject } from "../../src/db/schema";
+import { RevenueWorkerUnavailableError } from "../../src/worker/revenue";
+import {
+  authorizeRevenueWorkerRead,
+  authorizeRevenueWorkerRun,
+  normalizeIdempotencyKey,
+} from "../../src/worker/security";
+
+export const dynamic = "force-dynamic";
+
+const apiVersion = "continuous.workflow.v1";
+
+function optionalString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function bodyObject(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function jsonObject(value: unknown): JsonObject {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonObject) : {};
+}
+
+async function readBody(request: Request) {
+  if (!request.headers.get("content-type")?.includes("application/json")) {
+    return {};
+  }
+
+  try {
+    return bodyObject(await request.json());
+  } catch {
+    return {};
+  }
+}
+
+function errorResponse(error: { code: string; message: string }, status: number) {
+  return Response.json(
+    {
+      api: apiVersion,
+      data: null,
+      error,
+    },
+    {
+      status,
+      headers: {
+        "Cache-Control": "no-store",
+      },
+    },
+  );
+}
+
+function workflowErrorResponse(error: unknown, fallbackCode: string) {
+  const workflowError =
+    error instanceof RevenueWorkerUnavailableError
+      ? {
+          status: error.status,
+          code: error.code,
+          message: error.message,
+        }
+      : {
+          status: 500,
+          code: fallbackCode,
+          message: error instanceof Error ? error.message : "Unknown workflow error.",
+        };
+
+  return errorResponse(
+    {
+      code: workflowError.code,
+      message: workflowError.message,
+    },
+    workflowError.status,
+  );
+}
+
+export async function GET(request: Request) {
+  const auth = authorizeRevenueWorkerRead({
+    appEnv: env.APP_ENV,
+    expectedToken: env.REVENUE_WORKER_RUN_TOKEN,
+    operatorEmail: env.REVENUE_WORKER_OPERATOR_EMAIL,
+    authorization: request.headers.get("authorization"),
+    headerToken: request.headers.get("x-worker-run-token"),
+  });
+
+  if (!auth.ok) {
+    return errorResponse(auth, auth.status);
+  }
+
+  const url = new URL(request.url);
+
+  try {
+    const data = await listWorkflows({
+      operatorEmail: auth.operatorEmail,
+      tenantSlug: optionalString(url.searchParams.get("tenantSlug")),
+      state: optionalString(url.searchParams.get("state")),
+    });
+
+    return Response.json(
+      {
+        api: apiVersion,
+        data,
+        error: null,
+      },
+      {
+        headers: {
+          "Cache-Control": "no-store",
+        },
+      },
+    );
+  } catch (error) {
+    return workflowErrorResponse(error, "workflow_list_failed");
+  }
+}
+
+export async function POST(request: Request) {
+  const auth = authorizeRevenueWorkerRun({
+    enabled: env.REVENUE_WORKER_RUN_ENABLED,
+    appEnv: env.APP_ENV,
+    expectedToken: env.REVENUE_WORKER_RUN_TOKEN,
+    operatorEmail: env.REVENUE_WORKER_OPERATOR_EMAIL,
+    authorization: request.headers.get("authorization"),
+    headerToken: request.headers.get("x-worker-run-token"),
+  });
+
+  if (!auth.ok) {
+    return errorResponse(auth, auth.status);
+  }
+
+  const body = await readBody(request);
+  const workflow = bodyObject(body.workflow);
+  const config = bodyObject(body.config);
+  const command = optionalString(body.command);
+
+  if (command === "start") {
+    const workflowKey = optionalString(workflow.key);
+    const idempotency = normalizeIdempotencyKey(
+      request.headers.get("idempotency-key") ?? body.idempotencyKey,
+    );
+
+    if (!workflowKey || !idempotency.ok) {
+      return errorResponse(
+        {
+          code: "invalid_workflow_start",
+          message: workflowKey
+            ? idempotency.ok
+              ? "Workflow start request is invalid."
+              : idempotency.message
+            : "workflow.key is required for start.",
+        },
+        400,
+      );
+    }
+
+    try {
+      const result = await startWorkflowRun({
+        operatorEmail: auth.operatorEmail,
+        workflowKey,
+        idempotencyKey: idempotency.key,
+        tenantSlug: optionalString(workflow.tenantSlug),
+        objectId: optionalString(workflow.objectId),
+        workerId: optionalString(workflow.workerId),
+        initialState: optionalString(config.initialState),
+        data: jsonObject(config.data),
+        blockers: jsonObject(config.blockers),
+        metrics: jsonObject(config.metrics),
+      });
+
+      return Response.json(
+        {
+          api: apiVersion,
+          data: {
+            command,
+            workflow: {
+              key: workflowKey,
+              tenantSlug: optionalString(workflow.tenantSlug) ?? null,
+            },
+            result,
+          },
+          error: null,
+        },
+        {
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    } catch (error) {
+      return workflowErrorResponse(error, "workflow_start_failed");
+    }
+  }
+
+  if (command === "transition") {
+    const runId = optionalString(workflow.runId);
+    const toState = optionalString(config.toState);
+
+    if (!runId || !toState) {
+      return errorResponse(
+        {
+          code: "invalid_workflow_transition",
+          message: "workflow.runId and config.toState are required for transition.",
+        },
+        400,
+      );
+    }
+
+    try {
+      const result = await transitionWorkflowRun({
+        operatorEmail: auth.operatorEmail,
+        tenantSlug: optionalString(workflow.tenantSlug),
+        runId,
+        toState,
+        reason: optionalString(config.reason),
+        data: jsonObject(config.data),
+        blockers: jsonObject(config.blockers),
+        metrics: jsonObject(config.metrics),
+      });
+
+      return Response.json(
+        {
+          api: apiVersion,
+          data: {
+            command,
+            workflow: {
+              runId,
+              tenantSlug: optionalString(workflow.tenantSlug) ?? null,
+            },
+            result,
+          },
+          error: null,
+        },
+        {
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    } catch (error) {
+      return workflowErrorResponse(error, "workflow_transition_failed");
+    }
+  }
+
+  return errorResponse(
+    {
+      code: "workflow_command_unsupported",
+      message: "Workflow command must be start or transition.",
+    },
+    400,
+  );
+}

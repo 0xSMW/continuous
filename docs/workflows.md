@@ -161,3 +161,42 @@ Every workflow view should be emitted as structured data:
   ]
 }
 ```
+
+## Headless API
+
+The canonical workflow control-plane route is `/workflow`.
+
+```json
+{
+  "command": "start",
+  "workflow": {
+    "key": "payroll_preview",
+    "tenantSlug": "continuous-demo"
+  },
+  "idempotencyKey": "payroll-preview-run-001",
+  "config": {
+    "initialState": "draft",
+    "data": {}
+  }
+}
+```
+
+Transitions use the same route:
+
+```json
+{
+  "command": "transition",
+  "workflow": {
+    "runId": "workflow_run_uuid"
+  },
+  "config": {
+    "toState": "awaiting_approval",
+    "reason": "Preview packet is ready for operator review"
+  }
+}
+```
+
+The runtime validates transitions against `workflow_definitions.transitions`,
+records events, audit events, and transition evidence, and creates a pending
+approval packet when a definition moves into an approval state. Do not add
+workflow-specific URL paths for individual business processes.

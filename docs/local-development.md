@@ -43,8 +43,8 @@ bun run dev
 ```
 
 Open `http://localhost:3000` and `/api/health`. `/api/core` is an
-operator-only summary and uses the same bearer token as the Revenue Worker
-snapshot.
+operator-only summary and uses the same bearer token as the canonical `/worker`
+control plane.
 
 The repo also includes `.mcp.json` for the Next.js MCP bridge. With `bun run dev`
 running, compatible coding agents can inspect routes, runtime errors, metadata,
@@ -62,7 +62,7 @@ token:
 read -rsp "Worker token: " REVENUE_WORKER_RUN_TOKEN
 export REVENUE_WORKER_RUN_TOKEN
 bun run dev
-curl http://localhost:3000/api/revenue-worker \
+curl "http://localhost:3000/worker?view=snapshot&role=revenue_operations" \
   -H "authorization: Bearer $REVENUE_WORKER_RUN_TOKEN"
 ```
 
@@ -74,9 +74,15 @@ read -rsp "Worker token: " REVENUE_WORKER_RUN_TOKEN
 export REVENUE_WORKER_RUN_ENABLED=true
 export REVENUE_WORKER_RUN_TOKEN
 bun run dev
-curl -X POST http://localhost:3000/api/revenue-worker/run \
+curl -X POST http://localhost:3000/worker \
   -H "authorization: Bearer $REVENUE_WORKER_RUN_TOKEN" \
-  -H 'idempotency-key: local-revenue-run-001'
+  -H "content-type: application/json" \
+  -d '{
+    "command": "run",
+    "worker": {"role": "revenue_operations"},
+    "idempotencyKey": "local-revenue-run-001",
+    "config": {}
+  }'
 ```
 
 Runs are bound to `REVENUE_WORKER_OPERATOR_EMAIL`, which defaults to the seeded
@@ -89,17 +95,32 @@ The same persisted loop can run without exposing HTTP:
 IDEMPOTENCY_KEY=local-revenue-run-002 bun run worker:revenue
 ```
 
+Agent-facing local automation can use the repo-owned worker toolbox:
+
+```sh
+bun run worker:tool schema
+bun run worker:tool worker.snapshot --payload='{"worker":{"role":"revenue_operations"}}'
+```
+
 List and decide approvals with the same bearer token:
 
 ```sh
-curl http://localhost:3000/api/revenue-worker/approvals \
+curl "http://localhost:3000/worker?view=approvals&role=revenue_operations" \
   -H "authorization: Bearer $REVENUE_WORKER_RUN_TOKEN"
 
-curl -X POST http://localhost:3000/api/revenue-worker/approvals/$APPROVAL_ID \
+curl -X POST http://localhost:3000/worker \
   -H "authorization: Bearer $REVENUE_WORKER_RUN_TOKEN" \
   -H "content-type: application/json" \
-  -d '{"action":"approved"}'
+  -d "{
+    \"command\": \"approval.decide\",
+    \"worker\": {\"role\": \"revenue_operations\"},
+    \"config\": {\"approvalId\": \"$APPROVAL_ID\", \"action\": \"approved\"}
+  }"
 ```
+
+The older `/api/revenue-worker*` paths are compatibility wrappers for the first
+worker. New worker families should target `/worker` with role and config in the
+request payload.
 
 ## Notes
 

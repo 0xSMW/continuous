@@ -11,6 +11,9 @@ bun run app-server:generate-ts
 bun run app-server:generate-json-schema
 ```
 
+Generated app-server protocol files are written under `generated/app-server/`
+and ignored by git. They are protocol references, not worker tools.
+
 ## Next.js MCP
 
 The repo includes `.mcp.json` with `next-devtools-mcp` launched through `bunx`.
@@ -29,10 +32,11 @@ Useful app surfaces for worker development:
 | `/` | Runtime dashboard with public core state and redacted worker readiness |
 | `/api/health` | Machine health check |
 | `/api/core` | Operator-gated persisted primitive summary |
-| `/api/revenue-worker` | Operator-gated Revenue Worker snapshot |
-| `/api/revenue-worker/approvals` | Operator-gated approval queue |
-| `/api/revenue-worker/approvals/:id` | Operator-gated approval decision endpoint |
+| `/worker?view=snapshot` | Canonical operator-gated worker snapshot |
+| `/worker?view=approvals` | Canonical operator-gated worker approval queue |
+| `POST /worker` | Canonical command surface with `command`, `worker`, `config`, and `idempotencyKey` payload fields |
 | `bun run worker:revenue` | Operator CLI run path |
+| `bun run worker:tool` | Repo-owned JSON worker toolbox for agents and local automation |
 
 ## Boundary
 
@@ -58,4 +62,26 @@ bun run worker:revenue -- --idempotency-key=local-revenue-run-001
 When the HTTP snapshot, approval, or run path is required, start the app with
 `REVENUE_WORKER_RUN_TOKEN` and include that bearer token on operator routes.
 `REVENUE_WORKER_OPERATOR_EMAIL` must match an active seeded user, defaulting to
-`owner@continuoushq.com`.
+`owner@continuoushq.com`. Keep worker-specific config in the JSON payload:
+
+```json
+{
+  "command": "run",
+  "worker": {
+    "role": "revenue_operations",
+    "tenantSlug": "continuous-demo"
+  },
+  "idempotencyKey": "local-revenue-run-001",
+  "config": {}
+}
+```
+
+The worker toolbox uses the same payload shape:
+
+```sh
+bun run worker:tool schema
+
+bun run worker:tool worker.snapshot <<'JSON'
+{"worker":{"role":"revenue_operations"},"config":{}}
+JSON
+```

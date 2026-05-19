@@ -1,0 +1,187 @@
+import { env } from "../env";
+import type { JsonObject } from "../db/schema";
+import {
+  decideRevenueWorkerApproval,
+  listRevenueWorkerApprovals,
+  normalizeApprovalDecision,
+} from "./approvals";
+import { getRevenueWorkerSnapshotSafe, runRevenueWorker } from "./revenue";
+import { normalizeIdempotencyKey } from "./security";
+
+export const workerTools = [
+  {
+    name: "worker.snapshot",
+    description: "Read a worker snapshot by role, tenant, or worker id.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        worker: { $ref: "#/$defs/workerTarget" },
+        config: { type: "object" },
+      },
+      required: ["worker"],
+    },
+  },
+  {
+    name: "worker.run",
+    description: "Run a worker with an idempotency key and structured config.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        worker: { $ref: "#/$defs/workerTarget" },
+        idempotencyKey: { type: "string" },
+        config: { type: "object" },
+      },
+      required: ["worker", "idempotencyKey"],
+    },
+  },
+  {
+    name: "worker.approvals.list",
+    description: "List pending or decided worker approval requests.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        worker: { $ref: "#/$defs/workerTarget" },
+        config: {
+          type: "object",
+          properties: {
+            state: { type: "string" },
+          },
+        },
+      },
+      required: ["worker"],
+    },
+  },
+  {
+    name: "worker.approvals.decide",
+    description: "Decide a worker approval request with an operator action.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        worker: { $ref: "#/$defs/workerTarget" },
+        config: {
+          type: "object",
+          properties: {
+            approvalId: { type: "string" },
+            action: {
+              enum: ["approved", "rejected", "revision_requested"],
+            },
+            note: { type: "string" },
+          },
+          required: ["approvalId", "action"],
+        },
+      },
+      required: ["worker", "config"],
+    },
+  },
+] as const;
+
+export const workerToolSchema = {
+  $schema: "https://json-schema.org/draft/2020-12/schema",
+  $defs: {
+    workerTarget: {
+      type: "object",
+      properties: {
+        role: { type: "string", default: "revenue_operations" },
+        id: { type: "string" },
+        tenantSlug: { type: "string" },
+      },
+    },
+  },
+  tools: workerTools,
+} as const;
+
+function objectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function targetFrom(payload: JsonObject) {
+  const target = objectValue(payload.worker);
+  const role = stringValue(target.role) ?? "revenue_operations";
+
+  if (role !== "revenue_operations") {
+    throw new Error(`Worker role ${role} is not available yet.`);
+  }
+
+  return {
+    role,
+    workerId: stringValue(target.id),
+    tenantSlug: stringValue(target.tenantSlug),
+  };
+}
+
+export async function executeWorkerTool(name: string, payload: JsonObject = {}) {
+  const target = targetFrom(payload);
+  const config = objectValue(payload.config);
+  const operatorEmail = stringValue(payload.operatorEmail) ?? env.REVENUE_WORKER_OPERATOR_EMAIL;
+
+  if (name === "worker.snapshot") {
+    const result = await getRevenueWorkerSnapshotSafe({
+      role: target.role,
+      tenantSlug: target.tenantSlug,
+      workerId: target.workerId,
+    });
+
+    return {
+      worker: target,
+      snapshot: result.snapshot,
+      error: result.error,
+    };
+  }
+
+  if (name === "worker.run") {
+    const idempotency = normalizeIdempotencyKey(payload.idempotencyKey);
+
+    if (!idempotency.ok) {
+      throw new Error(idempotency.message);
+    }
+
+    return {
+      worker: target,
+      result: await runRevenueWorker({
+        idempotencyKey: idempotency.key,
+        tenantSlug: target.tenantSlug,
+        workerId: target.workerId,
+        operatorEmail,
+      }),
+    };
+  }
+
+  if (name === "worker.approvals.list") {
+    return {
+      worker: target,
+      result: await listRevenueWorkerApprovals({
+        operatorEmail,
+        tenantSlug: target.tenantSlug,
+        state: stringValue(config.state),
+      }),
+    };
+  }
+
+  if (name === "worker.approvals.decide") {
+    const approvalId = stringValue(config.approvalId);
+    const action = normalizeApprovalDecision(config.action);
+
+    if (!approvalId || !action) {
+      throw new Error("config.approvalId and config.action are required.");
+    }
+
+    return {
+      worker: target,
+      result: await decideRevenueWorkerApproval({
+        approvalId,
+        operatorEmail,
+        tenantSlug: target.tenantSlug,
+        action,
+        note: stringValue(config.note),
+      }),
+    };
+  }
+
+  throw new Error(`Unknown worker tool: ${name}`);
+}

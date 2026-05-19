@@ -5,7 +5,7 @@ import {
   normalizeApprovalDecision,
 } from "../../../../src/worker/approvals";
 import { RevenueWorkerUnavailableError } from "../../../../src/worker/revenue";
-import { authorizeRevenueWorkerRead } from "../../../../src/worker/security";
+import { authorizeRevenueWorkerRead, authorizeRevenueWorkerRun } from "../../../../src/worker/security";
 
 export const dynamic = "force-dynamic";
 
@@ -105,7 +105,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const auth = authorizeRevenueWorkerRead({
+  const auth = authorizeRevenueWorkerRun({
+    enabled: env.REVENUE_WORKER_RUN_ENABLED,
     appEnv: env.APP_ENV,
     expectedToken: env.REVENUE_WORKER_RUN_TOKEN,
     operatorEmail: env.REVENUE_WORKER_OPERATOR_EMAIL,

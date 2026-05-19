@@ -179,9 +179,12 @@ policy-bound:
 
 | Surface | Behavior |
 |---|---|
-| `/api/revenue-worker` | Operator-only snapshot of worker state, active tasks, controls, budget usage, and recent events |
+| `/worker?view=snapshot&role=revenue_operations` | Operator-only snapshot of worker state, active tasks, controls, budget usage, and recent events |
+| `/worker?view=approvals&role=revenue_operations` | Operator-only approval queue for worker decisions |
+| `POST /worker` | Canonical worker command surface; worker role, tenant selection, idempotency, and operation config live in structured payload fields |
+| `/workflow` | Canonical workflow command surface for listing definitions/runs and executing validated `start` / `transition` commands |
 | `bun run worker:revenue` | Operator CLI that runs the persisted worker loop with an idempotency key |
-| `/api/revenue-worker/run` | Guarded `POST` endpoint, disabled by default and bearer-token gated when enabled |
+| `/api/revenue-worker*` | Temporary first-worker compatibility wrappers; not the expansion API |
 
 One run reserves budget, records a simulated inference, writes usage, emits an
 idempotent `revenue_worker.run.completed` event, captures trace evidence,

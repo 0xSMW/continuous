@@ -38,9 +38,14 @@ Then open `http://localhost:3000`.
 
 - `/api/health` reports Postgres-backed readiness checks.
 - `/api/core` returns persisted core counts, active tasks, and recent events for tokened operators.
-- `/api/revenue-worker` returns the persisted Revenue Worker snapshot for tokened operators.
-- `/api/revenue-worker/run` is a disabled-by-default guarded `POST` run path.
-- `/api/revenue-worker/approvals` lists and decides pending worker approvals for tokened operators.
+- `/worker` is the canonical worker control-plane API. Use `GET /worker?view=snapshot` or
+  `GET /worker?view=approvals`; use `POST /worker` with `command` and `config`
+  payloads for side-effecting worker commands.
+- `/workflow` is the canonical workflow control-plane API. Use `GET /workflow`
+  for definitions/runs and `POST /workflow` with `command=start` or
+  `command=transition`.
+- `/api/revenue-worker*` routes remain temporary compatibility wrappers for the
+  first worker only; new worker families should use `/worker`.
 
 ## Docs
 

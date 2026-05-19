@@ -1,15 +1,8 @@
 import { and, desc, eq, sql } from "drizzle-orm";
 
 import { db as defaultDb } from "../db/client";
-import {
-  approvalRequests,
-  auditEvents,
-  evidence,
-  tasks,
-  tenants,
-  users,
-  type JsonObject,
-} from "../db/schema";
+import { loadOperatorContext } from "../core/operators";
+import { approvalRequests, auditEvents, evidence, tasks, type JsonObject } from "../db/schema";
 import { RevenueWorkerUnavailableError } from "./revenue";
 
 type Database = typeof defaultDb;
@@ -41,69 +34,6 @@ export type RevenueWorkerApprovalRecord = {
   updatedAt: string;
   decidedAt: string | null;
 };
-
-type OperatorContext = {
-  tenantId: string;
-  tenantSlug: string;
-  userId: string;
-  email: string;
-  name: string;
-  actorRef: string;
-};
-
-async function loadOperator(
-  db: Database,
-  operatorEmail: string,
-  tenantSlug?: string,
-): Promise<OperatorContext> {
-  const email = operatorEmail.trim().toLowerCase();
-  const conditions = [eq(users.email, email), eq(users.state, "active")];
-
-  if (tenantSlug) {
-    conditions.push(eq(tenants.slug, tenantSlug));
-  }
-
-  const rows = await db
-    .select({
-      tenantId: users.tenantId,
-      tenantSlug: tenants.slug,
-      userId: users.id,
-      email: users.email,
-      name: users.name,
-    })
-    .from(users)
-    .innerJoin(tenants, eq(users.tenantId, tenants.id))
-    .where(and(...conditions))
-    .orderBy(users.createdAt)
-    .limit(2);
-
-  if (rows.length === 0) {
-    throw new RevenueWorkerUnavailableError(
-      "operator_not_found",
-      "Revenue Worker approval access requires an active operator user.",
-      403,
-    );
-  }
-
-  if (rows.length > 1 && !tenantSlug) {
-    throw new RevenueWorkerUnavailableError(
-      "operator_tenant_ambiguous",
-      "Multiple operator tenant memberships match this email. Provide a tenantSlug.",
-      409,
-    );
-  }
-
-  const operator = rows[0];
-
-  return {
-    tenantId: operator.tenantId,
-    tenantSlug: operator.tenantSlug,
-    userId: operator.userId,
-    email: operator.email,
-    name: operator.name,
-    actorRef: `user:${operator.userId}`,
-  };
-}
 
 function approvalRecord(row: typeof approvalRequests.$inferSelect): RevenueWorkerApprovalRecord {
   return {
@@ -158,7 +88,11 @@ export async function listRevenueWorkerApprovals(input: {
   db?: Database;
 }) {
   const db = input.db ?? defaultDb;
-  const operator = await loadOperator(db, input.operatorEmail, input.tenantSlug);
+  const operator = await loadOperatorContext({
+    db,
+    operatorEmail: input.operatorEmail,
+    tenantSlug: input.tenantSlug,
+  });
   const conditions = [eq(approvalRequests.tenantId, operator.tenantId)];
 
   if (input.state) {
@@ -193,7 +127,11 @@ export async function decideRevenueWorkerApproval(input: {
   db?: Database;
 }) {
   const db = input.db ?? defaultDb;
-  const operator = await loadOperator(db, input.operatorEmail, input.tenantSlug);
+  const operator = await loadOperatorContext({
+    db,
+    operatorEmail: input.operatorEmail,
+    tenantSlug: input.tenantSlug,
+  });
   const now = new Date();
   const taskState = taskStateForDecision(input.action);
 

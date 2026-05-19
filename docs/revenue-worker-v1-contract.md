@@ -12,6 +12,43 @@ raising autonomy or permitting external sends.
 | `tenantSlug` | No | Required when an operator email spans tenants |
 | `workerId` | No | Required when multiple Revenue Workers match |
 
+## API Shape
+
+The canonical worker control-plane route is `/worker`.
+
+```json
+{
+  "command": "run",
+  "worker": {
+    "role": "revenue_operations",
+    "id": null,
+    "tenantSlug": "continuous-demo"
+  },
+  "idempotencyKey": "rev-worker-001",
+  "config": {}
+}
+```
+
+Approval decisions use the same route:
+
+```json
+{
+  "command": "approval.decide",
+  "worker": {
+    "role": "revenue_operations"
+  },
+  "config": {
+    "approvalId": "approval_uuid",
+    "action": "approved",
+    "note": "optional operator note"
+  }
+}
+```
+
+Worker-family-specific routes such as `/api/revenue-worker/run` are
+compatibility wrappers only. Future workers must use `/worker` with role and
+config in structured fields.
+
 ## Preconditions
 
 | Check | Failure code |
