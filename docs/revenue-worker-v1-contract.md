@@ -11,7 +11,8 @@ raising autonomy or permitting external sends.
 | `operatorEmail` | Yes | Must match an active user in the tenant |
 | `tenantSlug` | No | Required when an operator email spans tenants |
 | `workerId` | No | Required when multiple Revenue Workers match |
-| `config.leadPacket` | Yes for useful runs | Source lead payload used to derive classification, draft, quote, evidence, and approval packet |
+| `config.intake` | Preferred for useful runs | References persisted Core lead object/event/evidence rows used to derive classification, draft, quote, evidence, and approval packet |
+| `config.leadPacket` | Fallback only | Direct source payload for operator tests and controlled evals |
 
 ## API Shape
 
@@ -27,16 +28,28 @@ The canonical worker control-plane route is `/worker`.
   },
   "idempotencyKey": "rev-worker-001",
   "config": {
-    "leadPacket": {
-      "source": "website_form",
-      "sourceEventId": "form-2026-05-19-001",
-      "customerName": "Acme Roof Repair",
-      "customerIntent": "roof leak inspection",
-      "serviceArea": "roofing",
-      "urgency": "high",
-      "missingFacts": ["preferred_time_window"]
+    "intake": {
+      "objectId": "lead_object_uuid",
+      "eventId": "lead_received_event_uuid",
+      "evidenceId": "lead_snapshot_evidence_uuid",
+      "sourceEventId": "form-2026-05-19-001"
     }
   }
+}
+```
+
+The referenced Core records should carry the same flat lead packet in object,
+event, and evidence data:
+
+```json
+{
+  "source": "website_form",
+  "sourceEventId": "form-2026-05-19-001",
+  "customerName": "Acme Roof Repair",
+  "customerIntent": "roof leak inspection",
+  "serviceArea": "roofing",
+  "urgency": "high",
+  "missingFacts": ["preferred_time_window"]
 }
 ```
 
@@ -82,13 +95,11 @@ family, operation target, customer, source system, or draft type in the URL.
 
 | Field | Required | Notes |
 |---|---:|---|
-| `leadPacket.source` | No | Defaults to `operator_payload`; use connector names such as `website_form` or `gmail` |
-| `leadPacket.sourceEventId` | No | External event or message id when available |
-| `leadPacket.customerName` | No | Defaults to `Customer` |
-| `leadPacket.customerIntent` | No | Drives draft wording and quote line |
-| `leadPacket.serviceArea` | No | Drives packet title and quote context |
-| `leadPacket.urgency` | No | `low`, `normal`, `high`, `urgent`, `emergency`, or `same_day` |
-| `leadPacket.missingFacts` | No | Array of facts required before any customer send |
+| `intake.objectId` | Preferred | Core `objects.id` for the lead spine |
+| `intake.eventId` | Preferred | Core `events.id` for the `lead.received` event; this is not the external source event id |
+| `intake.evidenceId` | Preferred | Core `evidence.id` for the source snapshot |
+| `intake.sourceEventId` | No | External event or message id when available; trace metadata, not the DB event id |
+| `leadPacket.*` | No | Backward-compatible direct payload alias for evals and operator tests |
 | `pricing.baseCents` | No | Optional deterministic quote override for evals and controlled tests |
 
 `config.externalSend=true` or `config.leadPacket.externalSend=true` is rejected.
@@ -102,6 +113,10 @@ The first runtime only prepares owner-review packets.
 | Output | Required behavior |
 |---|---|
 | `sourceSnapshotEvidenceId` | Points to persisted source snapshot evidence |
+| `intake` | Resolved Core intake metadata used for the run |
+| `sourceObjectId` | Core source object id when resolved from persisted intake |
+| `sourceEventRowId` | Core source event row id when resolved from persisted intake |
+| `sourceEvidenceId` | Core source evidence id when resolved from persisted intake |
 | `classification` | Derived from lead urgency and missing facts |
 | `draftResponse` | Owner-review draft; not externally sent |
 | `quote` | Deterministic quote with lines, total, currency, and blocked money movement policy |

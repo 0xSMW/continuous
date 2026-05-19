@@ -17,6 +17,7 @@ import { db, pool } from "../db/client";
 import {
   adapterActions,
   adapterRuns,
+  approvalRequests,
   auditEvents,
   connections,
   decisions,
@@ -424,6 +425,151 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(secondOutput.classification).not.toBe(output.classification);
     expect(secondOutput.draftResponse).not.toEqual(output.draftResponse);
     expect(secondOutput.quote).not.toEqual(output.quote);
+  }, 120_000);
+
+  it("runs from persisted Core lead intake under config.intake", async () => {
+    const runId = randomUUID();
+    const leadPacket = {
+      source: "website_form",
+      sourceEventId: `website_form:${runId}`,
+      customerName: "Core Intake Roofing",
+      customerIntent: "roof leak inspection",
+      serviceArea: "roofing",
+      urgency: "high",
+      missingFacts: ["preferred_time_window"],
+    };
+    const objectResult = await upsertCoreObject({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-lead-object-${runId}`,
+      type: "lead",
+      name: leadPacket.customerName,
+      state: "received",
+      source: leadPacket.source,
+      externalId: leadPacket.sourceEventId,
+      data: leadPacket,
+      reason: "Core lead intake integration test",
+      db,
+    });
+    const eventResult = await ingestCoreEvent({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-lead-event-${runId}`,
+      type: "lead.received",
+      source: leadPacket.source,
+      objectId: objectResult.objectId,
+      data: leadPacket,
+      db,
+    });
+    const evidenceResult = await attachCoreEvidence({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-lead-evidence-${runId}`,
+      kind: "snapshot",
+      name: "Core lead intake snapshot",
+      objectId: objectResult.objectId,
+      eventId: eventResult.eventId,
+      data: {
+        ...leadPacket,
+        raw: {
+          formId: runId,
+        },
+      },
+      db,
+    });
+
+    const first = await runRevenueWorker({
+      idempotencyKey: `ci-worker-intake-${runId}`,
+      tenantSlug: "continuous-demo",
+      operatorEmail: "owner@continuoushq.com",
+      config: {
+        intake: {
+          objectId: objectResult.objectId,
+          eventId: eventResult.eventId,
+          evidenceId: evidenceResult.evidenceId,
+        },
+      },
+    });
+    const output = objectValue(first.output);
+    const intake = objectValue(output.intake);
+
+    expect(first.created).toBe(true);
+    expect(output.source).toBe(leadPacket.source);
+    expect(output.sourceEventId).toBe(leadPacket.sourceEventId);
+    expect(output.sourceObjectId).toBe(objectResult.objectId);
+    expect(output.sourceEventRowId).toBe(eventResult.eventId);
+    expect(output.sourceEvidenceId).toBe(evidenceResult.evidenceId);
+    expect(intake.mode).toBe("core_read");
+    expect(intake.objectId).toBe(objectResult.objectId);
+    expect(intake.eventId).toBe(eventResult.eventId);
+    expect(intake.evidenceId).toBe(evidenceResult.evidenceId);
+    expect(output.classification).toBe("quote_ready_for_owner_approval");
+    expect(output.externalSend).toBe(false);
+
+    const [workerRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(eq(workerRuns.id, first.workerRunId ?? ""))
+      .limit(1);
+    const runData = objectValue(workerRun?.data);
+    const runInput = objectValue(runData.input);
+    const resolvedConfig = objectValue(runInput.resolvedConfig);
+    const resolvedLead = objectValue(resolvedConfig.leadPacket);
+
+    expect(objectValue(runInput.config).intake).toEqual({
+      objectId: objectResult.objectId,
+      eventId: eventResult.eventId,
+      evidenceId: evidenceResult.evidenceId,
+    });
+    expect(resolvedLead.customerName).toBe(leadPacket.customerName);
+    expect(resolvedLead.customerIntent).toBe(leadPacket.customerIntent);
+
+    const [sourceSnapshot] = await db
+      .select()
+      .from(evidence)
+      .where(eq(evidence.id, first.sourceSnapshotEvidenceId ?? ""))
+      .limit(1);
+    const sourceData = objectValue(sourceSnapshot?.data);
+    const sourceLead = objectValue(sourceData.leadPacket);
+
+    expect(sourceData.sourceObjectId).toBe(objectResult.objectId);
+    expect(sourceData.sourceEventRowId).toBe(eventResult.eventId);
+    expect(sourceData.sourceEvidenceId).toBe(evidenceResult.evidenceId);
+    expect(sourceLead.customerName).toBe(leadPacket.customerName);
+
+    const [approval] = await db
+      .select()
+      .from(approvalRequests)
+      .where(eq(approvalRequests.id, first.approvalRequestId ?? ""))
+      .limit(1);
+    const requestedAction = objectValue(approval?.requestedAction);
+    const approvalEvidence = objectValue(approval?.evidence);
+
+    expect(approval?.state).toBe("pending");
+    expect(requestedAction.externalSend).toBe(false);
+    expect(requestedAction.sourceSnapshotEvidenceId).toBe(first.sourceSnapshotEvidenceId);
+    expect(requestedAction.sourceObjectId).toBe(objectResult.objectId);
+    expect(approvalEvidence.sourceEventRowId).toBe(eventResult.eventId);
+    expect(approvalEvidence.sourceEvidenceId).toBe(evidenceResult.evidenceId);
+
+    const replay = await runRevenueWorker({
+      idempotencyKey: `ci-worker-intake-${runId}`,
+      tenantSlug: "continuous-demo",
+      operatorEmail: "owner@continuoushq.com",
+      config: {
+        intake: {
+          objectId: objectResult.objectId,
+          eventId: eventResult.eventId,
+          evidenceId: evidenceResult.evidenceId,
+        },
+      },
+    });
+    const replayOutput = objectValue(replay.output);
+
+    expect(replay.created).toBe(false);
+    expect(replay.workerRunId).toBe(first.workerRunId);
+    expect(replayOutput.sourceEventRowId).toBe(eventResult.eventId);
+    expect(objectValue(replayOutput.intake).evidenceId).toBe(evidenceResult.evidenceId);
   }, 120_000);
 
   it("reconciles pending dry-run adapter rows without external execution", async () => {

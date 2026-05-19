@@ -42,8 +42,9 @@ Then open `http://localhost:3000`.
   `event.ingest`, `evidence.attach`, `document.create`, and `decision.record`.
 - `/worker` is the canonical worker control-plane API. Use `GET /worker?view=snapshot` or
   `GET /worker?view=approvals`; use `POST /worker` with `command` and `config`
-  payloads for side-effecting worker commands. Revenue operations runs provide
-  lead input under `config.leadPacket`.
+  payloads for side-effecting worker commands. Revenue operations runs prefer
+  persisted Core lead intake references under `config.intake`; `config.leadPacket`
+  remains a direct operator/test fallback.
 - `/workflow` is the canonical workflow control-plane API. Use `GET /workflow`
   for definitions/runs/steps, `GET /workflow?view=approvals` for workflow
   approvals, and `POST /workflow` with `command=start`, `command=transition`,

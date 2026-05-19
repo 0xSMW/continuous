@@ -32,8 +32,10 @@ export const workerTools = [
         idempotencyKey: { type: "string" },
         config: {
           type: "object",
-          description: "Worker-specific run configuration. Revenue operations runs use leadPacket.",
+          description:
+            "Worker-specific run configuration. Revenue operations runs prefer intake references to persisted Core records; leadPacket is a direct operator/test fallback.",
           properties: {
+            intake: { $ref: "#/$defs/intake" },
             leadPacket: { $ref: "#/$defs/leadPacket" },
             pricing: {
               type: "object",
@@ -131,6 +133,19 @@ export const workerToolSchema = {
           type: "array",
           items: { type: "string" },
         },
+      },
+      additionalProperties: true,
+    },
+    intake: {
+      type: "object",
+      description:
+        "Persisted Core lead intake selector. eventId/objectId/evidenceId are internal Core row ids; sourceEventId is the external origin id.",
+      properties: {
+        eventId: { type: "string" },
+        objectId: { type: "string" },
+        evidenceId: { type: "string" },
+        source: { type: "string" },
+        sourceEventId: { type: "string" },
       },
       additionalProperties: true,
     },

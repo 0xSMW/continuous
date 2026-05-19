@@ -126,14 +126,10 @@ curl -X POST http://localhost:3000/worker \
     "worker": {"role": "revenue_operations"},
     "idempotencyKey": "local-revenue-run-001",
     "config": {
-      "leadPacket": {
-        "source": "website_form",
-        "sourceEventId": "local-form-001",
-        "customerName": "Acme Roof Repair",
-        "customerIntent": "roof leak inspection",
-        "serviceArea": "roofing",
-        "urgency": "high",
-        "missingFacts": ["preferred_time_window"]
+      "intake": {
+        "objectId": "lead_object_uuid",
+        "eventId": "lead_received_event_uuid",
+        "evidenceId": "lead_snapshot_evidence_uuid"
       }
     }
   }'
@@ -141,13 +137,15 @@ curl -X POST http://localhost:3000/worker \
 
 Runs are bound to `WORKER_OPERATOR_EMAIL`, which defaults to the seeded
 `owner@continuoushq.com` user. A successful run records an approval request and
-audit trail while keeping external send and money movement blocked.
+audit trail while keeping external send and money movement blocked. Create the
+lead object/event/evidence through `/api/core` first; `config.leadPacket` is only
+the direct fallback for controlled local tests.
 
 The same persisted loop can run without exposing HTTP:
 
 ```sh
 bun run worker:tool worker.run <<'JSON'
-{"worker":{"role":"revenue_operations"},"idempotencyKey":"local-revenue-run-002","config":{"leadPacket":{"source":"operator_payload","customerName":"Beacon Bakery","customerIntent":"emergency HVAC repair","serviceArea":"hvac","urgency":"emergency","missingFacts":[]}}}
+{"worker":{"role":"revenue_operations"},"idempotencyKey":"local-revenue-run-002","config":{"intake":{"objectId":"lead_object_uuid","eventId":"lead_received_event_uuid","evidenceId":"lead_snapshot_evidence_uuid"}}}
 JSON
 ```
 

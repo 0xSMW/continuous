@@ -14,7 +14,7 @@ state, and object versioning without external sends or money movement.
 | Core loop | One operator run creates worker run, source snapshot evidence, budget, inference, usage, event, adapter run/action, approval packet, task update, and object version records |
 | Operator read API | `GET /worker?view=snapshot&role=revenue_operations`, bearer-token required |
 | Approval API | `GET /worker?view=approvals&role=revenue_operations` and `POST /worker` with `command=approval.decide`, bearer-token required |
-| Run API | `POST /worker` with `command=run` and `config.leadPacket`, disabled by default and bearer-token gated when enabled |
+| Run API | `POST /worker` with `command=run` and `config.intake` Core references; direct `config.leadPacket` remains an operator/test fallback |
 | Adapter reconciliation API | `POST /worker` with `command=adapters.reconcile`, tenant-scoped and bearer-token required |
 | Operator run | `bun run worker:tool worker.run` with the same worker/config payload |
 | External execution | Disabled; adapter runtime records dry-run receipts and matched reconciliation only |
@@ -85,7 +85,7 @@ smoke test.
 ## Milestones
 
 1. Convert the deterministic run into a small state machine.
-2. Add read-only real lead intake feeding the same `config.leadPacket` contract.
+2. Expand read-only real lead intake beyond Core object/event/evidence references into connected source readers.
 3. Add quote approval UI backed by `ui_contracts`.
 4. Extend the persistence-only reconciliation worker into retry execution paths for failed or uncertain adapter results.
 5. Extend eval fixtures beyond the first CI-enforced lead-to-quote cases.

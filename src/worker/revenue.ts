@@ -22,6 +22,7 @@ import {
   generatedViews,
   inferences,
   modelRoutes,
+  objects,
   objectVersions,
   tasks,
   tenants,
@@ -37,6 +38,8 @@ type Database = typeof defaultDb;
 const revenueWorkerRole = "revenue_operations";
 const source = "continuous.revenue_worker";
 const runUnits = 12000;
+const uuidPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export type RevenueWorkerSelector = {
   tenantSlug?: string;
@@ -141,6 +144,7 @@ type WorkerContext = {
   task: {
     id: string;
     objectId: string | null;
+    triggerEventId: string | null;
     capabilityId: string | null;
     priority: TaskPriority;
     reviewerUserId: string | null;
@@ -241,6 +245,11 @@ function booleanValue(value: unknown) {
   return value === true;
 }
 
+function uuidValue(value: unknown) {
+  const output = stringValue(value);
+  return output && uuidPattern.test(output) ? output : "";
+}
+
 function normalizedUrgency(value: unknown) {
   const urgency = stringValue(value, "normal").toLowerCase();
 
@@ -281,8 +290,265 @@ function formatUsd(cents: number) {
   return `$${(cents / 100).toFixed(2)}`;
 }
 
+function nestedLeadPacket(...values: unknown[]) {
+  for (const value of values) {
+    const object = objectValue(value);
+    const leadPacket = objectValue(object.leadPacket ?? object.lead);
+
+    if (Object.keys(leadPacket).length > 0) {
+      return leadPacket;
+    }
+  }
+
+  return {};
+}
+
+function firstStringValue(...values: unknown[]) {
+  for (const value of values) {
+    const output = stringValue(value);
+
+    if (output) {
+      return output;
+    }
+  }
+
+  return "";
+}
+
+function firstStringList(...values: unknown[]) {
+  for (const value of values) {
+    const output = stringList(value);
+
+    if (output.length > 0) {
+      return output;
+    }
+  }
+
+  return [];
+}
+
+async function resolveLeadIntake(
+  db: Database,
+  tenantId: string,
+  config: JsonObject,
+  fallback: { objectId?: string | null; eventId?: string | null; evidenceId?: string | null } = {},
+) {
+  const directLeadPacket = objectValue(config.leadPacket);
+  const directLead = objectValue(config.lead);
+
+  if (Object.keys(directLeadPacket).length > 0 || Object.keys(directLead).length > 0) {
+    return { config, intake: {} as JsonObject };
+  }
+
+  const intake = objectValue(config.intake);
+  const requestedEvidenceId = uuidValue(
+    intake.evidenceId ?? config.evidenceId ?? fallback.evidenceId,
+  );
+  const requestedEventId = uuidValue(intake.eventId ?? fallback.eventId);
+  const requestedObjectId = uuidValue(intake.objectId ?? config.objectId ?? fallback.objectId);
+
+  if (!requestedEventId && !requestedObjectId && !requestedEvidenceId) {
+    return { config, intake: {} as JsonObject };
+  }
+
+  const [directEvidence] = requestedEvidenceId
+    ? await db
+        .select({
+          id: evidence.id,
+          kind: evidence.kind,
+          name: evidence.name,
+          objectId: evidence.objectId,
+          eventId: evidence.eventId,
+          data: evidence.data,
+        })
+        .from(evidence)
+        .where(and(eq(evidence.tenantId, tenantId), eq(evidence.id, requestedEvidenceId)))
+        .limit(1)
+    : [];
+
+  if (requestedEvidenceId && !directEvidence) {
+    throw new RevenueWorkerUnavailableError(
+      "worker_intake_evidence_not_found",
+      "config.intake.evidenceId does not match Core evidence in this tenant.",
+      404,
+    );
+  }
+
+  const eventId = requestedEventId || directEvidence?.eventId || "";
+  const [event] = eventId
+    ? await db
+        .select({
+          id: events.id,
+          source: events.source,
+          idempotencyKey: events.idempotencyKey,
+          objectId: events.objectId,
+          data: events.data,
+          occurredAt: events.occurredAt,
+        })
+        .from(events)
+        .where(and(eq(events.tenantId, tenantId), eq(events.id, eventId)))
+        .limit(1)
+    : [];
+
+  if (eventId && !event) {
+    throw new RevenueWorkerUnavailableError(
+      "worker_intake_event_not_found",
+      "config.intake.eventId does not match a Core event in this tenant.",
+      404,
+    );
+  }
+
+  const resolvedObjectId = requestedObjectId || event?.objectId || directEvidence?.objectId || "";
+  const [object] = resolvedObjectId
+    ? await db
+        .select({
+          id: objects.id,
+          type: objects.type,
+          name: objects.name,
+          state: objects.state,
+          source: objects.source,
+          externalId: objects.externalId,
+          data: objects.data,
+        })
+        .from(objects)
+        .where(and(eq(objects.tenantId, tenantId), eq(objects.id, resolvedObjectId)))
+        .limit(1)
+    : [];
+
+  if (resolvedObjectId && !object) {
+    throw new RevenueWorkerUnavailableError(
+      "worker_intake_object_not_found",
+      "config.intake.objectId does not match a Core object in this tenant.",
+      404,
+    );
+  }
+
+  const [linkedEvidence] =
+    directEvidence || (!event?.id && !object?.id)
+      ? []
+      : await db
+          .select({
+            id: evidence.id,
+            kind: evidence.kind,
+            name: evidence.name,
+            objectId: evidence.objectId,
+            eventId: evidence.eventId,
+            data: evidence.data,
+          })
+          .from(evidence)
+          .where(
+            and(
+              eq(evidence.tenantId, tenantId),
+              event?.id ? eq(evidence.eventId, event.id) : eq(evidence.objectId, object?.id ?? ""),
+            ),
+          )
+          .orderBy(desc(evidence.createdAt))
+          .limit(1);
+  const evidenceRecord = directEvidence ?? linkedEvidence;
+  const eventData = objectValue(event?.data);
+  const objectData = objectValue(object?.data);
+  const evidenceData = objectValue(evidenceRecord?.data);
+  const lead = nestedLeadPacket(evidenceData, eventData, objectData, intake);
+  const leadPacket = {
+    source: firstStringValue(
+      lead.source,
+      intake.source,
+      evidenceData.source,
+      eventData.source,
+      objectData.source,
+      event?.source,
+      object?.source,
+      "core_intake",
+    ),
+    sourceEventId: firstStringValue(
+      lead.sourceEventId,
+      intake.sourceEventId,
+      eventData.sourceEventId,
+      event?.idempotencyKey,
+      event?.id,
+      object?.externalId,
+    ),
+    customerName: firstStringValue(
+      lead.customerName,
+      lead.name,
+      evidenceData.customerName,
+      eventData.customerName,
+      objectData.customerName,
+      object?.name,
+    ),
+    customerIntent: firstStringValue(
+      lead.customerIntent,
+      lead.intent,
+      evidenceData.customerIntent,
+      eventData.customerIntent,
+      objectData.customerIntent,
+      objectData.intent,
+      object?.type,
+    ),
+    serviceArea: firstStringValue(
+      lead.serviceArea,
+      evidenceData.serviceArea,
+      eventData.serviceArea,
+      objectData.serviceArea,
+    ),
+    urgency: firstStringValue(lead.urgency, evidenceData.urgency, eventData.urgency, objectData.urgency),
+    missingFacts: firstStringList(
+      lead.missingFacts,
+      evidenceData.missingFacts,
+      eventData.missingFacts,
+      objectData.missingFacts,
+    ),
+    raw: {
+      intake,
+      object: object
+        ? {
+            id: object.id,
+            type: object.type,
+            state: object.state,
+            source: object.source,
+            externalId: object.externalId,
+            data: object.data,
+          }
+        : null,
+      event: event
+        ? {
+            id: event.id,
+            source: event.source,
+            idempotencyKey: event.idempotencyKey,
+            occurredAt: event.occurredAt.toISOString(),
+            data: event.data,
+          }
+        : null,
+      evidence: evidenceRecord
+        ? {
+            id: evidenceRecord.id,
+            kind: evidenceRecord.kind,
+            name: evidenceRecord.name,
+            data: evidenceRecord.data,
+          }
+        : null,
+    },
+  };
+
+  return {
+    config: {
+      ...config,
+      leadPacket,
+    },
+    intake: {
+      mode: "core_read",
+      objectId: object?.id ?? null,
+      eventId: event?.id ?? null,
+      evidenceId: evidenceRecord?.id ?? null,
+      source: leadPacket.source,
+      sourceEventId: leadPacket.sourceEventId,
+    },
+  };
+}
+
 function leadPacketFromConfig(config: JsonObject) {
   const lead = objectValue(config.leadPacket ?? config.lead);
+  const intake = objectValue(config.intake);
   const pricing = objectValue(config.pricing);
   const urgency = normalizedUrgency(lead.urgency);
   const customerName = stringValue(lead.customerName, stringValue(lead.name, "Customer"));
@@ -290,7 +556,10 @@ function leadPacketFromConfig(config: JsonObject) {
   const serviceArea = stringValue(lead.serviceArea, "field service");
   const missingFacts = stringList(lead.missingFacts);
   const source = stringValue(lead.source, "operator_payload");
-  const sourceEventId = stringValue(lead.sourceEventId, stringValue(config.sourceEventId, ""));
+  const sourceEventId = stringValue(
+    lead.sourceEventId,
+    stringValue(intake.sourceEventId, stringValue(config.sourceEventId, "")),
+  );
   const baseCents = numberValue(pricing.baseCents) || centsForIntent(customerIntent, serviceArea);
   const urgencyFeeCents = urgency === "urgent" ? 7500 : urgency === "high" ? 2500 : 0;
   const totalCents = baseCents + urgencyFeeCents;
@@ -429,6 +698,7 @@ async function loadWorkerContext(db: Database, selector: RevenueWorkerSelector):
     .select({
       id: tasks.id,
       objectId: tasks.objectId,
+      triggerEventId: tasks.triggerEventId,
       capabilityId: tasks.capabilityId,
       priority: tasks.priority,
       reviewerUserId: tasks.reviewerUserId,
@@ -847,8 +1117,24 @@ export async function runRevenueWorker(input: {
     );
   }
 
-  const config = input.config ?? {};
+  const requestConfig = input.config ?? {};
+  const resolvedInput = await resolveLeadIntake(db, context.worker.tenantId, requestConfig, {
+    objectId: task?.objectId,
+    eventId: task?.triggerEventId,
+  });
+  const config = resolvedInput.config;
+  const intake = resolvedInput.intake;
   const leadPacket = leadPacketFromConfig(config);
+  const sourceObjectId = stringValue(intake.objectId) || null;
+  const sourceEventRowId = stringValue(intake.eventId) || null;
+  const sourceEvidenceId = stringValue(intake.evidenceId) || null;
+  const intakeTrace = {
+    intake,
+    sourceObjectId,
+    sourceEventRowId,
+    sourceEvidenceId,
+  };
+  const runObjectId = task?.objectId ?? sourceObjectId;
   const inputHash = hashObject({
     schemaVersion: "revenue_worker.lead_packet.v1",
     mode: "simulation",
@@ -856,7 +1142,9 @@ export async function runRevenueWorker(input: {
     tenantId: context.worker.tenantId,
     workerId: context.worker.id,
     operatorUserId: operator.id,
+    requestConfig,
     config,
+    ...intakeTrace,
     leadPacket: leadPacket.sourceSnapshot,
   });
 
@@ -936,6 +1224,10 @@ export async function runRevenueWorker(input: {
       const eventOutput = {
         eventId: existingEvent.id,
         taskId: existingEvent.taskId ?? null,
+        intake: objectValue(output.intake ?? existingEvent.data.intake),
+        sourceObjectId: stringData(existingEvent.data, "sourceObjectId"),
+        sourceEventRowId: stringData(existingEvent.data, "sourceEventRowId"),
+        sourceEvidenceId: stringData(existingEvent.data, "sourceEvidenceId"),
         sourceSnapshotEvidenceId: stringData(existingEvent.data, "sourceSnapshotEvidenceId"),
         evidenceId: stringData(existingEvent.data, "evidenceId"),
         reservationId: stringData(existingEvent.data, "reservationId"),
@@ -964,7 +1256,9 @@ export async function runRevenueWorker(input: {
           data: {
             input: {
               idempotencyKey: input.idempotencyKey,
-              config,
+              config: requestConfig,
+              resolvedConfig: config,
+              ...intakeTrace,
               inputHashUnavailable: true,
               adoptedFromEvent: existingEvent.id,
             },
@@ -1116,13 +1410,16 @@ export async function runRevenueWorker(input: {
     const runInput = {
       idempotencyKey: input.idempotencyKey,
       inputHash,
-      config,
+      config: requestConfig,
+      resolvedConfig: config,
+      ...intakeTrace,
       leadPacket: leadPacket.sourceSnapshot,
       operator: {
         userId: operator.id,
         email: operator.email,
       },
       taskId: task?.id ?? null,
+      objectId: runObjectId,
       capabilityId,
       connectionId: context.connectionId,
       budgetAccountId: context.budgetAccountId,
@@ -1166,7 +1463,7 @@ export async function runRevenueWorker(input: {
         targetId: workerRun.id,
         taskId: task?.id,
         workerRunId: workerRun.id,
-        objectId: task?.objectId,
+        objectId: runObjectId,
         capabilityId,
         risk: "medium",
         idempotencyKey: `${input.idempotencyKey}:run_requested`,
@@ -1174,6 +1471,7 @@ export async function runRevenueWorker(input: {
           operatorEmail: operator.email,
           operatorName: operator.name,
           inputHash,
+          ...intakeTrace,
           leadPacket: leadPacket.sourceSnapshot,
           externalExecution: "blocked",
           mode: "simulation",
@@ -1213,6 +1511,7 @@ export async function runRevenueWorker(input: {
           workerRunId: workerRun.id,
           capabilityId,
           inputHash,
+          ...intakeTrace,
           source: leadPacket.source,
           sourceEventId: leadPacket.sourceEventId,
           externalMutation: false,
@@ -1237,6 +1536,7 @@ export async function runRevenueWorker(input: {
           mode: "simulation",
           objective: "Classify the lead packet and prepare the next owner-visible no-send action.",
           leadPacket: leadPacket.sourceSnapshot,
+          ...intakeTrace,
           inputHash,
         },
         result: {
@@ -1276,6 +1576,7 @@ export async function runRevenueWorker(input: {
           route: "low_cost_fast",
           mode: "simulation",
           workerRunId: workerRun.id,
+          ...intakeTrace,
           adapterRunId: adapterRun.id,
         },
       })
@@ -1290,7 +1591,7 @@ export async function runRevenueWorker(input: {
         actorType: "worker",
         actorId: context.worker.id,
         actorRef: `worker:${context.worker.id}`,
-        objectId: task?.objectId,
+        objectId: runObjectId,
         taskId: task?.id,
         capabilityId,
         connectionId: context.connectionId,
@@ -1299,6 +1600,7 @@ export async function runRevenueWorker(input: {
           worker: context.worker.name,
           tenant: context.tenantName,
           inputHash,
+          ...intakeTrace,
           source: leadPacket.source,
           sourceEventId: leadPacket.sourceEventId,
           classification: leadPacket.classification,
@@ -1323,7 +1625,7 @@ export async function runRevenueWorker(input: {
         tenantId: context.worker.tenantId,
         kind: "snapshot",
         name: "Lead source snapshot",
-        objectId: task?.objectId,
+        objectId: runObjectId,
         taskId: task?.id,
         eventId: event.id,
         capabilityId,
@@ -1334,6 +1636,7 @@ export async function runRevenueWorker(input: {
           idempotencyKey: input.idempotencyKey,
           inputHash,
           workerRunId: workerRun.id,
+          ...intakeTrace,
           source: leadPacket.source,
           sourceEventId: leadPacket.sourceEventId,
           leadPacket: leadPacket.sourceSnapshot,
@@ -1348,7 +1651,7 @@ export async function runRevenueWorker(input: {
         tenantId: context.worker.tenantId,
         kind: "trace",
         name: "Revenue Worker simulation trace",
-        objectId: task?.objectId,
+        objectId: runObjectId,
         taskId: task?.id,
         eventId: event.id,
         capabilityId,
@@ -1359,6 +1662,7 @@ export async function runRevenueWorker(input: {
           idempotencyKey: input.idempotencyKey,
           inputHash,
           workerRunId: workerRun.id,
+          ...intakeTrace,
           sourceSnapshotEvidenceId: sourceSnapshotEvidence.id,
           inferenceId: inference.id,
           usageEventId: usage.id,
@@ -1392,6 +1696,7 @@ export async function runRevenueWorker(input: {
         request: {
           action: leadPacket.expectedAction,
           workerRunId: workerRun.id,
+          ...intakeTrace,
           sourceSnapshotEvidenceId: sourceSnapshotEvidence.id,
           classification: leadPacket.classification,
           draftResponse: leadPacket.draftResponse,
@@ -1402,6 +1707,7 @@ export async function runRevenueWorker(input: {
         response: {
           status: "prepared",
           preparedAction: leadPacket.expectedAction,
+          ...intakeTrace,
           draftResponse: leadPacket.draftResponse,
           quote: leadPacket.quote,
           externalSend: false,
@@ -1413,6 +1719,7 @@ export async function runRevenueWorker(input: {
           receiptId: traceHash(input.idempotencyKey, "adapter_receipt"),
           adapterRunId: adapterRun.id,
           workerRunId: workerRun.id,
+          ...intakeTrace,
           sourceSnapshotEvidenceId: sourceSnapshotEvidence.id,
           externalMutation: false,
           externalSend: false,
@@ -1428,7 +1735,7 @@ export async function runRevenueWorker(input: {
         tenantId: context.worker.tenantId,
         kind: "receipt",
         name: "Adapter dry-run receipt",
-        objectId: task?.objectId,
+        objectId: runObjectId,
         taskId: task?.id,
         eventId: event.id,
         capabilityId,
@@ -1440,6 +1747,7 @@ export async function runRevenueWorker(input: {
           workerRunId: workerRun.id,
           adapterRunId: adapterRun.id,
           adapterActionId: action.id,
+          ...intakeTrace,
           sourceSnapshotEvidenceId: sourceSnapshotEvidence.id,
           idempotencyKey: input.idempotencyKey,
           operation: "draft_customer_response",
@@ -1465,6 +1773,7 @@ export async function runRevenueWorker(input: {
           mode: "dry_run",
           receiptEvidenceId: receiptEvidence.id,
           adapterActionId: action.id,
+          ...intakeTrace,
           sourceSnapshotEvidenceId: sourceSnapshotEvidence.id,
           externalMutation: false,
           externalSend: false,
@@ -1482,7 +1791,7 @@ export async function runRevenueWorker(input: {
         taskId: task?.id,
         workerRunId: workerRun.id,
         eventId: event.id,
-        objectId: task?.objectId,
+        objectId: runObjectId,
         capabilityId,
         requesterType: "worker",
         requesterId: context.worker.id,
@@ -1497,6 +1806,7 @@ export async function runRevenueWorker(input: {
         requestedAction: {
           action: "review_prepared_packet",
           adapterActionId: action.id,
+          ...intakeTrace,
           sourceSnapshotEvidenceId: sourceSnapshotEvidence.id,
           classification: leadPacket.classification,
           draftResponse: leadPacket.draftResponse,
@@ -1506,6 +1816,7 @@ export async function runRevenueWorker(input: {
         },
         evidence: {
           eventId: event.id,
+          ...intakeTrace,
           sourceSnapshotEvidenceId: sourceSnapshotEvidence.id,
           evidenceId: workerEvidence.id,
           inferenceId: inference.id,
@@ -1522,6 +1833,7 @@ export async function runRevenueWorker(input: {
         data: {
           operatorRunAuditId: runAudit.id,
           inputHash,
+          ...intakeTrace,
           sourceSnapshotEvidenceId: sourceSnapshotEvidence.id,
           classification: leadPacket.classification,
           draftResponse: leadPacket.draftResponse,
@@ -1549,7 +1861,7 @@ export async function runRevenueWorker(input: {
         workerRunId: workerRun.id,
         approvalRequestId: approval.id,
         eventId: event.id,
-        objectId: task?.objectId,
+        objectId: runObjectId,
         capabilityId,
         risk: "medium",
         idempotencyKey: `${input.idempotencyKey}:approval_requested`,
@@ -1557,6 +1869,7 @@ export async function runRevenueWorker(input: {
           reviewerUserId: task?.reviewerUserId ?? operator.id,
           operatorUserId: operator.id,
           inputHash,
+          ...intakeTrace,
           sourceSnapshotEvidenceId: sourceSnapshotEvidence.id,
           classification: leadPacket.classification,
           externalExecution: "blocked",
@@ -1575,6 +1888,7 @@ export async function runRevenueWorker(input: {
           idempotencyKey: input.idempotencyKey,
           inputHash,
           workerRunId: workerRun.id,
+          ...intakeTrace,
           sourceSnapshotEvidenceId: sourceSnapshotEvidence.id,
           inferenceId: inference.id,
           usageEventId: usage.id,
@@ -1608,6 +1922,7 @@ export async function runRevenueWorker(input: {
       data: {
         inputHash,
         workerRunId: workerRun.id,
+        ...intakeTrace,
         sourceSnapshotEvidenceId: sourceSnapshotEvidence.id,
         adapterRunId: adapterRun.id,
         adapterActionId: action.id,
@@ -1633,6 +1948,7 @@ export async function runRevenueWorker(input: {
         idempotencyKey: input.idempotencyKey,
         approvalRequestId: approval.id,
         inputHash,
+        ...intakeTrace,
         sourceSnapshotEvidenceId: sourceSnapshotEvidence.id,
         classification: leadPacket.classification,
         dimensions: {
@@ -1656,6 +1972,7 @@ export async function runRevenueWorker(input: {
             status: leadPacket.classification,
             workerRunId: workerRun.id,
             runEventId: event.id,
+            ...intakeTrace,
             sourceSnapshotEvidenceId: sourceSnapshotEvidence.id,
             draftResponse: leadPacket.draftResponse,
             quote: leadPacket.quote,
@@ -1681,9 +1998,9 @@ export async function runRevenueWorker(input: {
         .where(eq(tasks.id, task.id));
     }
 
-    if (task?.objectId) {
+    if (runObjectId) {
       await tx.execute(
-        sql`select pg_advisory_xact_lock(hashtext('object_version'), hashtext(${task.objectId}))`,
+        sql`select pg_advisory_xact_lock(hashtext('object_version'), hashtext(${runObjectId}))`,
       );
 
       const [version] = await tx
@@ -1691,17 +2008,18 @@ export async function runRevenueWorker(input: {
           value: sql<number>`coalesce(max(${objectVersions.version}), 0) + 1`,
         })
         .from(objectVersions)
-        .where(eq(objectVersions.objectId, task.objectId));
+        .where(eq(objectVersions.objectId, runObjectId));
 
       await tx.insert(objectVersions).values({
         tenantId: context.worker.tenantId,
-        objectId: task.objectId,
+        objectId: runObjectId,
         version: numberValue(version?.value),
         data: {
           state: "approval_required",
           workerRunId: workerRun.id,
           sourceEventId: event.id,
           inputHash,
+          ...intakeTrace,
           sourceSnapshotEvidenceId: sourceSnapshotEvidence.id,
           classification: leadPacket.classification,
           draftResponse: leadPacket.draftResponse,
@@ -1734,6 +2052,7 @@ export async function runRevenueWorker(input: {
           worker: context.worker.name,
           tenant: context.tenantName,
           inputHash,
+          ...intakeTrace,
           source: leadPacket.source,
           sourceEventId: leadPacket.sourceEventId,
           classification: leadPacket.classification,
@@ -1763,6 +2082,7 @@ export async function runRevenueWorker(input: {
       worker: context.worker.name,
       tenant: context.tenantName,
       inputHash,
+      ...intakeTrace,
       source: leadPacket.source,
       sourceEventId: leadPacket.sourceEventId,
       classification: leadPacket.classification,

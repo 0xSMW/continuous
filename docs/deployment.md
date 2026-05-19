@@ -89,14 +89,17 @@ operator decisions can be written. Use the CLI path over SSH for direct
 operator-controlled smoke runs:
 
 ```sh
-ssh root@45.55.53.92 'cd /opt/continuous && docker compose --profile tools run --rm migrate bun run worker:tool worker.run --payload='"'"'{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"deploy-worker-run-001","config":{"leadPacket":{"source":"deploy_smoke","customerName":"Deploy Smoke Customer","customerIntent":"roof leak inspection","serviceArea":"roofing","urgency":"high","missingFacts":["preferred_time_window"]}}}'"'"''
+ssh root@45.55.53.92 'cd /opt/continuous && docker compose --profile tools run --rm migrate bun run worker:tool worker.run --payload='"'"'{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"deploy-worker-run-001","config":{"intake":{"objectId":"lead_object_uuid","eventId":"lead_received_event_uuid","evidenceId":"lead_snapshot_evidence_uuid"}}}'"'"''
 ```
 
 For the HTTPS worker API path, call `POST /worker` with `command`, `worker`,
-`config`, and `idempotencyKey` fields as required by the command plus the bearer token from
-`/opt/continuous/.env`. `GET /api/core`, `GET /worker?view=snapshot`, and
+`config`, and `idempotencyKey` fields as required by the command plus the bearer
+token from `/opt/continuous/.env`. Revenue Worker runs should first create the
+lead object, `lead.received` event, and source snapshot through `/api/core`, then
+pass those ids under `config.intake`. `GET /api/core`, `GET /worker?view=snapshot`, and
 `GET /worker?view=approvals` use the same bearer token for operator-only
 snapshots and approval review. Worker-specific HTTP paths are intentionally
 absent; expand the worker control plane through `/worker` payload fields.
-The deploy workflow also smokes `/api/core` task, object, event, evidence,
-document, and decision commands after each production rollout.
+The deploy workflow smokes Core lead intake before `/worker`, then covers
+`/api/core` task, object, event, evidence, document, and decision commands after
+each production rollout.

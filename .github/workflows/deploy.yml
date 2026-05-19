@@ -318,21 +318,131 @@ jobs:
             (select count(*) from evidence where data->>'operation'='deploy_reconciliation_smoke')::text;
           SQL
 
-          WORKER_RUN_KEY="deploy-worker-run-$RUN_ID"
-          WORKER_RUN_PAYLOAD="$(
-            /usr/bin/jq -nc --arg key "$WORKER_RUN_KEY" '{
-              command: "run",
-              worker: {role: "revenue_operations", tenantSlug: "continuous-demo"},
+          LEAD_SOURCE_EVENT_ID="deploy-smoke:$RUN_ID"
+          LEAD_OBJECT_KEY="deploy-lead-object-$RUN_ID"
+          LEAD_OBJECT_PAYLOAD="$(
+            /usr/bin/jq -nc --arg key "$LEAD_OBJECT_KEY" --arg sourceEventId "$LEAD_SOURCE_EVENT_ID" '{
+              command: "object.upsert",
+              core: {tenantSlug: "continuous-demo"},
               idempotencyKey: $key,
               config: {
-                leadPacket: {
+                type: "lead",
+                name: "Deploy Smoke Customer",
+                state: "received",
+                source: "deploy_smoke",
+                externalId: $sourceEventId,
+                data: {
                   source: "deploy_smoke",
-                  sourceEventId: $key,
+                  sourceEventId: $sourceEventId,
                   customerName: "Deploy Smoke Customer",
                   customerIntent: "roof leak inspection",
                   serviceArea: "roofing",
                   urgency: "high",
                   missingFacts: ["preferred_time_window"]
+                },
+                reason: "Deploy smoke lead intake"
+              }
+            }'
+          )"
+          LEAD_OBJECT_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/api/core \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$LEAD_OBJECT_PAYLOAD"
+          )"
+
+          echo "$LEAD_OBJECT_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,objectId:.data.result.objectId,eventId:.data.result.eventId}}'
+          echo "$LEAD_OBJECT_RESPONSE" | /usr/bin/jq -e \
+            '.error == null and .data.command == "object.upsert" and (.data.result.objectId | length > 0)' \
+            >/dev/null
+
+          LEAD_OBJECT_ID="$(echo "$LEAD_OBJECT_RESPONSE" | /usr/bin/jq -r '.data.result.objectId')"
+          LEAD_EVENT_KEY="deploy-lead-event-$RUN_ID"
+          LEAD_EVENT_PAYLOAD="$(
+            /usr/bin/jq -nc --arg key "$LEAD_EVENT_KEY" --arg objectId "$LEAD_OBJECT_ID" --arg sourceEventId "$LEAD_SOURCE_EVENT_ID" '{
+              command: "event.ingest",
+              core: {tenantSlug: "continuous-demo"},
+              idempotencyKey: $key,
+              config: {
+                type: "lead.received",
+                source: "deploy_smoke",
+                objectId: $objectId,
+                data: {
+                  source: "deploy_smoke",
+                  sourceEventId: $sourceEventId,
+                  customerName: "Deploy Smoke Customer",
+                  customerIntent: "roof leak inspection",
+                  serviceArea: "roofing",
+                  urgency: "high",
+                  missingFacts: ["preferred_time_window"]
+                }
+              }
+            }'
+          )"
+          LEAD_EVENT_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/api/core \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$LEAD_EVENT_PAYLOAD"
+          )"
+
+          echo "$LEAD_EVENT_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:.data.result}'
+          echo "$LEAD_EVENT_RESPONSE" | /usr/bin/jq -e \
+            '.error == null and .data.command == "event.ingest" and (.data.result.eventId | length > 0)' \
+            >/dev/null
+
+          LEAD_EVENT_ID="$(echo "$LEAD_EVENT_RESPONSE" | /usr/bin/jq -r '.data.result.eventId')"
+          LEAD_EVIDENCE_KEY="deploy-lead-evidence-$RUN_ID"
+          LEAD_EVIDENCE_PAYLOAD="$(
+            /usr/bin/jq -nc --arg key "$LEAD_EVIDENCE_KEY" --arg objectId "$LEAD_OBJECT_ID" --arg eventId "$LEAD_EVENT_ID" --arg sourceEventId "$LEAD_SOURCE_EVENT_ID" '{
+              command: "evidence.attach",
+              core: {tenantSlug: "continuous-demo"},
+              idempotencyKey: $key,
+              config: {
+                kind: "snapshot",
+                name: "Deploy smoke lead intake snapshot",
+                objectId: $objectId,
+                eventId: $eventId,
+                data: {
+                  source: "deploy_smoke",
+                  sourceEventId: $sourceEventId,
+                  customerName: "Deploy Smoke Customer",
+                  customerIntent: "roof leak inspection",
+                  serviceArea: "roofing",
+                  urgency: "high",
+                  missingFacts: ["preferred_time_window"],
+                  raw: {form: "deploy_smoke"}
+                }
+              }
+            }'
+          )"
+          LEAD_EVIDENCE_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/api/core \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$LEAD_EVIDENCE_PAYLOAD"
+          )"
+
+          echo "$LEAD_EVIDENCE_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:.data.result}'
+          echo "$LEAD_EVIDENCE_RESPONSE" | /usr/bin/jq -e \
+            '.error == null and .data.command == "evidence.attach" and (.data.result.evidenceId | length > 0)' \
+            >/dev/null
+
+          LEAD_EVIDENCE_ID="$(echo "$LEAD_EVIDENCE_RESPONSE" | /usr/bin/jq -r '.data.result.evidenceId')"
+          WORKER_RUN_KEY="deploy-worker-run-$RUN_ID"
+          WORKER_RUN_PAYLOAD="$(
+            /usr/bin/jq -nc --arg key "$WORKER_RUN_KEY" --arg objectId "$LEAD_OBJECT_ID" --arg eventId "$LEAD_EVENT_ID" --arg evidenceId "$LEAD_EVIDENCE_ID" '{
+              command: "run",
+              worker: {role: "revenue_operations", tenantSlug: "continuous-demo"},
+              idempotencyKey: $key,
+              config: {
+                intake: {
+                  objectId: $objectId,
+                  eventId: $eventId,
+                  evidenceId: $evidenceId
                 }
               }
             }'
@@ -345,9 +455,12 @@ jobs:
               -d "$WORKER_RUN_PAYLOAD"
           )"
 
-          echo "$WORKER_RUN_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,workerRunId:.data.result.workerRunId,eventId:.data.result.eventId,sourceSnapshotEvidenceId:.data.result.sourceSnapshotEvidenceId,externalSend:.data.result.output.externalSend,classification:.data.result.output.classification}}'
+          echo "$WORKER_RUN_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,workerRunId:.data.result.workerRunId,eventId:.data.result.eventId,sourceSnapshotEvidenceId:.data.result.sourceSnapshotEvidenceId,sourceObjectId:.data.result.output.sourceObjectId,sourceEventRowId:.data.result.output.sourceEventRowId,sourceEvidenceId:.data.result.output.sourceEvidenceId,externalSend:.data.result.output.externalSend,classification:.data.result.output.classification}}'
           echo "$WORKER_RUN_RESPONSE" | /usr/bin/jq -e \
-            '.error == null and .data.command == "run" and .data.result.created == true and (.data.result.workerRunId | length > 0) and (.data.result.eventId | length > 0) and (.data.result.sourceSnapshotEvidenceId | length > 0) and .data.result.output.externalSend == false and .data.result.output.classification == "quote_ready_for_owner_approval" and .data.result.snapshot.controls.externalExecution == "disabled"' \
+            --arg objectId "$LEAD_OBJECT_ID" \
+            --arg eventId "$LEAD_EVENT_ID" \
+            --arg evidenceId "$LEAD_EVIDENCE_ID" \
+            '.error == null and .data.command == "run" and .data.result.created == true and (.data.result.workerRunId | length > 0) and (.data.result.eventId | length > 0) and (.data.result.sourceSnapshotEvidenceId | length > 0) and .data.result.output.externalSend == false and .data.result.output.classification == "quote_ready_for_owner_approval" and .data.result.output.sourceObjectId == $objectId and .data.result.output.sourceEventRowId == $eventId and .data.result.output.sourceEvidenceId == $evidenceId and .data.result.snapshot.controls.externalExecution == "disabled"' \
             >/dev/null
 
           WORKER_RUN_ID="$(echo "$WORKER_RUN_RESPONSE" | /usr/bin/jq -r '.data.result.workerRunId')"
@@ -359,7 +472,7 @@ jobs:
           from worker_runs where id = '$WORKER_RUN_ID'::uuid;
           select 'worker_event' as kind, type, source
           from events where id = '$WORKER_EVENT_ID'::uuid;
-          select 'source_snapshot' as kind, kind, name, data->>'externalSend'
+          select 'source_snapshot' as kind, kind, name, data->>'externalSend', data->>'sourceObjectId', data->>'sourceEventRowId', data->>'sourceEvidenceId'
           from evidence where id = '$SOURCE_SNAPSHOT_ID'::uuid;
           SQL
 

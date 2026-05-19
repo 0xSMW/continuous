@@ -195,14 +195,15 @@ Approvals are platform records, not worker-specific records. Worker approvals
 and workflow approvals share `approval_requests`, `audit_events`, and evidence;
 the route decides which subject can be listed or decided.
 
-One run accepts a `config.leadPacket` payload, stores a source snapshot, binds
-the idempotency key to a canonical input hash, derives classification, draft
-response, and quote fields from that input, reserves budget, records inference
-and usage, emits an idempotent `revenue_worker.run.completed` event, captures
-trace and receipt evidence, creates an owner approval packet, updates the task
-to `approval_required`, and versions the quote object. External sends and money
-movement remain blocked until human approval and real adapter execution are
-implemented.
+One run accepts `config.intake` references to persisted Core lead object, event,
+and evidence rows, stores a worker source snapshot, binds the idempotency key to
+a canonical input hash, derives classification, draft response, and quote fields
+from the resolved intake packet, reserves budget, records inference and usage,
+emits an idempotent `revenue_worker.run.completed` event, captures trace and
+receipt evidence, creates an owner approval packet, updates the task to
+`approval_required`, and versions the quote object. `config.leadPacket` remains
+a direct operator/test fallback. External sends and money movement remain
+blocked until human approval and real adapter execution are implemented.
 
 Core writes are platform-level, not worker-specific. `POST /api/core` now
 creates accountable tasks, upserts typed business objects with object versions,

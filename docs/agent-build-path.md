@@ -57,11 +57,12 @@ bun run dev
 ```
 
 For worker runtime changes, prefer the CLI path first because it does not expose
-HTTP mutation:
+HTTP mutation. Create the lead object/event/evidence through Core first, then
+run the worker from those persisted references:
 
 ```sh
 bun run worker:tool worker.run <<'JSON'
-{"worker":{"role":"revenue_operations"},"idempotencyKey":"local-revenue-run-001","config":{"leadPacket":{"source":"website_form","sourceEventId":"local-form-001","customerName":"Acme Roof Repair","customerIntent":"roof leak inspection","serviceArea":"roofing","urgency":"high","missingFacts":["preferred_time_window"]}}}
+{"worker":{"role":"revenue_operations"},"idempotencyKey":"local-revenue-run-001","config":{"intake":{"objectId":"lead_object_uuid","eventId":"lead_received_event_uuid","evidenceId":"lead_snapshot_evidence_uuid"}}}
 JSON
 ```
 
@@ -79,14 +80,10 @@ When the HTTP snapshot, approval, or run path is required, start the app with
   },
   "idempotencyKey": "local-revenue-run-001",
   "config": {
-    "leadPacket": {
-      "source": "website_form",
-      "sourceEventId": "local-form-001",
-      "customerName": "Acme Roof Repair",
-      "customerIntent": "roof leak inspection",
-      "serviceArea": "roofing",
-      "urgency": "high",
-      "missingFacts": ["preferred_time_window"]
+    "intake": {
+      "objectId": "lead_object_uuid",
+      "eventId": "lead_received_event_uuid",
+      "evidenceId": "lead_snapshot_evidence_uuid"
     }
   }
 }
