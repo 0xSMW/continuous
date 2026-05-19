@@ -25,6 +25,7 @@
 | Bootstrap seed data | Seed records prove the substrate shape but are not customer fixtures |
 | Deploy updates | The deploy script keeps Postgres and its volume in place, then recreates app/Caddy after migrations and seed data |
 | Migration runner | Drizzle Kit's container migrator failed silently, so `db:migrate` uses a small Bun/Postgres runner that records Drizzle migration history and refuses partial baselines |
+| GitHub deploy access | The manual deploy workflow adds the current GitHub runner as a temporary SSH `/32` on the DigitalOcean firewall, then removes it at the end |
 
 ### Current State
 

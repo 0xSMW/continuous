@@ -53,5 +53,10 @@ The `Deploy` workflow is manual-only and uses these repository secrets:
 - `DEPLOY_KEY`
 - `DEPLOY_PATH`
 - `ACME_EMAIL`
+- `DO_API_TOKEN`
+
+The workflow uses `DO_API_TOKEN` to add the current GitHub runner IP as a
+temporary `/32` SSH source on `continuous-fw`, then removes that rule after the
+deploy job finishes.
 
 CI is separate and runs on pushes to `main`, pull requests, and manual dispatch.

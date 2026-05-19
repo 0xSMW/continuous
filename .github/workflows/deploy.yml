@@ -29,6 +29,8 @@ jobs:
       ACME_EMAIL: ${{ secrets.ACME_EMAIL || 'admin@continuoushq.com' }}
       APP_URL: http://${{ secrets.DEPLOY_HOST }}
       DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+      DO_API_TOKEN: ${{ secrets.DO_API_TOKEN }}
+      DO_FIREWALL_NAME: continuous-fw
 
     steps:
       - name: Checkout
@@ -46,6 +48,38 @@ jobs:
             echo "::error::Missing DEPLOY_KEY secret."
             exit 1
           fi
+          if [[ -z "${DO_API_TOKEN:-}" ]]; then
+            echo "::error::Missing DO_API_TOKEN secret."
+            exit 1
+          fi
+
+      - name: Open runner SSH access
+        shell: bash
+        run: |
+          set -euo pipefail
+          runner_ip="$(curl -4 -fsS https://ifconfig.me/ip)"
+          firewall_id="$(
+            curl -fsS \
+              -H "Authorization: Bearer $DO_API_TOKEN" \
+              "https://api.digitalocean.com/v2/firewalls" \
+              | jq -r --arg name "$DO_FIREWALL_NAME" '.firewalls[] | select(.name == $name) | .id' \
+              | head -1
+          )"
+          if [[ -z "$firewall_id" ]]; then
+            echo "::error::Could not find DigitalOcean firewall $DO_FIREWALL_NAME."
+            exit 1
+          fi
+
+          echo "RUNNER_SSH_CIDR=$runner_ip/32" >> "$GITHUB_ENV"
+          echo "DO_FIREWALL_ID=$firewall_id" >> "$GITHUB_ENV"
+
+          curl -fsS \
+            -X POST \
+            -H "Authorization: Bearer $DO_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{\"inbound_rules\":[{\"protocol\":\"tcp\",\"ports\":\"22\",\"sources\":{\"addresses\":[\"$runner_ip/32\"]}}]}" \
+            "https://api.digitalocean.com/v2/firewalls/$firewall_id/rules" \
+            >/dev/null
 
       - name: Configure SSH
         shell: bash
@@ -54,7 +88,14 @@ jobs:
           install -m 700 -d ~/.ssh
           printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+          for attempt in $(seq 1 30); do
+            if ssh-keyscan -T 5 -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::SSH did not become reachable from this runner."
+          exit 1
 
       - name: Sync repository
         shell: bash
@@ -134,3 +175,20 @@ jobs:
           docker compose up -d --build --remove-orphans app caddy
           docker compose ps
           REMOTE
+
+      - name: Close runner SSH access
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${DO_FIREWALL_ID:-}" || -z "${RUNNER_SSH_CIDR:-}" || -z "${DO_API_TOKEN:-}" ]]; then
+            exit 0
+          fi
+
+          curl -fsS \
+            -X DELETE \
+            -H "Authorization: Bearer $DO_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{\"inbound_rules\":[{\"protocol\":\"tcp\",\"ports\":\"22\",\"sources\":{\"addresses\":[\"$RUNNER_SSH_CIDR\"]}}]}" \
+            "https://api.digitalocean.com/v2/firewalls/$DO_FIREWALL_ID/rules" \
+            >/dev/null || true
