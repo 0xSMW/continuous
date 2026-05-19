@@ -27,6 +27,15 @@ function routeFiles(dir: string): string[] {
   });
 }
 
+function workerFamilyApiEntries(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    const nested = entry.isDirectory() ? workerFamilyApiEntries(path) : [];
+
+    return /(?:^|\/)[a-z0-9-]+-worker(?:\/|$)/.test(path) ? [path, ...nested] : nested;
+  });
+}
+
 describe("worker tool contract", () => {
   it("keeps the HTTP worker surface route-generic", () => {
     const root = process.cwd();
@@ -34,8 +43,10 @@ describe("worker tool contract", () => {
     const routeSource = readFileSync(routePath, "utf8");
     const appRoutes = routeFiles(join(root, "app")).map((path) => path.slice(root.length));
     const routeList = appRoutes.join("\n");
+    const workerFamilyApiPaths = workerFamilyApiEntries(join(root, "app", "api"));
 
     expect(existsSync(routePath)).toBe(true);
+    expect(workerFamilyApiPaths).toEqual([]);
     expect(routeList).not.toMatch(/\/app\/(?:api\/)?[a-z0-9-]+-worker\/route\.ts/);
     expect(routeSource).toContain("executeWorkerCommand");
     expect(routeSource).toContain("executeWorkerView");
