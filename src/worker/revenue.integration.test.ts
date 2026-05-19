@@ -1,10 +1,21 @@
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 
-import { and, count, eq, sql } from "drizzle-orm";
+import { and, count, eq, inArray, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { reconcileAdapterLedger } from "../core/adapters";
 import { db, pool } from "../db/client";
-import { evaluations, workerRuns, type JsonObject } from "../db/schema";
+import {
+  adapterActions,
+  adapterRuns,
+  auditEvents,
+  connections,
+  evaluations,
+  evidence,
+  workerRuns,
+  type JsonObject,
+} from "../db/schema";
 import { revenueWorkerEvalCases, scoreRevenueWorkerRun } from "./evals";
 import { runRevenueWorker } from "./revenue";
 
@@ -122,5 +133,97 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(replay.workerRunId).toBe(first.workerRunId);
     expect(runsAfterReplay.value).toBe(runsBeforeReplay.value);
     expect(evalsAfterReplay.value).toBe(evalsBeforeReplay.value);
+  }, 120_000);
+
+  it("reconciles pending dry-run adapter rows without external execution", async () => {
+    const [connection] = await db.select().from(connections).limit(1);
+    expect(connection).toBeDefined();
+
+    const runId = randomUUID();
+    const actionId = randomUUID();
+    const key = `ci-adapter-reconcile-${runId}`;
+    const now = new Date("2026-05-19T00:00:00.000Z");
+
+    await db.insert(adapterRuns).values({
+      id: runId,
+      tenantId: connection.tenantId,
+      connectionId: connection.id,
+      mode: "dry_run",
+      operation: "ci_reconciliation_check",
+      idempotencyKey: `${key}:run`,
+      state: "running",
+      attempt: 1,
+      maxAttempts: 3,
+      reconciliationState: "pending",
+      readCount: 1,
+      writeCount: 0,
+      receipt: {},
+      data: {
+        dryRun: true,
+        externalMutation: false,
+      },
+      startedAt: now,
+    });
+    await db.insert(adapterActions).values({
+      id: actionId,
+      tenantId: connection.tenantId,
+      connectionId: connection.id,
+      adapterRunId: runId,
+      idempotencyKey: `${key}:action`,
+      state: "done",
+      mode: "dry_run",
+      operation: "ci_reconciliation_check",
+      attempt: 1,
+      maxAttempts: 3,
+      reconciliationState: "pending",
+      request: {
+        dryRun: true,
+        externalSend: false,
+      },
+      response: {
+        status: "prepared",
+      },
+      receipt: {
+        externalMutation: false,
+      },
+    });
+
+    const result = await reconcileAdapterLedger({
+      tenantSlug: "continuous-demo",
+      limit: 10,
+      now,
+      db,
+    });
+
+    expect(result.processed).toBeGreaterThanOrEqual(2);
+    expect(result.matched).toBeGreaterThanOrEqual(2);
+    expect(result.retryScheduled).toBe(0);
+    expect(result.needsReview).toBe(0);
+
+    const [run] = await db.select().from(adapterRuns).where(eq(adapterRuns.id, runId)).limit(1);
+    const [action] = await db
+      .select()
+      .from(adapterActions)
+      .where(eq(adapterActions.id, actionId))
+      .limit(1);
+
+    expect(run?.state).toBe("done");
+    expect(run?.reconciliationState).toBe("matched");
+    expect(objectValue(run?.receipt).externalMutation).toBe(false);
+    expect(action?.state).toBe("done");
+    expect(action?.reconciliationState).toBe("matched");
+    expect(objectValue(action?.receipt).externalMutation).toBe(false);
+
+    const [auditCount] = await db
+      .select({ value: count() })
+      .from(auditEvents)
+      .where(inArray(auditEvents.id, result.auditEventIds));
+    const [evidenceCount] = await db
+      .select({ value: count() })
+      .from(evidence)
+      .where(inArray(evidence.id, result.evidenceIds));
+
+    expect(auditCount.value).toBe(result.auditEventIds.length);
+    expect(evidenceCount.value).toBe(result.evidenceIds.length);
   }, 120_000);
 });

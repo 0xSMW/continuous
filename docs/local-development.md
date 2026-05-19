@@ -102,6 +102,7 @@ Agent-facing local automation can use the repo-owned worker toolbox:
 ```sh
 bun run worker:tool schema
 bun run worker:tool worker.snapshot --payload='{"worker":{"role":"revenue_operations"}}'
+bun run worker:tool worker.adapters.reconcile --payload='{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{"limit":25}}'
 ```
 
 List and decide approvals with the same bearer token:

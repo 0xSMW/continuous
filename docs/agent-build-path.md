@@ -89,4 +89,8 @@ bun run worker:tool schema
 bun run worker:tool worker.snapshot <<'JSON'
 {"worker":{"role":"revenue_operations"},"config":{}}
 JSON
+
+bun run worker:tool worker.adapters.reconcile <<'JSON'
+{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{"limit":25}}
+JSON
 ```

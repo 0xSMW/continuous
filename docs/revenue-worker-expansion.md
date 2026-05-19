@@ -35,7 +35,7 @@ smoke test.
 | Budget | Reservation before model/tool work and usage attribution after |
 | Evidence | Source snapshot, prompt/result trace, approval, and adapter receipt |
 | Approval | First-class `approval_requests`, approval decision evidence, and audit trail |
-| Adapter safety | Dry-run mode, receipt evidence, attempt metadata, and reconciliation state are persisted; scoped live credentials and retry workers are still blocked |
+| Adapter safety | Dry-run mode, receipt evidence, attempt metadata, reconciliation worker output, and audit/evidence records are persisted; scoped live credentials are still blocked |
 | Eval | Golden lead/quote cases with expected classification, approval, budget, adapter receipt, and idempotency outputs pass in CI |
 
 ## Next Capabilities
@@ -86,6 +86,6 @@ smoke test.
 1. Convert the deterministic run into a small state machine.
 2. Add read-only real lead intake.
 3. Add quote approval UI backed by `ui_contracts`.
-4. Add retry execution paths and reconciliation workers for failed or uncertain adapter results.
+4. Extend the persistence-only reconciliation worker into retry execution paths for failed or uncertain adapter results.
 5. Extend eval fixtures beyond the first CI-enforced lead-to-quote case.
 6. Raise autonomy only for read, classify, draft, and owner brief capabilities.

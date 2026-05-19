@@ -25,7 +25,7 @@ adapters, generated UI, evidence, and evals.
 |---|---|
 | Lead-to-cash simulation | Run creates task, worker run, budget reservation, inference, usage, adapter dry-run, approval, audit, evidence, object version |
 | Approval execution | Approval decision uses shared approval service and leaves external execution blocked |
-| Adapter hardening | Live credentials are scoped, retries are durable, receipts reconcile, failure path creates tasks |
+| Adapter hardening | Persistence-only reconciliation writes audit/evidence records; live credentials, retry execution, and failure tasks remain gated |
 | Eval harness | CI-enforced lead-to-quote case proves classification, approval, budget, adapter receipt, and idempotency replay |
 | First controlled send | Approved external message sends through adapter with receipt and rollback/escalation evidence |
 

@@ -1,5 +1,6 @@
 import { env } from "../env";
 import type { JsonObject } from "../db/schema";
+import { reconcileAdapterLedger } from "../core/adapters";
 import {
   decideApproval,
   listApprovals,
@@ -71,6 +72,23 @@ export const workerTools = [
         },
       },
       required: ["worker", "config"],
+    },
+  },
+  {
+    name: "worker.adapters.reconcile",
+    description: "Reconcile pending dry-run adapter runs/actions without external execution.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        worker: { $ref: "#/$defs/workerTarget" },
+        config: {
+          type: "object",
+          properties: {
+            limit: { type: "number", minimum: 1, maximum: 100 },
+          },
+        },
+      },
+      required: ["worker"],
     },
   },
 ] as const;
@@ -186,6 +204,20 @@ export async function executeWorkerTool(name: string, payload: JsonObject = {}) 
         action,
         note: stringValue(config.note),
         subject: "worker",
+      }),
+    };
+  }
+
+  if (name === "worker.adapters.reconcile") {
+    if (!target.tenantSlug) {
+      throw new Error("worker.tenantSlug is required for adapter reconciliation.");
+    }
+
+    return {
+      worker: target,
+      result: await reconcileAdapterLedger({
+        tenantSlug: target.tenantSlug,
+        limit: typeof config.limit === "number" ? config.limit : undefined,
       }),
     };
   }
