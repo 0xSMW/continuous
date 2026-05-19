@@ -290,17 +290,17 @@ jobs:
           RUN_ID="${IDS%%|*}"
           ACTION_ID="${IDS##*|}"
           RESPONSE="$(
-            curl -fsS -X POST http://127.0.0.1/worker \
-              -H "host: continuoushq.com" \
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/worker \
               -H "authorization: Bearer $WORKER_TOKEN" \
               -H "content-type: application/json" \
               -d '{"command":"adapters.reconcile","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{"limit":25}}'
           )"
 
+          echo "$RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:.data.result}'
           echo "$RESPONSE" | /usr/bin/jq -e \
             '.error == null and .data.command == "adapters.reconcile" and (.data.result.processed >= 2) and (.data.result.matched >= 2)' \
             >/dev/null
-          echo "$RESPONSE" | /usr/bin/jq -c '{command:.data.command,result:.data.result}'
 
           psql_db -At <<SQL
           select 'adapter_run' as kind, state, reconciliation_state, coalesce(receipt->>'externalMutation','') as external_mutation
