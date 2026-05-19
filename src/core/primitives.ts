@@ -26,7 +26,7 @@ type EvidenceKind = "snapshot" | "draft" | "approval" | "receipt" | "trace" | "e
 type RiskLevel = "low" | "medium" | "high" | "critical";
 
 const uuidPattern =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{12}$/i;
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const actorTypes = new Set<ActorType>(["user", "worker", "adapter", "system"]);
 const evidenceKinds = new Set<EvidenceKind>([
   "snapshot",

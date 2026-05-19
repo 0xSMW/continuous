@@ -20,7 +20,7 @@ type OwnerType = "user" | "worker" | "system";
 
 const source = "continuous.core.tasks";
 const uuidPattern =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const taskPriorities = new Set<TaskPriority>(["low", "normal", "high", "urgent"]);
 const taskStates = new Set<TaskState>(["draft", "active", "waiting", "approval_required", "blocked"]);
 const ownerTypes = new Set<OwnerType>(["user", "worker", "system"]);
