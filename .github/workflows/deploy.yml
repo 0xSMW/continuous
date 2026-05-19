@@ -291,6 +291,33 @@ jobs:
             '.error == null and .data.command == "payroll.preview.record" and (.data.result.recorded | type) == "boolean" and (.data.result.statementId | length > 0) and (.data.result.lineIds | length) == 2 and (.data.result.liabilityIds | length) == 1 and (.data.result.traceId | length > 0) and (.data.result.evidenceId | length > 0)' \
             >/dev/null
 
+          PAYROLL_PACKET_KEY="deploy-payroll-preview-packet-smoke"
+          PAYROLL_PACKET_PAYLOAD="$(
+            /usr/bin/jq -nc --arg key "$PAYROLL_PACKET_KEY" '{
+              command: "payroll.preview.packet.prepare",
+              core: {tenantSlug: "continuous-demo"},
+              idempotencyKey: $key,
+              config: {
+                payrollRunId: "55555555-5555-4555-8555-000000000007",
+                objectId: "33333333-3333-4333-8333-000000000105",
+                variance: {source: "deploy_smoke"},
+                data: {source: "deploy_smoke"}
+              }
+            }'
+          )"
+          PAYROLL_PACKET_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/api/core \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$PAYROLL_PACKET_PAYLOAD"
+          )"
+
+          echo "$PAYROLL_PACKET_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{prepared:.data.result.prepared,packetId:.data.result.packetId,packetDocumentId:.data.result.packetDocumentId,varianceDocumentId:.data.result.varianceDocumentId,payStatementDocumentCount:(.data.result.payStatementDocumentIds | length),paymentInstructionCount:(.data.result.paymentInstructionIds | length),filingDraftId:.data.result.filingDraftId,approvalRequestId:.data.result.approvalRequestId,evidenceId:.data.result.evidenceId,externalExecution:.data.result.externalExecution}}'
+          echo "$PAYROLL_PACKET_RESPONSE" | /usr/bin/jq -e \
+            '.error == null and .data.command == "payroll.preview.packet.prepare" and (.data.result.prepared | type) == "boolean" and (.data.result.packetId | length > 0) and (.data.result.packetDocumentId | length > 0) and (.data.result.varianceDocumentId | length > 0) and (.data.result.payStatementDocumentIds | length) >= 1 and (.data.result.paymentInstructionIds | length) == 2 and (.data.result.filingDraftId | length > 0) and (.data.result.approvalRequestId | length > 0) and (.data.result.evidenceId | length > 0) and .data.result.externalExecution == "blocked"' \
+            >/dev/null
+
           SCHEMA="$(docker compose --profile tools run --rm migrate bun run worker:tool schema </dev/null)"
           echo "$SCHEMA" | /usr/bin/jq -c '{commands:.registry.commands, views:.registry.views, planned:[.registry.plannedContracts[].role], plannedCommandCount:(.registry.plannedCommands|length), plannedViewCount:(.registry.plannedViews|length), tools:[.tools[].name]}'
           echo "$SCHEMA" | /usr/bin/jq -e '

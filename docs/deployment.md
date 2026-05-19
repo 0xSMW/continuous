@@ -29,7 +29,7 @@ supports `task.create`, `task.transition`, `object.upsert`, `object.link`,
 `document.packet.prepare`, `decision.record`, `approval.request`,
 `capability.grant`, `budget.reserve`, `budget.charge`,
 `budget.release`, `view.publish`, `customer_signal.record`, and
-`payroll.preview.record`, all with the
+`payroll.preview.record`, and `payroll.preview.packet.prepare`, all with the
 same bearer token used by worker and workflow commands.
 
 ## First Deploy
@@ -156,7 +156,7 @@ The deploy workflow smokes `lead.read`, the source-selector `run` path, adapter
 reconciliation, continuation, and `/api/core` task creation, task transition,
 approval request, capability grant, budget reserve/charge/release, object,
 object-link, event, evidence, document, packet, decision, and generated-view
-commands after each production rollout.
+commands plus payroll preview packet handoff after each production rollout.
 
 ## Database Backup And Restore
 

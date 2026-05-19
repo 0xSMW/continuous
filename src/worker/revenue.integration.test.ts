@@ -19,7 +19,7 @@ import {
   recordCoreDecision,
   upsertCoreObject,
 } from "../core/primitives";
-import { recordPayrollPreview } from "../core/payroll";
+import { preparePayrollPreviewPacket, recordPayrollPreview } from "../core/payroll";
 import { createCoreTask, transitionCoreTask } from "../core/tasks";
 import { db, pool } from "../db/client";
 import {
@@ -39,9 +39,11 @@ import {
   evaluations,
   evidence,
   evidencePackets,
+  filingDrafts,
   objects,
   objectLinks,
   objectVersions,
+  paymentInstructions,
   payrollLiabilities,
   payrollLines,
   payrollRuns,
@@ -332,6 +334,128 @@ maybeDescribe("Revenue Worker integration eval", () => {
 
     expect(replay.recorded).toBe(false);
     expect(replay.statementId).toBe(first.statementId);
+    expect(auditCount.value).toBe(1);
+  }, 120_000);
+
+  it("prepares payroll preview packets with approval and blocked funding handoffs", async () => {
+    const runId = randomUUID();
+    const idempotencyKey = `ci-payroll-packet-${runId}`;
+    const payrollRunId = "55555555-5555-4555-8555-000000000007";
+    const payrollObjectId = "33333333-3333-4333-8333-000000000105";
+    const first = await preparePayrollPreviewPacket({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey,
+      payrollRunId,
+      objectId: payrollObjectId,
+      variance: {
+        source: "ci",
+      },
+      data: {
+        source: "ci.core",
+      },
+      db,
+    });
+
+    expect(first.prepared).toBe(true);
+    expect(first.packetId).toBeTruthy();
+    expect(first.packetDocumentId).toBeTruthy();
+    expect(first.varianceDocumentId).toBeTruthy();
+    expect(first.payStatementDocumentIds.length).toBeGreaterThanOrEqual(1);
+    expect(first.paymentInstructionIds).toHaveLength(2);
+    expect(first.filingDraftId).toBeTruthy();
+    expect(first.approvalRequestId).toBeTruthy();
+    expect(first.eventId).toBeTruthy();
+    expect(first.auditEventId).toBeTruthy();
+    expect(first.evidenceId).toBeTruthy();
+    expect(first.externalExecution).toBe("blocked");
+
+    const [packet] = await db
+      .select()
+      .from(evidencePackets)
+      .where(eq(evidencePackets.id, first.packetId))
+      .limit(1);
+    const [packetDocument] = await db
+      .select()
+      .from(documents)
+      .where(eq(documents.id, first.packetDocumentId ?? ""))
+      .limit(1);
+    const [varianceDocument] = await db
+      .select()
+      .from(documents)
+      .where(eq(documents.id, first.varianceDocumentId ?? ""))
+      .limit(1);
+    const paymentDrafts = await db
+      .select()
+      .from(paymentInstructions)
+      .where(inArray(paymentInstructions.id, first.paymentInstructionIds));
+    const [filingDraft] = await db
+      .select()
+      .from(filingDrafts)
+      .where(eq(filingDrafts.id, first.filingDraftId ?? ""))
+      .limit(1);
+    const [approval] = await db
+      .select()
+      .from(approvalRequests)
+      .where(eq(approvalRequests.id, first.approvalRequestId ?? ""))
+      .limit(1);
+    const [audit] = await db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.id, first.auditEventId))
+      .limit(1);
+    const [proof] = await db
+      .select()
+      .from(evidence)
+      .where(eq(evidence.id, first.evidenceId ?? ""))
+      .limit(1);
+
+    expect(packet?.kind).toBe("payroll_packet");
+    expect(packet?.state).toBe("approval_required");
+    expect(objectValue(packet?.data).externalExecution).toBe("blocked");
+    expect(objectValue(packet?.data).approvalRequestId).toBe(first.approvalRequestId);
+    expect(packetDocument?.kind).toBe("payroll_packet");
+    expect(varianceDocument?.kind).toBe("payroll_variance_report");
+    expect(paymentDrafts.map((draft) => draft.kind).sort()).toEqual([
+      "payroll_net_pay_funding",
+      "payroll_tax_deposit",
+    ]);
+    expect(paymentDrafts.every((draft) => draft.state === "approval_required")).toBe(true);
+    expect(paymentDrafts.every((draft) => objectValue(draft.data).moneyMovement === "blocked")).toBe(true);
+    expect(filingDraft?.state).toBe("source_review");
+    expect(objectValue(filingDraft?.data).externalExecution).toBe("blocked");
+    expect(approval?.kind).toBe("payroll_preview_approval");
+    expect(approval?.state).toBe("pending");
+    expect(objectValue(approval?.requestedAction).moneyMovement).toBe("blocked");
+    expect(audit?.type).toBe("payroll.preview.packet.prepared");
+    expect(audit?.targetType).toBe("evidence_packet");
+    expect(proof?.kind).toBe("trace");
+    expect(objectValue(proof?.data).packetId).toBe(first.packetId);
+
+    const replay = await preparePayrollPreviewPacket({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey,
+      payrollRunId,
+      objectId: payrollObjectId,
+      variance: {
+        source: "changed",
+      },
+      db,
+    });
+    const [auditCount] = await db
+      .select({ value: count() })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.source, "continuous.core.payroll"),
+          eq(auditEvents.idempotencyKey, `${idempotencyKey}:payroll_preview_packet_prepared`),
+        ),
+      );
+
+    expect(replay.prepared).toBe(false);
+    expect(replay.packetId).toBe(first.packetId);
+    expect(replay.approvalRequestId).toBe(first.approvalRequestId);
     expect(auditCount.value).toBe(1);
   }, 120_000);
 

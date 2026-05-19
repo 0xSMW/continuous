@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   grantCapability: vi.fn(),
   ingestCoreEvent: vi.fn(),
   linkCoreObjects: vi.fn(),
+  preparePayrollPreviewPacket: vi.fn(),
   recordPayrollPreview: vi.fn(),
   prepareCorePacket: vi.fn(),
   publishCoreView: vi.fn(),
@@ -41,6 +42,7 @@ vi.mock("../../../src/core/health", () => ({
 }));
 
 vi.mock("../../../src/core/payroll", () => ({
+  preparePayrollPreviewPacket: mocks.preparePayrollPreviewPacket,
   recordPayrollPreview: mocks.recordPayrollPreview,
 }));
 
@@ -250,6 +252,78 @@ describe("POST /api/core", () => {
         outputs: {
           grossCents: 336000,
         },
+      },
+    });
+  });
+
+  it("dispatches payroll.preview.packet.prepare with payroll run and packet config", async () => {
+    mocks.preparePayrollPreviewPacket.mockResolvedValue({
+      prepared: true,
+      payrollRunId: "55555555-5555-4555-8555-000000000007",
+      packetId: "77777777-7777-4777-8777-000000000005",
+      packetDocumentId: "77777777-7777-4777-8777-000000000006",
+      varianceDocumentId: "77777777-7777-4777-8777-000000000007",
+      payStatementDocumentIds: ["77777777-7777-4777-8777-000000000008"],
+      paymentInstructionIds: ["77777777-7777-4777-8777-000000000009"],
+      filingDraftId: "77777777-7777-4777-8777-000000000010",
+      approvalRequestId: "77777777-7777-4777-8777-000000000011",
+      eventId: "event-1",
+      auditEventId: "audit-1",
+      evidenceId: "evidence-1",
+      totals: {
+        statementCount: 1,
+      },
+      externalExecution: "blocked",
+    });
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/api/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "payroll.preview.packet.prepare",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "payroll-packet-route-test-001",
+          config: {
+            payrollRunId: "55555555-5555-4555-8555-000000000007",
+            objectId: "33333333-3333-4333-8333-000000000105",
+            reviewerUserId: "22222222-2222-4222-8222-222222222222",
+            dueAt: "2026-05-20T00:00:00.000Z",
+            variance: {
+              notes: "seeded route test",
+            },
+            data: {
+              source: "route-test",
+            },
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.command).toBe("payroll.preview.packet.prepare");
+    expect(body.data.core.tenantSlug).toBe("continuous-demo");
+    expect(body.data.result.packetId).toBe("77777777-7777-4777-8777-000000000005");
+    expect(mocks.preparePayrollPreviewPacket).toHaveBeenCalledWith({
+      operatorEmail: "operator@example.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: "payroll-packet-route-test-001",
+      payrollRunId: "55555555-5555-4555-8555-000000000007",
+      objectId: "33333333-3333-4333-8333-000000000105",
+      reviewerUserId: "22222222-2222-4222-8222-222222222222",
+      dueAt: "2026-05-20T00:00:00.000Z",
+      variance: {
+        notes: "seeded route test",
+      },
+      data: {
+        source: "route-test",
       },
     });
   });

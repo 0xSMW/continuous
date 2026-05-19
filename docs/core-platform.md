@@ -179,7 +179,7 @@ policy-bound:
 
 | Surface | Behavior |
 |---|---|
-| `POST /api/core` | Canonical Core command surface for `task.create`, `task.transition`, `object.upsert`, `object.link`, `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`, `document.packet.prepare`, `decision.record`, `approval.request`, `capability.grant`, `budget.reserve`, `budget.charge`, `budget.release`, `view.publish`, `customer_signal.record`, and `payroll.preview.record`; tenant selection and command fields live in structured `core` and `config` payloads |
+| `POST /api/core` | Canonical Core command surface for `task.create`, `task.transition`, `object.upsert`, `object.link`, `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`, `document.packet.prepare`, `decision.record`, `approval.request`, `capability.grant`, `budget.reserve`, `budget.charge`, `budget.release`, `view.publish`, `customer_signal.record`, `payroll.preview.record`, and `payroll.preview.packet.prepare`; tenant selection and command fields live in structured `core` and `config` payloads |
 | `/worker?view=snapshot&role=revenue_operations` | Operator-only snapshot of worker state, active tasks, controls, budget usage, and recent events |
 | `/worker?view=approvals&role=revenue_operations` | Operator-only approval queue for worker decisions |
 | `POST /worker` | Canonical worker command surface for `lead.read`, `run`, `continue`, `approval.decide`, `adapters.reconcile`, and `adapters.retry`; worker role, tenant selection, idempotency, and operation config live in structured payload fields |
@@ -218,8 +218,11 @@ reserve/charge/release ledger states, and publishes renderer-neutral generated
 views. `customer_signal.record` adds satisfaction, feedback, complaint,
 testimonial, and review records as typed customer signals. `payroll.preview.record`
 writes pay statements, payroll lines, liabilities, calculation traces, audit
-events, and trace evidence without submission or money movement. Every command is
-tenant-scoped, idempotent, audit-backed, and blocks external execution.
+events, and trace evidence without submission or money movement.
+`payroll.preview.packet.prepare` turns those preview artifacts into variance
+reports, pay statement documents, an approval packet, approval request, and
+blocked funding/tax handoff drafts. Every command is tenant-scoped, idempotent,
+audit-backed, and blocks external execution.
 
 ## Non-Goals For The First Slice
 

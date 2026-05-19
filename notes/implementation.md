@@ -45,6 +45,7 @@
 | Added durable evidence packets | `POST /api/core` now supports `packet.prepare` and `document.packet.prepare`, creating an `evidence_packets` record plus linked document, event, audit, and trace evidence for workflow review packets |
 | Added customer-signal primitives | Satisfaction, feedback, complaint, testimonial, and review records persist as `CustomerSignal.type` rows, and `POST /api/core` `command=customer_signal.record` writes them with object links, note evidence, events, and audit proof |
 | Added payroll preview kernel | Pay statements, payroll lines, payroll liabilities, and payroll calculation traces now persist as first-class Core tables; `POST /api/core` `command=payroll.preview.record` records preview artifacts with event, audit, and trace evidence while external execution stays blocked |
+| Added payroll preview packet handoff | `POST /api/core` `command=payroll.preview.packet.prepare` gathers preview artifacts into variance reports, pay statement documents, approval packets, pending approval requests, and blocked payroll funding/tax draft records |
 | Agent build path uses app-server protocol tooling plus Next.js MCP | The installed Codex app-server CLI exposes protocol generation/help commands; `.mcp.json` keeps the Next.js 16 MCP bridge for route/runtime diagnostics |
 | Added read-only app-server worker discovery | `continuous.worker.schema` exposes the registered worker command registry and repo-owned worker tool schema without database access, mutation, or production secrets |
 | Added the first authority ledger | Revenue Worker runs now create approval requests and audit events, and approval decisions create evidence before any external action is allowed |
@@ -89,7 +90,8 @@ persisted graph, task, capability, event, evidence, budget, adapter, authority,
 document, decision, workflow, and generated UI primitives plus worker run lifecycle
 records and `/`, `/api/health`, `/api/core`, and `POST /api/core` task,
 task-transition, approval-request, capability-grant, budget-ledger, object,
-object-link, event, evidence, document, packet, decision, and generated-view commands. Local
+object-link, event, evidence, document, packet, payroll preview, payroll packet,
+decision, and generated-view commands. Local
 Node-side validation passes; the real Bun path is verified in the droplet
 containers and GitHub CI.
 

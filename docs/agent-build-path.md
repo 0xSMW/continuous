@@ -146,7 +146,8 @@ Other supported Core commands are `task.transition`, `object.link`,
 `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`,
 `document.packet.prepare`, `decision.record`, `approval.request`,
 `capability.grant`, `budget.reserve`, `budget.charge`, `budget.release`,
-`view.publish`, `customer_signal.record`, and `payroll.preview.record`.
+`view.publish`, `customer_signal.record`, `payroll.preview.record`, and
+`payroll.preview.packet.prepare`.
 
 Use the same route for operational worker commands:
 

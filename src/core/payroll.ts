@@ -2,11 +2,20 @@ import { and, eq, sql } from "drizzle-orm";
 
 import { db as defaultDb } from "../db/client";
 import {
+  approvalRequests,
   auditEvents,
+  bankAccounts,
+  documents,
   employments,
   events,
   evidence,
+  evidencePackets,
+  filingDrafts,
+  filingRequirements,
+  obligations,
   objects,
+  paymentInstructions,
+  paySchedules,
   payrollLiabilities,
   payrollLines,
   payrollRuns,
@@ -14,6 +23,7 @@ import {
   payrollTraces,
   people,
   type JsonObject,
+  users,
 } from "../db/schema";
 import { PlatformUnavailableError } from "./errors";
 import { loadOperatorContext } from "./operators";
@@ -51,6 +61,19 @@ export type PayrollPreviewRecordInput = {
   lines?: unknown;
   liabilities?: unknown;
   trace?: unknown;
+  db?: Database;
+};
+
+export type PayrollPreviewPacketInput = {
+  operatorEmail: string;
+  idempotencyKey: string;
+  tenantSlug?: string;
+  payrollRunId: string;
+  objectId?: string;
+  reviewerUserId?: string;
+  dueAt?: string;
+  variance?: unknown;
+  data?: unknown;
   db?: Database;
 };
 
@@ -234,6 +257,18 @@ async function evidenceForAudit(tx: QueryClient, tenantId: string, auditEventId:
     .limit(1);
 
   return item?.id ?? null;
+}
+
+function centsTotal<T>(items: T[], selector: (item: T) => number | null | undefined) {
+  return items.reduce((total, item) => total + Number(selector(item) ?? 0), 0);
+}
+
+function stringsFromData(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function objectFromData(value: unknown): JsonObject {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonObject) : {};
 }
 
 export async function recordPayrollPreview(input: PayrollPreviewRecordInput) {
@@ -556,6 +591,649 @@ export async function recordPayrollPreview(input: PayrollPreviewRecordInput) {
       eventId: event.id,
       auditEventId: audit.id,
       evidenceId: evidenceItem.id,
+    };
+  });
+}
+
+export async function preparePayrollPreviewPacket(input: PayrollPreviewPacketInput) {
+  const db = input.db ?? defaultDb;
+  const payrollRunId = requiredUuid(input.payrollRunId, "config.payrollRunId");
+  const requestedObjectId = optionalUuid(input.objectId, "config.objectId");
+  const requestedReviewerUserId = optionalUuid(input.reviewerUserId, "config.reviewerUserId");
+  const dueAt = optionalDate(input.dueAt, "config.dueAt");
+  const operator = await loadOperatorContext({
+    db,
+    operatorEmail: input.operatorEmail,
+    tenantSlug: input.tenantSlug,
+  });
+
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${operator.tenantId}), hashtext(${`${payrollSource}:${input.idempotencyKey}:packet`}))`,
+    );
+
+    const [existingAudit] = await tx
+      .select({
+        auditEventId: auditEvents.id,
+        targetId: auditEvents.targetId,
+        eventId: auditEvents.eventId,
+      })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.tenantId, operator.tenantId),
+          eq(auditEvents.source, payrollSource),
+          eq(auditEvents.idempotencyKey, `${input.idempotencyKey}:payroll_preview_packet_prepared`),
+          eq(auditEvents.targetType, "evidence_packet"),
+        ),
+      )
+      .limit(1);
+
+    if (existingAudit?.targetId) {
+      const [packet] = await tx
+        .select({ id: evidencePackets.id, documentId: evidencePackets.documentId, data: evidencePackets.data })
+        .from(evidencePackets)
+        .where(and(eq(evidencePackets.tenantId, operator.tenantId), eq(evidencePackets.id, existingAudit.targetId)))
+        .limit(1);
+
+      if (packet) {
+        const packetData = objectFromData(packet.data);
+
+        return {
+          prepared: false,
+          payrollRunId: cleanString(packetData.payrollRunId) ?? payrollRunId,
+          packetId: packet.id,
+          packetDocumentId: packet.documentId,
+          varianceDocumentId: cleanString(packetData.varianceDocumentId) ?? null,
+          payStatementDocumentIds: stringsFromData(packetData.payStatementDocumentIds),
+          paymentInstructionIds: stringsFromData(packetData.paymentInstructionIds),
+          filingDraftId: cleanString(packetData.filingDraftId) ?? null,
+          approvalRequestId: cleanString(packetData.approvalRequestId) ?? null,
+          eventId: existingAudit.eventId,
+          auditEventId: existingAudit.auditEventId,
+          evidenceId: await evidenceForAudit(tx, operator.tenantId, existingAudit.auditEventId),
+          totals: objectFromData(packetData.totals),
+          externalExecution: "blocked",
+        };
+      }
+    }
+
+    const [payrollRun] = await tx
+      .select()
+      .from(payrollRuns)
+      .where(and(eq(payrollRuns.tenantId, operator.tenantId), eq(payrollRuns.id, payrollRunId)))
+      .limit(1);
+
+    if (!payrollRun) {
+      throw new PlatformUnavailableError(
+        "core_payroll_run_not_found",
+        "config.payrollRunId does not match a payroll run in this tenant.",
+        404,
+      );
+    }
+
+    const statements = await tx
+      .select()
+      .from(payrollStatements)
+      .where(and(eq(payrollStatements.tenantId, operator.tenantId), eq(payrollStatements.payrollRunId, payrollRunId)));
+
+    if (statements.length === 0) {
+      throw new PlatformUnavailableError(
+        "core_payroll_preview_missing",
+        "config.payrollRunId has no persisted payroll statements to packetize.",
+        409,
+      );
+    }
+
+    const [paySchedule] = await tx
+      .select()
+      .from(paySchedules)
+      .where(and(eq(paySchedules.tenantId, operator.tenantId), eq(paySchedules.id, payrollRun.payScheduleId)))
+      .limit(1);
+
+    if (!paySchedule) {
+      throw new PlatformUnavailableError(
+        "core_pay_schedule_not_found",
+        "The payroll run pay schedule is missing.",
+        404,
+      );
+    }
+
+    const statementIds = statements.map((statement) => statement.id);
+    const [lines, liabilities, traces, sourceEvidence] = await Promise.all([
+      tx
+        .select()
+        .from(payrollLines)
+        .where(and(eq(payrollLines.tenantId, operator.tenantId), eq(payrollLines.payrollRunId, payrollRunId))),
+      tx
+        .select()
+        .from(payrollLiabilities)
+        .where(and(eq(payrollLiabilities.tenantId, operator.tenantId), eq(payrollLiabilities.payrollRunId, payrollRunId))),
+      tx
+        .select()
+        .from(payrollTraces)
+        .where(and(eq(payrollTraces.tenantId, operator.tenantId), eq(payrollTraces.payrollRunId, payrollRunId))),
+      tx
+        .select({ id: evidence.id })
+        .from(evidence)
+        .where(and(eq(evidence.tenantId, operator.tenantId), sql`${evidence.data}->>'payrollRunId' = ${payrollRunId}`)),
+    ]);
+
+    const objectId = requestedObjectId ?? statements.find((statement) => statement.objectId)?.objectId ?? undefined;
+    await assertObject(tx, operator.tenantId, objectId);
+
+    const [reviewer] = await tx
+      .select({ id: users.id })
+      .from(users)
+      .where(
+        and(
+          eq(users.tenantId, operator.tenantId),
+          eq(users.id, requestedReviewerUserId ?? operator.userId),
+          eq(users.state, "active"),
+        ),
+      )
+      .limit(1);
+
+    if (!reviewer) {
+      throw new PlatformUnavailableError(
+        "core_payroll_reviewer_not_found",
+        "config.reviewerUserId does not match an active user in this tenant.",
+        404,
+      );
+    }
+
+    const [bankAccount] = paySchedule.legalEntityId
+      ? await tx
+          .select({ id: bankAccounts.id })
+          .from(bankAccounts)
+          .where(
+            and(
+              eq(bankAccounts.tenantId, operator.tenantId),
+              eq(bankAccounts.legalEntityId, paySchedule.legalEntityId),
+              eq(bankAccounts.state, "verified"),
+            ),
+          )
+          .limit(1)
+      : await tx
+          .select({ id: bankAccounts.id })
+          .from(bankAccounts)
+          .where(and(eq(bankAccounts.tenantId, operator.tenantId), eq(bankAccounts.state, "verified")))
+          .limit(1);
+
+    if (!bankAccount) {
+      throw new PlatformUnavailableError(
+        "core_payroll_bank_account_missing",
+        "A verified bank account is required before preparing payroll funding drafts.",
+        409,
+      );
+    }
+
+    const [filingRequirement] = await tx
+      .select({ id: filingRequirements.id })
+      .from(filingRequirements)
+      .where(
+        and(
+          eq(filingRequirements.tenantId, operator.tenantId),
+          eq(filingRequirements.form, "941"),
+          eq(filingRequirements.agency, "IRS"),
+          eq(filingRequirements.state, "active"),
+        ),
+      )
+      .limit(1);
+
+    if (!filingRequirement) {
+      throw new PlatformUnavailableError(
+        "core_payroll_filing_requirement_missing",
+        "An active IRS Form 941 filing requirement is required before preparing payroll tax drafts.",
+        409,
+      );
+    }
+
+    const [payrollObligation] = await tx
+      .select({ id: obligations.id })
+      .from(obligations)
+      .where(
+        and(
+          eq(obligations.tenantId, operator.tenantId),
+          eq(obligations.kind, "payroll_tax_filing"),
+          eq(obligations.state, "open"),
+        ),
+      )
+      .limit(1);
+
+    const grossCents = centsTotal(statements, (statement) => statement.grossCents);
+    const netCents = centsTotal(statements, (statement) => statement.netCents);
+    const taxCents = centsTotal(statements, (statement) => statement.taxCents);
+    const deductionCents = centsTotal(statements, (statement) => statement.deductionCents);
+    const liabilityCents = centsTotal(liabilities, (liability) => liability.amountCents);
+    const runTotals = {
+      grossCents: payrollRun.grossCents,
+      netCents: payrollRun.netCents,
+      taxCents: payrollRun.taxCents,
+    };
+    const totals = {
+      statementCount: statements.length,
+      lineCount: lines.length,
+      liabilityCount: liabilities.length,
+      traceCount: traces.length,
+      grossCents,
+      netCents,
+      taxCents,
+      deductionCents,
+      liabilityCents,
+      variance: {
+        grossCents: grossCents - payrollRun.grossCents,
+        netCents: netCents - payrollRun.netCents,
+        taxCents: taxCents - payrollRun.taxCents,
+        liabilityCents: liabilityCents - taxCents,
+        ...jsonObject(input.variance),
+      },
+    };
+    const period = {
+      start: payrollRun.periodStart.toISOString(),
+      end: payrollRun.periodEnd.toISOString(),
+      checkDate: payrollRun.checkDate.toISOString(),
+    };
+    const now = new Date();
+    const currency = statements[0]?.currency ?? "USD";
+
+    const [varianceDocument] = await tx
+      .insert(documents)
+      .values({
+        tenantId: operator.tenantId,
+        objectId,
+        kind: "payroll_variance_report",
+        name: "Payroll preview variance report",
+        state: "review_ready",
+        sensitivity: "high",
+        hash: `${payrollSource}:${payrollRunId}:${input.idempotencyKey}:variance`,
+        data: {
+          payrollRunId,
+          period,
+          runTotals,
+          totals,
+          statementIds,
+          lineIds: lines.map((line) => line.id),
+          liabilityIds: liabilities.map((liability) => liability.id),
+          traceIds: traces.map((trace) => trace.id),
+          blockers: ["approval_required", "funding_not_submitted", "tax_not_submitted"],
+          externalExecution: "blocked",
+        },
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: documents.id });
+
+    const payStatementDocuments = await tx
+      .insert(documents)
+      .values(
+        statements.map((statement, index) => ({
+          tenantId: operator.tenantId,
+          objectId: statement.objectId ?? objectId,
+          kind: "pay_statement",
+          name: `Pay statement preview ${index + 1}`,
+          state: "draft",
+          sensitivity: "high" as const,
+          hash: `${payrollSource}:${statement.id}:${input.idempotencyKey}:pay_statement`,
+          data: {
+            payrollRunId,
+            statementId: statement.id,
+            employmentId: statement.employmentId,
+            personId: statement.personId,
+            period,
+            grossCents: statement.grossCents,
+            netCents: statement.netCents,
+            taxCents: statement.taxCents,
+            deductionCents: statement.deductionCents,
+            currency: statement.currency,
+            lineIds: lines.filter((line) => line.statementId === statement.id).map((line) => line.id),
+            liabilityIds: liabilities
+              .filter((liability) => liability.statementId === statement.id)
+              .map((liability) => liability.id),
+            traceIds: traces.filter((trace) => trace.statementId === statement.id).map((trace) => trace.id),
+            externalExecution: "blocked",
+          },
+          createdAt: now,
+          updatedAt: now,
+        })),
+      )
+      .returning({ id: documents.id });
+
+    const paymentDrafts = await tx
+      .insert(paymentInstructions)
+      .values([
+        {
+          tenantId: operator.tenantId,
+          bankAccountId: bankAccount.id,
+          objectId,
+          kind: "payroll_net_pay_funding",
+          state: "approval_required",
+          amountCents: netCents,
+          currency,
+          data: {
+            payrollRunId,
+            period,
+            statementIds,
+            externalExecution: "blocked",
+            moneyMovement: "blocked",
+          },
+          createdAt: now,
+          updatedAt: now,
+        },
+        {
+          tenantId: operator.tenantId,
+          bankAccountId: bankAccount.id,
+          objectId,
+          kind: "payroll_tax_deposit",
+          state: "approval_required",
+          amountCents: liabilityCents,
+          currency,
+          data: {
+            payrollRunId,
+            period,
+            liabilityIds: liabilities.map((liability) => liability.id),
+            externalExecution: "blocked",
+            moneyMovement: "blocked",
+          },
+          createdAt: now,
+          updatedAt: now,
+        },
+      ])
+      .returning({ id: paymentInstructions.id });
+
+    const [filingDraft] = await tx
+      .insert(filingDrafts)
+      .values({
+        tenantId: operator.tenantId,
+        requirementId: filingRequirement.id,
+        obligationId: payrollObligation?.id,
+        state: "source_review",
+        periodStart: payrollRun.periodStart,
+        periodEnd: payrollRun.periodEnd,
+        data: {
+          payrollRunId,
+          period,
+          statementIds,
+          liabilityIds: liabilities.map((liability) => liability.id),
+          source: "payroll.preview.packet.prepare",
+          validation: "not_submittable",
+          externalExecution: "blocked",
+        },
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: filingDrafts.id });
+
+    const payStatementDocumentIds = payStatementDocuments.map((document) => document.id);
+    const paymentInstructionIds = paymentDrafts.map((draft) => draft.id);
+    const sourceEvidenceIds = sourceEvidence.map((item) => item.id);
+    const packetDocumentIds = [varianceDocument.id, ...payStatementDocumentIds];
+    const packetData: JsonObject = {
+      ...jsonObject(input.data),
+      payrollRunId,
+      period,
+      totals,
+      varianceDocumentId: varianceDocument.id,
+      payStatementDocumentIds,
+      paymentInstructionIds,
+      filingDraftId: filingDraft.id,
+      statementIds,
+      lineIds: lines.map((line) => line.id),
+      liabilityIds: liabilities.map((liability) => liability.id),
+      traceIds: traces.map((trace) => trace.id),
+      sourceEvidenceIds,
+      sections: {
+        order: ["summary", "variance", "pay_statements", "funding", "tax_drafts", "approval"],
+      },
+      externalExecution: "blocked",
+      moneyMovement: "blocked",
+      submission: "blocked",
+    };
+    const [packetDocument] = await tx
+      .insert(documents)
+      .values({
+        tenantId: operator.tenantId,
+        objectId,
+        kind: "payroll_packet",
+        name: "Payroll preview approval packet",
+        state: "approval_required",
+        sensitivity: "high",
+        hash: `${payrollSource}:${payrollRunId}:${input.idempotencyKey}:packet_document`,
+        data: packetData,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: documents.id });
+    const [packet] = await tx
+      .insert(evidencePackets)
+      .values({
+        tenantId: operator.tenantId,
+        documentId: packetDocument.id,
+        objectId,
+        kind: "payroll_packet",
+        name: "Payroll preview approval packet",
+        state: "approval_required",
+        sensitivity: "high",
+        evidenceIds: { ids: sourceEvidenceIds },
+        documentIds: { ids: packetDocumentIds },
+        data: packetData,
+        hash: `${payrollSource}:${payrollRunId}:${input.idempotencyKey}:packet`,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: evidencePackets.id });
+    const [event] = await tx
+      .insert(events)
+      .values({
+        tenantId: operator.tenantId,
+        type: "payroll.preview.packet.prepared",
+        source: payrollSource,
+        actorType: "user",
+        actorId: operator.userId,
+        actorRef: operator.actorRef,
+        objectId,
+        idempotencyKey: `${input.idempotencyKey}:payroll_preview_packet_prepared`,
+        data: {
+          ...packetData,
+          packetId: packet.id,
+          packetDocumentId: packetDocument.id,
+        },
+        occurredAt: now,
+      })
+      .returning({ id: events.id });
+    const [audit] = await tx
+      .insert(auditEvents)
+      .values({
+        tenantId: operator.tenantId,
+        type: "payroll.preview.packet.prepared",
+        source: payrollSource,
+        actorType: "user",
+        actorId: operator.userId,
+        actorRef: operator.actorRef,
+        targetType: "evidence_packet",
+        targetId: packet.id,
+        eventId: event.id,
+        objectId,
+        risk: "high",
+        idempotencyKey: `${input.idempotencyKey}:payroll_preview_packet_prepared`,
+        data: {
+          packetId: packet.id,
+          packetDocumentId: packetDocument.id,
+          ...packetData,
+        },
+      })
+      .returning({ id: auditEvents.id });
+    const [packetEvidence] = await tx
+      .insert(evidence)
+      .values({
+        tenantId: operator.tenantId,
+        kind: "trace",
+        name: "Payroll preview packet trace",
+        objectId,
+        eventId: event.id,
+        actorType: "user",
+        actorId: operator.userId,
+        hash: `${payrollSource}:${packet.id}:packet:${now.toISOString()}`,
+        data: {
+          packetId: packet.id,
+          packetDocumentId: packetDocument.id,
+          auditEventId: audit.id,
+          ...packetData,
+        },
+      })
+      .returning({ id: evidence.id });
+    const [approval] = await tx
+      .insert(approvalRequests)
+      .values({
+        tenantId: operator.tenantId,
+        eventId: event.id,
+        objectId,
+        requesterType: "user",
+        requesterId: operator.userId,
+        requesterRef: operator.actorRef,
+        reviewerUserId: reviewer.id,
+        kind: "payroll_preview_approval",
+        state: "pending",
+        priority: "high",
+        risk: "high",
+        title: "Approve payroll preview packet",
+        summary: "Review payroll preview, funding draft, tax deposit draft, and filing handoff before any external execution.",
+        requestedAction: {
+          action: "approve_payroll_preview",
+          payrollRunId,
+          packetId: packet.id,
+          paymentInstructionIds,
+          filingDraftId: filingDraft.id,
+          externalExecution: "blocked",
+          moneyMovement: "blocked",
+        },
+        evidence: {
+          packetId: packet.id,
+          packetEvidenceId: packetEvidence.id,
+          documentIds: packetDocumentIds,
+          paymentInstructionIds,
+          filingDraftId: filingDraft.id,
+          eventId: event.id,
+        },
+        policy: {
+          approvalRequired: true,
+          dualControl: true,
+          externalExecution: "blocked",
+          moneyMovement: "blocked",
+          submission: "blocked",
+        },
+        data: {
+          payrollRunId,
+          packetId: packet.id,
+          totals,
+          externalExecution: "blocked",
+        },
+        dueAt,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: approvalRequests.id });
+    const [approvalAudit] = await tx
+      .insert(auditEvents)
+      .values({
+        tenantId: operator.tenantId,
+        type: "approval.requested",
+        source: payrollSource,
+        actorType: "user",
+        actorId: operator.userId,
+        actorRef: operator.actorRef,
+        targetType: "approval_request",
+        targetId: approval.id,
+        approvalRequestId: approval.id,
+        eventId: event.id,
+        objectId,
+        risk: "high",
+        idempotencyKey: `${input.idempotencyKey}:payroll_preview_approval_requested`,
+        data: {
+          approvalRequestId: approval.id,
+          packetId: packet.id,
+          payrollRunId,
+          externalExecution: "blocked",
+        },
+      })
+      .returning({ id: auditEvents.id });
+    const [approvalEvidence] = await tx
+      .insert(evidence)
+      .values({
+        tenantId: operator.tenantId,
+        kind: "approval",
+        name: "Payroll preview approval requested",
+        objectId,
+        eventId: event.id,
+        actorType: "user",
+        actorId: operator.userId,
+        hash: `${payrollSource}:${approval.id}:approval:${now.toISOString()}`,
+        data: {
+          approvalRequestId: approval.id,
+          auditEventId: approvalAudit.id,
+          packetId: packet.id,
+          payrollRunId,
+          externalExecution: "blocked",
+        },
+      })
+      .returning({ id: evidence.id });
+
+    const completedPacketData: JsonObject = {
+      ...packetData,
+      packetId: packet.id,
+      packetDocumentId: packetDocument.id,
+      approvalRequestId: approval.id,
+      approvalEvidenceId: approvalEvidence.id,
+      packetEvidenceId: packetEvidence.id,
+    };
+    const completedEvidenceIds = [...sourceEvidenceIds, packetEvidence.id, approvalEvidence.id];
+
+    await Promise.all([
+      tx
+        .update(evidencePackets)
+        .set({
+          data: completedPacketData,
+          evidenceIds: { ids: completedEvidenceIds },
+          updatedAt: now,
+        })
+        .where(eq(evidencePackets.id, packet.id)),
+      tx
+        .update(documents)
+        .set({ data: completedPacketData, updatedAt: now })
+        .where(eq(documents.id, packetDocument.id)),
+      tx
+        .update(approvalRequests)
+        .set({
+          evidence: {
+            packetId: packet.id,
+            packetEvidenceId: packetEvidence.id,
+            approvalEvidenceId: approvalEvidence.id,
+            auditEventId: approvalAudit.id,
+            documentIds: packetDocumentIds,
+            paymentInstructionIds,
+            filingDraftId: filingDraft.id,
+            eventId: event.id,
+          },
+          updatedAt: now,
+        })
+        .where(eq(approvalRequests.id, approval.id)),
+    ]);
+
+    return {
+      prepared: true,
+      payrollRunId,
+      packetId: packet.id,
+      packetDocumentId: packetDocument.id,
+      varianceDocumentId: varianceDocument.id,
+      payStatementDocumentIds,
+      paymentInstructionIds,
+      filingDraftId: filingDraft.id,
+      approvalRequestId: approval.id,
+      eventId: event.id,
+      auditEventId: audit.id,
+      evidenceId: packetEvidence.id,
+      totals,
+      externalExecution: "blocked",
     };
   });
 }

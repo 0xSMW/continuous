@@ -43,7 +43,7 @@ All commands use `POST /worker`; no workforce-specific route is added.
 | `contractor.packet.prepare` | `worker.workforce.contractor.packet.prepare` | `personId`, `engagementId` | Required | Classification packet and blocker task | Blocked |
 | `credential.review` | `worker.workforce.credential.review` | `personId` or `credentialId` | Required | Credential renewal task and evidence | Blocked |
 | `schedule_readiness.prepare` | `worker.workforce.schedule_readiness.prepare` | `personId`, `period` | Required | Readiness packet and exception tasks | Blocked |
-| `payroll_input.prepare` | `worker.workforce.payroll_input.prepare` | `employmentId`, `period` | Required | Payroll input packet plus handoff to Core payroll preview artifacts | Dry-run |
+| `payroll_input.prepare` | `worker.workforce.payroll_input.prepare` | `employmentId`, `period` | Required | Payroll input packet plus Core `payroll.preview.record` and `payroll.preview.packet.prepare` handoff | Dry-run |
 | `approval.decide` | `worker.approvals.decide` | `approvalId`, `action`, optional `note` | None | Approval/task/workflow evidence only | Blocked |
 
 ## Core Object Map
@@ -74,7 +74,7 @@ All commands use `POST /worker`; no workforce-specific route is added.
 |---|---:|---|---|---|---|
 | `worker.read` | 1 | Worker | Workforce graph reads | No | Blocked |
 | `document_packet.prepare` | 2 | Worker | Hire, contractor, credential packets | Required for restricted docs | Blocked |
-| `payroll_preview.prepare` | 2 | Worker | Core `payroll.preview.record` handoff for statements, lines, liabilities, and traces | Required | Dry-run |
+| `payroll_preview.prepare` | 2 | Worker | Core `payroll.preview.record` and `payroll.preview.packet.prepare` handoff for statements, lines, liabilities, traces, packet docs, approvals, and blocked funding/tax drafts | Required | Dry-run |
 | `approval.request` | 2 | Worker | Hire, contractor, compensation, payroll blockers | Yes | Blocked |
 
 ## Adapters

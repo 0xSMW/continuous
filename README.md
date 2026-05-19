@@ -44,7 +44,8 @@ Then open `http://localhost:3000`.
   `document.packet.prepare`, `decision.record`,
   `approval.request`, `capability.grant`, `budget.reserve`,
   `budget.charge`, `budget.release`, `view.publish`, and
-  `customer_signal.record`, and `payroll.preview.record`.
+  `customer_signal.record`, `payroll.preview.record`, and
+  `payroll.preview.packet.prepare`.
 - `/worker` is the canonical worker control-plane API. Use
   `GET /worker?view=snapshot&role=revenue_operations` or
   `GET /worker?view=approvals&role=revenue_operations`; use `POST /worker` with
