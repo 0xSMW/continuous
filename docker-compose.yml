@@ -13,7 +13,7 @@ services:
       NODE_ENV: production
       PORT: "3000"
       HOSTNAME: 0.0.0.0
-      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-continuous}:${POSTGRES_PASSWORD:-continuous}@db:5432/${POSTGRES_DB:-continuous}}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
       REVENUE_WORKER_RUN_ENABLED: ${REVENUE_WORKER_RUN_ENABLED:-false}
       REVENUE_WORKER_RUN_TOKEN: ${REVENUE_WORKER_RUN_TOKEN:-}
     depends_on:
@@ -39,7 +39,7 @@ services:
     environment:
       APP_ENV: production
       NODE_ENV: production
-      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-continuous}:${POSTGRES_PASSWORD:-continuous}@db:5432/${POSTGRES_DB:-continuous}}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
       REVENUE_WORKER_RUN_ENABLED: ${REVENUE_WORKER_RUN_ENABLED:-false}
       REVENUE_WORKER_RUN_TOKEN: ${REVENUE_WORKER_RUN_TOKEN:-}
     depends_on:
@@ -56,7 +56,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-continuous}
       POSTGRES_USER: ${POSTGRES_USER:-continuous}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-continuous}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:

@@ -20,11 +20,8 @@ bun run check
 
 ## Database
 
-Use the default local URL:
-
-```sh
-DATABASE_URL=postgres://continuous:continuous@localhost:5432/continuous
-```
+Create a local `.env` from `.env.example`, then fill `DATABASE_URL` and
+`POSTGRES_PASSWORD` with local-only values. Keep `.env` untracked.
 
 With Docker running:
 
@@ -58,18 +55,23 @@ lead-to-cash slice. Detailed snapshots are operator-only and require the worker
 token:
 
 ```sh
-REVENUE_WORKER_RUN_TOKEN=local-worker-token bun run dev
+read -rsp "Worker token: " REVENUE_WORKER_RUN_TOKEN
+export REVENUE_WORKER_RUN_TOKEN
+bun run dev
 curl http://localhost:3000/api/revenue-worker \
-  -H 'authorization: Bearer local-worker-token'
+  -H "authorization: Bearer $REVENUE_WORKER_RUN_TOKEN"
 ```
 
 The run API is a guarded side-effecting `POST` and is disabled by default. For
 local-only testing, start the app with:
 
 ```sh
-REVENUE_WORKER_RUN_ENABLED=true REVENUE_WORKER_RUN_TOKEN=local-worker-token bun run dev
+read -rsp "Worker token: " REVENUE_WORKER_RUN_TOKEN
+export REVENUE_WORKER_RUN_ENABLED=true
+export REVENUE_WORKER_RUN_TOKEN
+bun run dev
 curl -X POST http://localhost:3000/api/revenue-worker/run \
-  -H 'authorization: Bearer local-worker-token' \
+  -H "authorization: Bearer $REVENUE_WORKER_RUN_TOKEN" \
   -H 'idempotency-key: local-revenue-run-001'
 ```
 

@@ -36,8 +36,8 @@ describe("authorizeRevenueWorkerRun", () => {
       authorizeRevenueWorkerRun({
         enabled: true,
         appEnv: "production",
-        expectedToken: "secret",
-        authorization: "Bearer secret",
+        expectedToken: "test-token",
+        authorization: "Bearer test-token",
       }),
     ).toEqual({ ok: true });
   });
@@ -82,7 +82,7 @@ describe("authorizeRevenueWorkerRead", () => {
     expect(
       authorizeRevenueWorkerRead({
         appEnv: "production",
-        expectedToken: "secret",
+        expectedToken: "test-token",
         headerToken: "wrong",
       }),
     ).toEqual({
@@ -97,8 +97,8 @@ describe("authorizeRevenueWorkerRead", () => {
     expect(
       authorizeRevenueWorkerRead({
         appEnv: "production",
-        expectedToken: "secret",
-        authorization: "Bearer secret",
+        expectedToken: "test-token",
+        authorization: "Bearer test-token",
       }),
     ).toEqual({ ok: true });
   });
