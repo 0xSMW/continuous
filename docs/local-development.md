@@ -48,7 +48,9 @@ snapshot.
 
 The repo also includes `.mcp.json` for the Next.js MCP bridge. With `bun run dev`
 running, compatible coding agents can inspect routes, runtime errors, metadata,
-and logs through `next-devtools-mcp`.
+and logs through `next-devtools-mcp`. This is a Next.js diagnostics bridge, not
+a replacement for the local Codex app-server daemon; verify that daemon with
+`bun run app-server:version` when worker build tooling needs it.
 
 ## Revenue Worker
 
