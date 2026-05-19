@@ -8,6 +8,7 @@ APP_DIR="${APP_DIR:-/opt/continuous}"
 REMOTE_BACKUP_DIR="${REMOTE_BACKUP_DIR:-$APP_DIR/backups/postgres}"
 MAX_AGE_HOURS="${MAX_AGE_HOURS:-26}"
 REQUIRE_CHECKSUM="${REQUIRE_CHECKSUM:-true}"
+BACKUP_OBJECT_STORAGE_ENABLED="${BACKUP_OBJECT_STORAGE_ENABLED:-false}"
 REMOTE="$SSH_USER@$HOST"
 SSH_ARGS=(-o BatchMode=yes -o ConnectTimeout=10)
 
@@ -52,6 +53,18 @@ if [ "$REQUIRE_CHECKSUM" = "true" ] && [ ! -f "$latest.sha256" ]; then
   exit 1
 fi
 
+if [ "$REQUIRE_CHECKSUM" = "true" ]; then
+  expected="$(awk '{print $1; exit}' "$latest.sha256")"
+  actual="$(sha256sum "$latest" | awk '{print $1}')"
+
+  if [ -z "$expected" ] || [ "$expected" != "$actual" ]; then
+    echo "Latest backup checksum mismatch: $latest" >&2
+    echo "Expected: $expected" >&2
+    echo "Actual:   $actual" >&2
+    exit 1
+  fi
+fi
+
 mtime="$(stat -c '%Y' "$latest")"
 size="$(stat -c '%s' "$latest")"
 printf '%s|%s|%s\n' "$latest" "$mtime" "$size"
@@ -80,3 +93,13 @@ fi
 echo "Latest backup is fresh: $backup_path"
 echo "Age seconds: $age_seconds"
 echo "Size bytes: $backup_size"
+
+if [ "$BACKUP_OBJECT_STORAGE_ENABLED" = "true" ]; then
+  if ! command -v bun >/dev/null 2>&1; then
+    echo "bun is required to check object-storage backup freshness." >&2
+    exit 1
+  fi
+
+  BACKUP_S3_MAX_AGE_HOURS="${BACKUP_S3_MAX_AGE_HOURS:-$MAX_AGE_HOURS}" \
+    bun scripts/s3-backup-object.ts --check-latest
+fi

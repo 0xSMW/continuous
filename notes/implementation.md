@@ -52,12 +52,13 @@
 | HTTPS is managed by Caddy | `continuoushq.com` and `getcontinuous.app` now point at the droplet, and Caddy issues and renews Let's Encrypt certificates from the persisted `caddy_data` volume |
 | Added a database recovery lane | `scripts/backup-db.sh` creates verified Postgres dumps on the droplet and copies them off-box; `scripts/restore-db.sh` performs a confirmation-gated restore, migration, restart, and health check |
 | Enabled DigitalOcean managed backups | The `continuous-01` droplet now has DO-managed backups enabled as the first off-host recovery layer; repo scripts also check custom dump age and checksum sidecars |
+| Added object-storage backup wiring | Verified Postgres dumps can now upload to an S3-compatible target with checksum sidecar and `latest.json`; a systemd timer installer wires daily scheduled retention once bucket credentials are available |
 
 ### Tradeoffs
 
 | Tradeoff | Notes |
 |---|---|
-| Single droplet versus managed Postgres | Simpler and cheaper now; the repo now has explicit backup/restore scripts, but managed Postgres is still the right move when customer data needs managed backup/isolation guarantees |
+| Single droplet versus managed Postgres | Simpler and cheaper now; the repo now has explicit backup/restore and object-retention wiring, but managed Postgres is still the right move when customer data needs managed backup/isolation guarantees |
 | Docker verification | Docker is not running locally on this Mac, so full container verification is happening on the DigitalOcean droplet |
 | Domain TLS | Caddy now serves `continuoushq.com` and `getcontinuous.app` over HTTPS and renews certificates automatically; decide whether to include `www` hostnames in `SITE_HOSTS` before serving those records |
 | Bootstrap seed data | Seed records prove the substrate shape but are not customer fixtures |

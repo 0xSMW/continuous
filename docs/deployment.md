@@ -135,15 +135,64 @@ HOST=45.55.53.92 \
 ```
 
 The backup script writes a `.sha256` sidecar next to the droplet dump and next
-to any local copy. Check that the latest droplet dump is fresh before a release
-or after changing recovery automation:
+to any local copy. It can also upload the verified dump, checksum sidecar, and
+`latest.json` manifest to an S3-compatible object store such as DigitalOcean
+Spaces:
+
+```sh
+HOST=45.55.53.92 \
+  BACKUP_OBJECT_STORAGE_ENABLED=true \
+  BACKUP_S3_ENDPOINT=https://nyc3.digitaloceanspaces.com \
+  BACKUP_S3_BUCKET=continuous-db-backups \
+  BACKUP_S3_REGION=nyc3 \
+  BACKUP_S3_PREFIX=postgres \
+  BACKUP_S3_ACCESS_KEY_ID=... \
+  BACKUP_S3_SECRET_ACCESS_KEY=... \
+  ./scripts/backup-db.sh
+```
+
+Do not commit object-storage credentials. Keep the bucket name, endpoint, and
+prefix in deployment notes, and store access keys in the operator shell,
+GitHub/environment secrets, or `/etc/continuous/postgres-backup.env` on the
+droplet.
+
+Install the daily systemd timer after object-storage credentials are available
+and the latest repo has been deployed to `/opt/continuous`:
+
+```sh
+HOST=45.55.53.92 \
+  BACKUP_S3_ENDPOINT=https://nyc3.digitaloceanspaces.com \
+  BACKUP_S3_BUCKET=continuous-db-backups \
+  BACKUP_S3_REGION=nyc3 \
+  BACKUP_S3_PREFIX=postgres \
+  BACKUP_S3_ACCESS_KEY_ID=... \
+  BACKUP_S3_SECRET_ACCESS_KEY=... \
+  ./scripts/install-backup-timer.sh
+```
+
+The timer runs `scripts/backup-db-on-host.sh`, keeps local droplet dump
+retention through `RETENTION_DAYS`, and writes off-host copies plus a latest
+manifest. Check that the latest droplet dump and optional object-store manifest
+are fresh before a release or after changing recovery automation:
 
 ```sh
 HOST=45.55.53.92 MAX_AGE_HOURS=26 ./scripts/check-backup-age.sh
+
+HOST=45.55.53.92 \
+  BACKUP_OBJECT_STORAGE_ENABLED=true \
+  BACKUP_S3_ENDPOINT=https://nyc3.digitaloceanspaces.com \
+  BACKUP_S3_BUCKET=continuous-db-backups \
+  BACKUP_S3_REGION=nyc3 \
+  BACKUP_S3_PREFIX=postgres \
+  BACKUP_S3_ACCESS_KEY_ID=... \
+  BACKUP_S3_SECRET_ACCESS_KEY=... \
+  ./scripts/check-backup-age.sh
 ```
 
 Restore is intentionally destructive and requires an explicit confirmation
-variable. It stops the app, validates the dump, recreates the database, restores
+variable. It stops the app only after checksum verification and archive
+validation pass. By default it first restores into a scratch database on the
+same Postgres instance, then drops/recreates the production database, restores
 the dump, runs migrations, restarts the app, and checks app health:
 
 ```sh

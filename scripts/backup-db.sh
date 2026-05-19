@@ -10,6 +10,7 @@ LOCAL_BACKUP_DIR="${LOCAL_BACKUP_DIR:-backups/postgres}"
 BACKUP_NAME="${BACKUP_NAME:-continuous-postgres-$(date -u +%Y%m%dT%H%M%SZ).dump}"
 RETENTION_DAYS="${RETENTION_DAYS:-14}"
 COPY_TO_LOCAL="${COPY_TO_LOCAL:-true}"
+BACKUP_OBJECT_STORAGE_ENABLED="${BACKUP_OBJECT_STORAGE_ENABLED:-false}"
 REMOTE="$SSH_USER@$HOST"
 SSH_ARGS=(-o BatchMode=yes -o ConnectTimeout=10)
 
@@ -31,46 +32,44 @@ quote() {
   printf "%q" "$1"
 }
 
-remote_info="$(
+remote_env=(
+  "APP_DIR=$(quote "$APP_DIR")"
+  "REMOTE_BACKUP_DIR=$(quote "$REMOTE_BACKUP_DIR")"
+  "BACKUP_NAME=$(quote "$BACKUP_NAME")"
+  "RETENTION_DAYS=$(quote "$RETENTION_DAYS")"
+  "BACKUP_OBJECT_STORAGE_ENABLED=$(quote "$BACKUP_OBJECT_STORAGE_ENABLED")"
+  "BACKUP_S3_ENDPOINT=$(quote "${BACKUP_S3_ENDPOINT:-}")"
+  "BACKUP_S3_BUCKET=$(quote "${BACKUP_S3_BUCKET:-}")"
+  "BACKUP_S3_REGION=$(quote "${BACKUP_S3_REGION:-}")"
+  "BACKUP_S3_PREFIX=$(quote "${BACKUP_S3_PREFIX:-}")"
+  "BACKUP_S3_ACCESS_KEY_ID=$(quote "${BACKUP_S3_ACCESS_KEY_ID:-}")"
+  "BACKUP_S3_SECRET_ACCESS_KEY=$(quote "${BACKUP_S3_SECRET_ACCESS_KEY:-}")"
+  "BACKUP_S3_DRY_RUN=$(quote "${BACKUP_S3_DRY_RUN:-}")"
+  "AWS_ENDPOINT_URL_S3=$(quote "${AWS_ENDPOINT_URL_S3:-}")"
+  "AWS_REGION=$(quote "${AWS_REGION:-}")"
+  "AWS_ACCESS_KEY_ID=$(quote "${AWS_ACCESS_KEY_ID:-}")"
+  "AWS_SECRET_ACCESS_KEY=$(quote "${AWS_SECRET_ACCESS_KEY:-}")"
+)
+
+remote_output="$(
   ssh "${SSH_ARGS[@]}" "$REMOTE" \
-    "APP_DIR=$(quote "$APP_DIR") REMOTE_BACKUP_DIR=$(quote "$REMOTE_BACKUP_DIR") BACKUP_NAME=$(quote "$BACKUP_NAME") RETENTION_DAYS=$(quote "$RETENTION_DAYS") bash -s" <<'REMOTE_SCRIPT'
-set -euo pipefail
-
-cd "$APP_DIR"
-
-if [ ! -f .env ]; then
-  echo "Missing $APP_DIR/.env; deploy the stack before backing up." >&2
-  exit 1
-fi
-
-install -m 0700 -d "$REMOTE_BACKUP_DIR"
-backup_path="$REMOTE_BACKUP_DIR/$BACKUP_NAME"
-tmp_path="$REMOTE_BACKUP_DIR/.tmp-$BACKUP_NAME"
-
-rm -f "$tmp_path"
-docker compose up -d db >/dev/null
-docker compose exec -T db sh -c 'until pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"; do sleep 1; done' </dev/null >/dev/null
-docker compose exec -T db sh -c 'pg_dump -Fc -U "$POSTGRES_USER" -d "$POSTGRES_DB"' </dev/null > "$tmp_path"
-docker compose exec -T db sh -c 'pg_restore --list' < "$tmp_path" >/dev/null
-chmod 600 "$tmp_path"
-mv "$tmp_path" "$backup_path"
-
-if [ "$RETENTION_DAYS" -gt 0 ] 2>/dev/null; then
-  find "$REMOTE_BACKUP_DIR" -type f -name '*.dump' -mtime "+$RETENTION_DAYS" -delete
-fi
-
-hash="$(sha256sum "$backup_path" | awk '{print $1}')"
-printf '%s  %s\n' "$hash" "$BACKUP_NAME" > "$backup_path.sha256"
-chmod 600 "$backup_path.sha256"
-printf '%s|%s\n' "$backup_path" "$hash"
-REMOTE_SCRIPT
+    "cd $(quote "$APP_DIR") && ${remote_env[*]} bash ./scripts/backup-db-on-host.sh"
 )"
 
-remote_info="$(printf '%s\n' "$remote_info" | tail -1)"
-remote_backup_path="${remote_info%%|*}"
-remote_hash="${remote_info##*|}"
+printf '%s\n' "$remote_output"
 
-if [ -z "$remote_backup_path" ] || [ "$remote_backup_path" = "$remote_hash" ]; then
+remote_backup_path="$(
+  printf '%s\n' "$remote_output" \
+    | awk -F= '$1 == "backup_path" {print substr($0, index($0, "=") + 1)}' \
+    | tail -1
+)"
+remote_hash="$(
+  printf '%s\n' "$remote_output" \
+    | awk -F= '$1 == "sha256" {print substr($0, index($0, "=") + 1)}' \
+    | tail -1
+)"
+
+if [ -z "$remote_backup_path" ] || [ -z "$remote_hash" ]; then
   echo "Backup did not return a remote path and checksum." >&2
   exit 1
 fi

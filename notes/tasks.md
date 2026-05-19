@@ -16,7 +16,7 @@
 - Implement runtime handlers and CI evals for Dispatch, Finance, Workforce, Compliance, and Systems from their registered contract metadata.
 - Extend the Owner Chief-of-Staff Worker beyond the first read-only brief slice into approval/revision continuations, stale-source handling, and broader factuality evals.
 - Keep all worker-family HTTP controls on `/worker` with registered `worker`, `command`, `idempotencyKey`, and `config` fields; do not add worker-family-specific URL shapes.
-- Add a durable object-storage target for custom Postgres dumps; DigitalOcean droplet backups are enabled, but database-level dumps still need scheduled off-host retention before customer data.
+- Provision the production object-storage bucket/key, run `scripts/install-backup-timer.sh`, and prove scheduled off-host Postgres dump retention before customer data.
 - Complete production hardening with tag-based deploy rollback, observability/alerts, scoped tokens, non-root host access, and a restore drill before using the droplet for real customer data.
 - Extend adapter reconciliation into retry execution, failure tasks, scoped live credentials, and rollback paths before allowing external sends or money movement.
 - Extend the Revenue Worker state machine with retry, failure, reconciliation, and later approved-execution branches; broaden revision continuation into revised packet generation.

@@ -49,6 +49,26 @@ The backup script writes the dump on the droplet, verifies it with
 local checksum. The restore script is destructive and should be drilled on a
 disposable droplet before using it for customer data.
 
+For durable database-level retention, configure an S3-compatible object target
+and install the backup timer after deployment:
+
+```sh
+HOST=your-droplet-ip \
+  BACKUP_S3_ENDPOINT=https://nyc3.digitaloceanspaces.com \
+  BACKUP_S3_BUCKET=your-backup-bucket \
+  BACKUP_S3_REGION=nyc3 \
+  BACKUP_S3_PREFIX=postgres \
+  BACKUP_S3_ACCESS_KEY_ID=... \
+  BACKUP_S3_SECRET_ACCESS_KEY=... \
+  ./scripts/install-backup-timer.sh
+```
+
+The timer stores its private environment in
+`/etc/continuous/postgres-backup.env` and runs
+`/opt/continuous/scripts/backup-db-on-host.sh`, which uploads the verified dump,
+checksum sidecar, and `latest.json` manifest. `scripts/check-backup-age.sh`
+checks the object manifest when `BACKUP_OBJECT_STORAGE_ENABLED=true`.
+
 ## Domain DNS
 
 The live domains use registrar DNS, not DigitalOcean DNS zones. Point these
