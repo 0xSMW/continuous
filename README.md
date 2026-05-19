@@ -54,8 +54,7 @@ Then open `http://localhost:3000`.
 
 ## Deployment
 
-The production host is a DigitalOcean droplet. Before DNS cutover, deploy by IP
-with plain HTTP:
+The production host is a DigitalOcean droplet. Deploy to the configured domains:
 
 ```sh
 ./scripts/create-droplet.sh
@@ -68,8 +67,8 @@ After DNS changes, refresh the Caddy site hosts without a full app deploy:
 HOST=45.55.53.92 ./scripts/configure-domain.sh
 ```
 
-Caddy issues and renews the HTTPS certificate automatically for
-`continuoushq.com` after DNS points at the droplet.
+Caddy issues and renews the HTTPS certificates automatically for
+`continuoushq.com` and `getcontinuous.app`.
 
 ## License
 
