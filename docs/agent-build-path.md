@@ -1,9 +1,14 @@
 # Agent Build Path
 
-Continuous does not currently own a direct Codex app-server daemon integration.
-The local Codex app-server CLI exists, but its standalone daemon socket was not
-available during setup. The practical agent-facing path for this Next.js app is
-the Next.js 16 MCP bridge.
+The local Codex app-server daemon is bootstrapped and running through the
+managed Codex install at `~/.codex/app-server-control/app-server-control.sock`.
+This repo does not yet define app-server-owned worker tools. Use the Next.js 16
+MCP bridge for route/runtime visibility, and add direct app-server tools only
+when worker control surfaces need repo-owned app-server methods.
+
+```sh
+bun run app-server:version
+```
 
 ## Next.js MCP
 
@@ -28,9 +33,9 @@ Useful app surfaces for worker development:
 
 ## Boundary
 
-Use the Next.js MCP bridge for development visibility. Keep side-effecting worker
-execution on explicit operator commands or guarded `POST` routes until real auth,
-permissions, and audit controls ship.
+Use the Next.js MCP bridge for Next.js diagnostics. Keep side-effecting worker
+execution on explicit operator commands or guarded `POST` routes until real
+operator identity, permissions, and audit controls ship.
 
 ## Build Loop
 
