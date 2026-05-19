@@ -2,7 +2,7 @@
 
 ## User
 
-- Add `www` DNS records later if `www.continuoushq.com` or `www.getcontinuous.app` should serve the app.
+- Decide whether `www.continuoushq.com` and `www.getcontinuous.app` should serve the app; if yes, add those hostnames to `SITE_HOSTS` and rerun the domain deploy.
 
 ## Agent
 
@@ -13,4 +13,4 @@
 - Add authenticated operator identity and approval UI to the persisted Revenue Worker runtime.
 - Add real adapter credentials and approval UI before allowing external sends or money movement.
 - Use `docs/revenue-worker-expansion.md` as the expansion gate list for the next worker iteration.
-- Replace the temporary Next.js MCP bridge with a direct Codex app-server integration if/when the repo needs app-server-owned worker tools.
+- Keep Next MCP for Next.js diagnostics; add direct Codex app-server worker tools if/when the repo needs app-server-owned controls.
