@@ -146,6 +146,16 @@ function optionalUuid(value: string | undefined, field: string) {
   return value;
 }
 
+function requiredUuid(value: unknown, field: string) {
+  const output = optionalUuid(requiredString(value, field), field);
+
+  if (!output) {
+    throw new PlatformUnavailableError("budget_reference_invalid", `${field} must be a UUID.`, 400);
+  }
+
+  return output;
+}
+
 function jsonObject(value: JsonObject | undefined): JsonObject {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
@@ -219,7 +229,7 @@ function actorFrom(input: {
     };
   }
 
-  const id = optionalUuid(requiredString(actor.id, "config.actor.id"), "config.actor.id");
+  const id = requiredUuid(actor.id, "config.actor.id");
 
   if (!actorTypes.has(requestedType as ActorType)) {
     throw new PlatformUnavailableError(
@@ -420,7 +430,7 @@ async function evidenceForAudit(tx: Pick<Database, "select">, tenantId: string, 
 
 export async function reserveBudget(input: BudgetReserveInput): Promise<BudgetReserveResult> {
   const db = input.db ?? defaultDb;
-  const accountId = optionalUuid(requiredString(input.budgetAccountId, "config.budgetAccountId"), "config.budgetAccountId");
+  const accountId = requiredUuid(input.budgetAccountId, "config.budgetAccountId");
   const taskId = optionalUuid(cleanString(input.taskId), "config.taskId");
   const capabilityId = optionalUuid(cleanString(input.capabilityId), "config.capabilityId");
   const units = parseUnits(input.units, "config.units");
@@ -588,7 +598,7 @@ export async function reserveBudget(input: BudgetReserveInput): Promise<BudgetRe
 
 export async function chargeBudget(input: BudgetChargeInput): Promise<BudgetChargeResult> {
   const db = input.db ?? defaultDb;
-  const reservationId = optionalUuid(requiredString(input.reservationId, "config.reservationId"), "config.reservationId");
+  const reservationId = requiredUuid(input.reservationId, "config.reservationId");
   const taskId = optionalUuid(cleanString(input.taskId), "config.taskId");
   const capabilityId = optionalUuid(cleanString(input.capabilityId), "config.capabilityId");
   const inferenceId = optionalUuid(cleanString(input.inferenceId), "config.inferenceId");
@@ -821,7 +831,7 @@ export async function chargeBudget(input: BudgetChargeInput): Promise<BudgetChar
 
 export async function releaseBudget(input: BudgetReleaseInput): Promise<BudgetReleaseResult> {
   const db = input.db ?? defaultDb;
-  const reservationId = optionalUuid(requiredString(input.reservationId, "config.reservationId"), "config.reservationId");
+  const reservationId = requiredUuid(input.reservationId, "config.reservationId");
   const reason = requiredString(input.reason, "config.reason");
   const operator = await loadOperatorContext({
     db,

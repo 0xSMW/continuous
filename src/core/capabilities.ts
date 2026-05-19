@@ -97,6 +97,16 @@ function optionalUuid(value: string | undefined, field: string) {
   return value;
 }
 
+function requiredUuid(value: unknown, field: string) {
+  const output = optionalUuid(requiredString(value, field), field);
+
+  if (!output) {
+    throw new PlatformUnavailableError("capability_reference_invalid", `${field} must be a UUID.`, 400);
+  }
+
+  return output;
+}
+
 function jsonObject(value: JsonObject | undefined): JsonObject {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
@@ -118,7 +128,7 @@ function optionalDate(value: string | undefined, field: string) {
 function actorFrom(value: JsonObject | undefined) {
   const actor = jsonObject(value);
   const type = requiredString(actor.type, "config.actor.type");
-  const id = optionalUuid(requiredString(actor.id, "config.actor.id"), "config.actor.id");
+  const id = requiredUuid(actor.id, "config.actor.id");
 
   if (!actorTypes.has(type as ActorType)) {
     throw new PlatformUnavailableError(
