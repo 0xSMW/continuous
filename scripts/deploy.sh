@@ -7,7 +7,7 @@ cd "$ROOT_DIR"
 HOST="${HOST:-}"
 SSH_USER="${SSH_USER:-root}"
 APP_DIR="${APP_DIR:-/opt/continuous}"
-SITE_HOSTS="${SITE_HOSTS:-continuoushq.com, getcontinuous.app}"
+SITE_HOSTS="${SITE_HOSTS:-http://:80}"
 ACME_EMAIL="${ACME_EMAIL:-admin@continuoushq.com}"
 APP_URL="${APP_URL:-}"
 POSTGRES_DB="${POSTGRES_DB:-continuous}"
@@ -21,10 +21,14 @@ if [ -z "$HOST" ]; then
 fi
 
 if [ -z "$APP_URL" ]; then
-  first_host="${SITE_HOSTS%%,*}"
-  first_host="${first_host#http://}"
-  first_host="${first_host#https://}"
-  APP_URL="https://$first_host"
+  if [ "$SITE_HOSTS" = "http://:80" ] || [ "$SITE_HOSTS" = ":80" ]; then
+    APP_URL="http://$HOST"
+  else
+    first_host="${SITE_HOSTS%%,*}"
+    first_host="${first_host#http://}"
+    first_host="${first_host#https://}"
+    APP_URL="https://$first_host"
+  fi
 fi
 
 quote() {
