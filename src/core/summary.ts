@@ -463,11 +463,13 @@ export function summarizeCoreReadiness(summary: CoreSummary) {
     hasBudgets:
       summary.counts.budgetPolicies > 0 &&
       summary.counts.budgetAllocations > 0 &&
-      summary.counts.budgetAccounts > 0,
+      summary.counts.budgetAccounts > 0 &&
+      summary.counts.budgetReservations > 0,
     hasAiGateway:
       summary.counts.modelProviders > 0 &&
       summary.counts.modelRoutes > 0 &&
-      summary.counts.budgetAccounts > 0,
+      summary.counts.inferences > 0 &&
+      summary.counts.usageEvents > 0,
     hasAdapterLedger: summary.counts.adapters > 0 && summary.counts.connections > 0,
     hasEntity: summary.counts.legalEntities > 0 && summary.counts.bankAccounts > 0,
     hasCustomerSignals: summary.counts.customerSignals > 0,

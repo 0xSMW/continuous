@@ -8,7 +8,7 @@
 
 - Implement canonical entity/workforce/payroll/filing/payment/AI-ops objects before widening the Revenue Worker runtime.
 - Extend customer-signal workflows, generated views, and eval fixtures beyond the seeded SatisfactionSignal, FeedbackItem, Complaint, Testimonial, and Review primitives.
-- Extend the broader workflow catalog beyond the first seven seeded workflows: open new state, compensation change, location change, payroll run, off-cycle payroll, quarter close, year-end, leave, injury/incident, benefits renewal, and agency notice.
+- Wire implementation handlers, retries, approvals, packets, and generated views into the expanded operating workflow catalog.
 - Wire workflow step handlers into capability execution, retry workers, and adapter reconciliation.
 - Add more specialized Core commands for adapter intents and rule changes.
 - Extend `packet.prepare` coverage into new-hire, contractor, payroll, filing, termination, AI action, and rule-change workflow packet tests.

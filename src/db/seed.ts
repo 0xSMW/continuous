@@ -9,6 +9,7 @@ import {
   budgetAllocations,
   budgetPolicies,
   budgetPools,
+  budgetReservations,
   capabilities,
   capabilityGrants,
   connections,
@@ -56,6 +57,7 @@ import {
   workerRuns,
   workers,
 } from "./schema";
+import { extendedWorkflowCatalog } from "./workflow-catalog";
 
 const ids = {
   tenant: "11111111-1111-4111-8111-111111111111",
@@ -69,6 +71,7 @@ const ids = {
   budgetPool: "bbbbbbbb-bbbb-4bbb-8bbb-000000000002",
   budgetAccount: "bbbbbbbb-bbbb-4bbb-8bbb-000000000003",
   budgetAllocation: "bbbbbbbb-bbbb-4bbb-8bbb-000000000004",
+  budgetReservation: "bbbbbbbb-bbbb-4bbb-8bbb-000000000005",
   legalEntityObject: "33333333-3333-4333-8333-000000000101",
   workLocationObject: "33333333-3333-4333-8333-000000000102",
   personObject: "33333333-3333-4333-8333-000000000103",
@@ -109,10 +112,12 @@ const ids = {
   evidenceLead: "eeeeeeee-eeee-4eee-8eee-000000000001",
   evidenceQuote: "eeeeeeee-eeee-4eee-8eee-000000000002",
   evidenceAdapterReceipt: "eeeeeeee-eeee-4eee-8eee-000000000003",
+  evidenceFiling: "eeeeeeee-eeee-4eee-8eee-000000000004",
   adapterRunSeed: "abababab-abab-4aba-8aba-000000000001",
   adapterActionSeed: "abababab-abab-4aba-8aba-000000000002",
   usage: "12121212-1212-4121-8121-121212121212",
   view: "34343434-3434-4343-8343-343434343434",
+  filingView: "34343434-3434-4343-8343-000000000002",
   legalEntity: "55555555-5555-4555-8555-000000000001",
   entityIdentifier: "55555555-5555-4555-8555-000000000002",
   person: "55555555-5555-4555-8555-000000000003",
@@ -134,6 +139,18 @@ const ids = {
   workflowContractor: "66666666-6666-4666-8666-000000000006",
   workflowTermination: "66666666-6666-4666-8666-000000000007",
   workflowLeadToCash: "66666666-6666-4666-8666-000000000008",
+  workflowOpenNewState: "66666666-6666-4666-8666-000000000009",
+  workflowCompensationChange: "66666666-6666-4666-8666-000000000010",
+  workflowLocationChange: "66666666-6666-4666-8666-000000000011",
+  workflowRunPayroll: "66666666-6666-4666-8666-000000000012",
+  workflowOffCyclePayroll: "66666666-6666-4666-8666-000000000013",
+  workflowQuarterClose: "66666666-6666-4666-8666-000000000014",
+  workflowYearEnd: "66666666-6666-4666-8666-000000000015",
+  workflowLeave: "66666666-6666-4666-8666-000000000016",
+  workflowInjuryIncident: "66666666-6666-4666-8666-000000000017",
+  workflowBenefitsRenewal: "66666666-6666-4666-8666-000000000018",
+  workflowAgencyNotice: "66666666-6666-4666-8666-000000000019",
+  workflowFilingDraft: "66666666-6666-4666-8666-000000000020",
   runEntitySetup: "77777777-7777-4777-8777-000000000001",
   runPayrollPreview: "77777777-7777-4777-8777-000000000002",
   runSyntheticWorker: "77777777-7777-4777-8777-000000000003",
@@ -141,6 +158,18 @@ const ids = {
   runAiBudget: "77777777-7777-4777-8777-000000000005",
   runContractor: "77777777-7777-4777-8777-000000000006",
   runTermination: "77777777-7777-4777-8777-000000000007",
+  runOpenNewState: "77777777-7777-4777-8777-000000000008",
+  runCompensationChange: "77777777-7777-4777-8777-000000000009",
+  runLocationChange: "77777777-7777-4777-8777-000000000010",
+  runRunPayroll: "77777777-7777-4777-8777-000000000011",
+  runOffCyclePayroll: "77777777-7777-4777-8777-000000000012",
+  runQuarterClose: "77777777-7777-4777-8777-000000000013",
+  runYearEnd: "77777777-7777-4777-8777-000000000014",
+  runLeave: "77777777-7777-4777-8777-000000000015",
+  runInjuryIncident: "77777777-7777-4777-8777-000000000016",
+  runBenefitsRenewal: "77777777-7777-4777-8777-000000000017",
+  runAgencyNotice: "77777777-7777-4777-8777-000000000018",
+  runFilingDraft: "77777777-7777-4777-8777-000000000019",
   stepEntitySetup: "77777777-7777-4777-8777-000000000101",
   stepPayrollPreview: "77777777-7777-4777-8777-000000000102",
   stepSyntheticWorker: "77777777-7777-4777-8777-000000000103",
@@ -148,9 +177,23 @@ const ids = {
   stepAiBudget: "77777777-7777-4777-8777-000000000105",
   stepContractor: "77777777-7777-4777-8777-000000000106",
   stepTermination: "77777777-7777-4777-8777-000000000107",
+  stepOpenNewState: "77777777-7777-4777-8777-000000000108",
+  stepCompensationChange: "77777777-7777-4777-8777-000000000109",
+  stepLocationChange: "77777777-7777-4777-8777-000000000110",
+  stepRunPayroll: "77777777-7777-4777-8777-000000000111",
+  stepOffCyclePayroll: "77777777-7777-4777-8777-000000000112",
+  stepQuarterClose: "77777777-7777-4777-8777-000000000113",
+  stepYearEnd: "77777777-7777-4777-8777-000000000114",
+  stepLeave: "77777777-7777-4777-8777-000000000115",
+  stepInjuryIncident: "77777777-7777-4777-8777-000000000116",
+  stepBenefitsRenewal: "77777777-7777-4777-8777-000000000117",
+  stepAgencyNotice: "77777777-7777-4777-8777-000000000118",
+  stepFilingDraft: "77777777-7777-4777-8777-000000000119",
   documentNewHire: "88888888-8888-4888-8888-000000000001",
   documentPayroll: "88888888-8888-4888-8888-000000000002",
   packetPayroll: "88888888-8888-4888-8888-000000000003",
+  documentFiling: "88888888-8888-4888-8888-000000000004",
+  packetFiling: "88888888-8888-4888-8888-000000000005",
   decisionQuote: "99999999-9999-4999-8999-000000000001",
   evaluationSeed: "99999999-9999-4999-8999-000000000002",
   approvalQuote: "99999999-9999-4999-8999-000000000003",
@@ -465,6 +508,15 @@ async function seed() {
   const now = new Date();
   const nextMonth = new Date(now);
   nextMonth.setMonth(nextMonth.getMonth() + 1);
+  const idFor = (key: string) => {
+    const id = ids[key as keyof typeof ids];
+
+    if (!id) {
+      throw new Error(`Missing seed id for ${key}`);
+    }
+
+    return id;
+  };
 
   await db
     .insert(budgetPools)
@@ -1007,6 +1059,25 @@ async function seed() {
     .onConflictDoNothing();
 
   await db
+    .insert(workflowDefinitions)
+    .values(
+      extendedWorkflowCatalog.map((workflow) => ({
+        id: idFor(workflow.workflowIdKey),
+        key: workflow.key,
+        name: workflow.name,
+        purpose: workflow.purpose,
+        domain: workflow.domain,
+        states: workflow.states,
+        transitions: workflow.transitions,
+        objects: workflow.objects,
+        approvals: workflow.approvals,
+        evidence: workflow.evidence,
+        tests: workflow.tests,
+      })),
+    )
+    .onConflictDoNothing();
+
+  await db
     .insert(workflowRuns)
     .values([
       {
@@ -1087,6 +1158,24 @@ async function seed() {
         metrics: { grants: Object.values(capIds).length },
       },
     ])
+    .onConflictDoNothing();
+
+  await db
+    .insert(workflowRuns)
+    .values(
+      extendedWorkflowCatalog.map((workflow) => ({
+        id: idFor(workflow.runIdKey),
+        tenantId: ids.tenant,
+        definitionId: idFor(workflow.workflowIdKey),
+        objectId: workflow.objectIdKey ? idFor(workflow.objectIdKey) : undefined,
+        workerId: workflow.workerIdKey ? idFor(workflow.workerIdKey) : undefined,
+        state: workflow.runState,
+        idempotencyKey: `seed-${workflow.key}`,
+        data: workflow.runData,
+        blockers: { open: workflow.blockers },
+        metrics: workflow.metrics,
+      })),
+    )
     .onConflictDoNothing();
 
   await db
@@ -1243,6 +1332,34 @@ async function seed() {
     .onConflictDoNothing();
 
   await db
+    .insert(workflowSteps)
+    .values(
+      extendedWorkflowCatalog.map((workflow) => ({
+        id: idFor(workflow.stepIdKey),
+        tenantId: ids.tenant,
+        definitionId: idFor(workflow.workflowIdKey),
+        workflowRunId: idFor(workflow.runIdKey),
+        objectId: workflow.objectIdKey ? idFor(workflow.objectIdKey) : undefined,
+        workerId: workflow.workerIdKey ? idFor(workflow.workerIdKey) : undefined,
+        kind: "seed_state",
+        name: workflow.stepName,
+        state: "done" as const,
+        toState: workflow.runState,
+        attempt: 1,
+        maxAttempts: 3,
+        leaseOwner: "system:seed",
+        leasedUntil: now,
+        idempotencyKey: `seed-${workflow.key}:${workflow.runState}`,
+        input: { seed: true, state: workflow.runState },
+        output: workflow.stepOutput,
+        startedAt: now,
+        completedAt: now,
+        updatedAt: now,
+      })),
+    )
+    .onConflictDoNothing();
+
+  await db
     .insert(documents)
     .values([
       {
@@ -1268,6 +1385,18 @@ async function seed() {
         sensitivity: "critical",
         hash: "bootstrap-payroll-packet",
         data: { deterministic: true, money_movement: "blocked", approval_required: true },
+      },
+      {
+        id: ids.documentFiling,
+        tenantId: ids.tenant,
+        objectId: ids.filingObject,
+        workflowRunId: ids.runFilingDraft,
+        kind: "filing_draft_packet",
+        name: "Federal quarterly filing draft packet",
+        state: "review_ready",
+        sensitivity: "high",
+        hash: "bootstrap-filing-draft-packet",
+        data: { form: "941", agency: "IRS", submission: "blocked", approval_required: true },
       },
     ])
     .onConflictDoNothing();
@@ -1425,6 +1554,16 @@ async function seed() {
   await db
     .insert(objectLinks)
     .values([
+      { tenantId: ids.tenant, fromId: ids.legalEntityObject, toId: ids.workLocationObject, type: "operates_at" },
+      { tenantId: ids.tenant, fromId: ids.legalEntityObject, toId: ids.bankObject, type: "uses_bank_account" },
+      { tenantId: ids.tenant, fromId: ids.legalEntityObject, toId: ids.obligationObject, type: "has_obligation" },
+      { tenantId: ids.tenant, fromId: ids.obligationObject, toId: ids.filingObject, type: "satisfied_by_draft" },
+      { tenantId: ids.tenant, fromId: ids.filingObject, toId: ids.legalEntityObject, type: "for_entity" },
+      { tenantId: ids.tenant, fromId: ids.employmentObject, toId: ids.personObject, type: "held_by" },
+      { tenantId: ids.tenant, fromId: ids.employmentObject, toId: ids.workLocationObject, type: "assigned_location" },
+      { tenantId: ids.tenant, fromId: ids.payrollObject, toId: ids.employmentObject, type: "includes_employment" },
+      { tenantId: ids.tenant, fromId: ids.payrollObject, toId: ids.filingObject, type: "supports_filing" },
+      { tenantId: ids.tenant, fromId: ids.bankObject, toId: ids.payrollObject, type: "funds_payroll" },
       { tenantId: ids.tenant, fromId: ids.leadObject, toId: ids.customerObject, type: "for_customer" },
       { tenantId: ids.tenant, fromId: ids.quoteObject, toId: ids.leadObject, type: "from_lead" },
       { tenantId: ids.tenant, fromId: ids.jobObject, toId: ids.quoteObject, type: "from_quote" },
@@ -1703,33 +1842,76 @@ async function seed() {
           reconciliationState: "matched",
         },
       },
+      {
+        id: ids.evidenceFiling,
+        tenantId: ids.tenant,
+        kind: "draft",
+        name: "Federal quarterly filing draft",
+        objectId: ids.filingObject,
+        capabilityId: capIds.filingPrepare,
+        actorType: "system",
+        hash: "bootstrap-filing-draft",
+        data: {
+          form: "941",
+          agency: "IRS",
+          filingRequirementId: ids.filingRequirement,
+          filingDraftId: ids.filingDraft,
+          obligationId: ids.obligation,
+          validation: "draft_only",
+          submission: "blocked",
+        },
+      },
     ])
     .onConflictDoNothing();
 
   await db
     .insert(evidencePackets)
-    .values({
-      id: ids.packetPayroll,
-      tenantId: ids.tenant,
-      documentId: ids.documentPayroll,
-      objectId: ids.payrollObject,
-      workflowRunId: ids.runPayrollPreview,
-      kind: "payroll_packet",
-      name: "Payroll preview evidence packet",
-      state: "review_ready",
-      sensitivity: "critical",
-      evidenceIds: { ids: [ids.evidenceQuote, ids.evidenceAdapterReceipt] },
-      documentIds: { ids: [ids.documentPayroll] },
-      hash: "bootstrap-payroll-evidence-packet",
-      data: {
-        payScheduleId: ids.paySchedule,
-        payrollRunId: ids.payrollRun,
-        filingDraftId: ids.filingDraft,
-        paymentInstructionId: ids.paymentInstruction,
-        moneyMovement: "blocked",
-        externalExecution: "blocked",
+    .values([
+      {
+        id: ids.packetPayroll,
+        tenantId: ids.tenant,
+        documentId: ids.documentPayroll,
+        objectId: ids.payrollObject,
+        workflowRunId: ids.runPayrollPreview,
+        kind: "payroll_packet",
+        name: "Payroll preview evidence packet",
+        state: "review_ready",
+        sensitivity: "critical",
+        evidenceIds: { ids: [ids.evidenceQuote, ids.evidenceAdapterReceipt] },
+        documentIds: { ids: [ids.documentPayroll] },
+        hash: "bootstrap-payroll-evidence-packet",
+        data: {
+          payScheduleId: ids.paySchedule,
+          payrollRunId: ids.payrollRun,
+          filingDraftId: ids.filingDraft,
+          paymentInstructionId: ids.paymentInstruction,
+          moneyMovement: "blocked",
+          externalExecution: "blocked",
+        },
       },
-    })
+      {
+        id: ids.packetFiling,
+        tenantId: ids.tenant,
+        documentId: ids.documentFiling,
+        objectId: ids.filingObject,
+        workflowRunId: ids.runFilingDraft,
+        kind: "filing_draft_packet",
+        name: "Filing draft evidence packet",
+        state: "review_ready",
+        sensitivity: "high",
+        evidenceIds: { ids: [ids.evidenceFiling] },
+        documentIds: { ids: [ids.documentFiling] },
+        hash: "bootstrap-filing-draft-evidence-packet",
+        data: {
+          legalEntityId: ids.legalEntity,
+          obligationId: ids.obligation,
+          filingRequirementId: ids.filingRequirement,
+          filingDraftId: ids.filingDraft,
+          submission: "blocked",
+          externalExecution: "blocked",
+        },
+      },
+    ])
     .onConflictDoNothing();
 
   await db
@@ -1851,6 +2033,19 @@ async function seed() {
     .onConflictDoNothing();
 
   await db
+    .insert(budgetReservations)
+    .values({
+      id: ids.budgetReservation,
+      tenantId: ids.tenant,
+      accountId: ids.budgetAccount,
+      taskId: ids.taskQuote,
+      units: 50000,
+      state: "used",
+      expiresAt: nextMonth,
+    })
+    .onConflictDoNothing();
+
+  await db
     .insert(inferences)
     .values({
       id: ids.inferenceSeed,
@@ -1892,6 +2087,7 @@ async function seed() {
       id: ids.usage,
       tenantId: ids.tenant,
       accountId: ids.budgetAccount,
+      reservationId: ids.budgetReservation,
       inferenceId: ids.inferenceSeed,
       taskId: ids.taskQuote,
       capabilityId: capIds.quotePrepare,
@@ -1905,22 +2101,40 @@ async function seed() {
 
   await db
     .insert(generatedViews)
-    .values({
-      id: ids.view,
-      tenantId: ids.tenant,
-      capabilityId: capIds.quotePrepare,
-      key: "quote.approval.review",
-      name: "Quote approval review",
-      purpose: "Let an owner approve, revise, or escalate a prepared quote.",
-      surface: "web",
-      objectType: "quote",
-      taskState: "approval_required",
-      contract: {
-        sections: ["CustomerSummary", "ScopeSummary", "PriceAndMargin", "DraftMessage", "EvidenceTimeline", "ActionBar"],
+    .values([
+      {
+        id: ids.view,
+        tenantId: ids.tenant,
+        capabilityId: capIds.quotePrepare,
+        key: "quote.approval.review",
+        name: "Quote approval review",
+        purpose: "Let an owner approve, revise, or escalate a prepared quote.",
+        surface: "web",
+        objectType: "quote",
+        taskState: "approval_required",
+        contract: {
+          sections: ["CustomerSummary", "ScopeSummary", "PriceAndMargin", "DraftMessage", "EvidenceTimeline", "ActionBar"],
+        },
+        actions: { valid: ["approve_and_send", "request_revision", "edit_price"] },
+        mask: { sensitive_payment_fields: true },
       },
-      actions: { valid: ["approve_and_send", "request_revision", "edit_price"] },
-      mask: { sensitive_payment_fields: true },
-    })
+      {
+        id: ids.filingView,
+        tenantId: ids.tenant,
+        capabilityId: capIds.filingPrepare,
+        key: "filing.draft.review",
+        name: "Filing draft review",
+        purpose: "Let an operator review source facts, validation state, blockers, and approval actions for a filing draft.",
+        surface: "web",
+        objectType: "filing_draft",
+        taskState: "approval_required",
+        contract: {
+          sections: ["EntitySummary", "RequirementSummary", "DraftValidation", "EvidenceTimeline", "ActionBar"],
+        },
+        actions: { valid: ["approve_filing_draft", "request_revision", "export_packet"] },
+        mask: { tax_identifiers: true, bank_fields: true },
+      },
+    ])
     .onConflictDoNothing();
 }
 

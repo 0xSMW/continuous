@@ -8,6 +8,7 @@ import {
   workflowApprovalRequirements,
   workflowStateOrder,
 } from "./workflows";
+import { extendedWorkflowCatalog } from "../db/workflow-catalog";
 
 const definition = {
   states: { order: ["draft", "preview_ready", "awaiting_approval", "approved"] },
@@ -50,5 +51,32 @@ describe("workflow transition helpers", () => {
     ]);
     expect(shouldRequestWorkflowApproval(definition, "awaiting_approval")).toBe(true);
     expect(shouldRequestWorkflowApproval(definition, "approved")).toBe(false);
+  });
+});
+
+describe("extended workflow catalog", () => {
+  it("covers the documented operating workflow expansion keys", () => {
+    expect(extendedWorkflowCatalog.map((workflow) => workflow.key).sort()).toEqual([
+      "agency_notice",
+      "benefits_renewal",
+      "compensation_change",
+      "filing_draft",
+      "injury_incident",
+      "leave",
+      "location_change",
+      "off_cycle_payroll",
+      "open_new_state",
+      "quarter_close",
+      "run_payroll",
+      "year_end",
+    ]);
+  });
+
+  it("has a valid seeded state and packet for every expansion workflow", () => {
+    for (const workflow of extendedWorkflowCatalog) {
+      expect(isKnownWorkflowState(workflow, workflow.runState)).toBe(true);
+      expect(workflow.evidence.packet).toMatch(/packet$/);
+      expect(workflow.blockers.length).toBeGreaterThan(0);
+    }
   });
 });
