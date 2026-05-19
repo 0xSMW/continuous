@@ -9,8 +9,9 @@ raising autonomy or permitting external sends.
 |---|---:|---|
 | `idempotencyKey` | Yes | Stable per operator-triggered run |
 | `operatorEmail` | Yes | Must match an active user in the tenant |
-| `tenantSlug` | No | Required when an operator email spans tenants |
-| `workerId` | No | Required when multiple Revenue Workers match |
+| `worker.role` | Yes | Explicit worker family selector; no default role is assumed |
+| `worker.tenantSlug` | No | Required when an operator email spans tenants |
+| `worker.id` | No | Required when multiple Revenue Workers match |
 | `config.intake` | Preferred for useful runs | References persisted Core lead object/event/evidence rows used to derive classification, draft, quote, evidence, and approval packet |
 | `config.leadPacket` | Fallback only | Direct source payload for operator tests and controlled evals |
 
@@ -69,6 +70,23 @@ Approval decisions use the same route:
 }
 ```
 
+Worker continuations also stay on the same route. The command consumes persisted
+approval state; the URL does not encode the worker family or continuation type.
+
+```json
+{
+  "command": "continue",
+  "worker": {
+    "role": "revenue_operations",
+    "tenantSlug": "continuous-demo"
+  },
+  "idempotencyKey": "rev-worker-continue-001",
+  "config": {
+    "approvalId": "approval_uuid"
+  }
+}
+```
+
 Adapter reconciliation also stays on the same command surface:
 
 ```json
@@ -98,12 +116,13 @@ and local toolbox aliases resolve to the same handlers and validation rules.
 | `GET view=snapshot` | `worker.snapshot` | None | None | Read-only | Blocked |
 | `GET view=approvals` | `worker.approvals.list` | Optional `state` | None | Read-only | Blocked |
 | `run` | `worker.run` | `config.intake` preferred, `config.leadPacket` fallback | Required | Internal records, budget, approval, dry-run adapter receipt | Blocked |
+| `continue` | `worker.continue` | `approvalId` | Required | Worker continuation records, workflow step, task outcome, audit/evidence | Blocked |
 | `approval.decide` | `worker.approvals.decide` | `approvalId`, `action`, optional `note` | None | Approval/task/workflow evidence only | Blocked |
 | `adapters.reconcile` | `worker.adapters.reconcile` | Tenant-scoped `worker.tenantSlug`, optional integer `limit` | None | Adapter reconciliation audit/evidence | Blocked |
 
 ## Run Config
 
-`config` is the worker-specific envelope. The route does not encode a worker
+`config` is the command payload envelope. The route does not encode a worker
 family, operation target, customer, source system, or draft type in the URL.
 
 | Field | Required | Notes |
@@ -168,12 +187,17 @@ The first runtime only prepares owner-review packets.
 | `tasks` | Moves active work to `approval_required`; decision later moves to `waiting`, `active`, or `blocked` |
 | `object_versions` | Records approval-required state against the object spine |
 
+`POST /worker` with `command=continue` creates a separate idempotent
+`worker_runs` continuation record and `workflow_steps.kind=worker_continuation`
+entry. V1 supports `revision_requested` approvals only; it queues the revised
+packet work, updates the task outcome, and keeps adapter execution blocked.
+
 ## Approval Actions
 
 | Action | Approval state | Task state | Workflow state | External behavior |
 |---|---|---|---|---|
 | `approved` | `approved` | `waiting` | `approved` when the definition allows it | Still blocked until real adapter execution exists |
-| `revision_requested` | `revision_requested` | `active` | `revision_requested` when the definition allows it | Worker can prepare a revised draft |
+| `revision_requested` | `revision_requested` | `active` | `revision_requested` when the definition allows it | `command=continue` queues revised packet work |
 | `rejected` | `rejected` | `blocked` | `rejected` when the definition allows it | Worker should stop the prepared action |
 
 ## Non-Goals

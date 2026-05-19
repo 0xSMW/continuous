@@ -7,6 +7,7 @@ import {
 import { PlatformUnavailableError } from "../core/errors";
 import type { JsonObject } from "../db/schema";
 import {
+  continueRevenueWorker,
   getRevenueWorkerSnapshotSafe,
   RevenueWorkerUnavailableError,
   runRevenueWorker,
@@ -14,7 +15,7 @@ import {
 import { normalizeIdempotencyKey } from "./security";
 
 export const workerApiVersion = "continuous.worker.v1";
-export const defaultWorkerRole = "revenue_operations";
+const revenueWorkerRole = "revenue_operations";
 
 export type WorkerTargetInput = {
   role?: string;
@@ -136,7 +137,7 @@ function requireIdempotency(value: unknown) {
 }
 
 const revenueDefinition: WorkerDefinition = {
-  role: defaultWorkerRole,
+  role: revenueWorkerRole,
   commands: {
     run: {
       name: "run",
@@ -159,6 +160,40 @@ const revenueDefinition: WorkerDefinition = {
           workerId: context.target.workerId,
           operatorEmail: context.operatorEmail,
           config: context.config,
+        });
+      },
+    },
+    continue: {
+      name: "continue",
+      description: "Continue a worker-owned approval outcome without executing external actions.",
+      idempotency: "required",
+      sideEffects: "internal",
+      externalExecution: "blocked",
+      async handle(context) {
+        const approvalId = optionalString(context.config.approvalId);
+
+        if (!context.idempotencyKey) {
+          throw new PlatformUnavailableError(
+            "invalid_idempotency_key",
+            "A string idempotency key is required.",
+            400,
+          );
+        }
+
+        if (!approvalId) {
+          throw new PlatformUnavailableError(
+            "invalid_worker_command_config",
+            "config.approvalId is required for continue.",
+            400,
+          );
+        }
+
+        return continueRevenueWorker({
+          approvalId,
+          idempotencyKey: context.idempotencyKey,
+          tenantSlug: context.target.tenantSlug,
+          workerId: context.target.workerId,
+          operatorEmail: context.operatorEmail,
         });
       },
     },
@@ -288,7 +323,15 @@ export function registeredWorkerViews() {
 }
 
 export function resolveWorkerTarget(target: WorkerTargetInput = {}): WorkerTarget {
-  const role = target.role ?? defaultWorkerRole;
+  const role = optionalString(target.role);
+
+  if (!role) {
+    throw new PlatformUnavailableError(
+      "invalid_worker_target",
+      "worker.role is required.",
+      400,
+    );
+  }
 
   if (!workerDefinitions[role]) {
     throw new PlatformUnavailableError(

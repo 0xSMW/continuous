@@ -19,7 +19,7 @@
 | Added open workflow documentation | Hiring, contractor engagement, termination, payroll, filings, AI budget, and synthetic-worker lifecycle now have explicit document, approval, state, and evidence requirements |
 | Simplified the canonical data model | Replaced early one-table-per-concept naming with smaller primitives such as Worker.kind, WorkRelationship.type, FilingArtifact.type, EvidenceItem.type, and CustomerSignal.type |
 | Revenue Worker HTTP paths are guarded | There is no auth system yet, so detailed worker reads require the operator token, and the side-effecting run endpoint is disabled by default |
-| Added canonical worker API | `/worker` is the forward control-plane route; worker role, tenant selection, command, idempotency, and config live in structured query or payload fields |
+| Added canonical worker API | `/worker` is the forward control-plane route; worker role, tenant selection, command, idempotency, and config live in structured payload fields for mutation commands |
 | Added worker command registry | `/worker` and `bun run worker:tool` now share registered command metadata, role allowlisting, config validation, idempotency rules, tenant requirements, and external-execution posture |
 | Added canonical workflow API | `/workflow` validates definition-backed `start` and `transition` commands and records workflow events, audit events, and evidence |
 | Removed worker-specific HTTP wrappers | The greenfield API does not expose worker-family routes; new workers must extend `/worker` through registered commands rather than adding route names |
@@ -40,6 +40,7 @@
 | Added first-class adapter dry-runs | Revenue Worker runs now create linked adapter runs/actions, receipt evidence, attempt metadata, and reconciliation state while external mutation remains disabled |
 | Added persisted-intake no-send worker packets | `POST /worker` `command=run` now prefers `config.intake` Core object/event/evidence references, stores source snapshot evidence, hashes normalized input for idempotency, and derives classification, draft response, quote, and approval packet output from the resolved payload; `config.leadPacket` remains a direct operator/test fallback |
 | Added Revenue workflow spine | Revenue Worker runs now create a `lead_to_cash` workflow run plus durable workflow steps for intake, packet preparation, adapter dry-run, approval request, and approval decision continuation |
+| Added worker continuation command | `POST /worker` `command=continue` is a generic idempotent continuation surface; V1 consumes `config.approvalId` for `revision_requested` approvals, records workflow/task/audit/evidence state, and keeps external execution blocked |
 | HTTPS is managed by Caddy | `continuoushq.com` and `getcontinuous.app` now point at the droplet, and Caddy issues and renews Let's Encrypt certificates from the persisted `caddy_data` volume |
 | Added a database recovery lane | `scripts/backup-db.sh` creates verified Postgres dumps on the droplet and copies them off-box; `scripts/restore-db.sh` performs a confirmation-gated restore, migration, restart, and health check |
 
@@ -98,12 +99,15 @@ evidence, marks the quote task as `approval_required`, and leaves external
 execution disabled until retry/reconciliation workers, live credential scopes,
 and approval UI are in place.
 
-The canonical HTTP shape is now `/worker`: `GET /worker?view=snapshot` for
-state, `GET /worker?view=approvals` for approval queues, and `POST /worker`
-with `command`, `worker`, `idempotencyKey`, and `config` for side-effecting
-operations. Adapter reconciliation uses the same route with
+The canonical HTTP shape is now `/worker` with explicit worker roles:
+`GET /worker?view=snapshot&role=revenue_operations` for state,
+`GET /worker?view=approvals&role=revenue_operations` for approval queues, and
+`POST /worker` with `command`, `worker`, `idempotencyKey`, and `config` for
+side-effecting operations. Adapter reconciliation uses the same route with
 `command=adapters.reconcile`, a tenant-scoped `worker` target, and
-`config.limit`. Route handlers now delegate to the worker command registry,
+`config.limit`; revision continuation uses `command=continue`, an
+idempotency key, and `config.approvalId`. Route handlers now delegate to the
+worker command registry,
 which owns role allowlisting, command lookup, idempotency, config validation,
 tenant requirements, and external-execution metadata. Worker-family-specific
 HTTP routes are absent by design.

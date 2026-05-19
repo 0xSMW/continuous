@@ -44,9 +44,11 @@ Then open `http://localhost:3000`.
   `document.packet.prepare`, `decision.record`,
   `approval.request`, `capability.grant`, `budget.reserve`,
   `budget.charge`, `budget.release`, and `view.publish`.
-- `/worker` is the canonical worker control-plane API. Use `GET /worker?view=snapshot` or
-  `GET /worker?view=approvals`; use `POST /worker` with `command` and `config`
-  payloads for side-effecting worker commands. Revenue operations runs prefer
+- `/worker` is the canonical worker control-plane API. Use
+  `GET /worker?view=snapshot&role=revenue_operations` or
+  `GET /worker?view=approvals&role=revenue_operations`; use `POST /worker` with
+  explicit `worker.role`, `command`, `idempotencyKey` when required, and
+  `config` payloads for side-effecting worker commands. Revenue operations runs prefer
   persisted Core lead intake references under `config.intake`; `config.leadPacket`
   remains a direct operator/test fallback. The route validates roles, commands,
   idempotency, tenant requirements, and external-execution posture through the

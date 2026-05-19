@@ -33,8 +33,8 @@ Useful app surfaces for worker development:
 | `/api/health` | Machine health check |
 | `/api/core` | Operator-gated persisted primitive summary |
 | `POST /api/core` | Canonical Core command surface with `command`, `core`, `config`, and `idempotencyKey` payload fields for tasks, task transitions, approvals, capability grants, budget ledger operations, objects, object links, events, evidence, documents, packets, decisions, and generated views |
-| `/worker?view=snapshot` | Canonical operator-gated worker snapshot |
-| `/worker?view=approvals` | Canonical operator-gated worker approval queue |
+| `/worker?view=snapshot&role=revenue_operations` | Canonical operator-gated worker snapshot |
+| `/worker?view=approvals&role=revenue_operations` | Canonical operator-gated worker approval queue |
 | `POST /worker` | Canonical command surface with `command`, `worker`, `config`, and `idempotencyKey` payload fields |
 | `/workflow?view=approvals` | Canonical operator-gated workflow approval queue |
 | `POST /workflow` | Canonical workflow command surface for starts, transitions, and workflow approval decisions |
@@ -158,7 +158,7 @@ The worker toolbox uses the same payload shape:
 bun run worker:tool schema
 
 bun run worker:tool worker.snapshot <<'JSON'
-{"worker":{"role":"revenue_operations"},"config":{}}
+{"worker":{"role":"revenue_operations"}}
 JSON
 
 bun run worker:tool worker.adapters.reconcile <<'JSON'

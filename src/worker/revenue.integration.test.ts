@@ -49,7 +49,7 @@ import {
   type JsonObject,
 } from "../db/schema";
 import { revenueWorkerEvalCases, scoreRevenueWorkerRun } from "./evals";
-import { runRevenueWorker } from "./revenue";
+import { continueRevenueWorker, runRevenueWorker } from "./revenue";
 
 const runIntegration = Boolean(process.env.CI && process.env.DATABASE_URL);
 const maybeDescribe = runIntegration ? describe : describe.skip;
@@ -1097,6 +1097,156 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(adapterAction?.mode).toBe("dry_run");
     expect(adapterReceipt.externalMutation).toBe(false);
     expect(objectValue(adapterReceipt.continuation).externalExecution).toBe("blocked");
+  }, 120_000);
+
+  it("continues revision-requested approval outcomes through the worker command spine", async () => {
+    const runId = randomUUID();
+    const [worker] = await db
+      .select({ id: workers.id })
+      .from(workers)
+      .where(eq(workers.role, "revenue_operations"))
+      .limit(1);
+    const workerId = worker?.id ?? "";
+
+    expect(workerId).toBeTruthy();
+
+    const createdTask = await createCoreTask({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-worker-revision-task-${runId}`,
+      title: "Revision continuation quote task",
+      state: "active",
+      priority: "urgent",
+      owner: {
+        type: "worker",
+        id: workerId,
+        ref: `worker:${workerId}`,
+      },
+      db,
+    });
+    const first = await runRevenueWorker({
+      idempotencyKey: `ci-worker-revision-${runId}`,
+      tenantSlug: "continuous-demo",
+      operatorEmail: "owner@continuoushq.com",
+      config: {
+        leadPacket: {
+          source: "revision_test",
+          sourceEventId: `revision-test:${runId}`,
+          customerName: "Revision Roofing",
+          customerIntent: "roof leak inspection",
+          serviceArea: "roofing",
+          urgency: "high",
+          missingFacts: ["preferred_time_window"],
+        },
+      },
+      db,
+    });
+
+    expect(first.taskId).toBe(createdTask.taskId);
+
+    const decision = await decideApproval({
+      approvalId: first.approvalRequestId ?? "",
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      action: "revision_requested",
+      note: "Revise the draft before owner approval.",
+      subject: "worker",
+      db,
+    });
+
+    expect(decision.workflowRunState).toBe("revision_requested");
+
+    const continuation = await continueRevenueWorker({
+      approvalId: first.approvalRequestId ?? "",
+      idempotencyKey: `ci-worker-continue-${runId}`,
+      tenantSlug: "continuous-demo",
+      operatorEmail: "owner@continuoushq.com",
+      db,
+    });
+    const output = objectValue(continuation.output);
+
+    expect(continuation.created).toBe(true);
+    expect(continuation.originalWorkerRunId).toBe(first.workerRunId);
+    expect(continuation.workflowRunId).toBe(first.workflowRunId);
+    expect(output.status).toBe("revision_continuation_queued");
+    expect(output.nextAction).toBe("prepare_revised_packet");
+    expect(output.externalExecution).toBe("blocked");
+    expect(output.externalSend).toBe(false);
+
+    const [workflowRun] = await db
+      .select()
+      .from(workflowRuns)
+      .where(eq(workflowRuns.id, continuation.workflowRunId ?? ""))
+      .limit(1);
+    const workflowData = objectValue(workflowRun?.data);
+    const revisionContinuation = objectValue(workflowData.revisionContinuation);
+
+    expect(workflowRun?.state).toBe("revision_requested");
+    expect(revisionContinuation.workerRunId).toBe(continuation.workerRunId);
+    expect(revisionContinuation.action).toBe("revision_requested");
+    expect(workflowData.workflowStepIds).toContain(continuation.workflowStepId);
+
+    const [continuationStep] = await db
+      .select()
+      .from(workflowSteps)
+      .where(eq(workflowSteps.id, continuation.workflowStepId ?? ""))
+      .limit(1);
+    const stepOutput = objectValue(continuationStep?.output);
+
+    expect(continuationStep?.kind).toBe("worker_continuation");
+    expect(continuationStep?.fromState).toBe("revision_requested");
+    expect(continuationStep?.toState).toBe("revision_requested");
+    expect(stepOutput.nextAction).toBe("prepare_revised_packet");
+    expect(stepOutput.externalExecution).toBe("blocked");
+    expect(stepOutput.externalSend).toBe(false);
+
+    const [task] = await db
+      .select()
+      .from(tasks)
+      .where(eq(tasks.id, continuation.taskId ?? ""))
+      .limit(1);
+    const taskOutcome = objectValue(task?.outcome);
+
+    expect(task?.state).toBe("active");
+    expect(taskOutcome.status).toBe("revision_continuation_queued");
+    expect(objectValue(taskOutcome.revisionContinuation).workerRunId).toBe(
+      continuation.workerRunId,
+    );
+
+    const [originalWorkerRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(eq(workerRuns.id, first.workerRunId ?? ""))
+      .limit(1);
+    const originalOutput = objectValue(objectValue(originalWorkerRun?.data).output);
+
+    expect(objectValue(originalOutput.revisionContinuation).workerRunId).toBe(
+      continuation.workerRunId,
+    );
+    expect(originalOutput.externalSend).toBe(false);
+
+    const [adapterAction] = await db
+      .select()
+      .from(adapterActions)
+      .where(eq(adapterActions.id, first.adapterActionId ?? ""))
+      .limit(1);
+    const adapterReceipt = objectValue(adapterAction?.receipt);
+
+    expect(adapterAction?.mode).toBe("dry_run");
+    expect(adapterReceipt.externalMutation).toBe(false);
+    expect(adapterReceipt.externalSend).not.toBe(true);
+
+    const replay = await continueRevenueWorker({
+      approvalId: first.approvalRequestId ?? "",
+      idempotencyKey: `ci-worker-continue-${runId}`,
+      tenantSlug: "continuous-demo",
+      operatorEmail: "owner@continuoushq.com",
+      db,
+    });
+
+    expect(replay.created).toBe(false);
+    expect(replay.workerRunId).toBe(continuation.workerRunId);
+    expect(objectValue(replay.output).status).toBe("revision_continuation_queued");
   }, 120_000);
 
   it("runs from persisted Core lead intake under config.intake", async () => {

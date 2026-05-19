@@ -32,7 +32,7 @@ jobs:
       SITE_HOSTS: ${{ inputs.site_hosts }}
       ACME_EMAIL: ${{ secrets.ACME_EMAIL || 'admin@continuoushq.com' }}
       APP_URL: ${{ inputs.app_url }}
-      WORKER_OPERATOR_EMAIL: ${{ secrets.WORKER_OPERATOR_EMAIL || secrets.REVENUE_WORKER_OPERATOR_EMAIL || 'owner@continuoushq.com' }}
+      WORKER_OPERATOR_EMAIL: ${{ secrets.WORKER_OPERATOR_EMAIL || 'owner@continuoushq.com' }}
       DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
       DO_API_TOKEN: ${{ secrets.DO_API_TOKEN }}
       DO_FIREWALL_NAME: continuous-fw
@@ -193,9 +193,6 @@ jobs:
           export POSTGRES_USER POSTGRES_DB
           worker_token="$(grep '^WORKER_RUN_TOKEN=' .env | cut -d= -f2- || true)"
           if [ -z "$worker_token" ]; then
-            worker_token="$(grep '^REVENUE_WORKER_RUN_TOKEN=' .env | cut -d= -f2- || true)"
-          fi
-          if [ -z "$worker_token" ]; then
             worker_token="$(openssl rand -hex 32)"
           fi
           set_env WORKER_RUN_TOKEN "$worker_token"
@@ -232,9 +229,6 @@ jobs:
           POSTGRES_USER="${POSTGRES_USER:-continuous}"
           POSTGRES_DB="${POSTGRES_DB:-continuous}"
           WORKER_TOKEN="$(grep '^WORKER_RUN_TOKEN=' .env | cut -d= -f2- || true)"
-          if [ -z "$WORKER_TOKEN" ]; then
-            WORKER_TOKEN="$(grep '^REVENUE_WORKER_RUN_TOKEN=' .env | cut -d= -f2- || true)"
-          fi
 
           if [ -z "$WORKER_TOKEN" ]; then
             echo "Missing WORKER_RUN_TOKEN in $APP_DIR/.env." >&2
@@ -249,24 +243,18 @@ jobs:
           echo "$SCHEMA" | /usr/bin/jq -c '{commands:.registry.commands, views:.registry.views, tools:[.tools[].name]}'
           echo "$SCHEMA" | /usr/bin/jq -e '
             (.registry.commands | map(.name) | index("run")) != null and
+            (.registry.commands | map(.name) | index("continue")) != null and
             (.registry.commands | map(.name) | index("approval.decide")) != null and
             (.registry.commands | map(.name) | index("adapters.reconcile")) != null and
             (.registry.views | map(.name) | index("snapshot")) != null and
             (.registry.views | map(.name) | index("approvals")) != null and
             (.registry.commands | any(.name == "run" and .idempotency == "required")) and
+            (.registry.commands | any(.name == "continue" and .idempotency == "required")) and
             (.registry.commands | any(.name == "adapters.reconcile" and .requiresTenant == true)) and
             (.tools | map(.name) | index("worker.run")) != null and
+            (.tools | map(.name) | index("worker.continue")) != null and
             (.tools | map(.name) | index("worker.adapters.reconcile")) != null
           ' >/dev/null
-
-          FORBIDDEN_WORKER_ROUTE_STATUS="$(
-            curl -sS -o /dev/null -w '%{http_code}' --resolve continuoushq.com:443:127.0.0.1 \
-              https://continuoushq.com/api/revenue-worker
-          )"
-          if [ "$FORBIDDEN_WORKER_ROUTE_STATUS" != "404" ]; then
-            echo "Expected /api/revenue-worker to be absent, got HTTP $FORBIDDEN_WORKER_ROUTE_STATUS." >&2
-            exit 1
-          fi
 
           IDS="$(psql_db -At <<'SQL'
           with base as (

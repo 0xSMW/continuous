@@ -29,9 +29,10 @@ routes.
 }
 ```
 
-Define every supported command with required `config` fields, validation
-errors, idempotent replay behavior, output fields, and external-execution
-status.
+`worker.role` is required; the control plane must not default to the first
+implemented worker. Define every supported command with required `config`
+fields, validation errors, idempotent replay behavior, output fields, and
+external-execution status.
 
 ## Command Registry
 

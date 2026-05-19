@@ -10,7 +10,7 @@ APP_DIR="${APP_DIR:-/opt/continuous}"
 SITE_HOSTS="${SITE_HOSTS:-continuoushq.com, getcontinuous.app}"
 ACME_EMAIL="${ACME_EMAIL:-admin@continuoushq.com}"
 APP_URL="${APP_URL:-}"
-WORKER_OPERATOR_EMAIL="${WORKER_OPERATOR_EMAIL:-${REVENUE_WORKER_OPERATOR_EMAIL:-owner@continuoushq.com}}"
+WORKER_OPERATOR_EMAIL="${WORKER_OPERATOR_EMAIL:-owner@continuoushq.com}"
 POSTGRES_DB="${POSTGRES_DB:-continuous}"
 POSTGRES_USER="${POSTGRES_USER:-continuous}"
 REMOTE="$SSH_USER@$HOST"
@@ -115,9 +115,6 @@ set_env ACME_EMAIL "$ACME_EMAIL"
 set_env WORKER_OPERATOR_EMAIL "$WORKER_OPERATOR_EMAIL"
 
 worker_token="$(grep '^WORKER_RUN_TOKEN=' .env | cut -d= -f2- || true)"
-if [ -z "$worker_token" ]; then
-  worker_token="$(grep '^REVENUE_WORKER_RUN_TOKEN=' .env | cut -d= -f2- || true)"
-fi
 if [ -z "$worker_token" ]; then
   worker_token="$(openssl rand -hex 32)"
 fi

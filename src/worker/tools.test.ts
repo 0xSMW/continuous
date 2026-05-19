@@ -23,12 +23,10 @@ describe("worker tool contract", () => {
     const routePath = join(root, "app", "worker", "route.ts");
     const routeSource = readFileSync(routePath, "utf8");
     const appRoutes = routeFiles(join(root, "app")).map((path) => path.slice(root.length));
+    const routeList = appRoutes.join("\n");
 
     expect(existsSync(routePath)).toBe(true);
-    expect(existsSync(join(root, "app", "api", "revenue-worker", "route.ts"))).toBe(false);
-    expect(appRoutes).not.toContain("/app/api/revenue-worker/route.ts");
-    expect(appRoutes).not.toContain("/app/revenue-worker/route.ts");
-    expect(appRoutes).not.toContain("/app/api/payroll-worker/route.ts");
+    expect(routeList).not.toMatch(/\/app\/(?:api\/)?[a-z0-9-]+-worker\/route\.ts/);
     expect(routeSource).toContain("executeWorkerCommand");
     expect(routeSource).toContain("executeWorkerView");
     expect(routeSource).not.toContain("runRevenueWorker");
@@ -40,6 +38,7 @@ describe("worker tool contract", () => {
     expect(workerTools.map((tool) => tool.name)).toEqual([
       "worker.snapshot",
       "worker.run",
+      "worker.continue",
       "worker.approvals.list",
       "worker.approvals.decide",
       "worker.adapters.reconcile",
@@ -49,6 +48,7 @@ describe("worker tool contract", () => {
     expect(workerToolSchema.registry.views).toEqual(registeredWorkerViews());
     expect(workerToolSchema.registry.commands.map((command) => command.name)).toEqual([
       "run",
+      "continue",
       "approval.decide",
       "adapters.reconcile",
     ]);
@@ -66,17 +66,32 @@ describe("worker tool contract", () => {
         }),
         expect.objectContaining({
           role: "revenue_operations",
+          name: "continue",
+          idempotency: "required",
+          externalExecution: "blocked",
+        }),
+        expect.objectContaining({
+          role: "revenue_operations",
           name: "adapters.reconcile",
           requiresTenant: true,
         }),
       ]),
     );
     expect(workerToolSchema.$defs.workerTarget.properties.tenantSlug.type).toBe("string");
+    expect(workerToolSchema.$defs.workerTarget.required).toContain("role");
     for (const tool of workerTools) {
       expect(tool.description.length).toBeGreaterThan(0);
       expect(tool.inputSchema.type).toBe("object");
       expect(tool.inputSchema.properties.worker).toBeTruthy();
     }
+  });
+
+  it("requires an explicit worker role before runtime work", async () => {
+    await expect(
+      executeWorkerTool("worker.snapshot", {
+        worker: {},
+      }),
+    ).rejects.toThrow("worker.role is required.");
   });
 
   it("rejects unsupported worker roles before runtime work", async () => {
@@ -97,6 +112,22 @@ describe("worker tool contract", () => {
         },
         idempotencyKey: "bad key!",
         config: {},
+      }),
+    ).rejects.toThrow(
+      "Idempotency key may only contain letters, numbers, dot, underscore, colon, or dash.",
+    );
+  });
+
+  it("validates worker continuation idempotency before invoking the worker", async () => {
+    await expect(
+      executeWorkerTool("worker.continue", {
+        worker: {
+          role: "revenue_operations",
+        },
+        idempotencyKey: "bad key!",
+        config: {
+          approvalId: "approval_uuid",
+        },
       }),
     ).rejects.toThrow(
       "Idempotency key may only contain letters, numbers, dot, underscore, colon, or dash.",

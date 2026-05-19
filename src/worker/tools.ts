@@ -20,7 +20,6 @@ export const workerTools = [
       type: "object",
       properties: {
         worker: { $ref: "#/$defs/workerTarget" },
-        config: { type: "object" },
       },
       required: ["worker"],
     },
@@ -59,6 +58,32 @@ export const workerTools = [
         },
       },
       required: ["worker", "idempotencyKey"],
+    },
+  },
+  {
+    name: "worker.continue",
+    description: "Continue a worker-owned approval outcome with structured config.",
+    registry: {
+      role: "revenue_operations",
+      surface: "command",
+      command: "continue",
+      idempotency: "required",
+      externalExecution: "blocked",
+    },
+    inputSchema: {
+      type: "object",
+      properties: {
+        worker: { $ref: "#/$defs/workerTarget" },
+        idempotencyKey: { type: "string" },
+        config: {
+          type: "object",
+          properties: {
+            approvalId: { type: "string" },
+          },
+          required: ["approvalId"],
+        },
+      },
+      required: ["worker", "idempotencyKey", "config"],
     },
   },
   {
@@ -149,10 +174,11 @@ export const workerToolSchema = {
     workerTarget: {
       type: "object",
       properties: {
-        role: { type: "string", default: "revenue_operations" },
+        role: { type: "string" },
         id: { type: "string" },
         tenantSlug: { type: "string" },
       },
+      required: ["role"],
     },
     leadPacket: {
       type: "object",
@@ -231,6 +257,16 @@ export async function executeWorkerTool(name: string, payload: JsonObject = {}) 
   if (name === "worker.run") {
     return executeWorkerCommand({
       command: "run",
+      target,
+      operatorEmail,
+      config,
+      idempotencyKey: payload.idempotencyKey,
+    });
+  }
+
+  if (name === "worker.continue") {
+    return executeWorkerCommand({
+      command: "continue",
       target,
       operatorEmail,
       config,

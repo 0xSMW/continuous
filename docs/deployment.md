@@ -99,8 +99,9 @@ For the HTTPS worker API path, call `POST /worker` with `command`, `worker`,
 `config`, and `idempotencyKey` fields as required by the command plus the bearer
 token from `/opt/continuous/.env`. Revenue Worker runs should first create the
 lead object, `lead.received` event, and source snapshot through `/api/core`, then
-pass those ids under `config.intake`. `GET /api/core`, `GET /worker?view=snapshot`, and
-`GET /worker?view=approvals` use the same bearer token for operator-only
+pass those ids under `config.intake`. `GET /api/core`,
+`GET /worker?view=snapshot&role=revenue_operations`, and
+`GET /worker?view=approvals&role=revenue_operations` use the same bearer token for operator-only
 snapshots and approval review. Worker-specific HTTP paths are intentionally
 absent; expand the worker control plane through registered `/worker` commands
 and payload fields.
