@@ -15,7 +15,7 @@
 - Build the approval UI on top of the shared `approval_requests`, `audit_events`, and evidence API.
 - Create implementation-grade V1 contract docs for each future worker before coding it, using `docs/worker-contract-template.md`, and register command metadata before runtime code.
 - Keep all worker-family HTTP controls on `/worker` with registered `worker`, `command`, `idempotencyKey`, and `config` fields; do not add worker-family-specific URL shapes.
-- Codify production infrastructure state, backup/restore, deploy rollback, observability, scoped tokens, and non-root host access before using the droplet for real customer data.
+- Complete production hardening with tag-based deploy rollback, observability/alerts, scoped tokens, non-root host access, and a restore drill before using the droplet for real customer data.
 - Extend adapter reconciliation into retry execution, failure tasks, scoped live credentials, and rollback paths before allowing external sends or money movement.
 - Extend the Revenue Worker state machine with revision, retry, failure, reconciliation, and later approved-execution branches.
 - Expand read-only real lead intake from `config.intake` Core references into connected source readers.

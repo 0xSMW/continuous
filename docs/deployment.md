@@ -108,3 +108,62 @@ The deploy workflow smokes Core lead intake before `/worker`, then covers
 `/api/core` task creation, task transition, approval request, capability grant,
 budget reserve/charge/release, object, object-link, event, evidence, document,
 packet, decision, and generated-view commands after each production rollout.
+
+## Database Backup And Restore
+
+Postgres is the only production stateful service today. The `postgres_data`
+Docker volume must have an off-box backup before the droplet is used for real
+customer data.
+
+Create a verified custom-format dump on the droplet and copy it to local
+`backups/postgres/`:
+
+```sh
+HOST=45.55.53.92 ./scripts/backup-db.sh
+```
+
+Useful options:
+
+```sh
+HOST=45.55.53.92 \
+  REMOTE_BACKUP_DIR=/opt/continuous/backups/postgres \
+  LOCAL_BACKUP_DIR=backups/postgres \
+  RETENTION_DAYS=14 \
+  ./scripts/backup-db.sh
+```
+
+Restore is intentionally destructive and requires an explicit confirmation
+variable. It stops the app, validates the dump, recreates the database, restores
+the dump, runs migrations, restarts the app, and checks app health:
+
+```sh
+HOST=45.55.53.92 \
+  BACKUP_FILE=backups/postgres/continuous-postgres-20260520T000000Z.dump \
+  CONFIRM_RESTORE=continuous \
+  ./scripts/restore-db.sh
+```
+
+For a dump already on the droplet, use `REMOTE_BACKUP_FILE` instead of
+`BACKUP_FILE`:
+
+```sh
+HOST=45.55.53.92 \
+  REMOTE_BACKUP_FILE=/opt/continuous/backups/postgres/continuous-postgres-20260520T000000Z.dump \
+  CONFIRM_RESTORE=continuous \
+  ./scripts/restore-db.sh
+```
+
+Run a restore drill on a disposable droplet before relying on a backup for
+customer data. Rollback still requires a compatible database backup because
+migrations are forward-only.
+
+## Remaining Production Hardening
+
+- Tag app releases instead of always using `APP_TAG=local`, and keep the previous
+  image/tag for one-command app rollback.
+- Add log retention, Caddy access logs, metrics, and alerting around health,
+  disk, certificate renewal, backup age, and failed jobs.
+- Split the single operator bearer token into scoped credentials before adding
+  multiple real operators or customer data.
+- Replace root SSH deployment with a dedicated deploy user and least-privilege
+  sudo policy.

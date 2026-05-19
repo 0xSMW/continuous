@@ -29,6 +29,26 @@ The deploy script creates `/opt/continuous/.env` on the droplet with a random
 Postgres password and requires HTTPS `SITE_HOSTS`. The current production hosts
 are `continuoushq.com, getcontinuous.app`.
 
+## Backup and restore
+
+Back up the production Postgres volume before risky changes and on a regular
+cadence:
+
+```sh
+HOST=your-droplet-ip ./scripts/backup-db.sh
+```
+
+Restore from a verified custom-format dump:
+
+```sh
+HOST=your-droplet-ip BACKUP_FILE=backups/postgres/continuous-postgres-YYYYMMDDTHHMMSSZ.dump CONFIRM_RESTORE=continuous ./scripts/restore-db.sh
+```
+
+The backup script writes the dump on the droplet, verifies it with
+`pg_restore --list`, copies it to local `backups/postgres/`, and verifies the
+local checksum. The restore script is destructive and should be drilled on a
+disposable droplet before using it for customer data.
+
 ## Domain DNS
 
 The live domains use registrar DNS, not DigitalOcean DNS zones. Point these

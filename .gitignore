@@ -5,6 +5,7 @@
 .next/
 node_modules/
 coverage/
+backups/
 dist/
 generated/app-server/
 *.log

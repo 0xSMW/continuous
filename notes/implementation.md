@@ -41,12 +41,13 @@
 | Added persisted-intake no-send worker packets | `POST /worker` `command=run` now prefers `config.intake` Core object/event/evidence references, stores source snapshot evidence, hashes normalized input for idempotency, and derives classification, draft response, quote, and approval packet output from the resolved payload; `config.leadPacket` remains a direct operator/test fallback |
 | Added Revenue workflow spine | Revenue Worker runs now create a `lead_to_cash` workflow run plus durable workflow steps for intake, packet preparation, adapter dry-run, approval request, and approval decision continuation |
 | HTTPS is managed by Caddy | `continuoushq.com` and `getcontinuous.app` now point at the droplet, and Caddy issues and renews Let's Encrypt certificates from the persisted `caddy_data` volume |
+| Added a database recovery lane | `scripts/backup-db.sh` creates verified Postgres dumps on the droplet and copies them off-box; `scripts/restore-db.sh` performs a confirmation-gated restore, migration, restart, and health check |
 
 ### Tradeoffs
 
 | Tradeoff | Notes |
 |---|---|
-| Single droplet versus managed Postgres | Simpler and cheaper now; move Postgres out when customer data needs managed backup/isolation guarantees |
+| Single droplet versus managed Postgres | Simpler and cheaper now; the repo now has explicit backup/restore scripts, but managed Postgres is still the right move when customer data needs managed backup/isolation guarantees |
 | Docker verification | Docker is not running locally on this Mac, so full container verification is happening on the DigitalOcean droplet |
 | Domain TLS | Caddy now serves `continuoushq.com` and `getcontinuous.app` over HTTPS and renews certificates automatically; decide whether to include `www` hostnames in `SITE_HOSTS` before serving those records |
 | Bootstrap seed data | Seed records prove the substrate shape but are not customer fixtures |
@@ -58,6 +59,7 @@
 | Worker selection | Runtime selection now accepts tenant or worker selectors and falls back only when a single active Revenue Worker exists |
 | Worker run lifecycle | `worker_runs` is now the idempotent lifecycle boundary for Revenue Worker runs, with events kept as the audit log |
 | Codex app-server boundary | The installed CLI has protocol generation commands, but no local daemon subcommand in this environment; keep Next MCP for Next.js diagnostics and add app-server-owned worker tools only when the repo needs custom worker controls |
+| Recovery boundary | The restore script is intentionally destructive and migrations remain forward-only, so rollback depends on a compatible database dump until tag-based app rollback and migration rollback policy exist |
 
 ### Current State
 
@@ -71,6 +73,11 @@ task-transition, approval-request, capability-grant, budget-ledger, object,
 object-link, event, evidence, document, packet, decision, and generated-view commands. Local
 Node-side validation passes; the real Bun path is verified in the droplet
 containers and GitHub CI.
+
+Postgres recovery is now explicit: production backups are custom-format dumps
+verified with `pg_restore --list`, copied off the droplet with checksum
+verification, and restorable through a confirmation-gated script that recreates
+the database, runs migrations, restarts the app, and checks health.
 
 The strategy now makes the broader entity/workforce/payroll/filing/compliance/
 payment/AI-ops core explicit. Next implementation should start from the
