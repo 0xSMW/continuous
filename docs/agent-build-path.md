@@ -1,18 +1,22 @@
 # Agent Build Path
 
 The installed Codex app-server CLI exposes protocol tooling, not a repo-owned
-daemon command. This repo does not yet define app-server-owned worker tools.
-Use the Next.js 16 MCP bridge for route/runtime visibility, and add direct
-app-server tools only when worker control surfaces need repo-owned methods.
+daemon command. Continuous now defines one repo-owned read-only worker discovery
+tool, `continuous.worker.schema`, so agents can inspect registered worker
+commands without gaining mutation authority. Use the Next.js 16 MCP bridge for
+route/runtime visibility.
 
 ```sh
 bun run app-server:help
+bun run app-server:worker-tools
 bun run app-server:generate-ts
 bun run app-server:generate-json-schema
 ```
 
 Generated app-server protocol files are written under `generated/app-server/`
-and ignored by git. They are protocol references, not worker tools.
+and ignored by git. They are protocol references. The committed worker discovery
+manifest lives in `src/worker/app-server-tools.ts`; details are in
+`docs/app-server-worker-tools.md`.
 
 ## Next.js MCP
 

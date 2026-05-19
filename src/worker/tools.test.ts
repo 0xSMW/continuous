@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
+import {
+  appServerWorkerToolManifest,
+  appServerWorkerTools,
+  executeAppServerWorkerTool,
+} from "./app-server-tools";
 import { executeWorkerTool, workerToolSchema, workerTools } from "./tools";
 import { registeredWorkerCommands, registeredWorkerViews } from "./registry";
 
@@ -159,5 +164,25 @@ describe("worker tool contract", () => {
         },
       }),
     ).rejects.toThrow("config.limit must be an integer between 1 and 100.");
+  });
+
+  it("exposes one read-only app-server worker discovery tool", () => {
+    expect(appServerWorkerTools.map((tool) => tool.name)).toEqual([
+      "continuous.worker.schema",
+    ]);
+    expect(appServerWorkerToolManifest.mode).toBe("read_only_discovery");
+    expect(appServerWorkerToolManifest.boundary.sideEffects).toBe("none");
+    expect(appServerWorkerToolManifest.boundary.mutationTools).toBe("not_exposed");
+
+    const result = executeAppServerWorkerTool("continuous.worker.schema");
+
+    expect(result.registry.commands).toEqual(registeredWorkerCommands());
+    expect(result.workerToolSchema).toBe(workerToolSchema);
+    expect(result.manifest.tools).toBe(appServerWorkerTools);
+    expect(() =>
+      executeAppServerWorkerTool("continuous.worker.schema", {
+        worker: { role: "revenue_operations" },
+      }),
+    ).toThrow("continuous.worker.schema does not accept arguments.");
   });
 });

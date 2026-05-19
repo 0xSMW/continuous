@@ -22,4 +22,4 @@
 - Use `docs/revenue-worker-expansion.md` as the expansion gate list for the next worker iteration.
 - Use `docs/revenue-worker-v1-contract.md` as the machine-actionable contract for run and approval effects.
 - Extend Revenue Worker evals beyond the first two lead-to-quote golden cases.
-- Keep Next MCP for Next.js diagnostics; add direct Codex app-server worker tools if/when the repo needs app-server-owned controls.
+- Keep Next MCP for Next.js diagnostics; keep app-server worker tooling read-only until a real repo-owned daemon integration needs mutation.
