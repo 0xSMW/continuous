@@ -36,19 +36,20 @@ bootstrap records, builds the app image, and starts the stack. After DNS is
 pointed, the default hosts are `continuoushq.com, getcontinuous.app` and the
 default app URL is `https://continuoushq.com`.
 
-## DNS Cutover
+## Domain State
 
-After `continuoushq.com` and `getcontinuous.app` point at `45.55.53.92`:
+`continuoushq.com` and `getcontinuous.app` currently point at `45.55.53.92`.
+Refresh the Caddy hostnames explicitly when domain records change:
 
 ```sh
-HOST=45.55.53.92 ./scripts/configure-domain.sh
+HOST=45.55.53.92 SITE_HOSTS="continuoushq.com, getcontinuous.app" ./scripts/configure-domain.sh
 ```
 
 Caddy requests a publicly trusted certificate through Let's Encrypt, persists
 the ACME account and certificates in the `caddy_data` Docker volume, redirects
 HTTP to HTTPS, and renews certificates automatically before they expire. If
-`www` records are added later, include them in `SITE_HOSTS` before rerunning
-`scripts/configure-domain.sh` or the deploy workflow.
+`www` hostnames should serve the app, include them in `SITE_HOSTS` before
+rerunning `scripts/configure-domain.sh` or the deploy workflow.
 
 ## GitHub Deploy
 
@@ -83,7 +84,7 @@ operator-controlled smoke runs:
 ssh root@45.55.53.92 'cd /opt/continuous && docker compose --profile tools run --rm migrate bun run worker:revenue -- --idempotency-key=deploy-revenue-run-001'
 ```
 
-For the HTTPS app-server path, call `POST /api/revenue-worker/run` with an
+For the HTTPS Next.js API path, call `POST /api/revenue-worker/run` with an
 `idempotency-key` header and the bearer token from `/opt/continuous/.env`.
 `GET /api/core` and `GET /api/revenue-worker` use the same bearer token for
 operator-only snapshots.
