@@ -1,0 +1,251 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  decideApproval: vi.fn(),
+  listApprovals: vi.fn(),
+  env: {
+    APP_ENV: "test",
+    WORKER_RUN_ENABLED: true,
+    WORKER_RUN_TOKEN: "test-token",
+    WORKER_OPERATOR_EMAIL: "operator@example.com",
+    CONTROL_PLANE_ALLOWED_TENANTS: undefined as string | undefined,
+    CONTROL_PLANE_ALLOWED_WORKER_ROLES: undefined as string | undefined,
+  },
+}));
+
+vi.mock("../../src/env", () => ({
+  env: mocks.env,
+}));
+
+vi.mock("../../src/core/approvals", () => ({
+  decideApproval: mocks.decideApproval,
+  listApprovals: mocks.listApprovals,
+  normalizeApprovalDecision: (value: unknown) =>
+    value === "approved" || value === "rejected" || value === "revision_requested"
+      ? value
+      : null,
+}));
+
+describe("/approval route", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    Object.assign(mocks.env, {
+      APP_ENV: "test",
+      WORKER_RUN_ENABLED: true,
+      WORKER_RUN_TOKEN: "test-token",
+      WORKER_OPERATOR_EMAIL: "operator@example.com",
+      CONTROL_PLANE_ALLOWED_TENANTS: undefined,
+      CONTROL_PLANE_ALLOWED_WORKER_ROLES: undefined,
+    });
+  });
+
+  afterEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it("rejects scoped approval reads without a tenant before listing approvals", async () => {
+    mocks.env.CONTROL_PLANE_ALLOWED_TENANTS = "continuous-demo";
+
+    const { GET } = await import("./route");
+    const response = await GET(
+      new Request("http://localhost/approval?view=inbox", {
+        headers: {
+          authorization: "Bearer test-token",
+        },
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(body.error).toEqual({
+      code: "control_plane_tenant_required",
+      message: "tenantSlug is required for scoped control-plane access.",
+    });
+    expect(mocks.listApprovals).not.toHaveBeenCalled();
+  });
+
+  it("lists shared approvals for an allowed tenant and subject", async () => {
+    mocks.env.CONTROL_PLANE_ALLOWED_TENANTS = "continuous-demo";
+    mocks.listApprovals.mockResolvedValue({
+      operator: {
+        tenantSlug: "continuous-demo",
+      },
+      subject: "all",
+      approvals: [],
+    });
+
+    const { GET } = await import("./route");
+    const response = await GET(
+      new Request("http://localhost/approval?tenantSlug=continuous-demo&state=pending&subject=worker", {
+        headers: {
+          authorization: "Bearer test-token",
+        },
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.api).toBe("continuous.approval.v1");
+    expect(body.data.view).toBe("inbox");
+    expect(mocks.listApprovals).toHaveBeenCalledWith({
+      operatorEmail: "operator@example.com",
+      tenantSlug: "continuous-demo",
+      state: "pending",
+      subject: "worker",
+    });
+  });
+
+  it("rejects unsupported approval subjects instead of widening scope", async () => {
+    const { GET } = await import("./route");
+    const response = await GET(
+      new Request("http://localhost/approval?tenantSlug=continuous-demo&subject=everything", {
+        headers: {
+          authorization: "Bearer test-token",
+        },
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toEqual({
+      code: "invalid_approval_subject",
+      message: "Approval subject must be all, worker, workflow, or task.",
+    });
+    expect(mocks.listApprovals).not.toHaveBeenCalled();
+  });
+
+  it("dispatches platform approval decisions through the shared envelope", async () => {
+    mocks.env.CONTROL_PLANE_ALLOWED_TENANTS = "continuous-demo";
+    mocks.decideApproval.mockResolvedValue({
+      decided: true,
+      approvalRequestId: "77777777-7777-4777-8777-000000000001",
+      state: "approved",
+    });
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/approval", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "approval.decide",
+          approval: {
+            id: "77777777-7777-4777-8777-000000000001",
+            tenantSlug: "continuous-demo",
+            subject: "all",
+          },
+          config: {
+            action: "approved",
+            note: "Looks correct.",
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.command).toBe("approval.decide");
+    expect(body.data.approval).toEqual({
+      id: "77777777-7777-4777-8777-000000000001",
+      tenantSlug: "continuous-demo",
+      subject: "all",
+    });
+    expect(mocks.decideApproval).toHaveBeenCalledWith({
+      approvalId: "77777777-7777-4777-8777-000000000001",
+      operatorEmail: "operator@example.com",
+      tenantSlug: "continuous-demo",
+      action: "approved",
+      note: "Looks correct.",
+      subject: "all",
+    });
+  });
+
+  it("rejects ad hoc top-level approval command fields", async () => {
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/approval", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "approval.decide",
+          approvalId: "77777777-7777-4777-8777-000000000001",
+          approval: {
+            id: "77777777-7777-4777-8777-000000000001",
+            tenantSlug: "continuous-demo",
+          },
+          config: {
+            action: "approved",
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error.code).toBe("invalid_approval_command_envelope");
+    expect(mocks.decideApproval).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid approval decisions before dispatch", async () => {
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/approval", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "approval.decide",
+          approval: {
+            id: "77777777-7777-4777-8777-000000000001",
+            tenantSlug: "continuous-demo",
+          },
+          config: {
+            action: "send_it",
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error.code).toBe("invalid_approval_decision");
+    expect(mocks.decideApproval).not.toHaveBeenCalled();
+  });
+
+  it("rejects unsupported decision subjects before dispatch", async () => {
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/approval", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "approval.decide",
+          approval: {
+            id: "77777777-7777-4777-8777-000000000001",
+            tenantSlug: "continuous-demo",
+            subject: "everything",
+          },
+          config: {
+            action: "approved",
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error.code).toBe("invalid_approval_subject");
+    expect(mocks.decideApproval).not.toHaveBeenCalled();
+  });
+});

@@ -183,6 +183,7 @@ policy-bound:
 | `/worker?view=snapshot&role=revenue_operations` | Operator-only snapshot of worker state, active tasks, controls, budget usage, and recent events |
 | `/worker?view=approvals&role=revenue_operations` | Operator-only approval queue for worker decisions |
 | `POST /worker` | Canonical worker command surface for `lead.read`, `run`, `continue`, `approval.decide`, `adapters.reconcile`, and `adapters.retry`; worker role, tenant selection, idempotency, and operation config live in structured payload fields |
+| `/approval` | Shared operator approval inbox and decision surface across Core, workflow, and worker subjects |
 | `/workflow` | Canonical workflow command surface for listing definitions/runs/steps and executing validated `start` / `transition` / `approval.decide` commands |
 | `/workflow?view=approvals` | Operator-only approval queue for workflow decisions backed by the shared approval service |
 | `bun run worker:tool worker.lead.read` / `worker.run` | Canonical local command surfaces using the same worker/config payload shape |
@@ -192,9 +193,10 @@ must extend `/worker` by registering role-scoped commands with structured
 `worker`, `command`, `idempotencyKey`, and `config` fields rather than adding
 route names per worker.
 
-Approvals are platform records, not worker-specific records. Worker approvals
-and workflow approvals share `approval_requests`, `audit_events`, and evidence;
-the route decides which subject can be listed or decided.
+Approvals are platform records, not worker-specific records. Core, worker, and
+workflow approvals share `approval_requests`, `audit_events`, and evidence;
+`/approval` lists and decides those shared records with structured `approval`
+and `config` payloads.
 
 `command=lead.read` accepts source records, stores Core lead object/event/evidence
 rows, writes a read-only worker run, attributes budget/usage, and returns stable

@@ -28,7 +28,7 @@ supports `task.create`, `task.transition`, `object.upsert`, `object.link`,
 `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`,
 `document.packet.prepare`, `decision.record`, `approval.request`,
 `capability.grant`, `budget.reserve`, `budget.charge`,
-`budget.release`, `view.publish`, `customer_signal.record`, and
+`budget.release`, `view.publish`, `customer_signal.record`,
 `payroll.preview.record`, and `payroll.preview.packet.prepare`, all with the
 same bearer token used by worker and workflow commands.
 
@@ -155,8 +155,9 @@ and payload fields.
 The deploy workflow smokes `lead.read`, the source-selector `run` path, adapter
 reconciliation, continuation, and `/api/core` task creation, task transition,
 approval request, capability grant, budget reserve/charge/release, object,
-object-link, event, evidence, document, packet, decision, and generated-view
-commands plus payroll preview packet handoff after each production rollout.
+object-link, event, evidence, document, packet, decision, generated-view,
+shared approval inbox route, and payroll preview packet handoff after each
+production rollout.
 
 ## Database Backup And Restore
 

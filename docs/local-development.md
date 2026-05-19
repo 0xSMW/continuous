@@ -97,6 +97,10 @@ The additional Core write commands are `task.transition`, `object.link`,
 `payroll.preview.packet.prepare`. Each command writes audit proof and keeps
 external execution blocked.
 
+The shared approval inbox is `/approvals` in the browser and `/approval` for
+operator-gated JSON. Decisions use `POST /approval` with `command`,
+`approval`, and `config` payload fields.
+
 The repo also includes `.mcp.json` for the Next.js MCP bridge. With `bun run dev`
 running, compatible coding agents can inspect routes, runtime errors, metadata,
 and logs through `next-devtools-mcp`. The installed Codex app-server CLI exposes

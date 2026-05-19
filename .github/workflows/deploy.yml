@@ -318,6 +318,17 @@ jobs:
             '.error == null and .data.command == "payroll.preview.packet.prepare" and (.data.result.prepared | type) == "boolean" and (.data.result.packetId | length > 0) and (.data.result.packetDocumentId | length > 0) and (.data.result.varianceDocumentId | length > 0) and (.data.result.payStatementDocumentIds | length) >= 1 and (.data.result.paymentInstructionIds | length) == 2 and (.data.result.filingDraftId | length > 0) and (.data.result.approvalRequestId | length > 0) and (.data.result.evidenceId | length > 0) and .data.result.externalExecution == "blocked"' \
             >/dev/null
 
+          APPROVAL_INBOX_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              "https://continuoushq.com/approval?view=inbox&tenantSlug=continuous-demo&subject=all" \
+              -H "authorization: Bearer $WORKER_TOKEN"
+          )"
+
+          echo "$APPROVAL_INBOX_RESPONSE" | /usr/bin/jq -c '{api,error,view:.data.view,subject:.data.approvals.subject,count:(.data.approvals.approvals | length)}'
+          echo "$APPROVAL_INBOX_RESPONSE" | /usr/bin/jq -e \
+            '.error == null and .data.view == "inbox" and .data.approvals.subject == "all" and (.data.approvals.approvals | type) == "array"' \
+            >/dev/null
+
           SCHEMA="$(docker compose --profile tools run --rm migrate bun run worker:tool schema </dev/null)"
           echo "$SCHEMA" | /usr/bin/jq -c '{commands:.registry.commands, views:.registry.views, planned:[.registry.plannedContracts[].role], plannedCommandCount:(.registry.plannedCommands|length), plannedViewCount:(.registry.plannedViews|length), tools:[.tools[].name]}'
           echo "$SCHEMA" | /usr/bin/jq -e '

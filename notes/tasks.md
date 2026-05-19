@@ -13,7 +13,7 @@
 - Wire workflow step handlers into capability execution and retry workers.
 - Add more specialized Core commands for adapter intents and rule changes.
 - Extend `packet.prepare` coverage into new-hire, contractor, payroll, filing, termination, AI action, and rule-change workflow packet tests.
-- Build the approval UI on top of the shared `approval_requests`, `audit_events`, and evidence API.
+- Extend the shared approval inbox beyond the first token-gated UI into richer evidence detail, filters, and subject-specific continuation prompts.
 - Implement runtime handlers and CI evals for Dispatch, Finance, Workforce, Compliance, and Systems from their registered contract metadata.
 - Extend the Owner Chief-of-Staff Worker beyond the first read-only brief slice into approval/revision continuations, stale-source handling, and broader factuality evals.
 - Keep all worker-family HTTP controls on `/worker` with registered `worker`, `command`, `idempotencyKey`, and `config` fields; do not add worker-family-specific URL shapes.

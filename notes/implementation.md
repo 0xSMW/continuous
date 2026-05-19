@@ -43,6 +43,7 @@
 | Added Core task and approval controls | `POST /api/core` now supports `task.transition` and `approval.request`, so the headless platform can move task state and create pending approval packets without a worker-specific path |
 | Added Core authority and budget controls | `POST /api/core` now supports `capability.grant`, `budget.reserve`, `budget.charge`, and `budget.release`, so worker authority and AI budget movement are platform-owned commands with audit and evidence |
 | Added durable evidence packets | `POST /api/core` now supports `packet.prepare` and `document.packet.prepare`, creating an `evidence_packets` record plus linked document, event, audit, and trace evidence for workflow review packets |
+| Added shared approval inbox | `/approval` and `/approvals` expose a token-gated, subject-neutral approval inbox and decision surface on top of the shared `approval_requests`, `audit_events`, and evidence records |
 | Added customer-signal primitives | Satisfaction, feedback, complaint, testimonial, and review records persist as `CustomerSignal.type` rows, and `POST /api/core` `command=customer_signal.record` writes them with object links, note evidence, events, and audit proof |
 | Added payroll preview kernel | Pay statements, payroll lines, payroll liabilities, and payroll calculation traces now persist as first-class Core tables; `POST /api/core` `command=payroll.preview.record` records preview artifacts with event, audit, and trace evidence while external execution stays blocked |
 | Added payroll preview packet handoff | `POST /api/core` `command=payroll.preview.packet.prepare` gathers preview artifacts into variance reports, pay statement documents, approval packets, pending approval requests, and blocked payroll funding/tax draft records |
@@ -88,7 +89,7 @@ The DigitalOcean stack is running on `45.55.53.92`. `continuoushq.com` and
 certificates. Continuous Core now has
 persisted graph, task, capability, event, evidence, budget, adapter, authority,
 document, decision, workflow, and generated UI primitives plus worker run lifecycle
-records and `/`, `/api/health`, `/api/core`, and `POST /api/core` task,
+records and `/`, `/api/health`, `/approval`, `/approvals`, `/api/core`, and `POST /api/core` task,
 task-transition, approval-request, capability-grant, budget-ledger, object,
 object-link, event, evidence, document, packet, payroll preview, payroll packet,
 decision, and generated-view commands. Local

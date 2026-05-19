@@ -46,6 +46,10 @@ Then open `http://localhost:3000`.
   `budget.charge`, `budget.release`, `view.publish`, and
   `customer_signal.record`, `payroll.preview.record`, and
   `payroll.preview.packet.prepare`.
+- `/approval` is the shared approval control-plane API. Use
+  `GET /approval?view=inbox&tenantSlug=continuous-demo&subject=all`, or
+  `POST /approval` with `command=approval.decide`, structured `approval`, and
+  `config` fields.
 - `/worker` is the canonical worker control-plane API. Use
   `GET /worker?view=snapshot&role=revenue_operations` or
   `GET /worker?view=approvals&role=revenue_operations`; use `POST /worker` with
