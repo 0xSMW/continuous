@@ -5,14 +5,17 @@ import { and, count, eq, inArray, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { reconcileAdapterLedger } from "../core/adapters";
+import { createCoreTask } from "../core/tasks";
 import { db, pool } from "../db/client";
 import {
   adapterActions,
   adapterRuns,
   auditEvents,
   connections,
+  events,
   evaluations,
   evidence,
+  tasks,
   workerRuns,
   type JsonObject,
 } from "../db/schema";
@@ -43,6 +46,76 @@ maybeDescribe("Revenue Worker integration eval", () => {
   afterAll(async () => {
     await pool.end();
   });
+
+  it("creates headless core tasks with event and audit proof", async () => {
+    const idempotencyKey = `ci-core-task-${randomUUID()}`;
+    const first = await createCoreTask({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey,
+      title: "Review agency notice packet",
+      priority: "high",
+      owner: {
+        type: "user",
+      },
+      evidence: {
+        required: ["notice_packet"],
+      },
+      cost: {
+        humanMinutes: 15,
+      },
+      kpi: {
+        riskAvoided: "filing_penalty",
+      },
+      db,
+    });
+
+    expect(first.created).toBe(true);
+    expect(first.task.title).toBe("Review agency notice packet");
+    expect(first.task.state).toBe("active");
+    expect(first.task.priority).toBe("high");
+    expect(first.eventId).toBeTruthy();
+    expect(first.auditEventId).toBeTruthy();
+
+    const [task] = await db.select().from(tasks).where(eq(tasks.id, first.taskId)).limit(1);
+    const [event] = await db.select().from(events).where(eq(events.id, first.eventId ?? "")).limit(1);
+    const [audit] = await db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.id, first.auditEventId))
+      .limit(1);
+
+    expect(task?.title).toBe("Review agency notice packet");
+    expect(task?.ownerRef).toMatch(/^user:/);
+    expect(objectValue(task?.evidence).required).toEqual(["notice_packet"]);
+    expect(event?.type).toBe("task.created");
+    expect(event?.taskId).toBe(first.taskId);
+    expect(audit?.type).toBe("task.created");
+    expect(audit?.targetType).toBe("task");
+    expect(audit?.targetId).toBe(first.taskId);
+    expect(objectValue(audit?.data).externalExecution).toBe("blocked");
+
+    const replay = await createCoreTask({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey,
+      title: "Different title should not create another task",
+      db,
+    });
+    const [taskCount] = await db
+      .select({ value: count() })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.source, "continuous.core.tasks"),
+          eq(auditEvents.idempotencyKey, `${idempotencyKey}:task_created`),
+        ),
+      );
+
+    expect(replay.created).toBe(false);
+    expect(replay.taskId).toBe(first.taskId);
+    expect(taskCount.value).toBe(1);
+  }, 120_000);
 
   it("persists the golden lead-to-quote output, eval row, and idempotent replay", async () => {
     const evalCase = revenueWorkerEvalCases[0];

@@ -32,6 +32,7 @@ Useful app surfaces for worker development:
 | `/` | Runtime dashboard with public core state and redacted worker readiness |
 | `/api/health` | Machine health check |
 | `/api/core` | Operator-gated persisted primitive summary |
+| `POST /api/core` | Canonical Core command surface with `command`, `core`, `config`, and `idempotencyKey` payload fields |
 | `/worker?view=snapshot` | Canonical operator-gated worker snapshot |
 | `/worker?view=approvals` | Canonical operator-gated worker approval queue |
 | `POST /worker` | Canonical command surface with `command`, `worker`, `config`, and `idempotencyKey` payload fields |
@@ -78,6 +79,22 @@ When the HTTP snapshot, approval, or run path is required, start the app with
   },
   "idempotencyKey": "local-revenue-run-001",
   "config": {}
+}
+```
+
+Headless Core commands use the same convention:
+
+```json
+{
+  "command": "task.create",
+  "core": {
+    "tenantSlug": "continuous-demo"
+  },
+  "idempotencyKey": "local-core-task-001",
+  "config": {
+    "title": "Review agency notice packet",
+    "priority": "high"
+  }
 }
 ```
 

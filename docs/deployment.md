@@ -23,6 +23,11 @@ commands.
 | `migrate` | Drizzle migration/seed runner |
 | `caddy` | Automatic HTTPS, HTTP redirects, and certificate renewal |
 
+`POST /api/core` is the operator-gated headless Core command surface. The first
+side-effecting command is `task.create`, which creates a task, emits
+`task.created`, and writes audit proof with the same bearer token used by
+worker and workflow commands.
+
 ## First Deploy
 
 ```sh

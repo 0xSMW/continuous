@@ -10,11 +10,13 @@
 - Add customer satisfaction and feedback entities: SatisfactionSignal, FeedbackItem, Complaint, Testimonial, and Review.
 - Extend the broader workflow catalog beyond the first seven seeded workflows: open new state, compensation change, location change, payroll run, off-cycle payroll, quarter close, year-end, leave, injury/incident, benefits renewal, and agency notice.
 - Wire workflow step handlers into capability execution, retry workers, and adapter reconciliation.
+- Extend headless Core commands beyond `task.create` to object upsert, event ingest, evidence attach, document packet create, and decision record.
 - Add document/evidence packet support for new-hire, contractor, payroll, filing, termination, AI action, and rule-change workflows.
 - Build the approval UI on top of the shared `approval_requests`, `audit_events`, and evidence API.
 - Keep all worker-family HTTP controls on `/worker` with structured `worker`, `command`, `idempotencyKey`, and `config` fields; do not add worker-family-specific URL shapes.
 - Extend adapter reconciliation into retry execution, failure tasks, scoped live credentials, and rollback paths before allowing external sends or money movement.
 - Convert the deterministic Revenue Worker run into the state machine defined by `docs/revenue-worker-v1-contract.md`.
+- Build the no-send lead packet to approval packet slice: source snapshot evidence, input-derived classification/draft/quote fields, and eval cases that prove changed input changes worker output while `externalSend=false`.
 - Use `docs/revenue-worker-expansion.md` as the expansion gate list for the next worker iteration.
 - Use `docs/revenue-worker-v1-contract.md` as the machine-actionable contract for run and approval effects.
 - Extend Revenue Worker evals beyond the first lead-to-quote golden case.

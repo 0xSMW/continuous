@@ -85,8 +85,11 @@ smoke test.
 ## Milestones
 
 1. Convert the deterministic run into a small state machine.
-2. Add read-only real lead intake.
-3. Add quote approval UI backed by `ui_contracts`.
-4. Extend the persistence-only reconciliation worker into retry execution paths for failed or uncertain adapter results.
-5. Extend eval fixtures beyond the first CI-enforced lead-to-quote case.
-6. Raise autonomy only for read, classify, draft, and owner brief capabilities.
+2. Add a no-send lead packet to approval packet slice: source snapshot evidence,
+   input-derived classification, draft response, quote fields, approval packet,
+   and evals proving changed input changes output while `externalSend=false`.
+3. Add read-only real lead intake.
+4. Add quote approval UI backed by `ui_contracts`.
+5. Extend the persistence-only reconciliation worker into retry execution paths for failed or uncertain adapter results.
+6. Extend eval fixtures beyond the first CI-enforced lead-to-quote case.
+7. Raise autonomy only for read, classify, draft, and owner brief capabilities.

@@ -46,6 +46,25 @@ Open `http://localhost:3000` and `/api/health`. `/api/core` is an
 operator-only summary and uses the same bearer token as the canonical `/worker`
 control plane.
 
+Core side effects use a structured command payload. For local-only testing,
+start the app with `REVENUE_WORKER_RUN_ENABLED=true` and call:
+
+```sh
+curl -X POST http://localhost:3000/api/core \
+  -H "authorization: Bearer $REVENUE_WORKER_RUN_TOKEN" \
+  -H "content-type: application/json" \
+  -d '{
+    "command": "task.create",
+    "core": {"tenantSlug": "continuous-demo"},
+    "idempotencyKey": "local-core-task-001",
+    "config": {
+      "title": "Review agency notice packet",
+      "priority": "high",
+      "evidence": {"required": ["notice_packet"]}
+    }
+  }'
+```
+
 The repo also includes `.mcp.json` for the Next.js MCP bridge. With `bun run dev`
 running, compatible coding agents can inspect routes, runtime errors, metadata,
 and logs through `next-devtools-mcp`. The installed Codex app-server CLI exposes

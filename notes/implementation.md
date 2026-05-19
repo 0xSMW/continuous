@@ -28,6 +28,7 @@
 | Added worker execution roadmap | `docs/worker-roadmap.md` turns the worker catalog into phase-by-phase implementation gates for workers 2+ |
 | Added first Revenue Worker eval gate | `bun run test` now includes a CI-backed Postgres integration eval that runs the seeded worker, verifies persisted output/evaluation records, and checks idempotent replay |
 | Added persistence-only adapter reconciliation | `worker.adapters.reconcile` scans pending dry-run adapter runs/actions, writes matched/retry/review state, and records audit/evidence without external execution |
+| Added headless Core task creation | `POST /api/core` with `command=task.create` creates platform tasks, emits `task.created`, and records audit proof without worker-specific routes |
 | Agent build path uses app-server protocol tooling plus Next.js MCP | The installed Codex app-server CLI exposes protocol generation/help commands; `.mcp.json` keeps the Next.js 16 MCP bridge for route/runtime diagnostics |
 | Added the first authority ledger | Revenue Worker runs now create approval requests and audit events, and approval decisions create evidence before any external action is allowed |
 | Added first-class adapter dry-runs | Revenue Worker runs now create linked adapter runs/actions, receipt evidence, attempt metadata, and reconciliation state while external mutation remains disabled |
@@ -57,7 +58,7 @@ The DigitalOcean stack is running on `45.55.53.92`. `continuoushq.com` and
 certificates. Continuous Core now has
 persisted graph, task, capability, event, evidence, budget, adapter, authority,
 and generated UI primitives plus worker run lifecycle records and `/`,
-`/api/health`, and `/api/core`. Local
+`/api/health`, `/api/core`, and `POST /api/core` task creation. Local
 Node-side validation passes; the real Bun path is verified in the droplet
 containers and GitHub CI.
 
