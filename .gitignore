@@ -8,6 +8,7 @@ coverage/
 dist/
 *.log
 *.tsbuildinfo
+.claude/settings.local.json
 npm-debug.log*
 pnpm-debug.log*
 yarn-debug.log*
