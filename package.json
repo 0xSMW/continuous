@@ -12,6 +12,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:eval": "vitest run src/worker/evals.test.ts src/worker/revenue.integration.test.ts",
     "check": "bun run lint && bun run typecheck && bun run test && bun run build",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "bun src/db/migrate.ts",
