@@ -4,6 +4,7 @@ import { db as defaultDb } from "../db/client";
 import {
   approvalRequests,
   auditEvents,
+  adapterActions,
   capabilities,
   evidence,
   events,
@@ -12,6 +13,8 @@ import {
   users,
   workflowDefinitions,
   workflowRuns,
+  workflowSteps,
+  workerRuns,
   type JsonObject,
 } from "../db/schema";
 import { PlatformUnavailableError } from "./errors";
@@ -92,12 +95,12 @@ export type ApprovalRequestResult = {
 };
 
 function approvalSubject(row: typeof approvalRequests.$inferSelect): ApprovalRecord["subject"] {
-  if (row.workflowRunId) {
-    return { type: "workflow_run", id: row.workflowRunId };
-  }
-
   if (row.workerRunId) {
     return { type: "worker_run", id: row.workerRunId };
+  }
+
+  if (row.workflowRunId) {
+    return { type: "workflow_run", id: row.workflowRunId };
   }
 
   if (row.taskId) {
@@ -253,6 +256,27 @@ function canTransition(transitions: JsonObject, fromState: string, toState: stri
 
 function isTerminal(transitions: JsonObject, state: string) {
   return stringArray(transitions[state]).length === 0;
+}
+
+function objectValue(value: unknown): JsonObject {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonObject) : {};
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function uuidValue(value: unknown) {
+  const valueString = stringValue(value);
+  return valueString && uuidPattern.test(valueString) ? valueString : undefined;
+}
+
+function workflowStateForDecision(action: ApprovalDecisionAction) {
+  if (action === "approved") {
+    return "approved";
+  }
+
+  return action;
 }
 
 export function normalizeApprovalDecision(value: unknown): ApprovalDecisionAction | null {
@@ -759,16 +783,64 @@ export async function decideApproval(input: {
       })
       .returning({ id: evidence.id });
 
+    const approvalData = objectValue(approval.data);
+    const approvalEvidenceData = objectValue(approval.evidence);
+    const requestedAction = objectValue(approval.requestedAction);
+    const adapterRunId = uuidValue(approvalData.adapterRunId ?? approvalEvidenceData.adapterRunId);
+    const adapterActionId = uuidValue(
+      requestedAction.adapterActionId ?? approvalData.adapterActionId ?? approvalEvidenceData.adapterActionId,
+    );
+    const adapterReceiptEvidenceId = uuidValue(
+      approvalData.adapterReceiptEvidenceId ?? approvalEvidenceData.adapterReceiptEvidenceId,
+    );
+    const continuation = {
+      status:
+        input.action === "approved"
+          ? "approved_waiting_internal_continuation"
+          : input.action === "revision_requested"
+            ? "revision_requested"
+            : "rejected_closed",
+      approvalRequestId: approval.id,
+      auditEventId: audit.id,
+      evidenceId: approvalEvidence.id,
+      workerRunId: approval.workerRunId,
+      workflowRunId: approval.workflowRunId,
+      adapterRunId: adapterRunId ?? null,
+      adapterActionId: adapterActionId ?? null,
+      adapterReceiptEvidenceId: adapterReceiptEvidenceId ?? null,
+      externalExecution: "blocked",
+      externalSend: false,
+      adapterMode: "dry_run",
+    };
+
+    await tx
+      .update(approvalRequests)
+      .set({
+        decision: {
+          ...decision,
+          continuation,
+        },
+      })
+      .where(eq(approvalRequests.id, approval.id));
+
     if (approval.taskId) {
+      const [task] = await tx
+        .select({ outcome: tasks.outcome })
+        .from(tasks)
+        .where(and(eq(tasks.tenantId, operator.tenantId), eq(tasks.id, approval.taskId)))
+        .limit(1);
+
       await tx
         .update(tasks)
         .set({
           state: taskState,
           outcome: {
+            ...objectValue(task?.outcome),
             status: `approval_${input.action}`,
             approvalRequestId: approval.id,
             approvalEvidenceId: approvalEvidence.id,
             auditEventId: audit.id,
+            continuation,
             externalExecution: "blocked",
           },
           updatedAt: now,
@@ -777,6 +849,7 @@ export async function decideApproval(input: {
     }
 
     let workflowRunState: string | null = null;
+    let workflowStepId: string | null = null;
 
     if (approval.workflowRunId) {
       const [workflow] = await tx
@@ -795,13 +868,56 @@ export async function decideApproval(input: {
         .limit(1);
 
       if (workflow) {
-        const nextState =
-          input.action === "approved" &&
-          canTransition(workflow.definition.transitions, workflow.run.state, "approved")
-            ? "approved"
-            : workflow.run.state;
+        const decisionState = workflowStateForDecision(input.action);
+        const nextState = canTransition(workflow.definition.transitions, workflow.run.state, decisionState)
+          ? decisionState
+          : workflow.run.state;
 
         workflowRunState = nextState;
+
+        const [workflowStep] = await tx
+          .insert(workflowSteps)
+          .values({
+            tenantId: operator.tenantId,
+            definitionId: workflow.definition.id,
+            workflowRunId: workflow.run.id,
+            eventId: approval.eventId,
+            approvalRequestId: approval.id,
+            taskId: approval.taskId,
+            objectId: approval.objectId,
+            workerId: workflow.run.workerId,
+            capabilityId: approval.capabilityId,
+            kind: "approval_decision",
+            name: `${workflow.definition.key}:approval:${input.action}`,
+            state: "done",
+            priority: approval.priority,
+            risk: approval.risk,
+            fromState: workflow.run.state,
+            toState: nextState,
+            attempt: 1,
+            maxAttempts: 1,
+            leaseOwner: operator.actorRef,
+            leasedUntil: now,
+            idempotencyKey: `${approval.id}:approval:${input.action}`,
+            input: {
+              approvalRequestId: approval.id,
+              workflowRunId: workflow.run.id,
+              action: input.action,
+              note: input.note ?? "",
+            },
+            output: {
+              auditEventId: audit.id,
+              evidenceId: approvalEvidence.id,
+              continuation,
+              externalExecution: "blocked",
+            },
+            startedAt: now,
+            completedAt: now,
+            updatedAt: now,
+          })
+          .returning({ id: workflowSteps.id });
+
+        workflowStepId = workflowStep.id;
 
         await tx
           .update(workflowRuns)
@@ -813,6 +929,8 @@ export async function decideApproval(input: {
                 approvalRequestId: approval.id,
                 auditEventId: audit.id,
                 evidenceId: approvalEvidence.id,
+                workflowStepId,
+                continuation,
                 ...decision,
               },
             },
@@ -822,6 +940,81 @@ export async function decideApproval(input: {
               : workflow.run.completedAt,
           })
           .where(eq(workflowRuns.id, workflow.run.id));
+      }
+    }
+
+    if (approval.workerRunId) {
+      const [workerRun] = await tx
+        .select({ data: workerRuns.data })
+        .from(workerRuns)
+        .where(and(eq(workerRuns.tenantId, operator.tenantId), eq(workerRuns.id, approval.workerRunId)))
+        .limit(1);
+      const workerRunData = objectValue(workerRun?.data);
+      const output = objectValue(workerRunData.output);
+
+      await tx
+        .update(workerRuns)
+        .set({
+          data: {
+            ...workerRunData,
+            output: {
+              ...output,
+              approvalDecision: {
+                ...decision,
+                workflowStepId,
+                continuation,
+              },
+              externalExecution: "blocked",
+              externalSend: false,
+            },
+            lastApprovalDecision: {
+              ...decision,
+              workflowStepId,
+              continuation,
+            },
+          },
+          updatedAt: now,
+        })
+        .where(eq(workerRuns.id, approval.workerRunId));
+    }
+
+    if (adapterActionId) {
+      const adapterConditions = [
+        eq(adapterActions.tenantId, operator.tenantId),
+        eq(adapterActions.id, adapterActionId),
+      ];
+
+      if (approval.workerRunId && adapterRunId) {
+        adapterConditions.push(eq(adapterActions.adapterRunId, adapterRunId));
+      }
+
+      const [adapterAction] = await tx
+        .select({
+          response: adapterActions.response,
+          receipt: adapterActions.receipt,
+        })
+        .from(adapterActions)
+        .where(and(...adapterConditions))
+        .limit(1);
+
+      if (adapterAction) {
+        await tx
+          .update(adapterActions)
+          .set({
+            response: {
+              ...adapterAction.response,
+              continuation,
+              externalExecution: "blocked",
+              externalSend: false,
+            },
+            receipt: {
+              ...adapterAction.receipt,
+              continuation,
+              externalMutation: false,
+              externalSend: false,
+            },
+          })
+          .where(eq(adapterActions.id, adapterActionId));
       }
     }
 
@@ -837,6 +1030,7 @@ export async function decideApproval(input: {
       evidenceId: approvalEvidence.id,
       taskState,
       workflowRunState,
+      workflowStepId,
     };
   });
 }

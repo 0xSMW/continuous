@@ -478,17 +478,19 @@ jobs:
               -d "$WORKER_RUN_PAYLOAD"
           )"
 
-          echo "$WORKER_RUN_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,workerRunId:.data.result.workerRunId,eventId:.data.result.eventId,sourceSnapshotEvidenceId:.data.result.sourceSnapshotEvidenceId,sourceObjectId:.data.result.output.sourceObjectId,sourceEventRowId:.data.result.output.sourceEventRowId,sourceEvidenceId:.data.result.output.sourceEvidenceId,externalSend:.data.result.output.externalSend,classification:.data.result.output.classification}}'
+          echo "$WORKER_RUN_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,workerRunId:.data.result.workerRunId,eventId:.data.result.eventId,workflowRunId:.data.result.workflowRunId,workflowStepCount:(.data.result.workflowStepIds | length),sourceSnapshotEvidenceId:.data.result.sourceSnapshotEvidenceId,sourceObjectId:.data.result.output.sourceObjectId,sourceEventRowId:.data.result.output.sourceEventRowId,sourceEvidenceId:.data.result.output.sourceEvidenceId,externalSend:.data.result.output.externalSend,classification:.data.result.output.classification}}'
           echo "$WORKER_RUN_RESPONSE" | /usr/bin/jq -e \
             --arg objectId "$LEAD_OBJECT_ID" \
             --arg eventId "$LEAD_EVENT_ID" \
             --arg evidenceId "$LEAD_EVIDENCE_ID" \
-            '.error == null and .data.command == "run" and .data.result.created == true and (.data.result.workerRunId | length > 0) and (.data.result.eventId | length > 0) and (.data.result.sourceSnapshotEvidenceId | length > 0) and .data.result.output.externalSend == false and .data.result.output.classification == "quote_ready_for_owner_approval" and .data.result.output.sourceObjectId == $objectId and .data.result.output.sourceEventRowId == $eventId and .data.result.output.sourceEvidenceId == $evidenceId and .data.result.snapshot.controls.externalExecution == "disabled"' \
+            '.error == null and .data.command == "run" and .data.result.created == true and (.data.result.workerRunId | length > 0) and (.data.result.eventId | length > 0) and (.data.result.workflowRunId | length > 0) and (.data.result.workflowStepIds | length) == 4 and (.data.result.sourceSnapshotEvidenceId | length > 0) and .data.result.output.externalSend == false and .data.result.output.classification == "quote_ready_for_owner_approval" and .data.result.output.sourceObjectId == $objectId and .data.result.output.sourceEventRowId == $eventId and .data.result.output.sourceEvidenceId == $evidenceId and .data.result.output.workflowRunId == .data.result.workflowRunId and .data.result.snapshot.controls.externalExecution == "disabled"' \
             >/dev/null
 
           WORKER_RUN_ID="$(echo "$WORKER_RUN_RESPONSE" | /usr/bin/jq -r '.data.result.workerRunId')"
           WORKER_EVENT_ID="$(echo "$WORKER_RUN_RESPONSE" | /usr/bin/jq -r '.data.result.eventId')"
           SOURCE_SNAPSHOT_ID="$(echo "$WORKER_RUN_RESPONSE" | /usr/bin/jq -r '.data.result.sourceSnapshotEvidenceId')"
+          WORKER_APPROVAL_ID="$(echo "$WORKER_RUN_RESPONSE" | /usr/bin/jq -r '.data.result.approvalRequestId')"
+          WORKFLOW_RUN_ID="$(echo "$WORKER_RUN_RESPONSE" | /usr/bin/jq -r '.data.result.workflowRunId')"
 
           psql_db -At <<SQL
           select 'worker_run' as kind, state, source, data->'output'->>'externalSend'
@@ -497,7 +499,76 @@ jobs:
           from events where id = '$WORKER_EVENT_ID'::uuid;
           select 'source_snapshot' as kind, kind, name, data->>'externalSend', data->>'sourceObjectId', data->>'sourceEventRowId', data->>'sourceEvidenceId'
           from evidence where id = '$SOURCE_SNAPSHOT_ID'::uuid;
+          select 'revenue_workflow' as kind, state, data->>'workerRunId', data->>'approvalRequestId'
+          from workflow_runs where id = '$WORKFLOW_RUN_ID'::uuid;
+          select 'revenue_workflow_steps' as kind, count(*)::text
+          from workflow_steps where workflow_run_id = '$WORKFLOW_RUN_ID'::uuid;
           SQL
+
+          WORKFLOW_ROW="$(psql_db -Atc "select state || '|' || coalesce(data->>'workerRunId','') || '|' || coalesce(data->>'approvalRequestId','') from workflow_runs where id = '$WORKFLOW_RUN_ID'::uuid;")"
+          if [ "$WORKFLOW_ROW" != "approval_requested|$WORKER_RUN_ID|$WORKER_APPROVAL_ID" ]; then
+            echo "Unexpected revenue workflow row: $WORKFLOW_ROW" >&2
+            exit 1
+          fi
+
+          WORKFLOW_STEP_COUNT="$(psql_db -Atc "select count(*)::text from workflow_steps where workflow_run_id = '$WORKFLOW_RUN_ID'::uuid;")"
+          if [ "$WORKFLOW_STEP_COUNT" != "4" ]; then
+            echo "Expected 4 revenue workflow steps, got $WORKFLOW_STEP_COUNT." >&2
+            exit 1
+          fi
+
+          WORKER_APPROVAL_DECISION_PAYLOAD="$(
+            /usr/bin/jq -nc --arg approvalId "$WORKER_APPROVAL_ID" '{
+              command: "approval.decide",
+              worker: {role: "revenue_operations", tenantSlug: "continuous-demo"},
+              config: {
+                approvalId: $approvalId,
+                action: "approved",
+                note: "Deploy smoke approval continuation; external execution remains blocked."
+              }
+            }'
+          )"
+          WORKER_APPROVAL_DECISION_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/worker \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$WORKER_APPROVAL_DECISION_PAYLOAD"
+          )"
+
+          echo "$WORKER_APPROVAL_DECISION_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{workflowRunState:.data.result.workflowRunState,workflowStepId:.data.result.workflowStepId,taskState:.data.result.taskState}}'
+          echo "$WORKER_APPROVAL_DECISION_RESPONSE" | /usr/bin/jq -e \
+            '.error == null and .data.command == "approval.decide" and .data.result.workflowRunState == "approved" and (.data.result.workflowStepId | length > 0)' \
+            >/dev/null
+
+          WORKFLOW_APPROVAL_STEP_ID="$(echo "$WORKER_APPROVAL_DECISION_RESPONSE" | /usr/bin/jq -r '.data.result.workflowStepId')"
+
+          psql_db -At <<SQL
+          select 'revenue_workflow_after_approval' as kind, state, data->'lastApprovalDecision'->>'action', data->'lastApprovalDecision'->'continuation'->>'externalExecution'
+          from workflow_runs where id = '$WORKFLOW_RUN_ID'::uuid;
+          select 'revenue_approval_step' as kind, kind, from_state, to_state, output->'continuation'->>'externalExecution'
+          from workflow_steps where id = '$WORKFLOW_APPROVAL_STEP_ID'::uuid;
+          select 'worker_run_approval_continuation' as kind, data->'output'->'approvalDecision'->'continuation'->>'externalExecution', data->'output'->>'externalSend'
+          from worker_runs where id = '$WORKER_RUN_ID'::uuid;
+          SQL
+
+          WORKFLOW_APPROVAL_ROW="$(psql_db -Atc "select state || '|' || coalesce(data->'lastApprovalDecision'->>'action','') || '|' || coalesce(data->'lastApprovalDecision'->'continuation'->>'externalExecution','') from workflow_runs where id = '$WORKFLOW_RUN_ID'::uuid;")"
+          if [ "$WORKFLOW_APPROVAL_ROW" != "approved|approved|blocked" ]; then
+            echo "Unexpected revenue workflow approval row: $WORKFLOW_APPROVAL_ROW" >&2
+            exit 1
+          fi
+
+          WORKFLOW_APPROVAL_STEP_ROW="$(psql_db -Atc "select kind || '|' || coalesce(from_state,'') || '|' || to_state || '|' || coalesce(output->'continuation'->>'externalExecution','') from workflow_steps where id = '$WORKFLOW_APPROVAL_STEP_ID'::uuid;")"
+          if [ "$WORKFLOW_APPROVAL_STEP_ROW" != "approval_decision|approval_requested|approved|blocked" ]; then
+            echo "Unexpected revenue approval workflow step: $WORKFLOW_APPROVAL_STEP_ROW" >&2
+            exit 1
+          fi
+
+          WORKER_CONTINUATION_ROW="$(psql_db -Atc "select coalesce(data->'output'->'approvalDecision'->'continuation'->>'externalExecution','') || '|' || coalesce(data->'output'->>'externalSend','') from worker_runs where id = '$WORKER_RUN_ID'::uuid;")"
+          if [ "$WORKER_CONTINUATION_ROW" != "blocked|false" ]; then
+            echo "Unexpected worker continuation row: $WORKER_CONTINUATION_ROW" >&2
+            exit 1
+          fi
 
           CORE_KEY="deploy-core-task-$RUN_ID"
           CORE_PAYLOAD="$(

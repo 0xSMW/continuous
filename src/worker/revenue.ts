@@ -27,6 +27,9 @@ import {
   tasks,
   tenants,
   usageEvents,
+  workflowDefinitions,
+  workflowRuns,
+  workflowSteps,
   users,
   workerRuns,
   workers,
@@ -36,6 +39,7 @@ import {
 type Database = typeof defaultDb;
 
 const revenueWorkerRole = "revenue_operations";
+const revenueWorkflowKey = "lead_to_cash";
 const source = "continuous.revenue_worker";
 const runUnits = 12000;
 const uuidPattern =
@@ -127,6 +131,8 @@ export type RevenueWorkerRunResult = {
   adapterReceiptEvidenceId: string | null;
   approvalRequestId: string | null;
   auditEventId: string | null;
+  workflowRunId: string | null;
+  workflowStepIds: string[];
   output: JsonObject;
   snapshot: RevenueWorkerSnapshot;
 };
@@ -239,6 +245,10 @@ function stringList(value: unknown) {
         .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
         .map((item) => item.trim())
     : [];
+}
+
+function getWorkflowStepIds(data: JsonObject) {
+  return stringList(outputData(data).workflowStepIds ?? data.workflowStepIds);
 }
 
 function booleanValue(value: unknown) {
@@ -1201,6 +1211,8 @@ export async function runRevenueWorker(input: {
         adapterReceiptEvidenceId: stringData(existingRun.data, "adapterReceiptEvidenceId"),
         approvalRequestId: stringData(existingRun.data, "approvalRequestId"),
         auditEventId: stringData(existingRun.data, "auditEventId"),
+        workflowRunId: stringData(existingRun.data, "workflowRunId"),
+        workflowStepIds: getWorkflowStepIds(existingRun.data),
         output,
       };
     }
@@ -1240,6 +1252,8 @@ export async function runRevenueWorker(input: {
         adapterReceiptEvidenceId: stringData(existingEvent.data, "adapterReceiptEvidenceId"),
         approvalRequestId: stringData(existingEvent.data, "approvalRequestId"),
         auditEventId: stringData(existingEvent.data, "auditEventId"),
+        workflowRunId: stringData(existingEvent.data, "workflowRunId"),
+        workflowStepIds: getWorkflowStepIds(existingEvent.data),
       };
       const [adoptedRun] = await tx
         .insert(workerRuns)
@@ -1288,6 +1302,8 @@ export async function runRevenueWorker(input: {
         adapterReceiptEvidenceId: stringData(existingEvent.data, "adapterReceiptEvidenceId"),
         approvalRequestId: stringData(existingEvent.data, "approvalRequestId"),
         auditEventId: stringData(existingEvent.data, "auditEventId"),
+        workflowRunId: eventOutput.workflowRunId,
+        workflowStepIds: eventOutput.workflowStepIds,
         output: {
           ...output,
           ...eventOutput,
@@ -1454,6 +1470,55 @@ export async function runRevenueWorker(input: {
       })
       .returning({ id: workerRuns.id });
 
+    const [workflowDefinition] = await tx
+      .select({
+        id: workflowDefinitions.id,
+        key: workflowDefinitions.key,
+        name: workflowDefinitions.name,
+      })
+      .from(workflowDefinitions)
+      .where(and(eq(workflowDefinitions.key, revenueWorkflowKey), eq(workflowDefinitions.active, true)))
+      .orderBy(workflowDefinitions.version)
+      .limit(1);
+
+    if (!workflowDefinition) {
+      throw new RevenueWorkerUnavailableError(
+        "worker_workflow_definition_missing",
+        "Revenue Worker requires the lead_to_cash workflow definition.",
+        409,
+      );
+    }
+
+    const [workflowRun] = await tx
+      .insert(workflowRuns)
+      .values({
+        tenantId: context.worker.tenantId,
+        definitionId: workflowDefinition.id,
+        objectId: runObjectId,
+        workerId: context.worker.id,
+        state: "received",
+        idempotencyKey: input.idempotencyKey,
+        data: {
+          workerRunId: workerRun.id,
+          inputHash,
+          ...intakeTrace,
+          source: leadPacket.source,
+          sourceEventId: leadPacket.sourceEventId,
+          leadPacket: leadPacket.sourceSnapshot,
+          externalExecution: "blocked",
+        },
+        blockers: {
+          open: ["owner_approval_required", "external_execution_blocked"],
+        },
+        metrics: {
+          budgetUnits: runUnits,
+          missingFacts: leadPacket.missingFacts.length,
+        },
+        startedAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: workflowRuns.id });
+
     const [runAudit] = await tx
       .insert(auditEvents)
       .values({
@@ -1477,6 +1542,7 @@ export async function runRevenueWorker(input: {
           inputHash,
           ...intakeTrace,
           leadPacket: leadPacket.sourceSnapshot,
+          workflowRunId: workflowRun.id,
           externalExecution: "blocked",
           mode: "simulation",
         },
@@ -1513,6 +1579,7 @@ export async function runRevenueWorker(input: {
         writeCount: 0,
         data: {
           workerRunId: workerRun.id,
+          workflowRunId: workflowRun.id,
           capabilityId,
           inputHash,
           ...intakeTrace,
@@ -1541,11 +1608,13 @@ export async function runRevenueWorker(input: {
           objective: "Classify the lead packet and prepare the next owner-visible no-send action.",
           leadPacket: leadPacket.sourceSnapshot,
           ...intakeTrace,
+          workflowRunId: workflowRun.id,
           inputHash,
         },
         result: {
           classification: leadPacket.classification,
           nextAction: "owner_approval",
+          workflowRunId: workflowRun.id,
           draftResponse: leadPacket.draftResponse,
           quote: leadPacket.quote,
           externalSend: false,
@@ -1581,6 +1650,7 @@ export async function runRevenueWorker(input: {
           mode: "simulation",
           workerRunId: workerRun.id,
           ...intakeTrace,
+          workflowRunId: workflowRun.id,
           adapterRunId: adapterRun.id,
         },
       })
@@ -1615,6 +1685,7 @@ export async function runRevenueWorker(input: {
           externalSend: false,
           requiresApproval: true,
           workerRunId: workerRun.id,
+          workflowRunId: workflowRun.id,
           taskId: task?.id ?? null,
           operatorUserId: operator.id,
           auditEventId: runAudit.id,
@@ -1640,6 +1711,7 @@ export async function runRevenueWorker(input: {
           idempotencyKey: input.idempotencyKey,
           inputHash,
           workerRunId: workerRun.id,
+          workflowRunId: workflowRun.id,
           ...intakeTrace,
           source: leadPacket.source,
           sourceEventId: leadPacket.sourceEventId,
@@ -1666,6 +1738,7 @@ export async function runRevenueWorker(input: {
           idempotencyKey: input.idempotencyKey,
           inputHash,
           workerRunId: workerRun.id,
+          workflowRunId: workflowRun.id,
           ...intakeTrace,
           sourceSnapshotEvidenceId: sourceSnapshotEvidence.id,
           inferenceId: inference.id,
@@ -1700,6 +1773,7 @@ export async function runRevenueWorker(input: {
         request: {
           action: leadPacket.expectedAction,
           workerRunId: workerRun.id,
+          workflowRunId: workflowRun.id,
           ...intakeTrace,
           sourceSnapshotEvidenceId: sourceSnapshotEvidence.id,
           classification: leadPacket.classification,
@@ -1794,6 +1868,7 @@ export async function runRevenueWorker(input: {
         tenantId: context.worker.tenantId,
         taskId: task?.id,
         workerRunId: workerRun.id,
+        workflowRunId: workflowRun.id,
         eventId: event.id,
         objectId: runObjectId,
         capabilityId,
@@ -1828,6 +1903,7 @@ export async function runRevenueWorker(input: {
           adapterRunId: adapterRun.id,
           adapterActionId: action.id,
           adapterReceiptEvidenceId: receiptEvidence.id,
+          workflowRunId: workflowRun.id,
         },
         policy: {
           externalSend: "approval_required",
@@ -1843,6 +1919,7 @@ export async function runRevenueWorker(input: {
           draftResponse: leadPacket.draftResponse,
           quote: leadPacket.quote,
           workerRunId: workerRun.id,
+          workflowRunId: workflowRun.id,
           adapterRunId: adapterRun.id,
           adapterActionId: action.id,
           adapterReceiptEvidenceId: receiptEvidence.id,
@@ -1881,9 +1958,152 @@ export async function runRevenueWorker(input: {
           adapterRunId: adapterRun.id,
           adapterActionId: action.id,
           adapterReceiptEvidenceId: receiptEvidence.id,
+          workflowRunId: workflowRun.id,
         },
       })
       .returning({ id: auditEvents.id });
+
+    const workflowStepValues = [
+      {
+        fromState: "received",
+        toState: "intake_resolved",
+        kind: "worker_transition",
+        name: "Revenue intake resolved",
+        input: {
+          ...intakeTrace,
+          leadPacket: leadPacket.sourceSnapshot,
+        },
+        output: {
+          sourceObjectId,
+          sourceEventRowId,
+          sourceEvidenceId,
+          inputHash,
+        },
+      },
+      {
+        fromState: "intake_resolved",
+        toState: "packet_prepared",
+        kind: "worker_transition",
+        name: "Revenue packet prepared",
+        input: {
+          classification: leadPacket.classification,
+          quote: leadPacket.quote,
+        },
+        output: {
+          sourceSnapshotEvidenceId: sourceSnapshotEvidence.id,
+          evidenceId: workerEvidence.id,
+          inferenceId: inference.id,
+          usageEventId: usage.id,
+        },
+      },
+      {
+        fromState: "packet_prepared",
+        toState: "adapter_dry_run_recorded",
+        kind: "worker_transition",
+        name: "Revenue adapter dry run recorded",
+        input: {
+          operation: "draft_customer_response",
+          mode: "dry_run",
+        },
+        output: {
+          adapterRunId: adapterRun.id,
+          adapterActionId: action.id,
+          adapterReceiptEvidenceId: receiptEvidence.id,
+          externalExecution: "blocked",
+          externalSend: false,
+        },
+      },
+      {
+        fromState: "adapter_dry_run_recorded",
+        toState: "approval_requested",
+        kind: "approval_request",
+        name: "Revenue owner approval requested",
+        input: {
+          policy: {
+            externalSend: "approval_required",
+            moneyMovement: "blocked",
+          },
+        },
+        output: {
+          approvalRequestId: approval.id,
+          approvalAuditEventId: approvalAudit.id,
+          externalExecution: "blocked",
+        },
+      },
+    ];
+
+    const workflowStepRows = await tx
+      .insert(workflowSteps)
+      .values(
+        workflowStepValues.map((step) => ({
+          tenantId: context.worker.tenantId,
+          definitionId: workflowDefinition.id,
+          workflowRunId: workflowRun.id,
+          eventId: event.id,
+          approvalRequestId: step.toState === "approval_requested" ? approval.id : null,
+          taskId: task?.id,
+          objectId: runObjectId,
+          workerId: context.worker.id,
+          capabilityId,
+          kind: step.kind,
+          name: step.name,
+          state: "done" as const,
+          priority: task?.priority ?? "high",
+          risk: "medium" as const,
+          fromState: step.fromState,
+          toState: step.toState,
+          attempt: 1,
+          maxAttempts: 3,
+          leaseOwner: `worker:${context.worker.id}`,
+          leasedUntil: now,
+          idempotencyKey: `${input.idempotencyKey}:${step.toState}`,
+          input: step.input as unknown as JsonObject,
+          output: step.output as unknown as JsonObject,
+          startedAt: now,
+          completedAt: now,
+          updatedAt: now,
+        })),
+      )
+      .returning({ id: workflowSteps.id });
+
+    const workflowStepIds = workflowStepRows.map((step) => step.id);
+
+    await tx
+      .update(workflowRuns)
+      .set({
+        state: "approval_requested",
+        data: {
+          workerRunId: workerRun.id,
+          eventId: event.id,
+          approvalRequestId: approval.id,
+          approvalAuditEventId: approvalAudit.id,
+          workflowStepIds,
+          inputHash,
+          ...intakeTrace,
+          source: leadPacket.source,
+          sourceEventId: leadPacket.sourceEventId,
+          classification: leadPacket.classification,
+          draftResponse: leadPacket.draftResponse,
+          quote: leadPacket.quote,
+          sourceSnapshotEvidenceId: sourceSnapshotEvidence.id,
+          evidenceId: workerEvidence.id,
+          adapterRunId: adapterRun.id,
+          adapterActionId: action.id,
+          adapterReceiptEvidenceId: receiptEvidence.id,
+          externalExecution: "blocked",
+          externalSend: false,
+        },
+        blockers: {
+          open: ["owner_approval_required", "external_execution_blocked"],
+        },
+        metrics: {
+          budgetUnits: runUnits,
+          quoteTotalCents: leadPacket.quote.totalCents,
+          missingFacts: leadPacket.missingFacts.length,
+        },
+        updatedAt: now,
+      })
+      .where(eq(workflowRuns.id, workflowRun.id));
 
     await tx
       .update(evidence)
@@ -1903,6 +2123,8 @@ export async function runRevenueWorker(input: {
           adapterReceiptEvidenceId: receiptEvidence.id,
           approvalRequestId: approval.id,
           auditEventId: approvalAudit.id,
+          workflowRunId: workflowRun.id,
+          workflowStepIds,
           classification: leadPacket.classification,
           draftResponse: leadPacket.draftResponse,
           quote: leadPacket.quote,
@@ -1926,6 +2148,8 @@ export async function runRevenueWorker(input: {
       data: {
         inputHash,
         workerRunId: workerRun.id,
+        workflowRunId: workflowRun.id,
+        workflowStepIds,
         ...intakeTrace,
         sourceSnapshotEvidenceId: sourceSnapshotEvidence.id,
         adapterRunId: adapterRun.id,
@@ -1949,6 +2173,8 @@ export async function runRevenueWorker(input: {
       score: "0.860",
       data: {
         workerRunId: workerRun.id,
+        workflowRunId: workflowRun.id,
+        workflowStepIds,
         idempotencyKey: input.idempotencyKey,
         approvalRequestId: approval.id,
         inputHash,
@@ -1963,6 +2189,7 @@ export async function runRevenueWorker(input: {
           external_execution_blocked: true,
           owner_approval_required: true,
           external_send_blocked: true,
+          workflow_spine_present: true,
         },
       },
     });
@@ -1985,6 +2212,8 @@ export async function runRevenueWorker(input: {
             adapterReceiptEvidenceId: receiptEvidence.id,
             approvalRequestId: approval.id,
             auditEventId: approvalAudit.id,
+            workflowRunId: workflowRun.id,
+            workflowStepIds,
           },
           cost: {
             units: runUnits,
@@ -2032,6 +2261,8 @@ export async function runRevenueWorker(input: {
           adapterActionId: action.id,
           adapterReceiptEvidenceId: receiptEvidence.id,
           approvalRequestId: approval.id,
+          workflowRunId: workflowRun.id,
+          workflowStepIds,
           approvalRequired: true,
         },
         changedByType: "worker",
@@ -2078,6 +2309,8 @@ export async function runRevenueWorker(input: {
           adapterReceiptEvidenceId: receiptEvidence.id,
           approvalRequestId: approval.id,
           auditEventId: approvalAudit.id,
+          workflowRunId: workflowRun.id,
+          workflowStepIds,
         },
       })
       .where(eq(events.id, event.id));
@@ -2108,6 +2341,8 @@ export async function runRevenueWorker(input: {
       adapterReceiptEvidenceId: receiptEvidence.id,
       approvalRequestId: approval.id,
       auditEventId: approvalAudit.id,
+      workflowRunId: workflowRun.id,
+      workflowStepIds,
     };
 
     await tx
@@ -2120,7 +2355,10 @@ export async function runRevenueWorker(input: {
         endedAt: now,
         updatedAt: now,
         data: {
-          input: runInput,
+          input: {
+            ...runInput,
+            workflowRunId: workflowRun.id,
+          },
           output: runOutput,
         },
       })
@@ -2141,6 +2379,8 @@ export async function runRevenueWorker(input: {
       adapterReceiptEvidenceId: receiptEvidence.id,
       approvalRequestId: approval.id,
       auditEventId: approvalAudit.id,
+      workflowRunId: workflowRun.id,
+      workflowStepIds,
       output: runOutput,
     };
   });

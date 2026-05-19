@@ -39,6 +39,7 @@
 | Added the first authority ledger | Revenue Worker runs now create approval requests and audit events, and approval decisions create evidence before any external action is allowed |
 | Added first-class adapter dry-runs | Revenue Worker runs now create linked adapter runs/actions, receipt evidence, attempt metadata, and reconciliation state while external mutation remains disabled |
 | Added persisted-intake no-send worker packets | `POST /worker` `command=run` now prefers `config.intake` Core object/event/evidence references, stores source snapshot evidence, hashes normalized input for idempotency, and derives classification, draft response, quote, and approval packet output from the resolved payload; `config.leadPacket` remains a direct operator/test fallback |
+| Added Revenue workflow spine | Revenue Worker runs now create a `lead_to_cash` workflow run plus durable workflow steps for intake, packet preparation, adapter dry-run, approval request, and approval decision continuation |
 | HTTPS is managed by Caddy | `continuoushq.com` and `getcontinuous.app` now point at the droplet, and Caddy issues and renews Let's Encrypt certificates from the persisted `caddy_data` volume |
 
 ### Tradeoffs
@@ -64,7 +65,7 @@ The DigitalOcean stack is running on `45.55.53.92`. `continuoushq.com` and
 `getcontinuous.app` both serve the app over HTTPS with Let's Encrypt
 certificates. Continuous Core now has
 persisted graph, task, capability, event, evidence, budget, adapter, authority,
-document, decision, and generated UI primitives plus worker run lifecycle
+document, decision, workflow, and generated UI primitives plus worker run lifecycle
 records and `/`, `/api/health`, `/api/core`, and `POST /api/core` task,
 task-transition, approval-request, capability-grant, budget-ledger, object,
 object-link, event, evidence, document, packet, decision, and generated-view commands. Local
@@ -79,14 +80,16 @@ define the platform boundaries.
 ### Revenue Worker Runtime
 
 The first Revenue Worker slice uses the existing worker, task, event, evidence,
-budget, inference, usage, adapter, worker-run, approval, audit, and UI-contract
+budget, inference, usage, adapter, workflow, worker-run, approval, audit, and UI-contract
 primitives. Each run requires an idempotency key, writes a `worker_runs`
-lifecycle record, binds a configured active operator user, enforces an active
-worker capability grant and budget before spend, creates durable
-budget/evidence/event/approval/audit records, writes dry-run adapter
-run/action/receipt evidence, marks the quote task as `approval_required`, and
-leaves external execution disabled until retry/reconciliation workers, live
-credential scopes, and approval UI are in place.
+lifecycle record and a `lead_to_cash` workflow run, binds a configured active
+operator user, enforces an active worker capability grant and budget before
+spend, creates durable budget/evidence/event/approval/audit records, writes
+workflow steps for intake, packet preparation, adapter dry-run, approval
+request, and approval decision, writes dry-run adapter run/action/receipt
+evidence, marks the quote task as `approval_required`, and leaves external
+execution disabled until retry/reconciliation workers, live credential scopes,
+and approval UI are in place.
 
 The canonical HTTP shape is now `/worker`: `GET /worker?view=snapshot` for
 state, `GET /worker?view=approvals` for approval queues, and `POST /worker`

@@ -5,7 +5,7 @@ import { and, count, eq, inArray, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { reconcileAdapterLedger } from "../core/adapters";
-import { requestApproval } from "../core/approvals";
+import { decideApproval, requestApproval } from "../core/approvals";
 import { reserveBudget, chargeBudget, releaseBudget } from "../core/budgets";
 import { grantCapability } from "../core/capabilities";
 import {
@@ -42,6 +42,8 @@ import {
   tasks,
   generatedViews,
   usageEvents,
+  workflowRuns,
+  workflowSteps,
   workerRuns,
   workers,
   type JsonObject,
@@ -966,6 +968,135 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(secondOutput.classification).not.toBe(output.classification);
     expect(secondOutput.draftResponse).not.toEqual(output.draftResponse);
     expect(secondOutput.quote).not.toEqual(output.quote);
+  }, 120_000);
+
+  it("records a workflow spine and approval continuation for Revenue Worker runs", async () => {
+    const runId = randomUUID();
+    const first = await runRevenueWorker({
+      idempotencyKey: `ci-worker-workflow-${runId}`,
+      tenantSlug: "continuous-demo",
+      operatorEmail: "owner@continuoushq.com",
+      config: {
+        leadPacket: {
+          source: "workflow_test",
+          sourceEventId: `workflow-test:${runId}`,
+          customerName: "Workflow Spine Roofing",
+          customerIntent: "roof leak inspection",
+          serviceArea: "roofing",
+          urgency: "high",
+          missingFacts: ["preferred_time_window"],
+        },
+      },
+    });
+
+    expect(first.created).toBe(true);
+    expect(first.workflowRunId).toBeTruthy();
+    expect(first.workflowStepIds.length).toBe(4);
+    expect(objectValue(first.output).workflowRunId).toBe(first.workflowRunId);
+
+    const [workflowRun] = await db
+      .select()
+      .from(workflowRuns)
+      .where(eq(workflowRuns.id, first.workflowRunId ?? ""))
+      .limit(1);
+    const workflowData = objectValue(workflowRun?.data);
+    const workflowBlockers = objectValue(workflowRun?.blockers);
+
+    expect(workflowRun?.state).toBe("approval_requested");
+    expect(workflowRun?.workerId).toBe(first.snapshot.worker?.id);
+    expect(workflowData.workerRunId).toBe(first.workerRunId);
+    expect(workflowData.approvalRequestId).toBe(first.approvalRequestId);
+    expect(workflowData.workflowStepIds).toEqual(first.workflowStepIds);
+    expect(workflowBlockers.open).toContain("owner_approval_required");
+
+    const steps = await db
+      .select()
+      .from(workflowSteps)
+      .where(inArray(workflowSteps.id, first.workflowStepIds));
+    const stepStates = steps.map((step) => step.toState).sort();
+
+    expect(stepStates).toEqual([
+      "adapter_dry_run_recorded",
+      "approval_requested",
+      "intake_resolved",
+      "packet_prepared",
+    ]);
+    expect(steps.every((step) => step.workflowRunId === first.workflowRunId)).toBe(true);
+    expect(steps.find((step) => step.toState === "approval_requested")?.approvalRequestId).toBe(
+      first.approvalRequestId,
+    );
+
+    const [approval] = await db
+      .select()
+      .from(approvalRequests)
+      .where(eq(approvalRequests.id, first.approvalRequestId ?? ""))
+      .limit(1);
+
+    expect(approval?.workflowRunId).toBe(first.workflowRunId);
+    expect(approval?.workerRunId).toBe(first.workerRunId);
+
+    const decision = await decideApproval({
+      approvalId: first.approvalRequestId ?? "",
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      action: "approved",
+      note: "CI approval continuation check",
+      subject: "worker",
+      db,
+    });
+
+    expect(decision.workflowRunState).toBe("approved");
+    expect(decision.workflowStepId).toBeTruthy();
+
+    const [approvedWorkflowRun] = await db
+      .select()
+      .from(workflowRuns)
+      .where(eq(workflowRuns.id, first.workflowRunId ?? ""))
+      .limit(1);
+    const approvedWorkflowData = objectValue(approvedWorkflowRun?.data);
+    const lastDecision = objectValue(approvedWorkflowData.lastApprovalDecision);
+    const continuation = objectValue(lastDecision.continuation);
+
+    expect(approvedWorkflowRun?.state).toBe("approved");
+    expect(lastDecision.action).toBe("approved");
+    expect(lastDecision.workflowStepId).toBe(decision.workflowStepId);
+    expect(continuation.externalExecution).toBe("blocked");
+    expect(continuation.externalSend).toBe(false);
+
+    const [decisionStep] = await db
+      .select()
+      .from(workflowSteps)
+      .where(eq(workflowSteps.id, decision.workflowStepId ?? ""))
+      .limit(1);
+    const decisionStepOutput = objectValue(decisionStep?.output);
+
+    expect(decisionStep?.kind).toBe("approval_decision");
+    expect(decisionStep?.fromState).toBe("approval_requested");
+    expect(decisionStep?.toState).toBe("approved");
+    expect(decisionStep?.approvalRequestId).toBe(first.approvalRequestId);
+    expect(objectValue(decisionStepOutput.continuation).externalExecution).toBe("blocked");
+
+    const [workerRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(eq(workerRuns.id, first.workerRunId ?? ""))
+      .limit(1);
+    const workerRunOutput = objectValue(objectValue(workerRun?.data).output);
+    const approvalDecision = objectValue(workerRunOutput.approvalDecision);
+
+    expect(objectValue(approvalDecision.continuation).externalExecution).toBe("blocked");
+    expect(workerRunOutput.externalSend).toBe(false);
+
+    const [adapterAction] = await db
+      .select()
+      .from(adapterActions)
+      .where(eq(adapterActions.id, first.adapterActionId ?? ""))
+      .limit(1);
+    const adapterReceipt = objectValue(adapterAction?.receipt);
+
+    expect(adapterAction?.mode).toBe("dry_run");
+    expect(adapterReceipt.externalMutation).toBe(false);
+    expect(objectValue(adapterReceipt.continuation).externalExecution).toBe("blocked");
   }, 120_000);
 
   it("runs from persisted Core lead intake under config.intake", async () => {

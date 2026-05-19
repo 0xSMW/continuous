@@ -134,6 +134,8 @@ The first runtime only prepares owner-review packets.
 | `draftResponse` | Owner-review draft; not externally sent |
 | `quote` | Deterministic quote with lines, total, currency, and blocked money movement policy |
 | `externalSend` | Always `false` in this runtime |
+| `workflowRunId` | Lead-to-cash workflow run tied to the worker run |
+| `workflowStepIds` | Durable workflow steps for intake, packet, adapter dry-run, and approval request |
 | `inputHash` | Canonical hash binding idempotency key to the normalized input payload |
 
 ## Preconditions
@@ -152,6 +154,8 @@ The first runtime only prepares owner-review packets.
 | Record | Required behavior |
 |---|---|
 | `worker_runs` | Owns lifecycle, idempotency, run input, and run output |
+| `workflow_runs` | Owns the lead-to-cash state machine for the prepared worker action |
+| `workflow_steps` | Records intake resolved, packet prepared, adapter dry-run recorded, approval requested, and approval decision transitions |
 | `budget_reservations` | Reserves and marks deterministic simulation units as used |
 | `adapter_runs` | Records dry-run adapter execution, attempt metadata, receipt state, and reconciliation state |
 | `inferences` | Stores prompt/result/safety trace |
@@ -166,11 +170,11 @@ The first runtime only prepares owner-review packets.
 
 ## Approval Actions
 
-| Action | Approval state | Task state | External behavior |
-|---|---|---|---|
-| `approved` | `approved` | `waiting` | Still blocked until real adapter execution exists |
-| `revision_requested` | `revision_requested` | `active` | Worker can prepare a revised draft |
-| `rejected` | `rejected` | `blocked` | Worker should stop the prepared action |
+| Action | Approval state | Task state | Workflow state | External behavior |
+|---|---|---|---|---|
+| `approved` | `approved` | `waiting` | `approved` when the definition allows it | Still blocked until real adapter execution exists |
+| `revision_requested` | `revision_requested` | `active` | `revision_requested` when the definition allows it | Worker can prepare a revised draft |
+| `rejected` | `rejected` | `blocked` | `rejected` when the definition allows it | Worker should stop the prepared action |
 
 ## Non-Goals
 

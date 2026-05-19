@@ -17,7 +17,7 @@
 - Keep all worker-family HTTP controls on `/worker` with registered `worker`, `command`, `idempotencyKey`, and `config` fields; do not add worker-family-specific URL shapes.
 - Codify production infrastructure state, backup/restore, deploy rollback, observability, scoped tokens, and non-root host access before using the droplet for real customer data.
 - Extend adapter reconciliation into retry execution, failure tasks, scoped live credentials, and rollback paths before allowing external sends or money movement.
-- Convert the deterministic Revenue Worker run into the state machine defined by `docs/revenue-worker-v1-contract.md`.
+- Extend the Revenue Worker state machine with revision, retry, failure, reconciliation, and later approved-execution branches.
 - Expand read-only real lead intake from `config.intake` Core references into connected source readers.
 - Use `docs/revenue-worker-expansion.md` as the expansion gate list for the next worker iteration.
 - Use `docs/revenue-worker-v1-contract.md` as the machine-actionable contract for run and approval effects.

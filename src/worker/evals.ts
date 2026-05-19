@@ -51,6 +51,7 @@ const requiredIds: Array<keyof RevenueWorkerRunResult> = [
   "adapterReceiptEvidenceId",
   "approvalRequestId",
   "auditEventId",
+  "workflowRunId",
 ];
 
 export const revenueWorkerEvalCases: RevenueWorkerEvalCase[] = [
@@ -220,6 +221,18 @@ export function scoreRevenueWorkerRun(
     Boolean(result.adapterRunId && result.adapterActionId && result.adapterReceiptEvidenceId),
     2,
     result.adapterReceiptEvidenceId ? "adapter dry-run receipt evidence is linked" : "adapter receipt is missing",
+  );
+
+  addDimension(
+    dimensions,
+    "workflow_spine",
+    Boolean(result.workflowRunId) &&
+      result.workflowStepIds.length >= 4 &&
+      stringValue(output.workflowRunId) === result.workflowRunId,
+    2,
+    result.workflowRunId
+      ? `workflow ${result.workflowRunId} has ${result.workflowStepIds.length} steps`
+      : "workflow spine is missing",
   );
 
   addDimension(

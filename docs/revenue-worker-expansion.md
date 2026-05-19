@@ -4,14 +4,14 @@ The current Revenue Worker is a deterministic persisted simulation. It proves
 worker identity, capability grants, task ownership, budget reservation, usage,
 inference logging, worker run lifecycle, event emission, evidence capture,
 adapter receipts, approval requests, audit events, operator decisions, approval
-state, and object versioning without external sends or money movement.
+state, workflow state, and object versioning without external sends or money movement.
 
 ## Current Runtime
 
 | Area | Current state |
 |---|---|
 | Worker identity | `Revenue Operations Worker`, autonomy level 2, owner-managed |
-| Core loop | One operator run creates worker run, source snapshot evidence, budget, inference, usage, event, adapter run/action, approval packet, task update, and object version records |
+| Core loop | One operator run creates workflow run/steps, worker run, source snapshot evidence, budget, inference, usage, event, adapter run/action, approval packet, task update, and object version records |
 | Operator read API | `GET /worker?view=snapshot&role=revenue_operations`, bearer-token required |
 | Approval API | `GET /worker?view=approvals&role=revenue_operations` and `POST /worker` with `command=approval.decide`, bearer-token required |
 | Run API | `POST /worker` with `command=run` and `config.intake` Core references; direct `config.leadPacket` remains an operator/test fallback |
@@ -36,7 +36,7 @@ smoke test.
 | Idempotency | `worker_runs` owns first-class run lifecycle state, with event idempotency kept as a compatibility guard |
 | Budget | Reservation before model/tool work and usage attribution after |
 | Evidence | Source snapshot, prompt/result trace, approval, and adapter receipt |
-| Approval | First-class `approval_requests`, approval decision evidence, and audit trail |
+| Approval | First-class `approval_requests`, approval decision evidence, audit trail, and allowed workflow advancement while external execution remains blocked |
 | Adapter safety | Dry-run mode, receipt evidence, attempt metadata, reconciliation worker output, and audit/evidence records are persisted; scoped live credentials are still blocked |
 | Eval | Golden lead/quote cases with expected classification, approval, budget, adapter receipt, and idempotency outputs pass in CI |
 
@@ -85,7 +85,7 @@ smoke test.
 
 ## Milestones
 
-1. Convert the deterministic run into a small state machine.
+1. Extend the Revenue Worker state machine with revision, retry, failure, and reconciliation branches without enabling external execution.
 2. Expand read-only real lead intake beyond Core object/event/evidence references into connected source readers.
 3. Add quote approval UI backed by `ui_contracts`.
 4. Extend the persistence-only reconciliation worker into retry execution paths for failed or uncertain adapter results.
