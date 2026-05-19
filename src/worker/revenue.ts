@@ -856,10 +856,6 @@ export async function runRevenueWorker(input: {
     tenantId: context.worker.tenantId,
     workerId: context.worker.id,
     operatorUserId: operator.id,
-    taskId: task?.id ?? null,
-    capabilityId,
-    connectionId: context.connectionId,
-    routeId: context.routeId,
     config,
     leadPacket: leadPacket.sourceSnapshot,
   });
