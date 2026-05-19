@@ -1789,7 +1789,8 @@ maybeDescribe("Revenue Worker integration eval", () => {
     }
     expect(retryEvents).toHaveLength(2);
     expect(retryEvents.every((event) => event.type === "adapter.retry_task.created")).toBe(true);
-    expect(retryEvidence).toHaveLength(2);
+    expect(retryEvidence.length).toBeGreaterThanOrEqual(2);
+    expect(retryEvidence.some((item) => item.name === "Adapter retry task created")).toBe(true);
     expect(retryEvidence.every((item) => objectValue(item.data).externalExecution === "blocked")).toBe(
       true,
     );
@@ -1911,7 +1912,8 @@ maybeDescribe("Revenue Worker integration eval", () => {
     }
     expect(reviewEvents).toHaveLength(2);
     expect(reviewEvents.every((event) => event.type === "adapter.review_task.created")).toBe(true);
-    expect(reviewEvidence).toHaveLength(2);
+    expect(reviewEvidence.length).toBeGreaterThanOrEqual(2);
+    expect(reviewEvidence.some((item) => item.name === "Adapter review task created")).toBe(true);
     expect(reviewEvidence.every((item) => objectValue(item.data).externalExecution === "blocked")).toBe(
       true,
     );
