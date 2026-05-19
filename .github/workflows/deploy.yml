@@ -1,0 +1,102 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      site_hosts:
+        description: "Caddy site hosts, for example http://:80 before DNS or continuoushq.com,www.continuoushq.com after DNS"
+        required: false
+        default: "http://:80"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  droplet:
+    name: DigitalOcean Droplet
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    environment: production
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER || 'root' }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/continuous' }}
+      SITE_HOSTS: ${{ inputs.site_hosts }}
+      ACME_EMAIL: ${{ secrets.ACME_EMAIL || 'admin@continuoushq.com' }}
+      APP_URL: http://${{ secrets.DEPLOY_HOST }}
+      DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check deploy secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${DEPLOY_HOST:-}" ]]; then
+            echo "::error::Missing DEPLOY_HOST secret."
+            exit 1
+          fi
+          if [[ -z "${DEPLOY_KEY:-}" ]]; then
+            echo "::error::Missing DEPLOY_KEY secret."
+            exit 1
+          fi
+
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+
+      - name: Sync repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$DEPLOY_PATH'"
+          rsync -az --delete \
+            -e "ssh -i ~/.ssh/deploy_key" \
+            --exclude ".git" \
+            --exclude "node_modules" \
+            --exclude ".next" \
+            --exclude ".env" \
+            --exclude ".env.*" \
+            ./ "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
+
+      - name: Deploy Compose stack
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" \
+            "APP_DIR='$DEPLOY_PATH' SITE_HOSTS='$SITE_HOSTS' ACME_EMAIL='$ACME_EMAIL' APP_URL='$APP_URL' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "$APP_DIR"
+          if [ ! -f .env ]; then
+            password="$(openssl rand -base64 36 | tr -d '\n')"
+            umask 077
+            {
+              printf 'POSTGRES_DB=continuous\n'
+              printf 'POSTGRES_USER=continuous\n'
+              printf 'POSTGRES_PASSWORD=%s\n' "$password"
+              printf 'APP_ENV=production\n'
+              printf 'APP_URL=%s\n' "$APP_URL"
+              printf 'SITE_HOSTS=%s\n' "$SITE_HOSTS"
+              printf 'ACME_EMAIL=%s\n' "$ACME_EMAIL"
+              printf 'APP_IMAGE=continuous-app\n'
+              printf 'APP_TAG=local\n'
+            } > .env
+          fi
+          docker compose pull db caddy
+          docker compose up -d db
+          docker compose run --rm migrate
+          docker compose run --rm migrate npm run db:seed
+          docker compose up -d --build app caddy
+          docker compose ps
+          REMOTE

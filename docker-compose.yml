@@ -1,0 +1,96 @@
+name: continuous
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${APP_IMAGE:-continuous-app}:${APP_TAG:-local}
+    restart: unless-stopped
+    environment:
+      APP_ENV: production
+      APP_URL: ${APP_URL:-http://localhost}
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: 0.0.0.0
+      DATABASE_URL: postgresql://${POSTGRES_USER:-continuous}:${POSTGRES_PASSWORD:-continuous}@db:5432/${POSTGRES_DB:-continuous}
+    depends_on:
+      db:
+        condition: service_healthy
+    expose:
+      - "3000"
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/api/health').then((r)=>process.exit(r.ok ? 0 : 1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: migrate
+    image: ${APP_IMAGE:-continuous-app}:${APP_TAG:-local}-migrate
+    environment:
+      APP_ENV: production
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-continuous}:${POSTGRES_PASSWORD:-continuous}@db:5432/${POSTGRES_DB:-continuous}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - internal
+    profiles:
+      - tools
+
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-continuous}
+      POSTGRES_USER: ${POSTGRES_USER:-continuous}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-continuous}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_started
+    environment:
+      SITE_HOSTS: ${SITE_HOSTS:-http://:80}
+      ACME_EMAIL: ${ACME_EMAIL:-admin@continuoushq.com}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - internal
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  internal:
+    driver: bridge

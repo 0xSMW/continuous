@@ -1,0 +1,14 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+.next/
+node_modules/
+coverage/
+dist/
+*.log
+*.tsbuildinfo
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
