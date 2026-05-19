@@ -9,6 +9,9 @@ import {
   events,
   tasks,
   tenants,
+  workflowDefinitions,
+  workflowRuns,
+  workflowSteps,
   type JsonObject,
 } from "../db/schema";
 import { PlatformUnavailableError } from "./errors";
@@ -21,6 +24,8 @@ type AdapterActionRow = typeof adapterActions.$inferSelect;
 type ReconciliationDecision = "matched" | "retry_scheduled" | "needs_review";
 
 const source = "continuous.adapter_reconciliation";
+const revenueWorkflowKey = "lead_to_cash";
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export type AdapterReconciliationResult = {
   processed: number;
@@ -34,6 +39,7 @@ export type AdapterReconciliationResult = {
   reviewTaskIds: string[];
   auditEventIds: string[];
   evidenceIds: string[];
+  workflowStepIds: string[];
 };
 
 export type AdapterRetryExecutionResult = {
@@ -50,6 +56,35 @@ export type AdapterRetryExecutionResult = {
 
 function hasExternalMutation(...values: JsonObject[]) {
   return values.some((value) => value.externalMutation === true || value.externalSend === true);
+}
+
+function objectValue(value: unknown): JsonObject {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonObject) : {};
+}
+
+function objectArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter(
+        (item): item is JsonObject => item && typeof item === "object" && !Array.isArray(item),
+      )
+    : [];
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function uuidValue(value: unknown) {
+  const valueString = stringValue(value);
+  return valueString && uuidPattern.test(valueString) ? valueString : undefined;
+}
+
+function appendString(value: unknown, item: string) {
+  const current = Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+    : [];
+
+  return Array.from(new Set([...current, item]));
 }
 
 function nextAttemptTime(now: Date, attempt: number) {
@@ -84,6 +119,221 @@ function decisionFor(row: {
 
 function incrementedAttempt(decision: ReconciliationDecision, attempt: number) {
   return decision === "retry_scheduled" ? attempt + 1 : attempt;
+}
+
+function workflowStateForDecision(decision: ReconciliationDecision) {
+  if (decision === "retry_scheduled") {
+    return "adapter_retry_scheduled";
+  }
+
+  if (decision === "needs_review") {
+    return "adapter_failure_review";
+  }
+
+  return "post_retry_reconciled";
+}
+
+function workflowBlockersForDecision(decision: ReconciliationDecision) {
+  if (decision === "retry_scheduled") {
+    return ["adapter_retry_pending", "external_execution_blocked"];
+  }
+
+  if (decision === "needs_review") {
+    return ["adapter_failure_review", "external_execution_blocked"];
+  }
+
+  return ["external_execution_blocked", "scoped_live_credentials_required"];
+}
+
+function workflowRunIdFromRun(row: Pick<AdapterRunRow, "data" | "receipt">) {
+  return uuidValue(row.data.workflowRunId ?? row.receipt.workflowRunId);
+}
+
+function retryWasExecuted(row: {
+  attempt: number;
+  data?: JsonObject;
+  receipt?: JsonObject;
+  response?: JsonObject;
+}) {
+  if (row.attempt <= 1) {
+    return false;
+  }
+
+  return Boolean(
+    row.data?.retryExecutedAt ||
+      row.receipt?.retryExecutedAt ||
+      row.receipt?.retryAttempt ||
+      row.response?.status === "retry_executed",
+  );
+}
+
+function shouldRecordWorkflowReconciliation(
+  decision: ReconciliationDecision,
+  row: {
+    attempt: number;
+    data?: JsonObject;
+    receipt?: JsonObject;
+    response?: JsonObject;
+  },
+) {
+  return decision !== "matched" || retryWasExecuted(row);
+}
+
+async function workflowRunIdFromAction(db: DatabaseExecutor, row: AdapterActionRow) {
+  const direct = uuidValue(
+    row.request.workflowRunId ?? row.response.workflowRunId ?? row.receipt.workflowRunId,
+  );
+
+  if (direct || !row.adapterRunId) {
+    return direct;
+  }
+
+  const [adapterRun] = await db
+    .select({
+      data: adapterRuns.data,
+      receipt: adapterRuns.receipt,
+    })
+    .from(adapterRuns)
+    .where(and(eq(adapterRuns.tenantId, row.tenantId), eq(adapterRuns.id, row.adapterRunId)))
+    .limit(1);
+
+  return adapterRun ? workflowRunIdFromRun(adapterRun) : undefined;
+}
+
+async function recordWorkflowReconciliation(
+  db: DatabaseExecutor,
+  input: {
+    tenantId: string;
+    workflowRunId?: string | null;
+    targetType: "adapter_run" | "adapter_action";
+    targetId: string;
+    workerRunId?: string | null;
+    eventId?: string | null;
+    taskId?: string | null;
+    followupTaskId?: string | null;
+    capabilityId?: string | null;
+    decision: ReconciliationDecision;
+    attempt: number;
+    maxAttempts: number;
+    operation: string;
+    auditEventId: string;
+    evidenceId: string;
+    now: Date;
+  },
+) {
+  const workflowRunId = uuidValue(input.workflowRunId);
+
+  if (!workflowRunId) {
+    return null;
+  }
+
+  const [workflow] = await db
+    .select({
+      run: workflowRuns,
+      definition: workflowDefinitions,
+    })
+    .from(workflowRuns)
+    .innerJoin(workflowDefinitions, eq(workflowRuns.definitionId, workflowDefinitions.id))
+    .where(and(eq(workflowRuns.tenantId, input.tenantId), eq(workflowRuns.id, workflowRunId)))
+    .limit(1);
+
+  if (!workflow || workflow.definition.key !== revenueWorkflowKey) {
+    return null;
+  }
+
+  const toState = workflowStateForDecision(input.decision);
+  const blockers = workflowBlockersForDecision(input.decision);
+  const workflowData = objectValue(workflow.run.data);
+  const reconciliation = {
+    targetType: input.targetType,
+    targetId: input.targetId,
+    workerRunId: input.workerRunId ?? null,
+    workflowRunId,
+    eventId: input.eventId ?? null,
+    taskId: input.taskId ?? null,
+    followupTaskId: input.followupTaskId ?? null,
+    auditEventId: input.auditEventId,
+    evidenceId: input.evidenceId,
+    decision: input.decision,
+    attempt: input.attempt,
+    maxAttempts: input.maxAttempts,
+    operation: input.operation,
+    fromState: workflow.run.state,
+    toState,
+    reconciledAt: input.now.toISOString(),
+    externalExecution: "blocked",
+    externalSend: false,
+  };
+
+  const [workflowStep] = await db
+    .insert(workflowSteps)
+    .values({
+      tenantId: input.tenantId,
+      definitionId: workflow.definition.id,
+      workflowRunId,
+      eventId: input.eventId,
+      taskId: input.followupTaskId ?? input.taskId,
+      objectId: workflow.run.objectId,
+      workerId: workflow.run.workerId,
+      capabilityId: input.capabilityId,
+      kind: "adapter_reconciliation",
+      name: `${workflow.definition.key}:adapter:${input.decision}`,
+      state: "done",
+      priority: input.decision === "needs_review" ? "high" : "normal",
+      risk: input.decision === "needs_review" ? "high" : "medium",
+      fromState: workflow.run.state,
+      toState,
+      attempt: input.attempt,
+      maxAttempts: input.maxAttempts,
+      leaseOwner: "system:adapter-reconciliation",
+      leasedUntil: input.now,
+      idempotencyKey: `${input.targetType}:${input.targetId}:adapter_reconciliation:${input.decision}:${input.attempt}`,
+      input: {
+        targetType: input.targetType,
+        targetId: input.targetId,
+        workerRunId: input.workerRunId ?? null,
+        eventId: input.eventId ?? null,
+        taskId: input.taskId ?? null,
+        operation: input.operation,
+      },
+      output: reconciliation,
+      startedAt: input.now,
+      completedAt: input.now,
+      updatedAt: input.now,
+    })
+    .returning({ id: workflowSteps.id });
+
+  const reconciliationWithStep = {
+    ...reconciliation,
+    workflowStepId: workflowStep.id,
+  };
+
+  await db
+    .update(workflowRuns)
+    .set({
+      state: toState,
+      data: {
+        ...workflowData,
+        lastAdapterReconciliation: reconciliationWithStep,
+        adapterReconciliations: [
+          ...objectArray(workflowData.adapterReconciliations),
+          reconciliationWithStep,
+        ],
+        workflowStepIds: appendString(workflowData.workflowStepIds, workflowStep.id),
+      },
+      blockers: {
+        ...objectValue(workflow.run.blockers),
+        open: blockers,
+      },
+      completedAt: null,
+      updatedAt: input.now,
+    })
+    .where(and(eq(workflowRuns.tenantId, input.tenantId), eq(workflowRuns.id, workflowRunId)));
+
+  return {
+    workflowRunId,
+    workflowStepId: workflowStep.id,
+  };
 }
 
 function pendingWhere() {
@@ -607,8 +857,27 @@ async function reconcileAction(db: DatabaseExecutor, row: AdapterActionRow, now:
     error,
     now,
   });
+  const workflowResult = shouldRecordWorkflowReconciliation(decision, row)
+    ? await recordWorkflowReconciliation(db, {
+        tenantId: row.tenantId,
+        workflowRunId: await workflowRunIdFromAction(db, row),
+        targetType: "adapter_action",
+        targetId: row.id,
+        eventId: row.eventId,
+        taskId: row.taskId,
+        followupTaskId: followup?.taskId,
+        capabilityId: row.capabilityId,
+        decision,
+        attempt,
+        maxAttempts: row.maxAttempts,
+        operation: row.operation,
+        auditEventId: evidenceResult.auditEventId,
+        evidenceId: evidenceResult.evidenceId,
+        now,
+      })
+    : null;
 
-  return { decision, followup, ...evidenceResult };
+  return { decision, followup, workflowResult, ...evidenceResult };
 }
 
 async function reconcileRun(db: DatabaseExecutor, row: AdapterRunRow, now: Date) {
@@ -686,8 +955,26 @@ async function reconcileRun(db: DatabaseExecutor, row: AdapterRunRow, now: Date)
     error,
     now,
   });
+  const workflowResult = shouldRecordWorkflowReconciliation(decision, row)
+    ? await recordWorkflowReconciliation(db, {
+        tenantId: row.tenantId,
+        workflowRunId: workflowRunIdFromRun(row),
+        targetType: "adapter_run",
+        targetId: row.id,
+        workerRunId: row.workerRunId,
+        eventId: row.eventId,
+        taskId: followup?.taskId,
+        decision,
+        attempt,
+        maxAttempts: row.maxAttempts,
+        operation: row.operation,
+        auditEventId: evidenceResult.auditEventId,
+        evidenceId: evidenceResult.evidenceId,
+        now,
+      })
+    : null;
 
-  return { decision, followup, ...evidenceResult };
+  return { decision, followup, workflowResult, ...evidenceResult };
 }
 
 async function executeActionRetry(db: DatabaseExecutor, row: AdapterActionRow, now: Date) {
@@ -829,6 +1116,7 @@ export async function reconcileAdapterLedger(input: {
     reviewTaskIds: [],
     auditEventIds: [],
     evidenceIds: [],
+    workflowStepIds: [],
   };
 
   const actionConditions = [pendingActionWhere()];
@@ -867,6 +1155,9 @@ export async function reconcileAdapterLedger(input: {
         result.auditEventIds.push(decision.followup.auditEventId);
         result.evidenceIds.push(decision.followup.evidenceId);
       }
+      if (decision.workflowResult) {
+        result.workflowStepIds.push(decision.workflowResult.workflowStepId);
+      }
 
       if (decision.decision === "matched") {
         result.matched += 1;
@@ -896,6 +1187,9 @@ export async function reconcileAdapterLedger(input: {
         result.taskIds.push(decision.followup.taskId);
         result.auditEventIds.push(decision.followup.auditEventId);
         result.evidenceIds.push(decision.followup.evidenceId);
+      }
+      if (decision.workflowResult) {
+        result.workflowStepIds.push(decision.workflowResult.workflowStepId);
       }
 
       if (decision.decision === "matched") {

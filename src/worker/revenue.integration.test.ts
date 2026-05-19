@@ -2196,6 +2196,280 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(workerRunCount.count).toBe(0);
   }, 120_000);
 
+  it("keeps first-pass adapter reconciliation from advancing Revenue workflows past approval", async () => {
+    const runId = randomUUID();
+    const first = await runRevenueWorker({
+      idempotencyKey: `ci-worker-adapter-first-pass-${runId}`,
+      tenantSlug: "continuous-demo",
+      operatorEmail: "owner@continuoushq.com",
+      config: {
+        leadPacket: {
+          source: "adapter_first_pass_test",
+          sourceEventId: `adapter-first-pass-test:${runId}`,
+          customerName: "Adapter First Pass Roofing",
+          customerIntent: "roof leak inspection",
+          serviceArea: "roofing",
+          urgency: "medium",
+          missingFacts: ["preferred_time_window"],
+        },
+      },
+      db,
+    });
+
+    await db
+      .update(adapterRuns)
+      .set({
+        state: "done",
+        attempt: 1,
+        maxAttempts: 3,
+        reconciliationState: "pending",
+        nextAttemptAt: null,
+        receipt: {
+          workflowRunId: first.workflowRunId,
+          externalMutation: false,
+          externalSend: false,
+        },
+        data: {
+          workflowRunId: first.workflowRunId,
+          externalMutation: false,
+          externalSend: false,
+        },
+        error: {},
+      })
+      .where(eq(adapterRuns.id, first.adapterRunId ?? ""));
+    await db
+      .update(adapterActions)
+      .set({
+        state: "done",
+        attempt: 1,
+        maxAttempts: 3,
+        reconciliationState: "pending",
+        nextAttemptAt: null,
+        request: {
+          workflowRunId: first.workflowRunId,
+          externalSend: false,
+        },
+        response: {
+          status: "prepared",
+        },
+        receipt: {
+          workflowRunId: first.workflowRunId,
+          externalMutation: false,
+          externalSend: false,
+        },
+        error: {},
+      })
+      .where(eq(adapterActions.id, first.adapterActionId ?? ""));
+
+    const result = await reconcileAdapterLedger({
+      tenantSlug: "continuous-demo",
+      limit: 100,
+      now: new Date("2026-05-19T00:45:00.000Z"),
+      db,
+    });
+
+    const [workflowRun] = await db
+      .select()
+      .from(workflowRuns)
+      .where(eq(workflowRuns.id, first.workflowRunId ?? ""))
+      .limit(1);
+    const reconciliationSteps = await db
+      .select()
+      .from(workflowSteps)
+      .where(
+        and(
+          eq(workflowSteps.workflowRunId, first.workflowRunId ?? ""),
+          eq(workflowSteps.kind, "adapter_reconciliation"),
+        ),
+      );
+
+    expect(result.matched).toBeGreaterThanOrEqual(2);
+    expect(workflowRun?.state).toBe("approval_requested");
+    expect(reconciliationSteps).toHaveLength(0);
+  }, 120_000);
+
+  it("moves Revenue workflows through adapter retry and post-retry reconciliation states", async () => {
+    const runId = randomUUID();
+    const first = await runRevenueWorker({
+      idempotencyKey: `ci-worker-adapter-workflow-${runId}`,
+      tenantSlug: "continuous-demo",
+      operatorEmail: "owner@continuoushq.com",
+      config: {
+        leadPacket: {
+          source: "adapter_workflow_test",
+          sourceEventId: `adapter-workflow-test:${runId}`,
+          customerName: "Adapter Workflow Roofing",
+          customerIntent: "roof leak inspection",
+          serviceArea: "roofing",
+          urgency: "high",
+          missingFacts: ["preferred_time_window"],
+        },
+      },
+      db,
+    });
+
+    await decideApproval({
+      approvalId: first.approvalRequestId ?? "",
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      action: "approved",
+      note: "Approve before adapter workflow retry smoke.",
+      subject: "worker",
+      db,
+    });
+    await continueRevenueWorker({
+      approvalId: first.approvalRequestId ?? "",
+      idempotencyKey: `ci-worker-adapter-workflow-continue-${runId}`,
+      tenantSlug: "continuous-demo",
+      operatorEmail: "owner@continuoushq.com",
+      db,
+    });
+
+    const [executionWorkflowRun] = await db
+      .select()
+      .from(workflowRuns)
+      .where(eq(workflowRuns.id, first.workflowRunId ?? ""))
+      .limit(1);
+
+    expect(executionWorkflowRun?.state).toBe("execution_blocked");
+
+    const [adapterRun] = await db
+      .select()
+      .from(adapterRuns)
+      .where(eq(adapterRuns.id, first.adapterRunId ?? ""))
+      .limit(1);
+    const [adapterAction] = await db
+      .select()
+      .from(adapterActions)
+      .where(eq(adapterActions.id, first.adapterActionId ?? ""))
+      .limit(1);
+
+    expect(adapterRun).toBeTruthy();
+    expect(adapterAction).toBeTruthy();
+
+    await db
+      .update(adapterRuns)
+      .set({
+        state: "failed",
+        attempt: 1,
+        maxAttempts: 3,
+        reconciliationState: "pending",
+        nextAttemptAt: null,
+        receipt: {
+          ...objectValue(adapterRun?.receipt),
+          externalMutation: false,
+          externalSend: false,
+        },
+        error: {
+          code: "adapter_timeout",
+        },
+        endedAt: null,
+      })
+      .where(eq(adapterRuns.id, first.adapterRunId ?? ""));
+    await db
+      .update(adapterActions)
+      .set({
+        state: "failed",
+        attempt: 1,
+        maxAttempts: 3,
+        reconciliationState: "pending",
+        nextAttemptAt: null,
+        receipt: {
+          ...objectValue(adapterAction?.receipt),
+          externalMutation: false,
+          externalSend: false,
+        },
+        error: {
+          code: "adapter_timeout",
+        },
+      })
+      .where(eq(adapterActions.id, first.adapterActionId ?? ""));
+
+    const retrySchedule = await reconcileAdapterLedger({
+      tenantSlug: "continuous-demo",
+      limit: 100,
+      now: new Date("2026-05-19T01:00:00.000Z"),
+      db,
+    });
+
+    expect(retrySchedule.retryScheduled).toBeGreaterThanOrEqual(2);
+    expect(retrySchedule.workflowStepIds.length).toBeGreaterThanOrEqual(2);
+
+    const [retryWorkflowRun] = await db
+      .select()
+      .from(workflowRuns)
+      .where(eq(workflowRuns.id, first.workflowRunId ?? ""))
+      .limit(1);
+    const retryWorkflowData = objectValue(retryWorkflowRun?.data);
+    const retryBlockers = objectValue(retryWorkflowRun?.blockers);
+    const retrySteps = await db
+      .select()
+      .from(workflowSteps)
+      .where(inArray(workflowSteps.id, retrySchedule.workflowStepIds));
+
+    expect(retryWorkflowRun?.state).toBe("adapter_retry_scheduled");
+    expect(retryBlockers.open).toEqual(["adapter_retry_pending", "external_execution_blocked"]);
+    expect(objectValue(retryWorkflowData.lastAdapterReconciliation).decision).toBe(
+      "retry_scheduled",
+    );
+    expect(retrySteps.filter((step) => step.workflowRunId === first.workflowRunId)).toHaveLength(2);
+    expect(
+      retrySteps
+        .filter((step) => step.workflowRunId === first.workflowRunId)
+        .every((step) => step.kind === "adapter_reconciliation" && step.toState === "adapter_retry_scheduled"),
+    ).toBe(true);
+
+    const retryExecution = await executeWorkerCommand({
+      command: "adapters.retry",
+      target: {
+        role: "revenue_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      config: {
+        limit: 100,
+      },
+    });
+    const retryOutput = objectValue(retryExecution.result);
+
+    expect(stringList(retryOutput.retryRunIds)).toContain(first.adapterRunId);
+    expect(stringList(retryOutput.retryActionIds)).toContain(first.adapterActionId);
+
+    const postRetry = await reconcileAdapterLedger({
+      tenantSlug: "continuous-demo",
+      limit: 100,
+      now: new Date("2026-05-19T01:10:00.000Z"),
+      db,
+    });
+
+    expect(postRetry.matched).toBeGreaterThanOrEqual(2);
+    expect(postRetry.workflowStepIds.length).toBeGreaterThanOrEqual(2);
+
+    const [postRetryWorkflowRun] = await db
+      .select()
+      .from(workflowRuns)
+      .where(eq(workflowRuns.id, first.workflowRunId ?? ""))
+      .limit(1);
+    const postRetryWorkflowData = objectValue(postRetryWorkflowRun?.data);
+    const postRetryBlockers = objectValue(postRetryWorkflowRun?.blockers);
+    const postRetrySteps = await db
+      .select()
+      .from(workflowSteps)
+      .where(inArray(workflowSteps.id, postRetry.workflowStepIds));
+
+    expect(postRetryWorkflowRun?.state).toBe("post_retry_reconciled");
+    expect(postRetryBlockers.open).toEqual([
+      "external_execution_blocked",
+      "scoped_live_credentials_required",
+    ]);
+    expect(objectValue(postRetryWorkflowData.lastAdapterReconciliation).decision).toBe("matched");
+    expect(
+      postRetrySteps
+        .filter((step) => step.workflowRunId === first.workflowRunId)
+        .every((step) => step.kind === "adapter_reconciliation" && step.toState === "post_retry_reconciled"),
+    ).toBe(true);
+  }, 120_000);
+
   it("reconciles pending dry-run adapter rows without external execution", async () => {
     const [connection] = await db.select().from(connections).limit(1);
     expect(connection).toBeDefined();

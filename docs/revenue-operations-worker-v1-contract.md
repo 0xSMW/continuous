@@ -280,7 +280,7 @@ whose `result.output.selectors[]` contains:
 |---|---|
 | `worker_runs` | Owns lifecycle, idempotency, lead-read input/output, run input/output, and continuations |
 | `workflow_runs` | Owns the lead-to-cash state machine for the prepared worker action |
-| `workflow_steps` | Records intake resolved, packet prepared, adapter dry-run recorded, approval requested, and approval decision transitions |
+| `workflow_steps` | Records intake resolved, packet prepared, adapter dry-run recorded, approval requested, approval decision transitions, worker continuations, and adapter reconciliation transitions |
 | `budget_reservations` | Reserves and marks deterministic simulation units as used |
 | `adapter_runs` | Records dry-run adapter execution, attempt metadata, retry execution, receipt state, and reconciliation state |
 | `inferences` | Stores prompt/result/safety trace |
@@ -292,6 +292,14 @@ whose `result.output.selectors[]` contains:
 | `audit_events` | Records run request, approval request, and approval decision |
 | `tasks` | Moves active work to `approval_required`; decision later moves to `waiting`, `active`, or `blocked`; reconciliation creates retry/review system tasks and retry execution closes due retry tasks |
 | `object_versions` | Records approval-required state against the object spine |
+
+Adapter reconciliation is also workflow-scoped when the adapter row carries a
+Revenue `workflowRunId`. Retryable adapter failures append
+`workflow_steps.kind=adapter_reconciliation` and move `lead_to_cash` to
+`adapter_retry_scheduled`; exhausted or unsafe failures move it to
+`adapter_failure_review`; matched rows after retry execution move it to
+`post_retry_reconciled`. These states remain no-send and keep external
+execution blocked.
 
 `POST /worker` with `command=continue` creates a separate idempotent
 `worker_runs` continuation record and `workflow_steps.kind=worker_continuation`

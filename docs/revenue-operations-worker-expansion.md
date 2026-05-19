@@ -20,7 +20,7 @@ state, workflow state, and object versioning without external sends or money mov
 | Adapter reconciliation API | `POST /worker` with `command=adapters.reconcile` and `command=adapters.retry`, tenant-scoped and bearer-token required |
 | Operator run | `bun run worker:tool worker.run` with the same worker/config payload |
 | Command registry | `/worker` commands and `worker:*` local tool aliases share role, config, idempotency, tenant, and external-execution validation |
-| External execution | Disabled; adapter runtime records dry-run receipts, reconciliation states, retry execution receipts, and retry/review system tasks only |
+| External execution | Disabled; adapter runtime records dry-run receipts, reconciliation states, retry execution receipts, retry/review system tasks, and workflow-level retry/review/post-retry steps only |
 
 `/worker` is the forward API. Worker role, tenant, operation config, and
 idempotency belong in payload fields for mutation commands, not in
@@ -41,7 +41,7 @@ smoke test.
 | Budget | Reservation before model/tool work and usage attribution after |
 | Evidence | Source snapshot, prompt/result trace, approval, and adapter receipt |
 | Approval | First-class `approval_requests`, approval decision evidence, audit trail, and allowed workflow advancement while external execution remains blocked |
-| Adapter safety | Dry-run mode, receipt evidence, attempt metadata, reconciliation worker output, due retry execution, retry/review system tasks, and audit/evidence records are persisted; scoped live credentials are still blocked |
+| Adapter safety | Dry-run mode, receipt evidence, attempt metadata, reconciliation worker output, due retry execution, retry/review system tasks, workflow retry/review/post-retry states, and audit/evidence records are persisted; scoped live credentials are still blocked |
 | Eval | Golden lead/quote cases with expected classification, approval, budget, adapter receipt, and idempotency outputs pass in CI |
 
 ## Next Capabilities
@@ -89,9 +89,8 @@ smoke test.
 
 ## Milestones
 
-1. Extend the Revenue Worker state machine with failure and post-retry reconciliation branches without enabling external execution.
-2. Expand read-only real lead intake beyond website-form source records into authenticated inbox and CRM source readers.
-3. Add quote approval UI backed by `ui_contracts`.
-4. Extend blocked retry execution into scoped live credential checks and rollback paths for failed or uncertain adapter results.
-5. Extend eval fixtures beyond the first CI-enforced lead-to-quote cases.
-6. Raise autonomy only for read, classify, draft, and owner brief capabilities.
+1. Expand read-only real lead intake beyond website-form source records into authenticated inbox and CRM source readers.
+2. Add quote approval UI backed by `ui_contracts`.
+3. Extend blocked retry execution into scoped live credential checks and rollback paths for failed or uncertain adapter results.
+4. Extend eval fixtures beyond the first CI-enforced lead-to-quote cases.
+5. Raise autonomy only for read, classify, draft, and owner brief capabilities.

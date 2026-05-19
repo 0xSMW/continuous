@@ -1,3 +1,5 @@
+import { eq } from "drizzle-orm";
+
 import { db, pool } from "./client";
 import {
   adapterActions,
@@ -221,6 +223,43 @@ const capIds = {
   sensitiveReveal: "10000000-0000-4000-8000-000000000013",
   achDraftPrepare: "10000000-0000-4000-8000-000000000014",
   workerRead: "10000000-0000-4000-8000-000000000015",
+};
+
+const leadToCashStates = {
+  order: [
+    "received",
+    "intake_resolved",
+    "packet_prepared",
+    "adapter_dry_run_recorded",
+    "approval_requested",
+    "approved",
+    "execution_blocked",
+    "adapter_retry_scheduled",
+    "adapter_failure_review",
+    "post_retry_reconciled",
+    "revision_requested",
+    "rejected",
+    "blocked",
+  ],
+};
+
+const leadToCashTransitions = {
+  received: ["intake_resolved"],
+  intake_resolved: ["packet_prepared", "blocked"],
+  packet_prepared: ["adapter_dry_run_recorded", "blocked"],
+  adapter_dry_run_recorded: ["approval_requested", "blocked"],
+  approval_requested: ["approved", "revision_requested", "rejected"],
+  approved: ["execution_blocked", "blocked"],
+  execution_blocked: [
+    "adapter_retry_scheduled",
+    "adapter_failure_review",
+    "post_retry_reconciled",
+    "blocked",
+  ],
+  adapter_retry_scheduled: ["post_retry_reconciled", "adapter_failure_review", "blocked"],
+  adapter_failure_review: ["adapter_retry_scheduled", "blocked"],
+  post_retry_reconciled: ["execution_blocked", "blocked"],
+  revision_requested: ["approval_requested", "blocked"],
 };
 
 async function seed() {
@@ -1103,29 +1142,8 @@ async function seed() {
         name: "Lead to cash",
         purpose: "Turn a lead into an owner-approved quote packet without external sends.",
         domain: "revenue",
-        states: {
-          order: [
-            "received",
-            "intake_resolved",
-            "packet_prepared",
-            "adapter_dry_run_recorded",
-            "approval_requested",
-            "approved",
-            "execution_blocked",
-            "revision_requested",
-            "rejected",
-            "blocked",
-          ],
-        },
-        transitions: {
-          received: ["intake_resolved"],
-          intake_resolved: ["packet_prepared", "blocked"],
-          packet_prepared: ["adapter_dry_run_recorded", "blocked"],
-          adapter_dry_run_recorded: ["approval_requested", "blocked"],
-          approval_requested: ["approved", "revision_requested", "rejected"],
-          approved: ["execution_blocked", "blocked"],
-          revision_requested: ["approval_requested", "blocked"],
-        },
+        states: leadToCashStates,
+        transitions: leadToCashTransitions,
         objects: { required: ["lead", "customer", "quote"] },
         approvals: { required: ["owner_quote_approval"], states: { approval_requested: ["owner_quote_approval"] } },
         evidence: { packet: "lead_to_cash_packet" },
@@ -1151,6 +1169,11 @@ async function seed() {
       },
     ])
     .onConflictDoNothing();
+
+  await db
+    .update(workflowDefinitions)
+    .set({ states: leadToCashStates, transitions: leadToCashTransitions, updatedAt: now })
+    .where(eq(workflowDefinitions.id, ids.workflowLeadToCash));
 
   await db
     .insert(workflowDefinitions)

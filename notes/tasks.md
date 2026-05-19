@@ -9,7 +9,7 @@
 - Implement canonical entity/workforce/payroll/filing/payment/AI-ops objects before widening the Revenue Worker runtime.
 - Extend customer-signal workflows, generated views, and eval fixtures beyond the seeded SatisfactionSignal, FeedbackItem, Complaint, Testimonial, and Review primitives.
 - Wire implementation handlers, retries, approvals, packets, and generated views into the expanded operating workflow catalog.
-- Wire workflow step handlers into capability execution, retry workers, and adapter reconciliation.
+- Wire workflow step handlers into capability execution and retry workers.
 - Add more specialized Core commands for adapter intents and rule changes.
 - Extend `packet.prepare` coverage into new-hire, contractor, payroll, filing, termination, AI action, and rule-change workflow packet tests.
 - Build the approval UI on top of the shared `approval_requests`, `audit_events`, and evidence API.
@@ -20,7 +20,6 @@
 - Provision the production object-storage bucket/key, run `scripts/install-backup-timer.sh`, and prove scheduled off-host Postgres dump retention before customer data.
 - Complete production hardening with tag-based deploy rollback, observability/alerts, scoped tokens, non-root host access, and a restore drill before using the droplet for real customer data.
 - Extend blocked adapter retry execution into scoped live credentials and rollback paths before allowing external sends or money movement.
-- Extend the Revenue Worker state machine with failure and post-retry reconciliation branches after the approved/revision continuation and blocked retry paths.
 - Expand read-only real lead intake from website-form `lead.read` records into authenticated inbox and CRM source readers.
 - Use `docs/revenue-operations-worker-expansion.md` as the expansion gate list for the next worker iteration.
 - Use `docs/revenue-operations-worker-v1-contract.md` as the machine-actionable contract for run and approval effects.
