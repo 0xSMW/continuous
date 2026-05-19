@@ -20,6 +20,7 @@ import {
   employments,
   entityIdentifiers,
   evidence,
+  evidencePackets,
   evaluations,
   events,
   filingDrafts,
@@ -136,6 +137,7 @@ const ids = {
   stepTermination: "77777777-7777-4777-8777-000000000107",
   documentNewHire: "88888888-8888-4888-8888-000000000001",
   documentPayroll: "88888888-8888-4888-8888-000000000002",
+  packetPayroll: "88888888-8888-4888-8888-000000000003",
   decisionQuote: "99999999-9999-4999-8999-000000000001",
   evaluationSeed: "99999999-9999-4999-8999-000000000002",
   approvalQuote: "99999999-9999-4999-8999-000000000003",
@@ -1539,6 +1541,32 @@ async function seed() {
         },
       },
     ])
+    .onConflictDoNothing();
+
+  await db
+    .insert(evidencePackets)
+    .values({
+      id: ids.packetPayroll,
+      tenantId: ids.tenant,
+      documentId: ids.documentPayroll,
+      objectId: ids.payrollObject,
+      workflowRunId: ids.runPayrollPreview,
+      kind: "payroll_packet",
+      name: "Payroll preview evidence packet",
+      state: "review_ready",
+      sensitivity: "critical",
+      evidenceIds: { ids: [ids.evidenceQuote, ids.evidenceAdapterReceipt] },
+      documentIds: { ids: [ids.documentPayroll] },
+      hash: "bootstrap-payroll-evidence-packet",
+      data: {
+        payScheduleId: ids.paySchedule,
+        payrollRunId: ids.payrollRun,
+        filingDraftId: ids.filingDraft,
+        paymentInstructionId: ids.paymentInstruction,
+        moneyMovement: "blocked",
+        externalExecution: "blocked",
+      },
+    })
     .onConflictDoNothing();
 
   await db

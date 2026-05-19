@@ -1018,9 +1018,53 @@ jobs:
             >/dev/null
 
           CORE_DOCUMENT_ID="$(echo "$CORE_DOCUMENT_RESPONSE" | /usr/bin/jq -r '.data.result.documentId')"
+          CORE_PACKET_KEY="deploy-core-packet-$RUN_ID"
+          CORE_PACKET_PAYLOAD="$(
+            /usr/bin/jq -nc \
+              --arg key "$CORE_PACKET_KEY" \
+              --arg objectId "$CORE_OBJECT_ID" \
+              --arg eventId "$CORE_INGESTED_EVENT_ID" \
+              --arg evidenceId "$CORE_EVIDENCE_ID" \
+              --arg documentId "$CORE_DOCUMENT_ID" '{
+                command: "packet.prepare",
+                core: {tenantSlug: "continuous-demo"},
+                idempotencyKey: $key,
+                config: {
+                  kind: "agency_notice_packet",
+                  name: "Deploy smoke agency notice evidence packet",
+                  state: "review_ready",
+                  sensitivity: "high",
+                  objectId: $objectId,
+                  eventId: $eventId,
+                  evidenceIds: [$evidenceId],
+                  documentIds: [$documentId],
+                  sections: {
+                    order: ["summary", "source", "decision"]
+                  },
+                  data: {
+                    externalExecution: "blocked"
+                  }
+                }
+              }'
+          )"
+          CORE_PACKET_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/api/core \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$CORE_PACKET_PAYLOAD"
+          )"
+
+          echo "$CORE_PACKET_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:.data.result}'
+          echo "$CORE_PACKET_RESPONSE" | /usr/bin/jq -e \
+            '.error == null and .data.command == "packet.prepare" and .data.result.prepared == true and (.data.result.packetId | length > 0) and (.data.result.documentId | length > 0) and (.data.result.evidenceId | length > 0)' \
+            >/dev/null
+
+          CORE_PACKET_ID="$(echo "$CORE_PACKET_RESPONSE" | /usr/bin/jq -r '.data.result.packetId')"
+          CORE_PACKET_DOCUMENT_ID="$(echo "$CORE_PACKET_RESPONSE" | /usr/bin/jq -r '.data.result.documentId')"
           CORE_DECISION_KEY="deploy-core-decision-$RUN_ID"
           CORE_DECISION_PAYLOAD="$(
-            /usr/bin/jq -nc --arg key "$CORE_DECISION_KEY" --arg eventId "$CORE_INGESTED_EVENT_ID" --arg objectId "$CORE_OBJECT_ID" --arg documentId "$CORE_DOCUMENT_ID" '{
+            /usr/bin/jq -nc --arg key "$CORE_DECISION_KEY" --arg eventId "$CORE_INGESTED_EVENT_ID" --arg objectId "$CORE_OBJECT_ID" --arg documentId "$CORE_DOCUMENT_ID" --arg packetId "$CORE_PACKET_ID" '{
               command: "decision.record",
               core: {tenantSlug: "continuous-demo"},
               idempotencyKey: $key,
@@ -1033,6 +1077,7 @@ jobs:
                 data: {
                   objectId: $objectId,
                   documentId: $documentId,
+                  packetId: $packetId,
                   externalExecution: "blocked"
                 }
               }
@@ -1063,6 +1108,10 @@ jobs:
           from evidence where id = '$CORE_EVIDENCE_ID'::uuid;
           select 'core_document' as kind, kind, state, sensitivity
           from documents where id = '$CORE_DOCUMENT_ID'::uuid;
+          select 'core_packet' as kind, kind, state, document_id
+          from evidence_packets where id = '$CORE_PACKET_ID'::uuid;
+          select 'core_packet_document' as kind, kind, state, sensitivity
+          from documents where id = '$CORE_PACKET_DOCUMENT_ID'::uuid;
           select 'core_decision' as kind, kind, state, decision
           from decisions where id = '$CORE_DECISION_ID'::uuid;
           SQL

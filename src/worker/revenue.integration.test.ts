@@ -13,6 +13,7 @@ import {
   createCoreDocument,
   ingestCoreEvent,
   linkCoreObjects,
+  prepareCorePacket,
   publishCoreView,
   recordCoreDecision,
   upsertCoreObject,
@@ -34,6 +35,7 @@ import {
   events,
   evaluations,
   evidence,
+  evidencePackets,
   objects,
   objectLinks,
   objectVersions,
@@ -597,6 +599,26 @@ maybeDescribe("Revenue Worker integration eval", () => {
       },
       db,
     });
+    const packetResult = await prepareCorePacket({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-core-packet-${runId}`,
+      kind: "agency_notice_packet",
+      name: "Agency notice evidence packet",
+      state: "review_ready",
+      sensitivity: "high",
+      objectId: objectResult.objectId,
+      eventId: eventResult.eventId,
+      evidenceIds: [evidenceResult.evidenceId],
+      documentIds: [documentResult.documentId],
+      sections: {
+        order: ["summary", "source", "decision"],
+      },
+      data: {
+        decisionId: decisionResult.decisionId,
+      },
+      db,
+    });
 
     const [object] = await db.select().from(objects).where(eq(objects.id, objectResult.objectId)).limit(1);
     const [version] = await db
@@ -620,6 +642,11 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .from(decisions)
       .where(eq(decisions.id, decisionResult.decisionId))
       .limit(1);
+    const [packet] = await db
+      .select()
+      .from(evidencePackets)
+      .where(eq(evidencePackets.id, packetResult.packetId))
+      .limit(1);
     const [auditCount] = await db
       .select({ value: count() })
       .from(auditEvents)
@@ -630,6 +657,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
           evidenceResult.auditEventId,
           documentResult.auditEventId,
           decisionResult.auditEventId,
+          packetResult.auditEventId,
         ]),
       );
     const replay = await attachCoreEvidence({
@@ -648,9 +676,24 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(document?.kind).toBe("agency_notice_packet");
     expect(document?.sensitivity).toBe("high");
     expect(decision?.decision).toBe("owner_review_required");
-    expect(auditCount.value).toBe(5);
+    expect(packet?.documentId).toBe(packetResult.documentId);
+    expect(packet?.state).toBe("review_ready");
+    expect(objectValue(packet?.evidenceIds).ids).toEqual([evidenceResult.evidenceId]);
+    expect(auditCount.value).toBe(6);
     expect(replay.created).toBe(false);
     expect(replay.evidenceId).toBe(evidenceResult.evidenceId);
+
+    const packetReplay = await prepareCorePacket({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-core-packet-${runId}`,
+      kind: "agency_notice_packet",
+      name: "Replay returns the first packet",
+      db,
+    });
+
+    expect(packetReplay.prepared).toBe(false);
+    expect(packetReplay.packetId).toBe(packetResult.packetId);
   }, 120_000);
 
   it("persists headless core object links and generated views", async () => {

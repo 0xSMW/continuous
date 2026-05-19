@@ -1937,6 +1937,65 @@ export const documents = pgTable(
   ],
 );
 
+export const evidencePackets = pgTable(
+  "evidence_packets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    documentId: uuid("document_id").references(() => documents.id, {
+      onDelete: "set null",
+    }),
+    objectId: uuid("object_id").references(() => objects.id, {
+      onDelete: "set null",
+    }),
+    taskId: uuid("task_id").references(() => tasks.id, {
+      onDelete: "set null",
+    }),
+    workflowRunId: uuid("workflow_run_id").references(() => workflowRuns.id, {
+      onDelete: "set null",
+    }),
+    eventId: uuid("event_id").references(() => events.id, {
+      onDelete: "set null",
+    }),
+    capabilityId: uuid("capability_id").references(() => capabilities.id, {
+      onDelete: "set null",
+    }),
+    kind: text("kind").notNull(),
+    name: text("name").notNull(),
+    state: text("state").notNull().default("prepared"),
+    sensitivity: riskLevel("sensitivity").notNull().default("medium"),
+    evidenceIds: jsonb("evidence_ids")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    documentIds: jsonb("document_ids")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    data: jsonb("data")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    hash: text("hash"),
+    retainedUntil: timestamp("retained_until", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("evidence_packets_tenant_idx").on(table.tenantId),
+    index("evidence_packets_document_idx").on(table.documentId),
+    index("evidence_packets_object_idx").on(table.objectId),
+    index("evidence_packets_task_idx").on(table.taskId),
+    index("evidence_packets_workflow_idx").on(table.workflowRunId),
+  ],
+);
+
 export const decisions = pgTable(
   "decisions",
   {
@@ -2298,6 +2357,7 @@ export const tenantsRelations = relations(tenants, ({ many }) => ({
   workers: many(workers),
   approvalRequests: many(approvalRequests),
   auditEvents: many(auditEvents),
+  evidencePackets: many(evidencePackets),
   customers: many(customers),
   leads: many(leads),
   offers: many(offers),
@@ -2394,6 +2454,7 @@ export const objectsRelations = relations(objects, ({ one, many }) => ({
   tasks: many(tasks),
   events: many(events),
   evidence: many(evidence),
+  evidencePackets: many(evidencePackets),
 }));
 
 export const customersRelations = relations(customers, ({ one }) => ({
@@ -2520,6 +2581,7 @@ export const tasksRelations = relations(tasks, ({ one, many }) => ({
   }),
   events: many(events),
   evidence: many(evidence),
+  evidencePackets: many(evidencePackets),
   usageEvents: many(usageEvents),
   workerRuns: many(workerRuns),
   workflowSteps: many(workflowSteps),
@@ -2553,6 +2615,7 @@ export const eventsRelations = relations(events, ({ one, many }) => ({
     references: [connections.id],
   }),
   evidence: many(evidence),
+  evidencePackets: many(evidencePackets),
   workerRuns: many(workerRuns),
   workflowSteps: many(workflowSteps),
   approvalRequests: many(approvalRequests),
@@ -2616,6 +2679,7 @@ export const workflowRunsRelations = relations(workflowRuns, ({ one, many }) => 
   }),
   steps: many(workflowSteps),
   approvalRequests: many(approvalRequests),
+  evidencePackets: many(evidencePackets),
 }));
 
 export const workflowStepsRelations = relations(workflowSteps, ({ one }) => ({
@@ -2653,6 +2717,53 @@ export const workflowStepsRelations = relations(workflowSteps, ({ one }) => ({
   }),
   capability: one(capabilities, {
     fields: [workflowSteps.capabilityId],
+    references: [capabilities.id],
+  }),
+}));
+
+export const documentsRelations = relations(documents, ({ one, many }) => ({
+  tenant: one(tenants, {
+    fields: [documents.tenantId],
+    references: [tenants.id],
+  }),
+  object: one(objects, {
+    fields: [documents.objectId],
+    references: [objects.id],
+  }),
+  workflowRun: one(workflowRuns, {
+    fields: [documents.workflowRunId],
+    references: [workflowRuns.id],
+  }),
+  evidencePackets: many(evidencePackets),
+}));
+
+export const evidencePacketsRelations = relations(evidencePackets, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [evidencePackets.tenantId],
+    references: [tenants.id],
+  }),
+  document: one(documents, {
+    fields: [evidencePackets.documentId],
+    references: [documents.id],
+  }),
+  object: one(objects, {
+    fields: [evidencePackets.objectId],
+    references: [objects.id],
+  }),
+  task: one(tasks, {
+    fields: [evidencePackets.taskId],
+    references: [tasks.id],
+  }),
+  workflowRun: one(workflowRuns, {
+    fields: [evidencePackets.workflowRunId],
+    references: [workflowRuns.id],
+  }),
+  event: one(events, {
+    fields: [evidencePackets.eventId],
+    references: [events.id],
+  }),
+  capability: one(capabilities, {
+    fields: [evidencePackets.capabilityId],
     references: [capabilities.id],
   }),
 }));

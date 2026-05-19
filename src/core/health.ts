@@ -26,6 +26,7 @@ export type Health = {
     tasks: number;
     events: number;
     evidence: number;
+    evidencePackets: number;
     capabilities: number;
     workers: number;
     aiGateway: number;
@@ -99,6 +100,7 @@ export function getHealth(input: HealthInput): Health {
     tasks: input.counts.tasks,
     events: input.counts.events,
     evidence: input.counts.evidence,
+    evidencePackets: input.counts.evidencePackets,
     capabilities: input.counts.capabilities,
     workers: input.counts.workers,
     aiGateway,
@@ -162,8 +164,13 @@ export function getHealth(input: HealthInput): Health {
     },
     {
       id: "evidence",
-      state: input.counts.evidence > 0 && input.counts.documents > 0 ? "pass" : "warn",
-      detail: `${input.counts.evidence} evidence records and ${input.counts.documents} document packets visible`,
+      state:
+        input.counts.evidence > 0 &&
+        input.counts.documents > 0 &&
+        input.counts.evidencePackets > 0
+          ? "pass"
+          : "warn",
+      detail: `${input.counts.evidence} evidence records, ${input.counts.documents} documents, and ${input.counts.evidencePackets} evidence packets visible`,
     },
     {
       id: "ai_gateway",

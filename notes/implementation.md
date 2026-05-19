@@ -33,6 +33,7 @@
 | Added Core graph and generated-view commands | `POST /api/core` now supports `object.link` and `view.publish`, so object relationships and renderer-neutral UI contracts are written through the same structured Core payload instead of seed-only data |
 | Added Core task and approval controls | `POST /api/core` now supports `task.transition` and `approval.request`, so the headless platform can move task state and create pending approval packets without a worker-specific path |
 | Added Core authority and budget controls | `POST /api/core` now supports `capability.grant`, `budget.reserve`, `budget.charge`, and `budget.release`, so worker authority and AI budget movement are platform-owned commands with audit and evidence |
+| Added durable evidence packets | `POST /api/core` now supports `packet.prepare` and `document.packet.prepare`, creating an `evidence_packets` record plus linked document, event, audit, and trace evidence for workflow review packets |
 | Agent build path uses app-server protocol tooling plus Next.js MCP | The installed Codex app-server CLI exposes protocol generation/help commands; `.mcp.json` keeps the Next.js 16 MCP bridge for route/runtime diagnostics |
 | Added the first authority ledger | Revenue Worker runs now create approval requests and audit events, and approval decisions create evidence before any external action is allowed |
 | Added first-class adapter dry-runs | Revenue Worker runs now create linked adapter runs/actions, receipt evidence, attempt metadata, and reconciliation state while external mutation remains disabled |
@@ -65,7 +66,7 @@ persisted graph, task, capability, event, evidence, budget, adapter, authority,
 document, decision, and generated UI primitives plus worker run lifecycle
 records and `/`, `/api/health`, `/api/core`, and `POST /api/core` task,
 task-transition, approval-request, capability-grant, budget-ledger, object,
-object-link, event, evidence, document, decision, and generated-view commands. Local
+object-link, event, evidence, document, packet, decision, and generated-view commands. Local
 Node-side validation passes; the real Bun path is verified in the droplet
 containers and GitHub CI.
 

@@ -45,7 +45,8 @@ List the exact Core writes the worker needs:
 | `object.link` | Relationship in the business graph | `fromObjectId`, `toObjectId`, `type`, `data` |
 | `event.ingest` | Source or lifecycle event | `type`, `source`, `objectId`, `data` |
 | `evidence.attach` | Snapshot, draft, receipt, trace, approval, or note | `kind`, `name`, references, `data` |
-| `document.create` | Document or packet record | `kind`, `name`, `state`, references |
+| `document.create` | Document record | `kind`, `name`, `state`, references |
+| `packet.prepare` / `document.packet.prepare` | Durable evidence packet with linked evidence and document refs | `kind`, `name`, references, `evidenceIds`, `documentIds`, sections |
 | `decision.record` | Proposed or decided worker judgment | `kind`, `decision`, `state`, references |
 | `approval.request` | Human or manager review gate | `kind`, `title`, task/object/event refs, action, policy |
 | `capability.grant` | Scoped worker or user authority | `capabilityId` or `capabilityKey`, actor, reason, scope, policy |

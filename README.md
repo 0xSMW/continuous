@@ -40,7 +40,8 @@ Then open `http://localhost:3000`.
 - `/api/core` returns persisted core counts, active tasks, and recent events for tokened operators;
   `POST /api/core` accepts structured core commands: `task.create`,
   `task.transition`, `object.upsert`, `object.link`, `event.ingest`,
-  `evidence.attach`, `document.create`, `decision.record`,
+  `evidence.attach`, `document.create`, `packet.prepare`,
+  `document.packet.prepare`, `decision.record`,
   `approval.request`, `capability.grant`, `budget.reserve`,
   `budget.charge`, `budget.release`, and `view.publish`.
 - `/worker` is the canonical worker control-plane API. Use `GET /worker?view=snapshot` or

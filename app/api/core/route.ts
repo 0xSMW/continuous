@@ -9,6 +9,7 @@ import {
   createCoreDocument,
   ingestCoreEvent,
   linkCoreObjects,
+  prepareCorePacket,
   publishCoreView,
   recordCoreDecision,
   upsertCoreObject,
@@ -501,6 +502,66 @@ export async function POST(request: Request) {
     }
   }
 
+  if (command === "packet.prepare" || command === "document.packet.prepare") {
+    const idempotency = normalizeIdempotencyKey(
+      request.headers.get("idempotency-key") ?? body.idempotencyKey,
+    );
+
+    if (!idempotency.ok) {
+      return errorResponse(
+        {
+          code: "invalid_idempotency_key",
+          message: idempotency.message,
+        },
+        400,
+      );
+    }
+
+    try {
+      const result = await prepareCorePacket({
+        operatorEmail: auth.operatorEmail,
+        idempotencyKey: idempotency.key,
+        tenantSlug,
+        kind: optionalString(config.kind) ?? "",
+        name: optionalString(config.name) ?? "",
+        state: optionalString(config.state),
+        sensitivity: optionalString(config.sensitivity),
+        objectId: optionalString(config.objectId),
+        taskId: optionalString(config.taskId),
+        workflowRunId: optionalString(config.workflowRunId),
+        eventId: optionalString(config.eventId),
+        capabilityId: optionalString(config.capabilityId),
+        evidenceIds: config.evidenceIds,
+        documentIds: config.documentIds,
+        sections: jsonObject(config.sections),
+        hash: optionalString(config.hash),
+        data: jsonObject(config.data),
+        retainedUntil: optionalString(config.retainedUntil),
+      });
+
+      return Response.json(
+        {
+          api: apiVersion,
+          data: {
+            command,
+            core: {
+              tenantSlug: tenantSlug ?? null,
+            },
+            result,
+          },
+          error: null,
+        },
+        {
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    } catch (error) {
+      return coreErrorResponse(error, "core_packet_prepare_failed");
+    }
+  }
+
   if (command === "decision.record") {
     const idempotency = normalizeIdempotencyKey(
       request.headers.get("idempotency-key") ?? body.idempotencyKey,
@@ -939,7 +1000,7 @@ export async function POST(request: Request) {
     {
       code: "core_command_unsupported",
       message:
-        "Core command must be task.create, task.transition, object.upsert, object.link, event.ingest, evidence.attach, document.create, decision.record, approval.request, capability.grant, budget.reserve, budget.charge, budget.release, or view.publish.",
+        "Core command must be task.create, task.transition, object.upsert, object.link, event.ingest, evidence.attach, document.create, packet.prepare, document.packet.prepare, decision.record, approval.request, capability.grant, budget.reserve, budget.charge, budget.release, or view.publish.",
     },
     400,
   );

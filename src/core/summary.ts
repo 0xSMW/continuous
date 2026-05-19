@@ -23,6 +23,7 @@ import {
   employments,
   entityIdentifiers,
   evidence,
+  evidencePackets,
   evaluations,
   events,
   filingDrafts,
@@ -97,6 +98,7 @@ export type CoreSummary = {
     payments: number;
     tasks: number;
     evidence: number;
+    evidencePackets: number;
     events: number;
     capabilities: number;
     capabilityGrants: number;
@@ -181,6 +183,7 @@ export async function getCoreSummary(): Promise<CoreSummary> {
     paymentCount,
     taskCount,
     evidenceCount,
+    evidencePacketCount,
     eventCount,
     capabilityCount,
     capabilityGrantCount,
@@ -238,6 +241,7 @@ export async function getCoreSummary(): Promise<CoreSummary> {
     tableCount(db, payments),
     tableCount(db, tasks),
     tableCount(db, evidence),
+    tableCount(db, evidencePackets),
     tableCount(db, events),
     tableCount(db, capabilities),
     tableCount(db, capabilityGrants),
@@ -319,6 +323,7 @@ export async function getCoreSummary(): Promise<CoreSummary> {
       payments: paymentCount,
       tasks: taskCount,
       evidence: evidenceCount,
+      evidencePackets: evidencePacketCount,
       events: eventCount,
       capabilities: capabilityCount,
       capabilityGrants: capabilityGrantCount,
@@ -402,6 +407,7 @@ export async function getCoreSummarySafe(): Promise<
           payments: 0,
           tasks: 0,
           evidence: 0,
+          evidencePackets: 0,
           events: 0,
           capabilities: 0,
           capabilityGrants: 0,
