@@ -19,25 +19,31 @@ Defaults:
 - `SIZE=s-2vcpu-4gb`
 - `IMAGE=ubuntu-24-04-x64`
 
-## Deploy by IP
+## Deploy
 
 ```sh
 HOST=your-droplet-ip ./scripts/deploy.sh
 ```
 
-The first deploy creates `/opt/continuous/.env` on the droplet with a random Postgres password and `SITE_HOSTS=http://:80`, so Caddy serves plain HTTP on the droplet IP.
+The deploy script creates `/opt/continuous/.env` on the droplet with a random
+Postgres password and requires HTTPS `SITE_HOSTS`. The current production hosts
+are `continuoushq.com, getcontinuous.app`.
 
-## Move to continuoushq.com
+## Domain DNS
 
-Point DNS at the droplet:
+The live domains use registrar DNS, not DigitalOcean DNS zones. Point these
+records at the droplet IP in the registrar:
 
 ```sh
-doctl compute domain create continuoushq.com --ip-address your-droplet-ip
-doctl compute domain records create continuoushq.com --record-type CNAME --record-name www --record-data continuoushq.com.
+continuoushq.com      A      your-droplet-ip
+getcontinuous.app     A      your-droplet-ip
 ```
 
-Then switch Caddy to hostnames and automatic TLS:
+DigitalOcean DNS commands only apply if the nameservers are migrated to
+DigitalOcean later.
+
+Refresh Caddy hostnames and automatic TLS:
 
 ```sh
-HOST=your-droplet-ip ACME_EMAIL=admin@continuoushq.com ./scripts/configure-domain.sh
+HOST=your-droplet-ip SITE_HOSTS="continuoushq.com, getcontinuous.app" ACME_EMAIL=admin@continuoushq.com ./scripts/configure-domain.sh
 ```
