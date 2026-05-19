@@ -20,6 +20,8 @@ function bodyObject(value: unknown) {
     : {};
 }
 
+const workerCommandEnvelopeFields = new Set(["command", "worker", "idempotencyKey", "config"]);
+
 async function readBody(request: Request) {
   if (!request.headers.get("content-type")?.includes("application/json")) {
     return {};
@@ -47,6 +49,10 @@ function idempotencyKeyFrom(body: Record<string, unknown>, request: Request) {
   }
 
   return request.headers.get("idempotency-key") ?? undefined;
+}
+
+function unexpectedWorkerPayloadFields(body: Record<string, unknown>) {
+  return Object.keys(body).filter((field) => !workerCommandEnvelopeFields.has(field));
 }
 
 function targetFromUrl(request: Request): WorkerTargetInput {
@@ -142,6 +148,17 @@ export async function POST(request: Request) {
   }
 
   const body = await readBody(request);
+  const unexpectedFields = unexpectedWorkerPayloadFields(body);
+
+  if (unexpectedFields.length > 0) {
+    return errorResponse(
+      {
+        code: "invalid_worker_command_envelope",
+        message: `Worker command payload fields must be command, worker, idempotencyKey, and config. Move operation inputs into config. Unexpected fields: ${unexpectedFields.join(", ")}.`,
+      },
+      400,
+    );
+  }
 
   try {
     const result = await executeWorkerCommand({

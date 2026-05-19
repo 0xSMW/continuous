@@ -34,6 +34,11 @@ implemented worker. Define every supported command with required `config`
 fields, validation errors, idempotent replay behavior, output fields, and
 external-execution status.
 
+Only `command`, `worker`, `idempotencyKey`, and `config` are accepted as
+top-level command fields. Worker selection belongs under `worker`; operation
+inputs such as source records, approval ids, retry limits, draft payloads, or
+adapter selectors belong under `config`.
+
 ## Command Registry
 
 Every worker command must be registered before implementation. The registry

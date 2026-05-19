@@ -50,7 +50,11 @@ Then open `http://localhost:3000`.
   `GET /worker?view=approvals&role=revenue_operations`; use `POST /worker` with
   explicit `worker.role`, `command`, `idempotencyKey` when required, and
   `config` payloads for side-effecting worker commands. Revenue operations runs
-  can first call `command=lead.read` with `config.source` and
+  accept only `command`, `worker`, `idempotencyKey`, and `config` as top-level
+  command fields; role and tenant selectors live under `worker`, and operation
+  inputs such as source records, approval ids, retry limits, or lead payloads
+  live under `config`. Revenue operations runs can first call
+  `command=lead.read` with `config.source` and
   `config.records[]` to persist Core lead source snapshots, then call
   `command=run` with the returned `config.intake` selector. Internal workflow
   handlers can still use exact Core row ids; `config.leadPacket` remains a

@@ -117,11 +117,14 @@ The canonical HTTP shape is now `/worker` with explicit worker roles:
 `GET /worker?view=snapshot&role=revenue_operations` for state,
 `GET /worker?view=approvals&role=revenue_operations` for approval queues, and
 `POST /worker` with `command`, `worker`, `idempotencyKey`, and `config` for
-side-effecting operations. Adapter reconciliation and retry execution use the
-same route with `command=adapters.reconcile` or `command=adapters.retry`, a
-tenant-scoped `worker` target, and `config.limit`; revision continuation uses
-`command=continue`, an
-idempotency key, and `config.approvalId`. Route handlers now delegate to the
+side-effecting operations. The route rejects ad hoc top-level operation fields;
+role and tenant selectors live under `worker`, while source records, approval
+ids, retry limits, and direct fallback payloads live under `config`. Adapter
+reconciliation and retry execution use the same route with
+`command=adapters.reconcile` or `command=adapters.retry`, a tenant-scoped
+`worker` target, and `config.limit`; revision continuation uses
+`command=continue`, an idempotency key, and `config.approvalId`. Route handlers
+now delegate to the
 worker command registry,
 which owns role allowlisting, command lookup, idempotency, config validation,
 tenant requirements, and external-execution metadata. Worker-family-specific

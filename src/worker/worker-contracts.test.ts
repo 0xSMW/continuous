@@ -64,6 +64,9 @@ describe("future worker contracts", () => {
     expect(source).toContain("The canonical worker control-plane route is `/worker`.");
     expect(source).toContain('"role": "revenue_operations"');
     expect(source).toContain("`config` is the command payload envelope.");
+    expect(source).toContain(
+      "Only `command`, `worker`, `idempotencyKey`, and `config` are accepted as",
+    );
     expect(source).toContain("HTTP and CLI callers both go through the registered `/worker` command");
     expect(source).not.toMatch(/\/api\/[a-z0-9-]+-worker/);
   });

@@ -25,7 +25,9 @@ state, workflow state, and object versioning without external sends or money mov
 `/worker` is the forward API. Worker role, tenant, operation config, and
 idempotency belong in payload fields for mutation commands, not in
 worker-family-specific URL paths. New worker families must register commands
-and config schemas, not new HTTP route names.
+and config schemas, not new HTTP route names. The mutation envelope accepts only
+`command`, `worker`, `idempotencyKey`, and `config` as top-level fields;
+worker selectors live under `worker`, and operation inputs live under `config`.
 
 ## Expansion Gates
 

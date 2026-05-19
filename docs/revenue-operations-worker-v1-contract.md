@@ -20,6 +20,12 @@ raising autonomy or permitting external sends.
 
 The canonical worker control-plane route is `/worker`.
 
+Only `command`, `worker`, `idempotencyKey`, and `config` are accepted as
+top-level command fields. Worker role, tenant selection, and worker id live
+under `worker`; operation-specific inputs such as source records, approval ids,
+retry limits, pricing overrides, and direct fallback lead payloads live under
+`config`.
+
 Read inbound lead source records before running the worker:
 
 ```json
@@ -171,7 +177,7 @@ Worker-family-specific routes are not part of the public API. There is no
 Revenue Operations compatibility path or worker-specific local mutation
 shortcut; HTTP and CLI callers both go through the registered `/worker` command
 envelope. Future workers must use `/worker` with role, command, idempotency,
-and config in structured fields.
+and config in structured fields; ad hoc top-level operation fields are rejected.
 
 ## Registry Entries
 

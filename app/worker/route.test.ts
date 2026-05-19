@@ -146,7 +146,7 @@ describe("/worker route", () => {
     );
   });
 
-  it("does not lift legacy top-level worker fields into the command envelope", async () => {
+  it("rejects legacy top-level worker fields outside the command envelope", async () => {
     mocks.executeWorkerCommand.mockResolvedValue({
       worker: {
         role: "revenue_operations",
@@ -158,7 +158,7 @@ describe("/worker route", () => {
     });
 
     const { POST } = await import("./route");
-    await POST(
+    const response = await POST(
       new Request("http://localhost/worker", {
         method: "POST",
         headers: {
@@ -176,18 +176,52 @@ describe("/worker route", () => {
         }),
       }),
     );
+    const body = await response.json();
 
-    expect(mocks.executeWorkerCommand).toHaveBeenCalledWith({
-      command: "run",
-      target: {
-        role: undefined,
-        id: undefined,
-        tenantSlug: undefined,
+    expect(response.status).toBe(400);
+    expect(body).toEqual({
+      api: "continuous.worker.v1",
+      data: null,
+      error: {
+        code: "invalid_worker_command_envelope",
+        message:
+          "Worker command payload fields must be command, worker, idempotencyKey, and config. Move operation inputs into config. Unexpected fields: role, tenantSlug, leadPacket.",
       },
-      config: undefined,
-      idempotencyKey: "legacy-top-level-001",
-      operatorEmail: "operator@example.com",
     });
+    expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
+  });
+
+  it("rejects ad hoc top-level command fields even with a valid worker target", async () => {
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/worker", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "run",
+          worker: {
+            role: "revenue_operations",
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "ad-hoc-top-level-001",
+          approvalId: "approval-1",
+          limit: 25,
+          config: {},
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toEqual({
+      code: "invalid_worker_command_envelope",
+      message:
+        "Worker command payload fields must be command, worker, idempotencyKey, and config. Move operation inputs into config. Unexpected fields: approvalId, limit.",
+    });
+    expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
   });
 
   it("routes GET views through role-scoped worker selectors", async () => {
