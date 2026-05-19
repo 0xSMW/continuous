@@ -119,6 +119,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [[ -z "${SITE_HOSTS:-}" || "$SITE_HOSTS" == "http://:80" || "$SITE_HOSTS" == ":80" ]]; then
+            SITE_HOSTS="continuoushq.com, getcontinuous.app"
+          fi
+          if [[ -z "${APP_URL:-}" || "$APP_URL" == http://* ]]; then
+            APP_URL="https://continuoushq.com"
+          fi
           app_url="${APP_URL:-https://continuoushq.com}"
           ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" \
             "APP_DIR='$DEPLOY_PATH' SITE_HOSTS='$SITE_HOSTS' ACME_EMAIL='$ACME_EMAIL' APP_URL='$app_url' bash -s" <<'REMOTE'
