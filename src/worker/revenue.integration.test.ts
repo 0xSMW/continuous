@@ -509,13 +509,43 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(audit?.targetType).toBe("task");
     expect(audit?.targetId).toBe(first.taskId);
     expect(objectValue(audit?.data).externalExecution).toBe("blocked");
+    expect(objectValue(objectValue(audit?.data).idempotency)).toMatchObject({
+      command: "task.create",
+      hashVersion: 1,
+    });
+    expect(stringValue(objectValue(objectValue(audit?.data).idempotency).inputHash)).toHaveLength(64);
 
     const replay = await createCoreTask({
       operatorEmail: "owner@continuoushq.com",
       tenantSlug: "continuous-demo",
       idempotencyKey,
-      title: "Different title should not create another task",
+      title: "Review agency notice packet",
+      priority: "high",
+      owner: {
+        type: "user",
+      },
+      evidence: {
+        required: ["notice_packet"],
+      },
+      cost: {
+        humanMinutes: 15,
+      },
+      kpi: {
+        riskAvoided: "filing_penalty",
+      },
       db,
+    });
+    await expect(
+      createCoreTask({
+        operatorEmail: "owner@continuoushq.com",
+        tenantSlug: "continuous-demo",
+        idempotencyKey,
+        title: "Different title should conflict",
+        db,
+      }),
+    ).rejects.toMatchObject({
+      code: "core_command_idempotency_conflict",
+      status: 409,
     });
     const [taskCount] = await db
       .select({ value: count() })
@@ -1178,9 +1208,29 @@ maybeDescribe("Revenue Worker integration eval", () => {
       tenantSlug: "continuous-demo",
       idempotencyKey: `ci-control-task-transition-${runId}`,
       taskId: taskResult.taskId,
-      toState: "done",
-      reason: "Different state should replay.",
+      toState: "waiting",
+      reason: "Response packet is waiting for owner review.",
+      evidence: {
+        packetReady: true,
+      },
+      outcome: {
+        status: "waiting_on_owner",
+      },
       db,
+    });
+    await expect(
+      transitionCoreTask({
+        operatorEmail: "owner@continuoushq.com",
+        tenantSlug: "continuous-demo",
+        idempotencyKey: `ci-control-task-transition-${runId}`,
+        taskId: taskResult.taskId,
+        toState: "done",
+        reason: "Different state should conflict.",
+        db,
+      }),
+    ).rejects.toMatchObject({
+      code: "core_command_idempotency_conflict",
+      status: 409,
     });
     const approvalReplay = await requestApproval({
       operatorEmail: "owner@continuoushq.com",

@@ -12,6 +12,7 @@ import {
   type JsonObject,
 } from "../db/schema";
 import { PlatformUnavailableError } from "./errors";
+import { assertCoreIdempotencyReplay, coreIdempotencyFingerprint } from "./idempotency";
 import { loadOperatorContext } from "./operators";
 
 type Database = typeof defaultDb;
@@ -271,6 +272,25 @@ export async function createCoreTask(input: CoreTaskCreateInput): Promise<CoreTa
     operatorUserId: operator.userId,
     operatorActorRef: operator.actorRef,
   });
+  const idempotency = coreIdempotencyFingerprint("task.create", {
+    title,
+    objectId: objectId ?? null,
+    capabilityId: capabilityId ?? null,
+    triggerEventId: triggerEventId ?? null,
+    state,
+    priority,
+    owner: {
+      type: owner.ownerType,
+      id: owner.ownerId ?? null,
+      ref: owner.ownerRef,
+    },
+    reviewerUserId: reviewerUserId ?? null,
+    dueAt: dueAt?.toISOString() ?? null,
+    evidence: input.evidence ?? {},
+    outcome: input.outcome ?? {},
+    cost: input.cost ?? {},
+    kpi: input.kpi ?? {},
+  });
 
   return db.transaction(async (tx) => {
     await tx.execute(
@@ -281,6 +301,7 @@ export async function createCoreTask(input: CoreTaskCreateInput): Promise<CoreTa
       .select({
         auditEventId: auditEvents.id,
         eventId: auditEvents.eventId,
+        data: auditEvents.data,
         task: tasks,
       })
       .from(auditEvents)
@@ -296,6 +317,12 @@ export async function createCoreTask(input: CoreTaskCreateInput): Promise<CoreTa
       .limit(1);
 
     if (existingAudit) {
+      assertCoreIdempotencyReplay({
+        command: "task.create",
+        fingerprint: idempotency,
+        storedData: existingAudit.data,
+      });
+
       return {
         created: false,
         taskId: existingAudit.task.id,
@@ -437,6 +464,7 @@ export async function createCoreTask(input: CoreTaskCreateInput): Promise<CoreTa
             ref: owner.ownerRef,
           },
           triggerEventId: task.triggerEventId ?? null,
+          idempotency,
           externalExecution: "blocked",
         },
       })
@@ -474,6 +502,15 @@ export async function transitionCoreTask(
     operatorEmail: input.operatorEmail,
     tenantSlug: input.tenantSlug,
   });
+  const idempotency = coreIdempotencyFingerprint("task.transition", {
+    taskId,
+    toState: nextState,
+    reason,
+    evidence: input.evidence ?? {},
+    outcome: input.outcome ?? {},
+    cost: input.cost ?? {},
+    kpi: input.kpi ?? {},
+  });
 
   return db.transaction(async (tx) => {
     await tx.execute(
@@ -484,6 +521,7 @@ export async function transitionCoreTask(
       .select({
         auditEventId: auditEvents.id,
         eventId: auditEvents.eventId,
+        data: auditEvents.data,
         task: tasks,
       })
       .from(auditEvents)
@@ -499,6 +537,12 @@ export async function transitionCoreTask(
       .limit(1);
 
     if (existingAudit) {
+      assertCoreIdempotencyReplay({
+        command: "task.transition",
+        fingerprint: idempotency,
+        storedData: existingAudit.data,
+      });
+
       const [transitionEvidence] = await tx
         .select({ id: evidence.id })
         .from(evidence)
@@ -562,6 +606,7 @@ export async function transitionCoreTask(
       fromState: task.state,
       toState: nextState,
       reason,
+      idempotency,
       externalExecution: "blocked",
     };
     const [event] = await tx
