@@ -456,6 +456,10 @@ describe("future worker contracts", () => {
     expect(attestationScript).toContain("control_plane.credential.revoke");
     expect(attestationScript).toContain("control_plane.session.review");
     expect(attestationScript).toContain("CONTROL_PLANE_SESSION_REVIEW_VIEW_ID");
+    expect(attestationScript).toContain("worker:hire.packet.prepare");
+    expect(attestationScript).toContain("worker:payroll_input.prepare");
+    expect(attestationScript).toContain("worker:view.readiness");
+    expect(attestationScript).toContain("workforce_operations");
     expect(rotationScript).toContain("control_plane.token_rotation.attest");
     expect(rotationScript).toContain("TOKEN_ROTATION_ATTESTATION_ID");
     expect(rotationScript).toContain("NEXT_WORKER_RUN_TOKEN");
@@ -465,6 +469,9 @@ describe("future worker contracts", () => {
     expect(deployScript).toContain("core:control_plane.credential.revoke");
     expect(deployScript).toContain("core:control_plane.session.review");
     expect(deployScript).toContain("worker:payment_draft.prepare");
+    expect(deployScript).toContain("worker:hire.packet.prepare");
+    expect(deployScript).toContain("worker:payroll_input.prepare");
+    expect(deployScript).toContain("worker:view.readiness");
     expect(deployScript).toContain("scripts/rotate-control-plane-token-on-host.sh");
     expect(deployScript).toContain("preserving the existing bootstrap token");
     expect(deployScript).toContain('SITE_HOST="$SITE_HOST"');
@@ -474,6 +481,9 @@ describe("future worker contracts", () => {
     expect(deployWorkflow).toContain("core:control_plane.credential.revoke");
     expect(deployWorkflow).toContain("core:control_plane.session.review");
     expect(deployWorkflow).toContain("worker:payment_draft.prepare");
+    expect(deployWorkflow).toContain("worker:hire.packet.prepare");
+    expect(deployWorkflow).toContain("worker:payroll_input.prepare");
+    expect(deployWorkflow).toContain("worker:view.readiness");
     expect(deployWorkflow).toContain("scripts/attest-control-plane-on-host.sh");
     expect(deployWorkflow).toContain("scripts/rotate-control-plane-token-on-host.sh");
     expect(deployWorkflow).toContain("preserving the existing bootstrap token");

@@ -322,7 +322,7 @@ Control-plane token catalog entries have this shape when provided directly via
     "tokenSha256": "hex_sha256_of_bearer_token",
     "operatorEmail": "owner@continuoushq.com",
     "allowedTenants": ["continuous-demo"],
-    "allowedWorkerRoles": ["revenue_operations", "owner_chief_of_staff", "dispatch_operations"],
+    "allowedWorkerRoles": ["revenue_operations", "owner_chief_of_staff", "dispatch_operations", "finance_operations", "workforce_operations"],
     "allowedRoutes": ["core", "worker", "workflow", "approval"],
     "allowedAccess": ["read", "write"],
     "allowedCommands": [
@@ -331,8 +331,11 @@ Control-plane token catalog entries have this shape when provided directly via
       "core:object.upsert",
       "core:entity.setup.record",
       "worker:view.snapshot",
+      "worker:view.readiness",
       "worker:lead.read",
       "worker:run",
+      "worker:hire.packet.prepare",
+      "worker:payroll_input.prepare",
       "workflow:view.overview",
       "approval:view.inbox"
     ],
@@ -499,7 +502,8 @@ shape:
       "revenue_operations",
       "owner_chief_of_staff",
       "dispatch_operations",
-      "finance_operations"
+      "finance_operations",
+      "workforce_operations"
     ],
     "allowedRoutes": ["core", "worker", "workflow", "approval"],
     "allowedAccess": ["read", "write"],
@@ -511,8 +515,11 @@ shape:
       "core:control_plane.session.review",
       "core:entity.setup.record",
       "worker:view.snapshot",
+      "worker:view.readiness",
       "worker:lead.read",
       "worker:run",
+      "worker:hire.packet.prepare",
+      "worker:payroll_input.prepare",
       "worker:continue",
       "worker:approval.decide",
       "workflow:view.overview",
