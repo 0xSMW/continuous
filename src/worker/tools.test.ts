@@ -13,6 +13,10 @@ import {
   plannedWorkerCommands,
   plannedWorkerContracts,
   plannedWorkerViews,
+  runtimeWorkerContracts,
+  workerContracts,
+  workerFollowUpCommands,
+  workerFollowUpViews,
 } from "./planned-workers";
 
 const originalAppEnv = process.env.APP_ENV;
@@ -258,22 +262,36 @@ describe("worker tool contract", () => {
       "worker.view",
       "worker.command",
     ]);
+    const contractSummary = (contract: (typeof workerContracts)[number]) => ({
+      role: contract.role,
+      name: contract.name,
+      contractPath: contract.contractPath,
+      firstOutcome: contract.firstOutcome,
+      autonomyLevel: contract.autonomyLevel,
+      externalExecution: contract.externalExecution,
+      evidencePacket: contract.evidencePacket,
+    });
+
     expect(workerToolSchema.tools).toBe(workerTools);
     expect(workerToolSchema.registry.commands).toEqual(registeredWorkerCommands());
     expect(workerToolSchema.registry.views).toEqual(registeredWorkerViews());
-    expect(workerToolSchema.registry.plannedContracts).toEqual(
-      plannedWorkerContracts.map((contract) => ({
-        role: contract.role,
-        name: contract.name,
-        contractPath: contract.contractPath,
-        firstOutcome: contract.firstOutcome,
-        autonomyLevel: contract.autonomyLevel,
-        externalExecution: contract.externalExecution,
-        evidencePacket: contract.evidencePacket,
-      })),
+    expect(workerToolSchema.registry.contracts).toEqual(workerContracts.map(contractSummary));
+    expect(workerToolSchema.registry.runtimeContracts).toEqual(
+      runtimeWorkerContracts.map(contractSummary),
     );
-    expect(workerToolSchema.registry.plannedCommands).toEqual(plannedWorkerCommands());
-    expect(workerToolSchema.registry.plannedViews).toEqual(plannedWorkerViews());
+    expect(workerToolSchema.registry.plannedContracts).toEqual(
+      plannedWorkerContracts.map(contractSummary),
+    );
+    expect(workerToolSchema.registry.plannedCommands).toEqual(
+      workerFollowUpCommands(registeredWorkerCommands()),
+    );
+    expect(workerToolSchema.registry.plannedViews).toEqual(
+      workerFollowUpViews(registeredWorkerViews()),
+    );
+    expect(workerToolSchema.registry.plannedFutureWorkerCommands).toEqual(
+      plannedWorkerCommands(),
+    );
+    expect(workerToolSchema.registry.plannedFutureWorkerViews).toEqual(plannedWorkerViews());
     expect(workerToolSchema.registry.commands).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -572,7 +590,7 @@ describe("worker tool contract", () => {
     ).rejects.toThrow("Worker role payroll_operations is not available yet.");
   });
 
-  it("exposes planned worker metadata without enabling unavailable runtime handlers", () => {
+  it("exposes planned worker metadata and runtime follow-ups without enabling unavailable handlers", () => {
     const plannedCommands = workerToolSchema.registry.plannedCommands as Array<{
       role: string;
       name: string;
@@ -592,8 +610,33 @@ describe("worker tool contract", () => {
       "compliance_operations",
       "systems_operations",
     ]);
+    expect(workerToolSchema.registry.contracts.map((contract) => contract.role)).toEqual([
+      "revenue_operations",
+      "owner_chief_of_staff",
+      "dispatch_operations",
+      "finance_operations",
+      "workforce_operations",
+      "compliance_operations",
+      "systems_operations",
+    ]);
+    expect(workerToolSchema.registry.runtimeContracts.map((contract) => contract.role)).toEqual([
+      "revenue_operations",
+      "owner_chief_of_staff",
+      "dispatch_operations",
+      "finance_operations",
+    ]);
     expect(workerToolSchema.registry.plannedCommands).toEqual(
       expect.arrayContaining([
+        expect.objectContaining({
+          role: "revenue_operations",
+          name: "quote.prepare",
+          sideEffects: "internal",
+        }),
+        expect.objectContaining({
+          role: "finance_operations",
+          name: "expense_code.propose",
+          sideEffects: "internal",
+        }),
         expect.objectContaining({
           role: "systems_operations",
           name: "sync.repair.plan",
@@ -615,6 +658,11 @@ describe("worker tool contract", () => {
         }
       }
     }
+    expect(
+      plannedCommands.find(
+        (command) => command.role === "revenue_operations" && command.name === "quote.prepare",
+      )?.configSchema.oneRequired,
+    ).toEqual(["intake", "leadPacket", "lead"]);
     expect(
       plannedCommands.find(
         (command) => command.role === "systems_operations" && command.name === "connector.health.scan",
@@ -639,10 +687,19 @@ describe("worker tool contract", () => {
           role: "finance_operations",
           name: "invoice.prepare",
         }),
+        expect.objectContaining({
+          role: "revenue_operations",
+          name: "lead.read",
+        }),
       ]),
     );
     expect(workerToolSchema.registry.plannedViews).toEqual(
       expect.arrayContaining([
+        expect.objectContaining({
+          role: "revenue_operations",
+          name: "quote_review",
+          evidencePacket: "quote_approval_packet",
+        }),
         expect.objectContaining({
           role: "compliance_operations",
           name: "snapshot",

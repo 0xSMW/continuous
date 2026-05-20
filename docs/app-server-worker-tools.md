@@ -5,16 +5,18 @@ discovery and registry-backed command execution:
 
 | Tool | Mode | Purpose |
 |---|---|---|
-| `continuous.worker.schema` | Read-only | Returns the registered Revenue, Owner, Dispatch, and Finance runtime commands, planned future-worker metadata, worker tool schema, and integration boundary |
+| `continuous.worker.schema` | Read-only | Returns worker contracts, runtime roles, registered commands, follow-up commands, planned future-worker metadata, worker tool schema, and integration boundary |
 | `continuous.worker.command` | Registry-backed command | Invokes an existing worker command with the same `command`, `worker`, `idempotencyKey`, and `config` envelope used by `/worker` |
 
 The generated Codex app-server protocol defines a dynamic tool as `name`,
 `description`, and `inputSchema`. The local manifest in
 `src/worker/app-server-tools.ts` follows that shape and delegates commands to
 the shared worker command registry.
-`continuous.worker.schema` exposes each registered command's `configSchema`;
-planned future-worker commands also expose a non-executable `configSchema` so
-agents can inspect payload requirements before handlers exist.
+`continuous.worker.schema` exposes each registered command's `configSchema`,
+the full `contracts` catalog, current `runtimeContracts`, and
+`followUpCommands` that are contract-defined but not executable yet. Planned
+future-worker commands also expose a non-executable `configSchema` so agents
+can inspect payload requirements before handlers exist.
 `continuous.worker.command`, `/worker`, and `worker:tool` all run through that
 same registry validation before dispatch.
 The CI integration suite exercises `continuous.worker.command` on real

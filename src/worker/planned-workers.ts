@@ -107,11 +107,11 @@ function plannedFieldSchema(field: string): PlannedWorkerConfigSchema {
     return windowSchema();
   }
 
-  if (field === "accounts" || field === "checks" || field === "objectIds" || field === "sourceRefs") {
+  if (field === "accounts" || field === "checks" || field === "objectIds") {
     return stringArraySchema();
   }
 
-  if (field === "constraints" || field === "policy" || field === "trigger") {
+  if (field === "constraints" || field === "policy" || field === "sourceRefs" || field === "trigger") {
     return objectSchema();
   }
 
@@ -144,7 +144,195 @@ function plannedConfigSchema(command: PlannedWorkerCommandMetadata): PlannedWork
   };
 }
 
-const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
+export const workerContracts: PlannedWorkerContractMetadata[] = [
+  {
+    role: "revenue_operations",
+    name: "Revenue Operations Worker",
+    contractPath: "docs/revenue-operations-worker-v1-contract.md",
+    firstOutcome: "Lead intake, classification, response draft, quote approval, and no-send continuation proof",
+    autonomyLevel: 2,
+    externalExecution: "blocked",
+    evidencePacket: "quote_approval_packet",
+    commands: [
+      {
+        role: "revenue_operations",
+        name: "lead.read",
+        toolAlias: "worker.command",
+        description: "Read inbound lead source records into persisted Core intake selectors.",
+        idempotency: "required",
+        sideEffects: "internal",
+        externalExecution: "blocked",
+        requiresTenant: true,
+        requiredConfig: ["source"],
+        oneRequiredConfig: ["record", "records", "items", "leads", "reader"],
+        configSchema: {
+          type: "object",
+          required: ["source"],
+          oneRequired: ["record", "records", "items", "leads", "reader"],
+          properties: {
+            source: stringSchema("Source system name."),
+            sourceKind: stringSchema("Optional source kind."),
+            reader: objectSchema("Read-only source reader metadata."),
+            record: objectSchema("Single source record."),
+            records: { type: "array", minItems: 1, maxItems: 25, items: objectSchema() },
+            items: { type: "array", minItems: 1, maxItems: 25, items: objectSchema() },
+            leads: { type: "array", minItems: 1, maxItems: 25, items: objectSchema() },
+          },
+          additionalProperties: true,
+        },
+      },
+      {
+        role: "revenue_operations",
+        name: "lead.classify",
+        toolAlias: "worker.command",
+        description: "Classify a persisted or direct lead packet without external execution.",
+        idempotency: "required",
+        sideEffects: "internal",
+        externalExecution: "blocked",
+        requiresTenant: true,
+        requiredConfig: [],
+        oneRequiredConfig: ["intake", "leadPacket", "lead"],
+      },
+      {
+        role: "revenue_operations",
+        name: "response.draft",
+        toolAlias: "worker.command",
+        description: "Draft an owner-reviewable customer response without sending it.",
+        idempotency: "required",
+        sideEffects: "internal",
+        externalExecution: "blocked",
+        requiresTenant: true,
+        requiredConfig: [],
+        oneRequiredConfig: ["intake", "leadPacket", "lead"],
+      },
+      {
+        role: "revenue_operations",
+        name: "run",
+        toolAlias: "worker.command",
+        description: "Run the Revenue Operations Worker against persisted Core intake.",
+        idempotency: "required",
+        sideEffects: "internal",
+        externalExecution: "blocked",
+        requiresTenant: true,
+        requiredConfig: [],
+        oneRequiredConfig: ["intake", "leadPacket", "lead"],
+      },
+      {
+        role: "revenue_operations",
+        name: "continue",
+        toolAlias: "worker.command",
+        description: "Continue a worker-owned approval outcome without executing external actions.",
+        idempotency: "required",
+        sideEffects: "internal",
+        externalExecution: "blocked",
+        requiresTenant: true,
+        requiredConfig: ["approvalId"],
+      },
+      {
+        role: "revenue_operations",
+        name: "approval.decide",
+        toolAlias: "worker.command",
+        description: "Record an operator approval decision without executing external actions.",
+        idempotency: "none",
+        sideEffects: "internal",
+        externalExecution: "blocked",
+        requiresTenant: true,
+        requiredConfig: ["approvalId", "action"],
+      },
+      {
+        role: "revenue_operations",
+        name: "adapters.reconcile",
+        toolAlias: "worker.command",
+        description: "Reconcile dry-run adapter records, retry tasks, and review tasks.",
+        idempotency: "none",
+        sideEffects: "internal",
+        externalExecution: "blocked",
+        requiresTenant: true,
+        requiredConfig: [],
+        configSchema: {
+          type: "object",
+          properties: {
+            limit: { type: "number", integer: true, minimum: 1, maximum: 100 },
+          },
+          additionalProperties: false,
+        },
+      },
+      {
+        role: "revenue_operations",
+        name: "adapters.retry",
+        toolAlias: "worker.command",
+        description: "Drain due dry-run adapter retry rows without live external mutation.",
+        idempotency: "none",
+        sideEffects: "internal",
+        externalExecution: "blocked",
+        requiresTenant: true,
+        requiredConfig: [],
+        configSchema: {
+          type: "object",
+          properties: {
+            limit: { type: "number", integer: true, minimum: 1, maximum: 100 },
+          },
+          additionalProperties: false,
+        },
+      },
+      {
+        role: "revenue_operations",
+        name: "quote.prepare",
+        toolAlias: "worker.command",
+        description: "Planned split quote-preparation command for owner-reviewable quote packets.",
+        idempotency: "required",
+        sideEffects: "internal",
+        externalExecution: "blocked",
+        requiresTenant: true,
+        requiredConfig: [],
+        oneRequiredConfig: ["intake", "leadPacket", "lead"],
+      },
+      {
+        role: "revenue_operations",
+        name: "payment_link.prepare",
+        toolAlias: "worker.command",
+        description: "Planned payment-link preparation packet with human approval and no money movement.",
+        idempotency: "required",
+        sideEffects: "approved_only",
+        externalExecution: "blocked",
+        requiresTenant: true,
+        requiredConfig: [],
+        oneRequiredConfig: ["invoiceId", "sourceRefs"],
+      },
+    ],
+    views: [
+      {
+        role: "revenue_operations",
+        name: "snapshot",
+        toolAlias: "worker.view",
+        description: "Read the Revenue Operations Worker runtime snapshot.",
+        idempotency: "none",
+        sideEffects: "none",
+        externalExecution: "blocked",
+        requiresTenant: false,
+      },
+      {
+        role: "revenue_operations",
+        name: "approvals",
+        toolAlias: "worker.view",
+        description: "Read Revenue approval queue items and continuation hints.",
+        idempotency: "none",
+        sideEffects: "none",
+        externalExecution: "blocked",
+        requiresTenant: true,
+      },
+      {
+        role: "revenue_operations",
+        name: "quote_review",
+        toolAlias: "worker.view",
+        description: "Planned quote approval packet detail view for generated review surfaces.",
+        idempotency: "none",
+        sideEffects: "none",
+        externalExecution: "blocked",
+        requiresTenant: true,
+      },
+    ],
+  },
   {
     role: "owner_chief_of_staff",
     name: "Owner Chief-of-Staff Worker",
@@ -754,12 +942,17 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
 ];
 
 const runtimeWorkerRoles = new Set([
+  "revenue_operations",
   "owner_chief_of_staff",
   "dispatch_operations",
   "finance_operations",
 ]);
 
-export const plannedWorkerContracts = allPlannedWorkerContracts.filter(
+export const runtimeWorkerContracts = workerContracts.filter((contract) =>
+  runtimeWorkerRoles.has(contract.role),
+);
+
+export const plannedWorkerContracts = workerContracts.filter(
   (contract) => !runtimeWorkerRoles.has(contract.role),
 );
 
@@ -788,6 +981,52 @@ export function plannedWorkerViews(): PlannedWorkerViewRegistryEntry[] {
       evidencePacket: view.name === "snapshot" ? null : contract.evidencePacket,
     })),
   );
+}
+
+type RegisteredWorkerItem = {
+  role: string;
+  name: string;
+};
+
+function registeredKeys(items: RegisteredWorkerItem[]) {
+  return new Set(items.map((item) => `${item.role}:${item.name}`));
+}
+
+export function workerFollowUpCommands(
+  registeredCommands: RegisteredWorkerItem[] = [],
+): PlannedWorkerCommandRegistryEntry[] {
+  const registered = registeredKeys(registeredCommands);
+
+  return workerContracts.flatMap((contract) =>
+    contract.commands
+      .filter((command) => !registered.has(`${command.role}:${command.name}`))
+      .map((command) => ({
+        ...command,
+        contractPath: contract.contractPath,
+        evidencePacket: contract.evidencePacket,
+        configSchema: plannedConfigSchema(command),
+      })),
+  );
+}
+
+export function workerFollowUpViews(
+  registeredViews: RegisteredWorkerItem[] = [],
+): PlannedWorkerViewRegistryEntry[] {
+  const registered = registeredKeys(registeredViews);
+
+  return workerContracts.flatMap((contract) =>
+    contract.views
+      .filter((view) => !registered.has(`${view.role}:${view.name}`))
+      .map((view) => ({
+        ...view,
+        contractPath: contract.contractPath,
+        evidencePacket: view.name === "snapshot" ? null : contract.evidencePacket,
+      })),
+  );
+}
+
+export function workerContractForRole(role: string) {
+  return workerContracts.find((contract) => contract.role === role);
 }
 
 export function plannedWorkerContractForRole(role: string) {

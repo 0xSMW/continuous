@@ -40,12 +40,45 @@ describe("app-server worker tools", () => {
     if (!("registry" in schema)) {
       throw new Error("Expected schema result.");
     }
-    expect(schema.registry.commands.some((command) => command.name === "run")).toBe(true);
-    expect(schema.registry.commands.some((command) => command.name === "approval.decide")).toBe(true);
-    expect(schema.registry.commands.some((command) => command.name === "lead.classify")).toBe(true);
-    expect(schema.registry.commands.some((command) => command.name === "response.draft")).toBe(true);
+    const registry = schema.registry;
+    const runtimeRoles = registry.runtimeContracts.map((contract) => contract.role);
+    const plannedRoles = registry.plannedContracts.map((contract) => contract.role);
+    const revenueFollowUpCommands = registry.followUpCommands.filter(
+      (command) => command.role === "revenue_operations",
+    );
+
+    expect(registry.contracts.map((contract) => contract.role)).toEqual([
+      "revenue_operations",
+      "owner_chief_of_staff",
+      "dispatch_operations",
+      "finance_operations",
+      "workforce_operations",
+      "compliance_operations",
+      "systems_operations",
+    ]);
+    expect(runtimeRoles).toEqual([
+      "revenue_operations",
+      "owner_chief_of_staff",
+      "dispatch_operations",
+      "finance_operations",
+    ]);
+    expect(plannedRoles).toEqual(["workforce_operations", "compliance_operations", "systems_operations"]);
+    expect(registry.plannedCommands).toEqual(registry.followUpCommands);
+    expect(registry.plannedViews).toEqual(registry.followUpViews);
+    expect(revenueFollowUpCommands.map((command) => command.name)).toEqual([
+      "quote.prepare",
+      "payment_link.prepare",
+    ]);
     expect(
-      schema.registry.commands.some(
+      revenueFollowUpCommands.find((command) => command.name === "payment_link.prepare")?.configSchema.properties
+        ?.sourceRefs?.type,
+    ).toBe("object");
+    expect(registry.commands.some((command) => command.name === "run")).toBe(true);
+    expect(registry.commands.some((command) => command.name === "approval.decide")).toBe(true);
+    expect(registry.commands.some((command) => command.name === "lead.classify")).toBe(true);
+    expect(registry.commands.some((command) => command.name === "response.draft")).toBe(true);
+    expect(
+      registry.commands.some(
         (command) =>
           command.role === "owner_chief_of_staff" &&
           command.name === "brief.generate" &&
@@ -53,7 +86,7 @@ describe("app-server worker tools", () => {
       ),
     ).toBe(true);
     expect(
-      schema.registry.commands.some(
+      registry.commands.some(
         (command) =>
           command.role === "owner_chief_of_staff" &&
           command.name === "decision_queue.prepare" &&
@@ -61,7 +94,7 @@ describe("app-server worker tools", () => {
       ),
     ).toBe(true);
     expect(
-      schema.registry.commands.some(
+      registry.commands.some(
         (command) =>
           command.role === "owner_chief_of_staff" &&
           command.name === "anomaly.triage" &&
@@ -69,22 +102,22 @@ describe("app-server worker tools", () => {
       ),
     ).toBe(true);
     expect(
-      schema.registry.commands.some(
+      registry.commands.some(
         (command) => command.role === "dispatch_operations" && command.name === "schedule.propose",
       ),
     ).toBe(true);
     expect(
-      schema.registry.commands.some(
+      registry.commands.some(
         (command) => command.role === "dispatch_operations" && command.name === "customer_update.draft",
       ),
     ).toBe(true);
     expect(
-      schema.registry.commands.some(
+      registry.commands.some(
         (command) => command.role === "dispatch_operations" && command.name === "closeout.prepare",
       ),
     ).toBe(true);
     expect(
-      schema.registry.commands.some(
+      registry.commands.some(
         (command) =>
           command.role === "dispatch_operations" &&
           command.name === "exception.route" &&
@@ -92,7 +125,7 @@ describe("app-server worker tools", () => {
       ),
     ).toBe(true);
     expect(
-      schema.registry.commands.some(
+      registry.commands.some(
         (command) =>
           command.role === "finance_operations" &&
           command.name === "invoice.prepare" &&
@@ -100,7 +133,7 @@ describe("app-server worker tools", () => {
       ),
     ).toBe(true);
     expect(
-      schema.registry.commands.some(
+      registry.commands.some(
         (command) =>
           command.role === "finance_operations" &&
           command.name === "ar_followup.draft" &&
@@ -108,7 +141,7 @@ describe("app-server worker tools", () => {
       ),
     ).toBe(true);
     expect(
-      schema.registry.commands.some(
+      registry.commands.some(
         (command) =>
           command.role === "finance_operations" &&
           command.name === "cash_forecast.generate" &&
@@ -116,7 +149,7 @@ describe("app-server worker tools", () => {
       ),
     ).toBe(true);
     expect(
-      schema.registry.commands.some(
+      registry.commands.some(
         (command) =>
           command.role === "finance_operations" &&
           command.name === "payment_draft.prepare" &&

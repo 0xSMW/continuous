@@ -10,6 +10,10 @@ import {
   plannedWorkerCommands,
   plannedWorkerContracts,
   plannedWorkerViews,
+  runtimeWorkerContracts,
+  workerContracts,
+  workerFollowUpCommands,
+  workerFollowUpViews,
 } from "./planned-workers";
 import {
   unexpectedEnvelopeFields,
@@ -83,22 +87,37 @@ export const workerTools = [
   },
 ] as const;
 
+const registeredCommands = registeredWorkerCommands();
+const registeredViews = registeredWorkerViews();
+const followUpCommands = workerFollowUpCommands(registeredCommands);
+const followUpViews = workerFollowUpViews(registeredViews);
+
+function contractSummary(contract: (typeof workerContracts)[number]) {
+  return {
+    role: contract.role,
+    name: contract.name,
+    contractPath: contract.contractPath,
+    firstOutcome: contract.firstOutcome,
+    autonomyLevel: contract.autonomyLevel,
+    externalExecution: contract.externalExecution,
+    evidencePacket: contract.evidencePacket,
+  };
+}
+
 export const workerToolSchema = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
   registry: {
-    commands: registeredWorkerCommands(),
-    views: registeredWorkerViews(),
-    plannedContracts: plannedWorkerContracts.map((contract) => ({
-      role: contract.role,
-      name: contract.name,
-      contractPath: contract.contractPath,
-      firstOutcome: contract.firstOutcome,
-      autonomyLevel: contract.autonomyLevel,
-      externalExecution: contract.externalExecution,
-      evidencePacket: contract.evidencePacket,
-    })),
-    plannedCommands: plannedWorkerCommands(),
-    plannedViews: plannedWorkerViews(),
+    commands: registeredCommands,
+    views: registeredViews,
+    contracts: workerContracts.map(contractSummary),
+    runtimeContracts: runtimeWorkerContracts.map(contractSummary),
+    plannedContracts: plannedWorkerContracts.map(contractSummary),
+    followUpCommands,
+    followUpViews,
+    plannedCommands: followUpCommands,
+    plannedViews: followUpViews,
+    plannedFutureWorkerCommands: plannedWorkerCommands(),
+    plannedFutureWorkerViews: plannedWorkerViews(),
   },
   $defs: {
     workerTarget: {

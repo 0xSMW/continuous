@@ -22,7 +22,8 @@
 - Keep deploy-produced token rotation, control-plane credential inventory, disposable revocation drill, operator session review evidence, and `control_plane_auth_sessions` audit references current in readiness before broad customer use.
 - Provision scoped adapter credentials, tested rollback playbooks, and a first controlled send only after retry readiness evidence stays green.
 - Provision production inbox and CRM managed credential refs, create pollable active live-provider connections through `/core connection.upsert`, record readiness through `/core connection.health.record`, and monitor scheduler coverage behind the persisted connection-backed `lead.read` source-reader shape.
-- Align worker contract metadata so Revenue uses the same implementation-grade contract shape as the future workers and runtime-worker planned follow-up commands remain visible in app-server schema.
+- Promote the first Workforce runtime slice from planned metadata into registered `/worker` handlers for document packets, payroll-input readiness, restricted-document proof, and readiness views.
+- Keep worker contract metadata exposing the full contract catalog, runtime contracts, registered commands, and non-executable follow-up commands through `continuous.worker.schema`.
 - Build a DigitalOcean release gate that deploys a CI-built image digest, runs Postgres 17 parity smoke, and reuses a parameterized host smoke script before customer-data mode.
 - Use `docs/revenue-operations-worker-expansion.md` as the expansion gate list for the next worker iteration.
 - Use `docs/revenue-operations-worker-v1-contract.md` as the machine-actionable contract for run and approval effects.

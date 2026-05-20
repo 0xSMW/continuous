@@ -6,6 +6,11 @@ import {
   plannedWorkerCommands,
   plannedWorkerContracts,
   plannedWorkerViews,
+  runtimeWorkerContracts,
+  workerContractForRole,
+  workerContracts,
+  workerFollowUpCommands,
+  workerFollowUpViews,
 } from "./planned-workers";
 
 const root = process.cwd();
@@ -182,6 +187,57 @@ describe("future worker contracts", () => {
     );
     expect(source).toContain("HTTP and CLI callers both go through the registered `/worker` command");
     expect(source).not.toMatch(/\/api\/[a-z0-9-]+-worker/);
+  });
+
+  it("publishes worker contracts and follow-up commands without route-specific API names", () => {
+    const registeredCommands = [
+      "run",
+      "lead.read",
+      "lead.classify",
+      "response.draft",
+      "continue",
+      "approval.decide",
+      "adapters.reconcile",
+      "adapters.retry",
+    ].map((name) => ({ role: "revenue_operations", name }));
+    const registeredViews = ["snapshot", "approvals"].map((name) => ({
+      role: "revenue_operations",
+      name,
+    }));
+    const revenueFollowUps = workerFollowUpCommands(registeredCommands).filter(
+      (command) => command.role === "revenue_operations",
+    );
+    const revenueViews = workerFollowUpViews(registeredViews).filter(
+      (view) => view.role === "revenue_operations",
+    );
+
+    expect(workerContracts.map((contract) => contract.role)).toEqual([
+      "revenue_operations",
+      "owner_chief_of_staff",
+      "dispatch_operations",
+      "finance_operations",
+      "workforce_operations",
+      "compliance_operations",
+      "systems_operations",
+    ]);
+    expect(runtimeWorkerContracts.map((contract) => contract.role)).toEqual([
+      "revenue_operations",
+      "owner_chief_of_staff",
+      "dispatch_operations",
+      "finance_operations",
+    ]);
+    expect(workerContractForRole("revenue_operations")?.contractPath).toBe(
+      "docs/revenue-operations-worker-v1-contract.md",
+    );
+    expect(revenueFollowUps.map((command) => command.name)).toEqual([
+      "quote.prepare",
+      "payment_link.prepare",
+    ]);
+    expect(
+      revenueFollowUps.find((command) => command.name === "payment_link.prepare")?.configSchema.properties?.sourceRefs
+        ?.type,
+    ).toBe("object");
+    expect(revenueViews.map((view) => view.name)).toEqual(["quote_review"]);
   });
 
   it("uses one shared worker envelope guard across HTTP and tool surfaces", () => {
