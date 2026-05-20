@@ -26,6 +26,7 @@
 | Added canonical workflow API | `/workflow` validates definition-backed `start` and `transition` commands and records workflow events, audit events, and evidence |
 | Removed worker-specific HTTP wrappers | The greenfield API does not expose worker-family routes; new workers must extend `/worker` through registered commands rather than adding route names |
 | Added workflow step ledger | Workflow starts and transitions now write durable step records with lease, retry, input, output, state-transition, event, evidence, and approval links |
+| Added workflow step execution | `/workflow` now supports `command=steps.execute`, claiming queued or retryable steps, running generic transition handlers, and writing completion or retry state without workflow-specific URLs |
 | Added shared approval service | Worker and workflow approvals now use a neutral approval service over `approval_requests`, with subject-scoped listing and decisions |
 | Seeded the first open-workflow set | Entity setup, hire employee, contractor engagement, termination, payroll preview, AI budget cycle, and synthetic-worker lifecycle now all have persisted definitions, runs, and steps |
 | Seeded the expanded operating workflow catalog | Open-state, compensation-change, location-change, payroll-run, off-cycle payroll, quarter-close, year-end, leave, incident, benefits-renewal, agency-notice, and filing-draft workflows now have persisted definitions, runs, and seed steps |
@@ -144,6 +145,9 @@ HTTP routes are absent by design.
 Workflow execution now has the same control-plane style through `/workflow`.
 Definitions remain declarative, and the runtime validates transitions against
 their JSON transition maps before updating `workflow_runs` and writing durable
-`workflow_steps`, replayable event, audit, evidence, and approval records.
+`workflow_steps`, replayable event, audit, evidence, and approval records. The
+same route can execute queued workflow steps with `command=steps.execute`; step
+claims, leases, attempts, completion proof, and retry failures stay on the
+shared workflow step ledger.
 Workflow approvals are listed with `GET /workflow?view=approvals` and decided
 with `POST /workflow` using `command=approval.decide`.

@@ -57,15 +57,22 @@ export type WorkflowStepRecord = {
   definitionId: string;
   eventId: string | null;
   approvalRequestId: string | null;
+  taskId: string | null;
+  objectId: string | null;
+  workerId: string | null;
+  capabilityId: string | null;
   kind: string;
   name: string;
   state: string;
+  priority: string;
+  risk: string;
   fromState: string | null;
   toState: string;
   attempt: number;
   maxAttempts: number;
   leaseOwner: string | null;
   leasedUntil: string | null;
+  dueAt: string | null;
   nextAttemptAt: string | null;
   input: JsonObject;
   output: JsonObject;
@@ -191,15 +198,22 @@ function stepRecord(row: typeof workflowSteps.$inferSelect): WorkflowStepRecord 
     definitionId: row.definitionId,
     eventId: row.eventId,
     approvalRequestId: row.approvalRequestId,
+    taskId: row.taskId,
+    objectId: row.objectId,
+    workerId: row.workerId,
+    capabilityId: row.capabilityId,
     kind: row.kind,
     name: row.name,
     state: row.state,
+    priority: row.priority,
+    risk: row.risk,
     fromState: row.fromState,
     toState: row.toState,
     attempt: row.attempt,
     maxAttempts: row.maxAttempts,
     leaseOwner: row.leaseOwner,
     leasedUntil: row.leasedUntil?.toISOString() ?? null,
+    dueAt: row.dueAt?.toISOString() ?? null,
     nextAttemptAt: row.nextAttemptAt?.toISOString() ?? null,
     input: row.input,
     output: row.output,
@@ -264,6 +278,472 @@ export async function listWorkflows(input: {
     definitions: definitionRows.map(definitionRecord),
     runs: runRows.map(runRecord),
     steps: stepRows.map(stepRecord),
+  };
+}
+
+type ClaimedWorkflowStep = {
+  step: typeof workflowSteps.$inferSelect;
+  run: typeof workflowRuns.$inferSelect;
+  definition: typeof workflowDefinitions.$inferSelect;
+};
+
+const executableWorkflowStepKinds = new Set([
+  "transition",
+  "workflow_transition",
+  "worker_transition",
+  "seed_state",
+]);
+
+class WorkflowStepLeaseLostError extends Error {
+  readonly code = "workflow_step_lease_lost";
+  readonly status = 409;
+
+  constructor(message = "Workflow step lease was lost before execution completed.") {
+    super(message);
+    this.name = "WorkflowStepLeaseLostError";
+  }
+}
+
+function workflowStepPriorityRank() {
+  return sql`case ${workflowSteps.priority} when 'urgent' then 0 when 'high' then 1 when 'normal' then 2 else 3 end`;
+}
+
+function errorData(error: unknown, attempt: number, maxAttempts: number): JsonObject {
+  return {
+    message: error instanceof Error ? error.message : "Unknown workflow step execution error.",
+    code:
+      error instanceof RevenueWorkerUnavailableError
+        ? error.code
+        : error instanceof WorkflowStepLeaseLostError
+          ? error.code
+          : "workflow_step_execution_failed",
+    attempt,
+    maxAttempts,
+    retryable: attempt < maxAttempts,
+  };
+}
+
+async function claimWorkflowStep(input: {
+  db: Database;
+  tenantId: string;
+  leaseOwner: string;
+  leaseMs: number;
+  now: Date;
+}): Promise<ClaimedWorkflowStep | null> {
+  return input.db.transaction(async (tx) => {
+    const [candidate] = await tx
+      .select({
+        step: workflowSteps,
+        run: workflowRuns,
+        definition: workflowDefinitions,
+      })
+      .from(workflowSteps)
+      .innerJoin(workflowRuns, eq(workflowSteps.workflowRunId, workflowRuns.id))
+      .innerJoin(workflowDefinitions, eq(workflowSteps.definitionId, workflowDefinitions.id))
+      .where(
+        and(
+          eq(workflowSteps.tenantId, input.tenantId),
+          sql`(
+            ${workflowSteps.state} = 'queued'
+            or (
+              ${workflowSteps.state} in ('failed', 'running')
+              and ${workflowSteps.attempt} < ${workflowSteps.maxAttempts}
+              and (${workflowSteps.leasedUntil} is null or ${workflowSteps.leasedUntil} <= ${input.now})
+            )
+          )`,
+          sql`(${workflowSteps.dueAt} is null or ${workflowSteps.dueAt} <= ${input.now})`,
+          sql`(${workflowSteps.nextAttemptAt} is null or ${workflowSteps.nextAttemptAt} <= ${input.now})`,
+        ),
+      )
+      .orderBy(workflowStepPriorityRank(), workflowSteps.dueAt, workflowSteps.createdAt)
+      .limit(1)
+      .for("update", { of: workflowSteps, skipLocked: true });
+
+    if (!candidate) {
+      return null;
+    }
+
+    const nextAttempt =
+      candidate.step.state === "queued" ? candidate.step.attempt : candidate.step.attempt + 1;
+    const leasedUntil = new Date(input.now.getTime() + input.leaseMs);
+    const [claimedStep] = await tx
+      .update(workflowSteps)
+      .set({
+        state: "running",
+        attempt: nextAttempt,
+        leaseOwner: input.leaseOwner,
+        leasedUntil,
+        startedAt: candidate.step.startedAt ?? input.now,
+        updatedAt: input.now,
+      })
+      .where(
+        and(
+          eq(workflowSteps.id, candidate.step.id),
+          eq(workflowSteps.state, candidate.step.state),
+          eq(workflowSteps.attempt, candidate.step.attempt),
+        ),
+      )
+      .returning();
+
+    if (!claimedStep) {
+      return null;
+    }
+
+    return {
+      step: claimedStep,
+      run: candidate.run,
+      definition: candidate.definition,
+    };
+  });
+}
+
+async function completeWorkflowStep(input: {
+  db: Database;
+  operator: Awaited<ReturnType<typeof loadOperatorContext>>;
+  claimed: ClaimedWorkflowStep;
+  now: Date;
+}) {
+  const { step: claimedStep, definition } = input.claimed;
+  const claimOwner = claimedStep.leaseOwner;
+
+  if (!claimOwner) {
+    throw new WorkflowStepLeaseLostError();
+  }
+
+  if (!executableWorkflowStepKinds.has(claimedStep.kind)) {
+    throw new RevenueWorkerUnavailableError(
+      "workflow_step_handler_missing",
+      `Workflow step kind ${claimedStep.kind} does not have a registered executor.`,
+      409,
+    );
+  }
+
+  return input.db.transaction(async (tx) => {
+    const [step] = await tx
+      .select()
+      .from(workflowSteps)
+      .where(
+        and(
+          eq(workflowSteps.id, claimedStep.id),
+          eq(workflowSteps.state, "running"),
+          eq(workflowSteps.leaseOwner, claimOwner),
+          eq(workflowSteps.attempt, claimedStep.attempt),
+        ),
+      )
+      .limit(1)
+      .for("update", { of: workflowSteps });
+
+    if (!step) {
+      throw new WorkflowStepLeaseLostError();
+    }
+
+    const [run] = await tx
+      .select()
+      .from(workflowRuns)
+      .where(
+        and(
+          eq(workflowRuns.id, step.workflowRunId),
+          eq(workflowRuns.tenantId, input.operator.tenantId),
+        ),
+      )
+      .limit(1)
+      .for("update", { of: workflowRuns });
+
+    if (!run) {
+      throw new RevenueWorkerUnavailableError(
+        "workflow_run_not_found",
+        "No workflow run matches this step.",
+        404,
+      );
+    }
+
+    const definitionView = definitionRecord(definition);
+    const currentFromState = run.state;
+
+    if (currentFromState !== step.toState) {
+      if (step.fromState && currentFromState !== step.fromState) {
+        throw new RevenueWorkerUnavailableError(
+          "workflow_step_state_mismatch",
+          `Workflow step expected ${step.fromState}, but run is ${currentFromState}.`,
+          409,
+        );
+      }
+
+      if (!canTransitionWorkflow(definitionView, currentFromState, step.toState)) {
+        throw new RevenueWorkerUnavailableError(
+          "workflow_step_transition_invalid",
+          `Workflow ${definition.key} cannot execute ${currentFromState} to ${step.toState}.`,
+          409,
+        );
+      }
+
+      await tx
+        .update(workflowRuns)
+        .set({
+          state: step.toState,
+          data: {
+            ...run.data,
+            lastExecutedStep: {
+              stepId: step.id,
+              kind: step.kind,
+              name: step.name,
+              fromState: currentFromState,
+              toState: step.toState,
+              executedBy: input.operator.actorRef,
+              executedAt: input.now.toISOString(),
+            },
+          },
+          updatedAt: input.now,
+          completedAt: isTerminalWorkflowState(definitionView, step.toState) ? input.now : run.completedAt,
+        })
+        .where(eq(workflowRuns.id, run.id));
+    }
+
+    const executionData = {
+      workflowRunId: run.id,
+      workflowStepId: step.id,
+      workflowKey: definition.key,
+      handler: step.kind,
+      fromState: currentFromState,
+      toState: step.toState,
+      attempt: step.attempt,
+      externalExecution: "blocked",
+    };
+    const [event] = await tx
+      .insert(events)
+      .values({
+        tenantId: input.operator.tenantId,
+        type: "workflow.step.executed",
+        source,
+        actorType: "user",
+        actorId: input.operator.userId,
+        actorRef: input.operator.actorRef,
+        taskId: step.taskId,
+        objectId: step.objectId ?? run.objectId,
+        idempotencyKey: `${step.id}:executed:${step.attempt}`,
+        data: executionData,
+        occurredAt: input.now,
+      })
+      .returning({ id: events.id });
+    const [audit] = await tx
+      .insert(auditEvents)
+      .values({
+        tenantId: input.operator.tenantId,
+        type: "workflow.step.executed",
+        source,
+        actorType: "user",
+        actorId: input.operator.userId,
+        actorRef: input.operator.actorRef,
+        targetType: "workflow_step",
+        targetId: step.id,
+        eventId: event.id,
+        taskId: step.taskId,
+        objectId: step.objectId ?? run.objectId,
+        capabilityId: step.capabilityId,
+        risk: step.risk,
+        idempotencyKey: `${step.id}:executed:${step.attempt}`,
+        data: executionData,
+      })
+      .returning({ id: auditEvents.id });
+    const [proof] = await tx
+      .insert(evidence)
+      .values({
+        tenantId: input.operator.tenantId,
+        kind: "trace",
+        name: `Workflow step executed: ${step.name}`,
+        taskId: step.taskId,
+        objectId: step.objectId ?? run.objectId,
+        eventId: event.id,
+        capabilityId: step.capabilityId,
+        actorType: "user",
+        actorId: input.operator.userId,
+        hash: `${source}:${step.id}:executed:${step.attempt}:${input.now.toISOString()}`,
+        data: {
+          ...executionData,
+          auditEventId: audit.id,
+          input: step.input,
+        },
+      })
+      .returning({ id: evidence.id });
+    const output = {
+      ...step.output,
+      ...executionData,
+      eventId: event.id,
+      auditEventId: audit.id,
+      evidenceId: proof.id,
+    };
+    const [updatedStep] = await tx
+      .update(workflowSteps)
+      .set({
+        eventId: event.id,
+        state: "done",
+        leaseOwner: null,
+        leasedUntil: null,
+        nextAttemptAt: null,
+        output,
+        error: {},
+        completedAt: input.now,
+        updatedAt: input.now,
+      })
+      .where(
+        and(
+          eq(workflowSteps.id, step.id),
+          eq(workflowSteps.state, "running"),
+          eq(workflowSteps.leaseOwner, claimOwner),
+          eq(workflowSteps.attempt, step.attempt),
+        ),
+      )
+      .returning();
+
+    if (!updatedStep) {
+      throw new WorkflowStepLeaseLostError();
+    }
+
+    return {
+      step: updatedStep,
+      eventId: event.id,
+      auditEventId: audit.id,
+      evidenceId: proof.id,
+      output,
+    };
+  });
+}
+
+async function failWorkflowStep(input: {
+  db: Database;
+  claimed: ClaimedWorkflowStep;
+  error: unknown;
+  now: Date;
+}) {
+  const claimOwner = input.claimed.step.leaseOwner;
+  const retryable = input.claimed.step.attempt < input.claimed.step.maxAttempts;
+  const nextAttemptAt = retryable
+    ? new Date(input.now.getTime() + Math.min(5 * 60 * 1000, 30 * 1000 * input.claimed.step.attempt))
+    : null;
+  const data = errorData(input.error, input.claimed.step.attempt, input.claimed.step.maxAttempts);
+
+  if (!claimOwner) {
+    return {
+      step: null,
+      error: data,
+      skipped: true,
+    };
+  }
+
+  const [updatedStep] = await input.db
+    .update(workflowSteps)
+    .set({
+      state: "failed",
+      leaseOwner: null,
+      leasedUntil: null,
+      nextAttemptAt,
+      error: data,
+      completedAt: null,
+      updatedAt: input.now,
+    })
+    .where(
+      and(
+        eq(workflowSteps.id, input.claimed.step.id),
+        eq(workflowSteps.state, "running"),
+        eq(workflowSteps.leaseOwner, claimOwner),
+        eq(workflowSteps.attempt, input.claimed.step.attempt),
+      ),
+    )
+    .returning();
+
+  if (!updatedStep) {
+    return {
+      step: null,
+      error: data,
+      skipped: true,
+    };
+  }
+
+  return {
+    step: updatedStep,
+    error: data,
+    skipped: false,
+  };
+}
+
+export async function executeWorkflowSteps(input: {
+  operatorEmail: string;
+  tenantSlug?: string;
+  limit?: number;
+  leaseOwner?: string;
+  leaseMs?: number;
+  db?: Database;
+}) {
+  const db = input.db ?? defaultDb;
+  const operator = await loadOperatorContext({
+    db,
+    operatorEmail: input.operatorEmail,
+    tenantSlug: input.tenantSlug,
+  });
+  const limit = Math.max(1, Math.min(input.limit ?? 10, 50));
+  const leaseOwner = input.leaseOwner ?? `workflow-executor:${operator.actorRef}`;
+  const leaseMs = Math.max(30_000, Math.min(input.leaseMs ?? 5 * 60_000, 15 * 60_000));
+  const results: Array<{
+    stepId: string;
+    state: "done" | "failed" | "skipped";
+    attempt: number;
+    handler: string;
+    eventId?: string;
+    auditEventId?: string;
+    evidenceId?: string;
+    error?: JsonObject;
+  }> = [];
+
+  for (let index = 0; index < limit; index += 1) {
+    const now = new Date();
+    const claimed = await claimWorkflowStep({
+      db,
+      tenantId: operator.tenantId,
+      leaseOwner,
+      leaseMs,
+      now,
+    });
+
+    if (!claimed) {
+      break;
+    }
+
+    try {
+      const completed = await completeWorkflowStep({ db, operator, claimed, now: new Date() });
+      results.push({
+        stepId: claimed.step.id,
+        state: "done",
+        attempt: claimed.step.attempt,
+        handler: claimed.step.kind,
+        eventId: completed.eventId,
+        auditEventId: completed.auditEventId,
+        evidenceId: completed.evidenceId,
+      });
+    } catch (error) {
+      const failed = await failWorkflowStep({ db, claimed, error, now: new Date() });
+      results.push({
+        stepId: claimed.step.id,
+        state: failed.skipped ? "skipped" : "failed",
+        attempt: claimed.step.attempt,
+        handler: claimed.step.kind,
+        error: failed.error,
+      });
+    }
+  }
+
+  return {
+    operator: {
+      tenantId: operator.tenantId,
+      tenantSlug: operator.tenantSlug,
+      userId: operator.userId,
+      email: operator.email,
+    },
+    leaseOwner,
+    processed: results.length,
+    completed: results.filter((result) => result.state === "done").length,
+    failed: results.filter((result) => result.state === "failed").length,
+    skipped: results.filter((result) => result.state === "skipped").length,
+    results,
   };
 }
 

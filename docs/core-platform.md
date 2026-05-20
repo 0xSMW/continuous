@@ -184,7 +184,7 @@ policy-bound:
 | `/worker?view=approvals&role=revenue_operations` | Operator-only approval queue for worker decisions |
 | `POST /worker` | Canonical worker command surface for `lead.read`, `run`, `continue`, `approval.decide`, `adapters.reconcile`, and `adapters.retry`; worker role, tenant selection, idempotency, and operation config live in structured payload fields |
 | `/approval` | Shared operator approval inbox and decision surface across Core, workflow, and worker subjects |
-| `/workflow` | Canonical workflow command surface for listing definitions/runs/steps and executing validated `start` / `transition` / `approval.decide` commands |
+| `/workflow` | Canonical workflow command surface for listing definitions/runs/steps and executing validated `start` / `transition` / `steps.execute` / `approval.decide` commands |
 | `/workflow?view=approvals` | Operator-only approval queue for workflow decisions backed by the shared approval service |
 | `bun run worker:tool worker.lead.read` / `worker.run` | Canonical local command surfaces using the same worker/config payload shape |
 

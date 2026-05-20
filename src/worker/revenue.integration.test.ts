@@ -21,6 +21,7 @@ import {
 } from "../core/primitives";
 import { preparePayrollPreviewPacket, recordPayrollPreview } from "../core/payroll";
 import { createCoreTask, transitionCoreTask } from "../core/tasks";
+import { executeWorkflowSteps, startWorkflowRun } from "../core/workflows";
 import { db, pool } from "../db/client";
 import {
   adapterActions,
@@ -1711,6 +1712,256 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(approvedReplay.created).toBe(false);
     expect(approvedReplay.workerRunId).toBe(approvedContinuation.workerRunId);
     expect(objectValue(approvedReplay.output).status).toBe("approved_execution_blocked");
+  }, 120_000);
+
+  it("claims, executes, and retries queued workflow steps", async () => {
+    const runId = randomUUID();
+    const start = await startWorkflowRun({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      workflowKey: "run_payroll",
+      idempotencyKey: `ci-workflow-executor-run-${runId}`,
+      initialState: "draft",
+      data: {
+        source: "workflow_executor_ci",
+      },
+      db,
+    });
+    const [run] = await db
+      .select()
+      .from(workflowRuns)
+      .where(eq(workflowRuns.id, start.run.id))
+      .limit(1);
+
+    expect(start.created).toBe(true);
+    expect(run?.state).toBe("draft");
+
+    const [queuedStep] = await db
+      .insert(workflowSteps)
+      .values({
+        tenantId: run?.tenantId ?? "",
+        definitionId: run?.definitionId ?? "",
+        workflowRunId: start.run.id,
+        kind: "transition",
+        name: "CI execute payroll source lock",
+        state: "queued",
+        priority: "urgent",
+        risk: "medium",
+        fromState: "draft",
+        toState: "source_data_locked",
+        attempt: 1,
+        maxAttempts: 2,
+        idempotencyKey: `ci-workflow-executor-step-${runId}`,
+        input: {
+          source: "workflow_executor_ci",
+        },
+      })
+      .returning();
+
+    const executed = await executeWorkflowSteps({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      limit: 1,
+      leaseOwner: `ci-workflow-executor:${runId}`,
+      db,
+    });
+    const [executionResult] = executed.results;
+
+    expect(executed.processed).toBe(1);
+    expect(executed.completed).toBe(1);
+    expect(executed.failed).toBe(0);
+    expect(executionResult?.stepId).toBe(queuedStep.id);
+    expect(executionResult?.state).toBe("done");
+    expect(executionResult?.eventId).toBeTruthy();
+    expect(executionResult?.auditEventId).toBeTruthy();
+    expect(executionResult?.evidenceId).toBeTruthy();
+
+    const [executedRun] = await db
+      .select()
+      .from(workflowRuns)
+      .where(eq(workflowRuns.id, start.run.id))
+      .limit(1);
+    const [executedStep] = await db
+      .select()
+      .from(workflowSteps)
+      .where(eq(workflowSteps.id, queuedStep.id))
+      .limit(1);
+    const [event] = await db
+      .select()
+      .from(events)
+      .where(eq(events.id, executionResult?.eventId ?? ""))
+      .limit(1);
+    const [audit] = await db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.id, executionResult?.auditEventId ?? ""))
+      .limit(1);
+    const [proof] = await db
+      .select()
+      .from(evidence)
+      .where(eq(evidence.id, executionResult?.evidenceId ?? ""))
+      .limit(1);
+    const executedStepOutput = objectValue(executedStep?.output);
+
+    expect(executedRun?.state).toBe("source_data_locked");
+    expect(executedStep?.state).toBe("done");
+    expect(executedStep?.leaseOwner).toBeNull();
+    expect(executedStep?.leasedUntil).toBeNull();
+    expect(executedStepOutput.externalExecution).toBe("blocked");
+    expect(event?.type).toBe("workflow.step.executed");
+    expect(audit?.targetId).toBe(queuedStep.id);
+    expect(proof?.kind).toBe("trace");
+
+    const expiredStart = await startWorkflowRun({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      workflowKey: "run_payroll",
+      idempotencyKey: `ci-workflow-executor-expired-run-${runId}`,
+      initialState: "draft",
+      db,
+    });
+    const [expiredRun] = await db
+      .select()
+      .from(workflowRuns)
+      .where(eq(workflowRuns.id, expiredStart.run.id))
+      .limit(1);
+    const [expiredStep] = await db
+      .insert(workflowSteps)
+      .values({
+        tenantId: expiredRun?.tenantId ?? "",
+        definitionId: expiredRun?.definitionId ?? "",
+        workflowRunId: expiredStart.run.id,
+        kind: "transition",
+        name: "CI reclaim expired payroll transition",
+        state: "running",
+        priority: "urgent",
+        risk: "medium",
+        fromState: "draft",
+        toState: "source_data_locked",
+        attempt: 1,
+        maxAttempts: 2,
+        leaseOwner: "expired-runner",
+        leasedUntil: new Date("2026-05-19T00:00:00.000Z"),
+        idempotencyKey: `ci-workflow-executor-expired-step-${runId}`,
+        input: {
+          source: "workflow_executor_expired_ci",
+        },
+        startedAt: new Date("2026-05-19T00:00:00.000Z"),
+      })
+      .returning();
+
+    const reclaimed = await executeWorkflowSteps({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      limit: 1,
+      leaseOwner: `ci-workflow-executor-expired:${runId}`,
+      db,
+    });
+    const [reclaimedResult] = reclaimed.results;
+    const [reclaimedStep] = await db
+      .select()
+      .from(workflowSteps)
+      .where(eq(workflowSteps.id, expiredStep.id))
+      .limit(1);
+
+    expect(reclaimed.processed).toBe(1);
+    expect(reclaimed.completed).toBe(1);
+    expect(reclaimedResult?.stepId).toBe(expiredStep.id);
+    expect(reclaimedResult?.attempt).toBe(2);
+    expect(reclaimedStep?.state).toBe("done");
+    expect(reclaimedStep?.attempt).toBe(2);
+    expect(reclaimedStep?.leaseOwner).toBeNull();
+
+    const retryStart = await startWorkflowRun({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      workflowKey: "run_payroll",
+      idempotencyKey: `ci-workflow-executor-retry-run-${runId}`,
+      initialState: "draft",
+      db,
+    });
+    const [retryRun] = await db
+      .select()
+      .from(workflowRuns)
+      .where(eq(workflowRuns.id, retryStart.run.id))
+      .limit(1);
+    const [retryStep] = await db
+      .insert(workflowSteps)
+      .values({
+        tenantId: retryRun?.tenantId ?? "",
+        definitionId: retryRun?.definitionId ?? "",
+        workflowRunId: retryStart.run.id,
+        kind: "transition",
+        name: "CI retry invalid payroll transition",
+        state: "queued",
+        priority: "urgent",
+        risk: "medium",
+        fromState: "draft",
+        toState: "not_a_state",
+        attempt: 1,
+        maxAttempts: 2,
+        idempotencyKey: `ci-workflow-executor-retry-step-${runId}`,
+        input: {
+          source: "workflow_executor_retry_ci",
+        },
+      })
+      .returning();
+
+    const firstFailure = await executeWorkflowSteps({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      limit: 1,
+      leaseOwner: `ci-workflow-executor-retry:${runId}`,
+      db,
+    });
+    const [firstFailureResult] = firstFailure.results;
+
+    expect(firstFailure.processed).toBe(1);
+    expect(firstFailure.completed).toBe(0);
+    expect(firstFailure.failed).toBe(1);
+    expect(firstFailureResult?.stepId).toBe(retryStep.id);
+    expect(firstFailureResult?.state).toBe("failed");
+
+    const [failedStep] = await db
+      .select()
+      .from(workflowSteps)
+      .where(eq(workflowSteps.id, retryStep.id))
+      .limit(1);
+    const failedError = objectValue(failedStep?.error);
+
+    expect(failedStep?.state).toBe("failed");
+    expect(failedStep?.attempt).toBe(1);
+    expect(failedStep?.nextAttemptAt).toBeTruthy();
+    expect(failedError.retryable).toBe(true);
+
+    await db
+      .update(workflowSteps)
+      .set({
+        nextAttemptAt: new Date("2026-05-19T00:00:00.000Z"),
+      })
+      .where(eq(workflowSteps.id, retryStep.id));
+
+    const finalFailure = await executeWorkflowSteps({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      limit: 1,
+      leaseOwner: `ci-workflow-executor-retry:${runId}`,
+      db,
+    });
+    const [finalFailureResult] = finalFailure.results;
+    const [finalFailedStep] = await db
+      .select()
+      .from(workflowSteps)
+      .where(eq(workflowSteps.id, retryStep.id))
+      .limit(1);
+    const finalError = objectValue(finalFailedStep?.error);
+
+    expect(finalFailure.processed).toBe(1);
+    expect(finalFailureResult?.stepId).toBe(retryStep.id);
+    expect(finalFailureResult?.state).toBe("failed");
+    expect(finalFailedStep?.attempt).toBe(2);
+    expect(finalFailedStep?.nextAttemptAt).toBeNull();
+    expect(finalError.retryable).toBe(false);
   }, 120_000);
 
   it("continues revision-requested approval outcomes through the worker command spine", async () => {

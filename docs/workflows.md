@@ -196,13 +196,33 @@ Transitions use the same route:
 }
 ```
 
-The runtime validates transitions against `workflow_definitions.transitions`,
-records a durable `workflow_steps` row with lease, attempt, input, output, and
-state-transition fields, writes events, audit events, and transition evidence,
-and creates a pending approval packet when a definition moves into an approval
-state. `GET /workflow` returns active definitions, runs, and the recent step
-ledger; `POST /workflow` returns the `stepId` created for the command. Do not
-add workflow-specific URL paths for individual business processes.
+Queued workflow work uses the same route and keeps execution controls in
+`config`:
+
+```json
+{
+  "command": "steps.execute",
+  "workflow": {
+    "tenantSlug": "continuous-demo"
+  },
+  "config": {
+    "limit": 10,
+    "leaseOwner": "workflow-executor:ops"
+  }
+}
+```
+
+The runtime validates transitions against `workflow_definitions.transitions`.
+Direct `transition` commands record a durable `workflow_steps` row with lease,
+attempt, input, output, and state-transition fields, writes events, audit
+events, and transition evidence, and creates a pending approval packet when a
+definition moves into an approval state. `steps.execute` claims queued,
+retryable failed, or expired leased steps, runs generic transition-style
+handlers, advances valid transitions, records event/audit/evidence proof on
+completion, and leaves failed work on the same step ledger with retry metadata.
+`GET /workflow` returns active definitions, runs, and the recent step ledger;
+`POST /workflow` returns the result for the requested command. Do not add
+workflow-specific URL paths for individual business processes.
 
 Workflow approvals use the same platform approval ledger as worker approvals:
 

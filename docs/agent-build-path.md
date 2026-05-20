@@ -43,7 +43,7 @@ Useful app surfaces for worker development:
 | `/worker?view=approvals&role=revenue_operations` | Canonical operator-gated worker approval queue |
 | `POST /worker` | Canonical command surface with `command`, `worker`, `config`, and `idempotencyKey` payload fields |
 | `/workflow?view=approvals` | Canonical operator-gated workflow approval queue |
-| `POST /workflow` | Canonical workflow command surface for starts, transitions, and workflow approval decisions |
+| `POST /workflow` | Canonical workflow command surface for starts, transitions, queued step execution, and workflow approval decisions |
 | `bun run worker:tool` | Repo-owned JSON worker toolbox for agents and local automation |
 | `bun run app-server:worker-tools continuous.worker.command` | App-server command surface backed by the same worker registry |
 

@@ -6,6 +6,7 @@ import {
 } from "../../src/core/approvals";
 import { PlatformUnavailableError } from "../../src/core/errors";
 import {
+  executeWorkflowSteps,
   listWorkflows,
   startWorkflowRun,
   transitionWorkflowRun,
@@ -23,6 +24,7 @@ import {
 export const dynamic = "force-dynamic";
 
 const apiVersion = "continuous.workflow.v1";
+const workflowCommandEnvelopeFields = new Set(["command", "workflow", "idempotencyKey", "config"]);
 const controlPlaneScope = controlPlaneScopeFromEnv({
   allowedTenants: env.CONTROL_PLANE_ALLOWED_TENANTS,
   allowedWorkerRoles: env.CONTROL_PLANE_ALLOWED_WORKER_ROLES,
@@ -40,6 +42,33 @@ function bodyObject(value: unknown) {
 
 function jsonObject(value: unknown): JsonObject {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonObject) : {};
+}
+
+function optionalBoundedInteger(
+  value: unknown,
+  field: string,
+  min: number,
+  max: number,
+) {
+  if (value === undefined || value === null || value === "") {
+    return { ok: true as const, value: undefined };
+  }
+
+  const numericValue =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && /^\d+$/.test(value.trim())
+        ? Number(value.trim())
+        : Number.NaN;
+
+  if (!Number.isInteger(numericValue) || numericValue < min || numericValue > max) {
+    return {
+      ok: false as const,
+      message: `${field} must be an integer between ${min} and ${max}.`,
+    };
+  }
+
+  return { ok: true as const, value: numericValue };
 }
 
 async function readBody(request: Request) {
@@ -101,6 +130,10 @@ function guardErrorResponse(error: { code: string; message: string; status: numb
     },
     error.status,
   );
+}
+
+function unexpectedWorkflowPayloadFields(body: Record<string, unknown>) {
+  return Object.keys(body).filter((field) => !workflowCommandEnvelopeFields.has(field));
 }
 
 export async function GET(request: Request) {
@@ -203,6 +236,18 @@ export async function POST(request: Request) {
   }
 
   const body = await readBody(request);
+  const unexpectedFields = unexpectedWorkflowPayloadFields(body);
+
+  if (unexpectedFields.length > 0) {
+    return errorResponse(
+      {
+        code: "invalid_workflow_command_envelope",
+        message: `Workflow command payload fields must be command, workflow, idempotencyKey, and config. Move operation inputs into config. Unexpected fields: ${unexpectedFields.join(", ")}.`,
+      },
+      400,
+    );
+  }
+
   const workflow = bodyObject(body.workflow);
   const config = bodyObject(body.config);
   const command = optionalString(body.command);
@@ -325,6 +370,62 @@ export async function POST(request: Request) {
     }
   }
 
+  if (command === "steps.execute") {
+    const limit = optionalBoundedInteger(config.limit, "config.limit", 1, 50);
+    const leaseMs = optionalBoundedInteger(config.leaseMs, "config.leaseMs", 30_000, 900_000);
+
+    if (!limit.ok) {
+      return errorResponse(
+        {
+          code: "invalid_workflow_step_execution",
+          message: limit.message,
+        },
+        400,
+      );
+    }
+
+    if (!leaseMs.ok) {
+      return errorResponse(
+        {
+          code: "invalid_workflow_step_execution",
+          message: leaseMs.message,
+        },
+        400,
+      );
+    }
+
+    try {
+      const result = await executeWorkflowSteps({
+        operatorEmail: auth.operatorEmail,
+        tenantSlug,
+        limit: limit.value,
+        leaseOwner: optionalString(config.leaseOwner),
+        leaseMs: leaseMs.value,
+      });
+
+      return Response.json(
+        {
+          api: apiVersion,
+          data: {
+            command,
+            workflow: {
+              tenantSlug: tenantSlug ?? null,
+            },
+            result,
+          },
+          error: null,
+        },
+        {
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    } catch (error) {
+      return workflowErrorResponse(error, "workflow_step_execution_failed");
+    }
+  }
+
   if (command === "approval.decide") {
     const approvalId = optionalString(config.approvalId);
     const action = normalizeApprovalDecision(config.action);
@@ -375,7 +476,7 @@ export async function POST(request: Request) {
   return errorResponse(
     {
       code: "workflow_command_unsupported",
-      message: "Workflow command must be start, transition, or approval.decide.",
+      message: "Workflow command must be start, transition, steps.execute, or approval.decide.",
     },
     400,
   );
