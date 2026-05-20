@@ -241,7 +241,7 @@ export const workerTools = [
         config: {
           type: "object",
           properties: {
-            limit: { type: "number", minimum: 1, maximum: 100 },
+            limit: { type: "integer", minimum: 1, maximum: 100 },
           },
         },
       },
@@ -266,7 +266,7 @@ export const workerTools = [
         config: {
           type: "object",
           properties: {
-            limit: { type: "number", minimum: 1, maximum: 100 },
+            limit: { type: "integer", minimum: 1, maximum: 100 },
           },
         },
       },
@@ -295,6 +295,7 @@ export const workerTools = [
             window: { $ref: "#/$defs/window" },
             scopes: {
               type: "array",
+              minItems: 1,
               items: {
                 enum: ["tasks", "approvals", "cash", "capacity", "obligations", "workers"],
               },
@@ -357,6 +358,7 @@ export const workerTools = [
             window: { $ref: "#/$defs/window" },
             metricKeys: {
               type: "array",
+              minItems: 1,
               items: { type: "string" },
             },
           },

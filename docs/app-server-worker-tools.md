@@ -12,6 +12,9 @@ The generated Codex app-server protocol defines a dynamic tool as `name`,
 `description`, and `inputSchema`. The local manifest in
 `src/worker/app-server-tools.ts` follows that shape and delegates commands to
 the shared worker command registry.
+`continuous.worker.schema` exposes each registered command's `configSchema`;
+`continuous.worker.command`, `/worker`, and `worker:tool` all run through that
+same registry validation before dispatch.
 
 ```sh
 bun run app-server:worker-tools
@@ -27,6 +30,8 @@ bun run app-server:worker-tools continuous.worker.command --payload='{"command":
 The app-server command tool is intentionally narrow:
 
 - Commands are resolved by the same registry as `/worker` and `worker:tool`.
+- Worker-specific options stay inside `config` and are validated by the
+  command registry's `configSchema`.
 - Planned worker roles remain non-executable until handlers are registered.
 - Caller supplies `operatorEmail`, `worker`, `idempotencyKey`, and `config`.
 - No external execution is available.

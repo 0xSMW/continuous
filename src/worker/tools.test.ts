@@ -173,6 +173,31 @@ describe("worker tool contract", () => {
         }),
       ]),
     );
+    expect(workerToolSchema.registry.commands).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "revenue_operations",
+          name: "lead.read",
+          configSchema: expect.objectContaining({
+            required: ["source"],
+            oneRequired: ["record", "records", "items", "leads"],
+            properties: expect.objectContaining({
+              records: expect.objectContaining({ minItems: 1, maxItems: 25 }),
+            }),
+          }),
+        }),
+        expect.objectContaining({
+          role: "owner_chief_of_staff",
+          name: "brief.generate",
+          configSchema: expect.objectContaining({
+            required: ["window", "scopes"],
+            properties: expect.objectContaining({
+              scopes: expect.objectContaining({ minItems: 1 }),
+            }),
+          }),
+        }),
+      ]),
+    );
     expect(workerToolSchema.registry.views).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ role: "revenue_operations", name: "snapshot" }),
@@ -413,6 +438,90 @@ describe("worker tool contract", () => {
         },
       }),
     ).rejects.toThrow("config.limit must be an integer between 1 and 100.");
+  });
+
+  it("uses registry config schemas for lead source reads", async () => {
+    await expect(
+      executeWorkerTool("worker.lead.read", {
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "lead-read-schema-001",
+        config: {
+          records: [
+            {
+              sourceEventId: "source-event-001",
+              customerName: "Acme Roof Repair",
+            },
+          ],
+        },
+      }),
+    ).rejects.toThrow("config.source is required for lead.read.");
+
+    await expect(
+      executeWorkerTool("worker.lead.read", {
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "lead-read-schema-002",
+        config: {
+          source: "website_form",
+        },
+      }),
+    ).rejects.toThrow("config.record, records, items or leads is required for lead.read.");
+  });
+
+  it("uses registry config schemas for owner commands", async () => {
+    await expect(
+      executeWorkerTool("worker.owner.brief.generate", {
+        worker: {
+          role: "owner_chief_of_staff",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "owner-brief-schema-001",
+        config: {
+          window: {
+            from: "2026-05-19T00:00:00.000Z",
+            to: "2026-05-20T00:00:00.000Z",
+          },
+        },
+      }),
+    ).rejects.toThrow("config.scopes is required for brief.generate.");
+
+    await expect(
+      executeWorkerTool("worker.owner.anomaly.triage", {
+        worker: {
+          role: "owner_chief_of_staff",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "owner-anomaly-schema-001",
+        config: {
+          window: {
+            from: "2026-05-19T00:00:00.000Z",
+            to: "2026-05-20T00:00:00.000Z",
+          },
+          metricKeys: [],
+        },
+      }),
+    ).rejects.toThrow("config.metricKeys must contain at least 1 item.");
+  });
+
+  it("applies the same registry config schemas through app-server commands", async () => {
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.command", {
+        command: "approval.decide",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        operatorEmail: "owner@continuoushq.com",
+        config: {
+          approvalId: "approval-1",
+        },
+      }),
+    ).rejects.toThrow("config.action is required for approval.decide.");
   });
 
   it("exposes app-server worker discovery and registry command tools", async () => {

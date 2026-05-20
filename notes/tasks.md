@@ -18,6 +18,7 @@
 - Extend the Owner Chief-of-Staff Worker beyond the first read-only brief slice into approval/revision continuations, stale-source handling, and broader factuality evals.
 - Keep all worker-family HTTP controls on `/worker` with registered `worker`, `command`, `idempotencyKey`, and `config` fields; do not add worker-family-specific URL shapes.
 - Keep local worker mutation controls on `worker:tool` or `continuous.worker.command`; do not add worker-family-specific package scripts or app-server tools that bypass the command registry.
+- Extend future worker commands with registry-owned `configSchema` definitions before adding handlers, so command payloads stay discoverable and validated across `/worker`, `worker:tool`, and app-server execution.
 - Provision the production object-storage bucket/key, run `scripts/install-backup-timer.sh`, and prove scheduled off-host Postgres dump retention before customer data.
 - Complete production hardening with tag-based deploy rollback, observability/alerts, scoped tokens, non-root host access, and a restore drill before using the droplet for real customer data.
 - Replace the bootstrap shared operator token with first-class operator auth, per-command scopes, token rotation, and session-level audit trails before broad customer use.

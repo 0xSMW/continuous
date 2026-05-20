@@ -60,6 +60,7 @@ type WorkerCommandDefinition = {
   sideEffects: "internal" | "dry_run" | "approved_only" | "external" | "none";
   externalExecution: "blocked" | "dry_run" | "approved_only" | "enabled";
   requiresTenant?: boolean;
+  configSchema?: WorkerConfigSchema;
   handle: (context: WorkerCommandContext) => Promise<unknown>;
 };
 
@@ -79,6 +80,22 @@ type WorkerDefinition = {
   role: string;
   commands: Record<string, WorkerCommandDefinition>;
   views: Record<string, WorkerViewDefinition>;
+};
+
+type WorkerConfigSchema = {
+  type: "object" | "array" | "string" | "number" | "boolean";
+  description?: string;
+  required?: string[];
+  oneRequired?: string[];
+  properties?: Record<string, WorkerConfigSchema>;
+  items?: WorkerConfigSchema;
+  enum?: string[];
+  minItems?: number;
+  maxItems?: number;
+  minimum?: number;
+  maximum?: number;
+  integer?: boolean;
+  additionalProperties?: boolean;
 };
 
 export type WorkerCommandResult = {
@@ -159,6 +176,209 @@ function commandConfig(value: unknown): JsonObject {
   );
 }
 
+function describeFields(fields: string[]) {
+  if (fields.length === 1) {
+    return fields[0];
+  }
+
+  return `${fields.slice(0, -1).join(", ")} or ${fields[fields.length - 1]}`;
+}
+
+function failConfig(message: string): never {
+  throw new PlatformUnavailableError("invalid_worker_command_config", message, 400);
+}
+
+function validateConfigSchema(commandName: string, schema: WorkerConfigSchema, value: unknown, path = "config") {
+  if (schema.type === "object") {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      failConfig(`${path} must be an object.`);
+    }
+
+    const record = value as Record<string, unknown>;
+
+    for (const field of schema.required ?? []) {
+      if (record[field] === undefined || record[field] === null || record[field] === "") {
+        failConfig(`${path}.${field} is required for ${commandName}.`);
+      }
+    }
+
+    if (schema.oneRequired && !schema.oneRequired.some((field) => record[field] !== undefined && record[field] !== null)) {
+      failConfig(`${path}.${describeFields(schema.oneRequired)} is required for ${commandName}.`);
+    }
+
+    if (schema.additionalProperties === false && schema.properties) {
+      const allowed = new Set(Object.keys(schema.properties));
+      const unexpected = Object.keys(record).filter((field) => !allowed.has(field));
+
+      if (unexpected.length > 0) {
+        failConfig(`${path} contains unsupported fields: ${unexpected.join(", ")}.`);
+      }
+    }
+
+    for (const [field, fieldSchema] of Object.entries(schema.properties ?? {})) {
+      if (record[field] !== undefined && record[field] !== null) {
+        validateConfigSchema(commandName, fieldSchema, record[field], `${path}.${field}`);
+      }
+    }
+
+    return;
+  }
+
+  if (schema.type === "array") {
+    if (!Array.isArray(value)) {
+      failConfig(`${path} must be an array.`);
+    }
+
+    if (schema.minItems !== undefined && value.length < schema.minItems) {
+      failConfig(`${path} must contain at least ${schema.minItems} item${schema.minItems === 1 ? "" : "s"}.`);
+    }
+
+    if (schema.maxItems !== undefined && value.length > schema.maxItems) {
+      failConfig(`${path} must contain at most ${schema.maxItems} items.`);
+    }
+
+    if (schema.items) {
+      value.forEach((item, index) => validateConfigSchema(commandName, schema.items!, item, `${path}[${index}]`));
+    }
+
+    return;
+  }
+
+  if (schema.type === "string") {
+    if (typeof value !== "string" || !value.trim()) {
+      failConfig(`${path} must be a non-empty string.`);
+    }
+
+    if (schema.enum && !schema.enum.includes(value)) {
+      failConfig(`${path} must be one of ${schema.enum.join(", ")}.`);
+    }
+
+    return;
+  }
+
+  if (schema.type === "number") {
+    if (typeof value !== "number" || Number.isNaN(value)) {
+      failConfig(`${path} must be a number.`);
+    }
+
+    if (schema.integer && !Number.isInteger(value)) {
+      if (schema.minimum !== undefined && schema.maximum !== undefined) {
+        failConfig(`${path} must be an integer between ${schema.minimum} and ${schema.maximum}.`);
+      }
+
+      failConfig(`${path} must be an integer.`);
+    }
+
+    if (schema.minimum !== undefined && value < schema.minimum) {
+      failConfig(`${path} must be greater than or equal to ${schema.minimum}.`);
+    }
+
+    if (schema.maximum !== undefined && value > schema.maximum) {
+      failConfig(`${path} must be less than or equal to ${schema.maximum}.`);
+    }
+
+    return;
+  }
+
+  if (typeof value !== "boolean") {
+    failConfig(`${path} must be a boolean.`);
+  }
+}
+
+const jsonObjectConfig: WorkerConfigSchema = {
+  type: "object",
+  additionalProperties: true,
+};
+const optionalLimitConfig: WorkerConfigSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    limit: {
+      type: "number",
+      integer: true,
+      minimum: 1,
+      maximum: 100,
+    },
+  },
+};
+const windowConfig: WorkerConfigSchema = {
+  type: "object",
+  required: ["from", "to"],
+  properties: {
+    from: { type: "string" },
+    to: { type: "string" },
+  },
+  additionalProperties: true,
+};
+const leadReadConfig: WorkerConfigSchema = {
+  type: "object",
+  required: ["source"],
+  oneRequired: ["record", "records", "items", "leads"],
+  properties: {
+    source: { type: "string" },
+    record: jsonObjectConfig,
+    records: { type: "array", minItems: 1, maxItems: 25, items: jsonObjectConfig },
+    items: { type: "array", minItems: 1, maxItems: 25, items: jsonObjectConfig },
+    leads: { type: "array", minItems: 1, maxItems: 25, items: jsonObjectConfig },
+  },
+  additionalProperties: true,
+};
+const workerRunConfig: WorkerConfigSchema = {
+  type: "object",
+  properties: {
+    intake: jsonObjectConfig,
+    leadPacket: jsonObjectConfig,
+    pricing: {
+      type: "object",
+      properties: {
+        baseCents: { type: "number", minimum: 0 },
+      },
+      additionalProperties: true,
+    },
+    expectedAction: { type: "string" },
+  },
+  additionalProperties: true,
+};
+const ownerBriefConfig: WorkerConfigSchema = {
+  type: "object",
+  required: ["window", "scopes"],
+  properties: {
+    window: windowConfig,
+    scopes: {
+      type: "array",
+      minItems: 1,
+      items: {
+        type: "string",
+        enum: ["tasks", "approvals", "cash", "capacity", "obligations", "workers"],
+      },
+    },
+    includeEvidence: { type: "boolean" },
+  },
+  additionalProperties: true,
+};
+const ownerDecisionQueueConfig: WorkerConfigSchema = {
+  type: "object",
+  required: ["window"],
+  properties: {
+    window: windowConfig,
+    priorityFloor: { type: "string" },
+  },
+  additionalProperties: true,
+};
+const ownerAnomalyTriageConfig: WorkerConfigSchema = {
+  type: "object",
+  required: ["window", "metricKeys"],
+  properties: {
+    window: windowConfig,
+    metricKeys: {
+      type: "array",
+      minItems: 1,
+      items: { type: "string" },
+    },
+  },
+  additionalProperties: true,
+};
+
 const revenueDefinition: WorkerDefinition = {
   role: revenueWorkerRole,
   commands: {
@@ -168,6 +388,7 @@ const revenueDefinition: WorkerDefinition = {
       idempotency: "required",
       sideEffects: "internal",
       externalExecution: "blocked",
+      configSchema: workerRunConfig,
       async handle(context) {
         if (!context.idempotencyKey) {
           throw new PlatformUnavailableError(
@@ -193,6 +414,7 @@ const revenueDefinition: WorkerDefinition = {
       sideEffects: "internal",
       externalExecution: "blocked",
       requiresTenant: true,
+      configSchema: leadReadConfig,
       async handle(context) {
         if (!context.idempotencyKey) {
           throw new PlatformUnavailableError(
@@ -225,6 +447,14 @@ const revenueDefinition: WorkerDefinition = {
       idempotency: "required",
       sideEffects: "internal",
       externalExecution: "blocked",
+      configSchema: {
+        type: "object",
+        required: ["approvalId"],
+        properties: {
+          approvalId: { type: "string" },
+        },
+        additionalProperties: true,
+      },
       async handle(context) {
         const approvalId = optionalString(context.config.approvalId);
 
@@ -259,6 +489,19 @@ const revenueDefinition: WorkerDefinition = {
       idempotency: "none",
       sideEffects: "internal",
       externalExecution: "blocked",
+      configSchema: {
+        type: "object",
+        required: ["approvalId", "action"],
+        properties: {
+          approvalId: { type: "string" },
+          action: {
+            type: "string",
+            enum: ["approved", "rejected", "revision_requested"],
+          },
+          note: { type: "string" },
+        },
+        additionalProperties: true,
+      },
       async handle(context) {
         const approvalId = optionalString(context.config.approvalId);
         const action = normalizeApprovalDecision(context.config.action);
@@ -288,6 +531,7 @@ const revenueDefinition: WorkerDefinition = {
       sideEffects: "internal",
       externalExecution: "blocked",
       requiresTenant: true,
+      configSchema: optionalLimitConfig,
       async handle(context) {
         if (!context.target.tenantSlug) {
           throw new PlatformUnavailableError(
@@ -310,6 +554,7 @@ const revenueDefinition: WorkerDefinition = {
       sideEffects: "internal",
       externalExecution: "blocked",
       requiresTenant: true,
+      configSchema: optionalLimitConfig,
       async handle(context) {
         if (!context.target.tenantSlug) {
           throw new PlatformUnavailableError(
@@ -384,6 +629,7 @@ const workerDefinitions: Record<string, WorkerDefinition> = {
         sideEffects: "internal",
         externalExecution: "blocked",
         requiresTenant: true,
+        configSchema: ownerBriefConfig,
         async handle(context) {
           if (!context.idempotencyKey) {
             throw new PlatformUnavailableError(
@@ -409,6 +655,7 @@ const workerDefinitions: Record<string, WorkerDefinition> = {
         sideEffects: "internal",
         externalExecution: "blocked",
         requiresTenant: true,
+        configSchema: ownerDecisionQueueConfig,
         async handle(context) {
           if (!context.idempotencyKey) {
             throw new PlatformUnavailableError(
@@ -434,6 +681,7 @@ const workerDefinitions: Record<string, WorkerDefinition> = {
         sideEffects: "internal",
         externalExecution: "blocked",
         requiresTenant: true,
+        configSchema: ownerAnomalyTriageConfig,
         async handle(context) {
           if (!context.idempotencyKey) {
             throw new PlatformUnavailableError(
@@ -459,6 +707,19 @@ const workerDefinitions: Record<string, WorkerDefinition> = {
         sideEffects: "internal",
         externalExecution: "blocked",
         requiresTenant: true,
+        configSchema: {
+          type: "object",
+          required: ["approvalId", "action"],
+          properties: {
+            approvalId: { type: "string" },
+            action: {
+              type: "string",
+              enum: ["approved", "rejected", "revision_requested"],
+            },
+            note: { type: "string" },
+          },
+          additionalProperties: true,
+        },
         async handle(context) {
           const approvalId = optionalString(context.config.approvalId);
           const action = normalizeApprovalDecision(context.config.action);
@@ -560,6 +821,7 @@ export function registeredWorkerCommands() {
       sideEffects: command.sideEffects,
       externalExecution: command.externalExecution,
       requiresTenant: command.requiresTenant === true,
+      configSchema: command.configSchema ?? null,
     })),
   );
 }
@@ -656,10 +918,16 @@ export async function executeWorkerCommand(input: {
 
   const idempotencyKey =
     command.idempotency === "required" ? requireIdempotency(input.idempotencyKey) : undefined;
+  const config = commandConfig(input.config);
+
+  if (command.configSchema) {
+    validateConfigSchema(command.name, command.configSchema, config);
+  }
+
   const result = await command.handle({
     target,
     operatorEmail: input.operatorEmail,
-    config: commandConfig(input.config),
+    config,
     idempotencyKey,
   });
 
