@@ -27,6 +27,7 @@ import {
   recordAdapterIntent,
   recordCustomerSignal,
   recordCoreDecision,
+  recordExternalAction,
   recordRuleChange,
   upsertCoreObject,
 } from "../../src/core/primitives";
@@ -2019,11 +2020,71 @@ export async function POST(request: Request) {
     }
   }
 
+  if (command === "external_action.record") {
+    const idempotency = normalizeIdempotencyKey(
+      request.headers.get("idempotency-key") ?? body.idempotencyKey,
+    );
+
+    if (!idempotency.ok) {
+      return errorResponse(
+        {
+          code: "invalid_idempotency_key",
+          message: idempotency.message,
+        },
+        400,
+      );
+    }
+
+    try {
+      const result = await recordExternalAction({
+        operatorEmail: auth.operatorEmail,
+        idempotencyKey: idempotency.key,
+        tenantSlug,
+        targetType: optionalString(config.targetType) ?? "",
+        targetId: optionalString(config.targetId) ?? "",
+        kind: optionalString(config.kind) ?? "",
+        state: optionalString(config.state) ?? "",
+        connectionId: optionalString(config.connectionId),
+        adapterActionId: optionalString(config.adapterActionId),
+        taskId: optionalString(config.taskId),
+        eventId: optionalString(config.eventId),
+        capabilityId: optionalString(config.capabilityId),
+        amountCents: config.amountCents,
+        currency: optionalString(config.currency),
+        occurredAt: optionalString(config.occurredAt),
+        receipt: jsonObject(config.receipt),
+        response: jsonObject(config.response),
+        data: jsonObject(config.data),
+      });
+
+      return Response.json(
+        {
+          api: apiVersion,
+          data: {
+            command,
+            core: {
+              tenantSlug: tenantSlug ?? null,
+            },
+            result,
+          },
+          error: null,
+        },
+        {
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    } catch (error) {
+      return coreErrorResponse(error, "core_external_action_record_failed");
+    }
+  }
+
   return errorResponse(
     {
       code: "core_command_unsupported",
       message:
-        "Core command must be task.create, task.transition, object.upsert, adapter.upsert, connection.upsert, connection.health.record, object.link, event.ingest, evidence.attach, document.create, packet.prepare, document.packet.prepare, decision.record, approval.request, adapter.intent.record, rule.change.record, capability.grant, budget.reserve, budget.charge, budget.release, ai.infer, view.publish, customer_signal.record, payroll.preview.record, or payroll.preview.packet.prepare.",
+        "Core command must be task.create, task.transition, object.upsert, adapter.upsert, connection.upsert, connection.health.record, object.link, event.ingest, evidence.attach, document.create, packet.prepare, document.packet.prepare, decision.record, approval.request, adapter.intent.record, rule.change.record, external_action.record, capability.grant, budget.reserve, budget.charge, budget.release, ai.infer, view.publish, customer_signal.record, payroll.preview.record, or payroll.preview.packet.prepare.",
     },
     400,
   );

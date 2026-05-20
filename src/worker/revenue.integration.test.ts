@@ -30,6 +30,7 @@ import {
   recordCoreConnectionHealth,
   recordCustomerSignal,
   recordCoreDecision,
+  recordExternalAction,
   recordRuleChange,
   upsertCoreAdapter,
   upsertCoreConnection,
@@ -2244,6 +2245,61 @@ maybeDescribe("Revenue Worker integration eval", () => {
       },
       db,
     });
+    const paymentObjectResult = await upsertCoreObject({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-core-external-action-payment-object-${runId}`,
+      type: "payment",
+      name: "External action payment target",
+      source: "ci.core",
+      externalId: `external-action-payment-${runId}`,
+      state: "pending",
+      db,
+    });
+    const [paymentObject] = await db
+      .select({ tenantId: objects.tenantId })
+      .from(objects)
+      .where(eq(objects.id, paymentObjectResult.objectId))
+      .limit(1);
+
+    expect(paymentObject?.tenantId).toBeTruthy();
+
+    const [payment] = await db
+      .insert(payments)
+      .values({
+        tenantId: paymentObject?.tenantId ?? "",
+        objectId: paymentObjectResult.objectId,
+        state: "pending",
+        externalId: `external-action-payment-${runId}`,
+        data: {
+          source: "core_primitive_ci",
+        },
+      })
+      .returning({ id: payments.id });
+    const externalActionResult = await recordExternalAction({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-core-external-action-${runId}`,
+      targetType: "payment",
+      targetId: payment.id,
+      kind: "payment_receipt",
+      state: "receipt_recorded",
+      adapterActionId: adapterIntentResult.adapterActionId,
+      amountCents: 24900,
+      currency: "usd",
+      occurredAt: "2026-05-20T08:00:00.000Z",
+      receipt: {
+        receiptId: `receipt-${runId}`,
+        provider: "ci",
+      },
+      response: {
+        status: "recorded",
+      },
+      data: {
+        source: "core_primitive_ci",
+      },
+      db,
+    });
 
     const [object] = await db.select().from(objects).where(eq(objects.id, objectResult.objectId)).limit(1);
     const [version] = await db
@@ -2297,6 +2353,26 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .from(evidence)
       .where(eq(evidence.id, ruleChangeResult.evidenceId ?? ""))
       .limit(1);
+    const [externalActionEvent] = await db
+      .select()
+      .from(events)
+      .where(eq(events.id, externalActionResult.eventId))
+      .limit(1);
+    const [externalActionEvidence] = await db
+      .select()
+      .from(evidence)
+      .where(eq(evidence.id, externalActionResult.evidenceId ?? ""))
+      .limit(1);
+    const [paymentAfterExternalAction] = await db
+      .select()
+      .from(payments)
+      .where(eq(payments.id, payment.id))
+      .limit(1);
+    const [paymentObjectAfterExternalAction] = await db
+      .select()
+      .from(objects)
+      .where(eq(objects.id, paymentObjectResult.objectId))
+      .limit(1);
     const [auditCount] = await db
       .select({ value: count() })
       .from(auditEvents)
@@ -2347,6 +2423,32 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(ruleChangeDecision?.decision).toBe("owner_review_required");
     expect(ruleChangeEvidence?.kind).toBe("trace");
     expect(objectValue(ruleChangeEvidence?.data).decisionId).toBe(ruleChangeResult.decisionId);
+    expect(externalActionResult.created).toBe(true);
+    expect(externalActionResult.connectionId).toBe(connection?.id);
+    expect(externalActionResult.executionMode).toBe("record_only");
+    expect(externalActionEvent?.type).toBe("external_action.recorded");
+    expect(externalActionEvent?.source).toBe("continuous.core.external_actions");
+    expect(externalActionEvidence?.kind).toBe("receipt");
+    expect(paymentAfterExternalAction?.state).toBe("receipt_recorded");
+    expect(paymentObjectAfterExternalAction?.state).toBe("receipt_recorded");
+    expect(objectValue(paymentAfterExternalAction?.data).lastExternalAction).toMatchObject({
+      targetType: "payment",
+      targetId: payment.id,
+      kind: "payment_receipt",
+      state: "receipt_recorded",
+      amountCents: 24900,
+      currency: "USD",
+      sourceEventId: adapterIntentResult.eventId,
+      externalExecution: "blocked",
+      executionMode: "record_only",
+      continuousExecuted: false,
+    });
+    expect(objectValue(paymentObjectAfterExternalAction?.data).lastExternalAction).toMatchObject({
+      targetType: "payment",
+      targetId: payment.id,
+      state: "receipt_recorded",
+      sourceEventId: adapterIntentResult.eventId,
+    });
     expect(auditCount.value).toBe(8);
     expect(replay.created).toBe(false);
     expect(replay.evidenceId).toBe(evidenceResult.evidenceId);
@@ -2426,6 +2528,66 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(adapterIntentReplay.adapterActionId).toBe(adapterIntentResult.adapterActionId);
     expect(ruleChangeReplay.created).toBe(false);
     expect(ruleChangeReplay.objectId).toBe(ruleChangeResult.objectId);
+
+    const externalActionReplay = await recordExternalAction({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-core-external-action-${runId}`,
+      targetType: "payment",
+      targetId: payment.id,
+      kind: "payment_receipt",
+      state: "receipt_recorded",
+      adapterActionId: adapterIntentResult.adapterActionId,
+      amountCents: 24900,
+      currency: "usd",
+      occurredAt: "2026-05-20T08:00:00.000Z",
+      receipt: {
+        receiptId: `receipt-${runId}`,
+        provider: "ci",
+      },
+      response: {
+        status: "recorded",
+      },
+      data: {
+        source: "core_primitive_ci",
+      },
+      db,
+    });
+
+    expect(externalActionReplay.created).toBe(false);
+    expect(externalActionReplay.targetId).toBe(payment.id);
+    expect(externalActionReplay.evidenceId).toBe(externalActionResult.evidenceId);
+
+    await db.delete(payments).where(eq(payments.id, payment.id));
+
+    const externalActionDeletedTargetReplay = await recordExternalAction({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-core-external-action-${runId}`,
+      targetType: "payment",
+      targetId: payment.id,
+      kind: "payment_receipt",
+      state: "receipt_recorded",
+      adapterActionId: adapterIntentResult.adapterActionId,
+      amountCents: 24900,
+      currency: "usd",
+      occurredAt: "2026-05-20T08:00:00.000Z",
+      receipt: {
+        receiptId: `receipt-${runId}`,
+        provider: "ci",
+      },
+      response: {
+        status: "recorded",
+      },
+      data: {
+        source: "core_primitive_ci",
+      },
+      db,
+    });
+
+    expect(externalActionDeletedTargetReplay.created).toBe(false);
+    expect(externalActionDeletedTargetReplay.targetId).toBe(payment.id);
+    expect(externalActionDeletedTargetReplay.evidenceId).toBe(externalActionResult.evidenceId);
   }, 120_000);
 
   it("persists headless core object links and generated views", async () => {

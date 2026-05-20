@@ -15,9 +15,12 @@ import {
   events,
   evidence,
   evidencePackets,
+  filingDrafts,
   objects,
   objectLinks,
   objectVersions,
+  payments,
+  paymentInstructions,
   rulePacks,
   tasks,
   uiContracts,
@@ -39,6 +42,7 @@ type AdapterAuthMode = "none" | "oauth" | "oauth2" | "api_key" | "basic" | "bear
 type AdapterConnectionState = "draft" | "active" | "paused" | "error" | "archived";
 type ConnectionHealthStatus = "ready" | "needs_configuration" | "paused" | "error" | "archived";
 type ConnectionHealthCheckStatus = "pass" | "warn" | "fail" | "not_applicable";
+type ExternalActionTargetType = "payment_instruction" | "payment" | "filing_draft";
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -65,6 +69,7 @@ const customerSignalSource = "continuous.core.customer_signals";
 const viewSource = "continuous.core.views";
 const adapterIntentSource = "continuous.core.adapter_intents";
 const ruleChangeSource = "continuous.core.rule_changes";
+const externalActionSource = "continuous.core.external_actions";
 const adapterSource = "continuous.core.adapters";
 const connectionSource = "continuous.core.connections";
 const connectionHealthSource = "continuous.core.connection_health";
@@ -376,6 +381,28 @@ export type CoreRuleChangeRecordInput = {
   db?: Database;
 };
 
+export type CoreExternalActionRecordInput = {
+  operatorEmail: string;
+  idempotencyKey: string;
+  tenantSlug?: string;
+  targetType: string;
+  targetId: string;
+  kind: string;
+  state: string;
+  connectionId?: string;
+  adapterActionId?: string;
+  taskId?: string;
+  eventId?: string;
+  capabilityId?: string;
+  amountCents?: unknown;
+  currency?: string;
+  occurredAt?: string;
+  receipt?: JsonObject;
+  response?: JsonObject;
+  data?: JsonObject;
+  db?: Database;
+};
+
 function cleanString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
@@ -551,12 +578,65 @@ function boundedInteger(value: unknown, field: string, fallback: number, min: nu
   return numericValue;
 }
 
+function optionalInteger(value: unknown, field: string) {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+
+  const numericValue =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && /^-?\d+$/.test(value.trim())
+        ? Number(value.trim())
+        : Number.NaN;
+
+  if (!Number.isInteger(numericValue)) {
+    throw new PlatformUnavailableError("core_integer_invalid", `${field} must be an integer.`, 400);
+  }
+
+  return numericValue;
+}
+
+function optionalCurrency(value: unknown, field: string) {
+  const output = cleanString(value);
+
+  if (!output) {
+    return undefined;
+  }
+
+  const currency = output.toUpperCase();
+
+  if (!/^[A-Z]{3}$/.test(currency)) {
+    throw new PlatformUnavailableError("core_currency_invalid", `${field} must be a 3-letter currency code.`, 400);
+  }
+
+  return currency;
+}
+
 function stringList(value: unknown) {
   return Array.isArray(value)
     ? value
         .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
         .map((item) => item.trim())
     : [];
+}
+
+function parseExternalActionTargetType(value: unknown) {
+  const targetType = requiredString(value, "config.targetType");
+
+  if (
+    targetType === "payment_instruction" ||
+    targetType === "payment" ||
+    targetType === "filing_draft"
+  ) {
+    return targetType as ExternalActionTargetType;
+  }
+
+  throw new PlatformUnavailableError(
+    "core_external_action_target_invalid",
+    "config.targetType must be payment_instruction, payment, or filing_draft.",
+    400,
+  );
 }
 
 function firstStringValue(...values: unknown[]) {
@@ -1260,6 +1340,31 @@ async function assertConnection(tx: QueryClient, tenantId: string, connectionId?
   }
 }
 
+async function loadAdapterAction(tx: QueryClient, tenantId: string, adapterActionId: string) {
+  const [action] = await tx
+    .select({
+      id: adapterActions.id,
+      connectionId: adapterActions.connectionId,
+      adapterRunId: adapterActions.adapterRunId,
+      taskId: adapterActions.taskId,
+      eventId: adapterActions.eventId,
+      capabilityId: adapterActions.capabilityId,
+    })
+    .from(adapterActions)
+    .where(and(eq(adapterActions.tenantId, tenantId), eq(adapterActions.id, adapterActionId)))
+    .limit(1);
+
+  if (!action) {
+    throw new PlatformUnavailableError(
+      "core_adapter_action_not_found",
+      "config.adapterActionId does not match an adapter action in this tenant.",
+      404,
+    );
+  }
+
+  return action;
+}
+
 async function loadConnection(tx: QueryClient, tenantId: string, connectionId: string) {
   const [connection] = await tx
     .select({
@@ -1368,6 +1473,142 @@ async function evidenceForAudit(tx: QueryClient, tenantId: string, auditEventId:
     .limit(1);
 
   return item?.id ?? null;
+}
+
+async function loadExternalActionTarget(
+  tx: QueryClient,
+  tenantId: string,
+  targetType: ExternalActionTargetType,
+  targetId: string,
+) {
+  if (targetType === "payment_instruction") {
+    const [target] = await tx
+      .select({
+        id: paymentInstructions.id,
+        objectId: paymentInstructions.objectId,
+        state: paymentInstructions.state,
+        data: paymentInstructions.data,
+      })
+      .from(paymentInstructions)
+      .where(and(eq(paymentInstructions.tenantId, tenantId), eq(paymentInstructions.id, targetId)))
+      .limit(1);
+
+    if (target) {
+      return target;
+    }
+  }
+
+  if (targetType === "payment") {
+    const [target] = await tx
+      .select({
+        id: payments.id,
+        objectId: payments.objectId,
+        state: payments.state,
+        data: payments.data,
+      })
+      .from(payments)
+      .where(and(eq(payments.tenantId, tenantId), eq(payments.id, targetId)))
+      .limit(1);
+
+    if (target) {
+      return target;
+    }
+  }
+
+  if (targetType === "filing_draft") {
+    const [target] = await tx
+      .select({
+        id: filingDrafts.id,
+        objectId: sql<string | null>`null`,
+        state: filingDrafts.state,
+        data: filingDrafts.data,
+      })
+      .from(filingDrafts)
+      .where(and(eq(filingDrafts.tenantId, tenantId), eq(filingDrafts.id, targetId)))
+      .limit(1);
+
+    if (target) {
+      return target;
+    }
+  }
+
+  throw new PlatformUnavailableError(
+    "core_external_action_target_not_found",
+    "config.targetId does not match a tenant-scoped target for config.targetType.",
+    404,
+  );
+}
+
+async function updateExternalActionTarget(input: {
+  tx: Transaction;
+  tenantId: string;
+  targetType: ExternalActionTargetType;
+  targetId: string;
+  objectId?: string;
+  state: string;
+  currentData: JsonObject;
+  actionRecord: JsonObject;
+  now: Date;
+}) {
+  const data = {
+    ...input.currentData,
+    lastExternalAction: input.actionRecord,
+  };
+
+  if (input.targetType === "payment_instruction") {
+    await input.tx
+      .update(paymentInstructions)
+      .set({
+        state: input.state,
+        data,
+        updatedAt: input.now,
+      })
+      .where(and(eq(paymentInstructions.tenantId, input.tenantId), eq(paymentInstructions.id, input.targetId)));
+  } else if (input.targetType === "payment") {
+    await input.tx
+      .update(payments)
+      .set({
+        state: input.state,
+        data,
+        updatedAt: input.now,
+      })
+      .where(and(eq(payments.tenantId, input.tenantId), eq(payments.id, input.targetId)));
+  } else {
+    await input.tx
+      .update(filingDrafts)
+      .set({
+        state: input.state,
+        data,
+        updatedAt: input.now,
+      })
+      .where(and(eq(filingDrafts.tenantId, input.tenantId), eq(filingDrafts.id, input.targetId)));
+  }
+
+  if (!input.objectId) {
+    return;
+  }
+
+  const [object] = await input.tx
+    .select({ data: objects.data })
+    .from(objects)
+    .where(and(eq(objects.tenantId, input.tenantId), eq(objects.id, input.objectId)))
+    .limit(1);
+
+  if (!object) {
+    return;
+  }
+
+  await input.tx
+    .update(objects)
+    .set({
+      state: input.state,
+      data: {
+        ...jsonObject(object.data),
+        lastExternalAction: input.actionRecord,
+      },
+      updatedAt: input.now,
+    })
+    .where(and(eq(objects.tenantId, input.tenantId), eq(objects.id, input.objectId)));
 }
 
 async function nextObjectVersion(tx: QueryClient, objectId: string) {
@@ -3355,6 +3596,248 @@ export async function recordAdapterIntent(input: CoreAdapterIntentRecordInput) {
   });
 
   return db.transaction(async (tx) => recordAdapterIntentForOperator(tx, operator, input));
+}
+
+export async function recordExternalAction(input: CoreExternalActionRecordInput) {
+  const db = input.db ?? defaultDb;
+  const targetType = parseExternalActionTargetType(input.targetType);
+  const targetId = requiredUuid(input.targetId, "config.targetId");
+  const kind = requiredStringMax(input.kind, "config.kind", 120);
+  const state = requiredStringMax(input.state, "config.state", 80);
+  const requestedConnectionId = optionalUuid(input.connectionId, "config.connectionId");
+  const adapterActionId = optionalUuid(input.adapterActionId, "config.adapterActionId");
+  const taskId = optionalUuid(input.taskId, "config.taskId");
+  const sourceEventId = optionalUuid(input.eventId, "config.eventId");
+  const capabilityId = optionalUuid(input.capabilityId, "config.capabilityId");
+  const amountCents = optionalInteger(input.amountCents, "config.amountCents");
+  const currency = optionalCurrency(input.currency, "config.currency");
+  const occurredAt = optionalDate(input.occurredAt, "config.occurredAt") ?? new Date();
+  const receipt = jsonObject(input.receipt);
+  const response = jsonObject(input.response);
+  const data = jsonObject(input.data);
+  const operator = await loadOperatorContext({
+    db,
+    operatorEmail: input.operatorEmail,
+    tenantSlug: input.tenantSlug,
+  });
+
+  if (amountCents !== undefined && amountCents < 0) {
+    throw new PlatformUnavailableError(
+      "core_amount_invalid",
+      "config.amountCents must be greater than or equal to 0.",
+      400,
+    );
+  }
+
+  const idempotency = coreIdempotencyFingerprint("external_action.record", {
+    targetType,
+    targetId,
+    kind,
+    state,
+    connectionId: requestedConnectionId ?? null,
+    adapterActionId: adapterActionId ?? null,
+    taskId: taskId ?? null,
+    sourceEventId: sourceEventId ?? null,
+    capabilityId: capabilityId ?? null,
+    amountCents: amountCents ?? null,
+    currency: currency ?? null,
+    occurredAt: occurredAt.toISOString(),
+    receipt,
+    response,
+    data,
+  });
+
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${operator.tenantId}), hashtext(${`${externalActionSource}:${input.idempotencyKey}`}))`,
+    );
+
+    const [existingAudit] = await tx
+      .select({
+        auditEventId: auditEvents.id,
+        targetType: auditEvents.targetType,
+        targetId: auditEvents.targetId,
+        eventId: auditEvents.eventId,
+        data: auditEvents.data,
+      })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.tenantId, operator.tenantId),
+          eq(auditEvents.source, externalActionSource),
+          eq(auditEvents.idempotencyKey, `${input.idempotencyKey}:external_action_recorded`),
+        ),
+      )
+      .limit(1);
+
+    if (existingAudit) {
+      assertCoreIdempotencyReplay({
+        command: "external_action.record",
+        fingerprint: idempotency,
+        storedData: existingAudit.data,
+      });
+
+      return {
+        created: false,
+        targetType: cleanString(existingAudit.targetType) ?? targetType,
+        targetId: existingAudit.targetId ?? targetId,
+        state: cleanString(existingAudit.data.state) ?? state,
+        eventId: existingAudit.eventId,
+        auditEventId: existingAudit.auditEventId,
+        evidenceId: await evidenceForAudit(tx, operator.tenantId, existingAudit.auditEventId),
+        connectionId: cleanString(existingAudit.data.connectionId) ?? null,
+        adapterActionId: cleanString(existingAudit.data.adapterActionId) ?? null,
+        externalExecution: "blocked",
+        executionMode: "record_only",
+      };
+    }
+
+    const adapterAction = adapterActionId
+      ? await loadAdapterAction(tx, operator.tenantId, adapterActionId)
+      : null;
+    const connectionId = requestedConnectionId ?? adapterAction?.connectionId ?? undefined;
+    const resolvedTaskId = taskId ?? adapterAction?.taskId ?? undefined;
+    const resolvedSourceEventId = sourceEventId ?? adapterAction?.eventId ?? undefined;
+    const resolvedCapabilityId = capabilityId ?? adapterAction?.capabilityId ?? undefined;
+
+    if (requestedConnectionId && adapterAction && requestedConnectionId !== adapterAction.connectionId) {
+      throw new PlatformUnavailableError(
+        "core_external_action_adapter_mismatch",
+        "config.connectionId must match config.adapterActionId when both are provided.",
+        400,
+      );
+    }
+
+    await Promise.all([
+      assertConnection(tx, operator.tenantId, connectionId),
+      assertTask(tx, operator.tenantId, resolvedTaskId),
+      assertEvent(tx, operator.tenantId, resolvedSourceEventId),
+      assertCapability(tx, resolvedCapabilityId),
+    ]);
+
+    const target = await loadExternalActionTarget(tx, operator.tenantId, targetType, targetId);
+    const objectId = target.objectId ?? undefined;
+    const targetData = jsonObject(target.data);
+
+    const now = new Date();
+    const actionRecord = {
+      targetType,
+      targetId,
+      kind,
+      state,
+      previousState: target.state,
+      amountCents: amountCents ?? null,
+      currency: currency ?? null,
+      connectionId: connectionId ?? null,
+      adapterActionId: adapterActionId ?? null,
+      taskId: resolvedTaskId ?? null,
+      sourceEventId: resolvedSourceEventId ?? null,
+      capabilityId: resolvedCapabilityId ?? null,
+      receipt,
+      response,
+      data,
+      occurredAt: occurredAt.toISOString(),
+      recordedAt: now.toISOString(),
+      recordedByUserId: operator.userId,
+      externalExecution: "blocked",
+      executionMode: "record_only",
+      continuousExecuted: false,
+    };
+    const [event] = await tx
+      .insert(events)
+      .values({
+        tenantId: operator.tenantId,
+        type: "external_action.recorded",
+        source: externalActionSource,
+        actorType: "user",
+        actorId: operator.userId,
+        actorRef: operator.actorRef,
+        objectId,
+        taskId: resolvedTaskId,
+        capabilityId: resolvedCapabilityId,
+        connectionId,
+        idempotencyKey: `${input.idempotencyKey}:external_action_recorded`,
+        data: actionRecord,
+        occurredAt,
+      })
+      .returning({ id: events.id });
+    const [audit] = await tx
+      .insert(auditEvents)
+      .values({
+        tenantId: operator.tenantId,
+        type: "external_action.recorded",
+        source: externalActionSource,
+        actorType: "user",
+        actorId: operator.userId,
+        actorRef: operator.actorRef,
+        targetType,
+        targetId,
+        taskId: resolvedTaskId,
+        eventId: event.id,
+        objectId,
+        capabilityId: resolvedCapabilityId,
+        risk: "high",
+        idempotencyKey: `${input.idempotencyKey}:external_action_recorded`,
+        data: {
+          ...actionRecord,
+          recordedEventId: event.id,
+          idempotency,
+        },
+      })
+      .returning({ id: auditEvents.id });
+    const [proof] = await tx
+      .insert(evidence)
+      .values({
+        tenantId: operator.tenantId,
+        kind: "receipt",
+        name: `External action recorded: ${kind}`,
+        objectId,
+        taskId: resolvedTaskId,
+        eventId: event.id,
+        capabilityId: resolvedCapabilityId,
+        actorType: "user",
+        actorId: operator.userId,
+        hash: `${externalActionSource}:${targetType}:${targetId}:${input.idempotencyKey}`,
+        data: {
+          ...actionRecord,
+          auditEventId: audit.id,
+          recordedEventId: event.id,
+          idempotency,
+        },
+      })
+      .returning({ id: evidence.id });
+
+    await updateExternalActionTarget({
+      tx,
+      tenantId: operator.tenantId,
+      targetType,
+      targetId,
+      objectId,
+      state,
+      currentData: targetData,
+      actionRecord: {
+        ...actionRecord,
+        recordedEventId: event.id,
+        auditEventId: audit.id,
+        evidenceId: proof.id,
+      },
+      now,
+    });
+
+    return {
+      created: true,
+      targetType,
+      targetId,
+      state,
+      eventId: event.id,
+      auditEventId: audit.id,
+      evidenceId: proof.id,
+      connectionId: connectionId ?? null,
+      adapterActionId: adapterActionId ?? null,
+      externalExecution: "blocked",
+      executionMode: "record_only",
+    };
+  });
 }
 
 export async function recordRuleChangeForOperator(

@@ -30,7 +30,7 @@ supports `task.create`, `task.transition`, `object.upsert`, `object.link`,
 `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`, `document.packet.prepare`,
 `decision.record`, `approval.request`, `capability.grant`, `budget.reserve`,
 `budget.charge`, `budget.release`, `ai.infer`, `view.publish`, `adapter.intent.record`,
-`rule.change.record`, `customer_signal.record`,
+`rule.change.record`, `external_action.record`, `customer_signal.record`,
 `payroll.preview.record`, `payroll.preview.packet.prepare`,
 `control_plane.token_rotation.attest`, `control_plane.credential.upsert`,
 `control_plane.credential.revoke`, and `control_plane.session.review`, all with the

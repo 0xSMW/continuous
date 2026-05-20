@@ -179,7 +179,7 @@ policy-bound:
 
 | Surface | Behavior |
 |---|---|
-| `POST /core` | Canonical Core command surface for `task.create`, `task.transition`, `object.upsert`, `adapter.upsert`, `connection.upsert`, `connection.health.record`, `object.link`, `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`, `document.packet.prepare`, `decision.record`, `approval.request`, `adapter.intent.record`, `rule.change.record`, `capability.grant`, `budget.reserve`, `budget.charge`, `budget.release`, `ai.infer`, `view.publish`, `customer_signal.record`, `payroll.preview.record`, `payroll.preview.packet.prepare`, `control_plane.token_rotation.attest`, `control_plane.credential.upsert`, `control_plane.credential.revoke`, and `control_plane.session.review`; invalid credentials fail before body reads, command bodies are capped at 1 MiB, tenant selection and command fields live in structured `core` and `config` payloads, and no other top-level command fields are accepted |
+| `POST /core` | Canonical Core command surface for `task.create`, `task.transition`, `object.upsert`, `adapter.upsert`, `connection.upsert`, `connection.health.record`, `object.link`, `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`, `document.packet.prepare`, `decision.record`, `approval.request`, `adapter.intent.record`, `rule.change.record`, `external_action.record`, `capability.grant`, `budget.reserve`, `budget.charge`, `budget.release`, `ai.infer`, `view.publish`, `customer_signal.record`, `payroll.preview.record`, `payroll.preview.packet.prepare`, `control_plane.token_rotation.attest`, `control_plane.credential.upsert`, `control_plane.credential.revoke`, and `control_plane.session.review`; invalid credentials fail before body reads, command bodies are capped at 1 MiB, tenant selection and command fields live in structured `core` and `config` payloads, and no other top-level command fields are accepted |
 | `GET /core?tenantSlug=...` | Tenant-scoped Core summary for active tasks, recent events, approvals, workers, capabilities, graph counts, and ledger counts |
 | `/worker?view=snapshot&role=revenue_operations` | Operator-only snapshot of worker state, active tasks, controls, budget usage, and recent events |
 | `/worker?view=approvals&role=revenue_operations` | Operator-only approval queue for worker decisions |
@@ -258,7 +258,11 @@ blocked funding/tax handoff drafts. A shared approval decision applies the
 payroll outcome to the payroll run, funding drafts, tax draft, filing draft,
 packet document, evidence packet, audit trail, and handoff metadata while
 external execution, submission, and money movement remain blocked. Every
-command is tenant-scoped, idempotent, audit-backed, and blocks external
+`external_action.record` captures receipt/outcome facts for payment
+instructions, payments, and filing drafts after a human or adapter-controlled
+process produces a result; it updates the Core target state and writes receipt
+evidence without executing the external action itself. Every command is
+tenant-scoped, idempotent, audit-backed, and blocks external
 execution.
 
 ## Non-Goals For The First Slice

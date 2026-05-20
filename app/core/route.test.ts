@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   recordCoreConnectionHealth: vi.fn(),
   recordCoreDecision: vi.fn(),
   recordCustomerSignal: vi.fn(),
+  recordExternalAction: vi.fn(),
   recordRuleChange: vi.fn(),
   reviewControlPlaneSessions: vi.fn(),
   revokeControlPlaneCredential: vi.fn(),
@@ -86,6 +87,7 @@ vi.mock("../../src/core/primitives", () => ({
   recordCoreConnectionHealth: mocks.recordCoreConnectionHealth,
   recordCoreDecision: mocks.recordCoreDecision,
   recordCustomerSignal: mocks.recordCustomerSignal,
+  recordExternalAction: mocks.recordExternalAction,
   recordRuleChange: mocks.recordRuleChange,
   upsertCoreAdapter: mocks.upsertCoreAdapter,
   upsertCoreConnection: mocks.upsertCoreConnection,
@@ -2223,6 +2225,91 @@ describe("POST /core", () => {
         source: "route-test",
       },
       maxAttempts: 3,
+    });
+  });
+
+  it("dispatches external_action.record with target outcome payload", async () => {
+    mocks.recordExternalAction.mockResolvedValue({
+      created: true,
+      targetType: "payment_instruction",
+      targetId: "99999999-9999-4999-8999-000000000077",
+      state: "receipt_recorded",
+      eventId: "event-1",
+      auditEventId: "audit-1",
+      evidenceId: "evidence-1",
+      connectionId: "99999999-9999-4999-8999-000000000001",
+      adapterActionId: "99999999-9999-4999-8999-000000000002",
+      externalExecution: "blocked",
+      executionMode: "record_only",
+    });
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "external_action.record",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "external-action-route-test-001",
+          config: {
+            targetType: "payment_instruction",
+            targetId: "99999999-9999-4999-8999-000000000077",
+            kind: "payment_receipt",
+            state: "receipt_recorded",
+            connectionId: "99999999-9999-4999-8999-000000000001",
+            adapterActionId: "99999999-9999-4999-8999-000000000002",
+            amountCents: 24900,
+            currency: "usd",
+            occurredAt: "2026-05-20T08:00:00.000Z",
+            receipt: {
+              receiptId: "receipt-1",
+            },
+            response: {
+              status: "recorded",
+            },
+            data: {
+              source: "route-test",
+            },
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.command).toBe("external_action.record");
+    expect(body.data.result.executionMode).toBe("record_only");
+    expect(mocks.recordExternalAction).toHaveBeenCalledWith({
+      operatorEmail: "operator@example.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: "external-action-route-test-001",
+      targetType: "payment_instruction",
+      targetId: "99999999-9999-4999-8999-000000000077",
+      kind: "payment_receipt",
+      state: "receipt_recorded",
+      connectionId: "99999999-9999-4999-8999-000000000001",
+      adapterActionId: "99999999-9999-4999-8999-000000000002",
+      taskId: undefined,
+      eventId: undefined,
+      capabilityId: undefined,
+      amountCents: 24900,
+      currency: "usd",
+      occurredAt: "2026-05-20T08:00:00.000Z",
+      receipt: {
+        receiptId: "receipt-1",
+      },
+      response: {
+        status: "recorded",
+      },
+      data: {
+        source: "route-test",
+      },
     });
   });
 
