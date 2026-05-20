@@ -40,13 +40,16 @@ Then open `http://localhost:3000`.
 - `/core` returns persisted core counts, active tasks, and recent events for tokened operators;
   `POST /core` accepts structured core commands: `task.create`,
   `task.transition`, `object.upsert`, `adapter.upsert`,
-  `connection.upsert`, `connection.health.record`, `object.link`,
+  `connection.upsert`, `connection.health.record`, `entity.setup.record`,
   `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`,
-  `document.packet.prepare`, `decision.record`,
-  `approval.request`, `adapter.intent.record`, `rule.change.record`,
-  `capability.grant`, `budget.reserve`, `budget.charge`, `budget.release`,
-  `ai.infer`, `view.publish`, `customer_signal.record`, `payroll.preview.record`, and
-  `payroll.preview.packet.prepare`. Core mutation requests accept only
+  `document.packet.prepare`, `decision.record`, `approval.request`,
+  `adapter.intent.record`, `rule.change.record`, `capability.grant`,
+  `budget.reserve`, `budget.charge`, `budget.release`, `ai.infer`,
+  `object.link`, `view.publish`, `customer_signal.record`,
+  `payroll.preview.record`, `payroll.preview.packet.prepare`,
+  `external_action.record`, `control_plane.token_rotation.attest`,
+  `control_plane.credential.upsert`, `control_plane.credential.revoke`, and
+  `control_plane.session.review`. Core mutation requests accept only
   `command`, `core`, `idempotencyKey`, and `config` as top-level fields.
   `ai.infer` is the deterministic Core AI gateway: route selection, redaction,
   budget reservation/charge, inference, usage, audit, and evidence are written

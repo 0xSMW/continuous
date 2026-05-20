@@ -282,3 +282,9 @@ post-Systems sequencing wave for Offer/Pricing, Customer Experience,
 Asset/Supply, Growth, and vertical packaged workers. `docs/worker-handoffs.md`
 also names the first Core-record handoff fixture each post-initial family must
 prove before runtime promotion.
+
+The top-level README now matches the implemented `/core` command catalog,
+including entity setup, external action proof, and control-plane credential
+attestation commands. Deployment docs now reflect the live firewall posture:
+HTTP/HTTPS stay open, while SSH is opened only temporarily by the deploy
+workflow.

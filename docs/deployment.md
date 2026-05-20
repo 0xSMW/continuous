@@ -12,7 +12,9 @@ commands.
 - Size: `s-2vcpu-4gb`
 - Public IP: `45.55.53.92`
 - Firewall: `continuous-fw`
-- Open inbound ports: SSH from the current operator IP, HTTP, HTTPS
+- Open inbound ports: HTTP and HTTPS. The deploy workflow opens SSH only for
+  the current GitHub runner `/32` during a deploy and removes that rule when
+  the job finishes.
 
 ## Services
 
