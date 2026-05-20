@@ -25,6 +25,11 @@ import {
   prepareOwnerDecisionQueue,
   triageOwnerAnomalies,
 } from "./owner";
+import {
+  dispatchWorkerRole,
+  getDispatchWorkerSnapshotSafe,
+  proposeDispatchSchedule,
+} from "./dispatch";
 import { plannedWorkerContractForRole } from "./planned-workers";
 import { normalizeIdempotencyKey } from "./security";
 
@@ -379,6 +384,29 @@ const ownerAnomalyTriageConfig: WorkerConfigSchema = {
       type: "array",
       minItems: 1,
       items: { type: "string" },
+    },
+  },
+  additionalProperties: true,
+};
+const dispatchScheduleConfig: WorkerConfigSchema = {
+  type: "object",
+  required: ["constraints"],
+  oneRequired: ["jobId", "sourceRefs"],
+  properties: {
+    jobId: { type: "string" },
+    sourceRefs: jsonObjectConfig,
+    constraints: {
+      type: "object",
+      properties: {
+        serviceWindow: { type: "string" },
+        durationMinutes: { type: "number", integer: true, minimum: 15, maximum: 480 },
+        crewSkills: {
+          type: "array",
+          minItems: 1,
+          items: { type: "string" },
+        },
+      },
+      additionalProperties: true,
     },
   },
   additionalProperties: true,
@@ -903,6 +931,166 @@ const workerDefinitions: Record<string, WorkerDefinition> = {
               worker: responseTarget(context.target, ownerDecisions.worker.tenantSlug),
               view: "decisions",
               decisions: ownerDecisions.decisions,
+            },
+            error: null,
+          };
+        },
+      },
+    },
+  },
+  [dispatchWorkerRole]: {
+    role: dispatchWorkerRole,
+    commands: {
+      "schedule.propose": {
+        name: "schedule.propose",
+        description: "Prepare a dry-run schedule proposal from Core job and handoff refs.",
+        idempotency: "required",
+        sideEffects: "dry_run",
+        externalExecution: "dry_run",
+        requiresTenant: true,
+        configSchema: dispatchScheduleConfig,
+        async handle(context) {
+          if (!context.idempotencyKey) {
+            throw new PlatformUnavailableError(
+              "invalid_idempotency_key",
+              "A string idempotency key is required.",
+              400,
+            );
+          }
+
+          return proposeDispatchSchedule({
+            idempotencyKey: context.idempotencyKey,
+            tenantSlug: context.target.tenantSlug,
+            workerId: context.target.workerId,
+            operatorEmail: context.operatorEmail,
+            config: context.config,
+          });
+        },
+      },
+      "approval.decide": {
+        name: "approval.decide",
+        description: "Decide a dispatch approval request without executing external actions.",
+        idempotency: "none",
+        sideEffects: "internal",
+        externalExecution: "blocked",
+        requiresTenant: true,
+        configSchema: {
+          type: "object",
+          required: ["approvalId", "action"],
+          properties: {
+            approvalId: { type: "string" },
+            action: {
+              type: "string",
+              enum: ["approved", "rejected", "revision_requested"],
+            },
+            note: { type: "string" },
+          },
+          additionalProperties: true,
+        },
+        async handle(context) {
+          const approvalId = optionalString(context.config.approvalId);
+          const action = normalizeApprovalDecision(context.config.action);
+
+          if (!approvalId || !action) {
+            throw new PlatformUnavailableError(
+              "invalid_worker_command_config",
+              "config.approvalId and config.action are required for approval.decide.",
+              400,
+            );
+          }
+
+          return decideApproval({
+            approvalId,
+            operatorEmail: context.operatorEmail,
+            tenantSlug: context.target.tenantSlug,
+            action,
+            note: optionalString(context.config.note),
+            subject: "worker",
+          });
+        },
+      },
+    },
+    views: {
+      snapshot: {
+        name: "snapshot",
+        description: "Read the dispatch worker runtime snapshot.",
+        async handle(context) {
+          const result = await getDispatchWorkerSnapshotSafe({
+            tenantSlug: context.target.tenantSlug,
+            workerId: context.target.workerId,
+            role: context.target.role,
+          });
+
+          return {
+            status: result.ok ? 200 : 500,
+            data: {
+              worker: responseTarget(context.target),
+              view: "snapshot",
+              snapshot: result.snapshot,
+            },
+            error: result.error,
+          };
+        },
+      },
+      board: {
+        name: "board",
+        description: "Read dispatch schedule proposals, approvals, and dry-run calendar state.",
+        async handle(context) {
+          const result = await getDispatchWorkerSnapshotSafe({
+            tenantSlug: context.target.tenantSlug,
+            workerId: context.target.workerId,
+            role: context.target.role,
+          });
+
+          return {
+            status: result.ok ? 200 : 500,
+            data: {
+              worker: responseTarget(context.target),
+              view: "board",
+              board: result.snapshot.scheduleBoard,
+              approvals: result.snapshot.controls.approvalTasks,
+            },
+            error: result.error,
+          };
+        },
+      },
+      exceptions: {
+        name: "exceptions",
+        description: "Read dispatch exceptions and blocker tasks.",
+        async handle(context) {
+          const result = await getDispatchWorkerSnapshotSafe({
+            tenantSlug: context.target.tenantSlug,
+            workerId: context.target.workerId,
+            role: context.target.role,
+          });
+
+          return {
+            status: result.ok ? 200 : 500,
+            data: {
+              worker: responseTarget(context.target),
+              view: "exceptions",
+              exceptions: result.snapshot.exceptions,
+            },
+            error: result.error,
+          };
+        },
+      },
+      approvals: {
+        name: "approvals",
+        description: "List dispatch approval requests.",
+        async handle(context) {
+          const approvals = await listApprovals({
+            operatorEmail: context.operatorEmail,
+            tenantSlug: context.target.tenantSlug,
+            state: context.state,
+            subject: "worker",
+          });
+
+          return {
+            data: {
+              worker: responseTarget(context.target, approvals.operator.tenantSlug),
+              view: "approvals",
+              approvals,
             },
             error: null,
           };

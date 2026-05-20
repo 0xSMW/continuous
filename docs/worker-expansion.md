@@ -21,7 +21,7 @@ new worker family.
 |---:|---|---|---|
 | 1 | Revenue Operations Worker | Turn leads into quotes, bookings, invoices, collections, and reviews | Stable lead-to-cash simulation plus approval-backed dry-run adapters |
 | 2 | Owner Chief-of-Staff Worker | Daily decision queue, anomalies, cash/capacity brief, and task routing | Read-only cross-system summary with evidence links and no external mutation |
-| 3 | Dispatch/Ops Worker | Schedule jobs, update customers, close out work, and reduce handoff misses | Job/work-order state machine with calendar dry-run and customer-message approval |
+| 3 | Dispatch/Ops Worker | Schedule jobs, update customers, close out work, and reduce handoff misses | First `schedule.propose` slice is runtime; launch still needs customer updates, closeout, and exception routing |
 | 4 | Finance Worker | Draft invoices, AR follow-ups, expense coding, and cash forecast | Accounting/payment adapters in draft mode, cash evidence packet, no money movement |
 | 5 | Workforce Worker | Hiring, onboarding, credentials, schedules, and payroll-input readiness | New-hire/contractor workflow packets, restricted document controls, payroll blockers |
 | 6 | Compliance Worker | Licenses, insurance, permits, notices, filings, and evidence binders | Rule-pack coverage, due-date obligations, source refs, and human submission approval |

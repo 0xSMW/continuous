@@ -71,6 +71,11 @@ Then open `http://localhost:3000`.
   fallback. The route validates roles, commands, idempotency, tenant
   requirements, and external-execution posture through the worker command
   registry.
+- Dispatch schedule proposals use the same shape:
+  `POST /worker` with `worker.role=dispatch_operations`,
+  `command=schedule.propose`, handoff ids in `config.sourceRefs`, and schedule
+  requirements in `config.constraints`; the first slice writes only dry-run
+  calendar receipts and approval records.
 - `/workflow` is the canonical workflow control-plane API. Use `GET /workflow`
   for definitions/runs/steps, `GET /workflow?view=approvals` for workflow
   approvals, and `POST /workflow` with `command=start`, `command=transition`,

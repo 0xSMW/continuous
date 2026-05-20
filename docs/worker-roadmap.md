@@ -55,6 +55,14 @@ before promotion.
 
 ## Phase 3: Dispatch/Ops Worker
 
+Status: first runtime slice is registered on `/worker` for
+`schedule.propose`. It consumes a Revenue `revenue.quote_to_dispatch` handoff
+from `config.sourceRefs`, writes an appointment object, promise-to-delivery
+workflow run/steps, dry-run calendar adapter receipt, approval request,
+dispatch packet, and `dispatch.schedule.review` generated view. Remaining work
+is customer update drafts, closeout packets, exception routing, and live
+calendar credentials.
+
 | Dependency | Implementation target |
 |---|---|
 | Core objects | Job, appointment, crew, asset, material, closeout, customer update |

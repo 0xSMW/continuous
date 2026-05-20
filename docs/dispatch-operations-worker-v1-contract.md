@@ -26,7 +26,13 @@ All commands use `POST /worker`; no dispatch-specific route is added.
   },
   "idempotencyKey": "dispatch-schedule-job-001",
   "config": {
-    "jobId": "job_object_uuid",
+    "sourceRefs": {
+      "customerObjectId": "customer_object_uuid",
+      "quoteObjectId": "quote_object_uuid",
+      "jobObjectId": "job_object_uuid",
+      "approvalRequestId": "approved_quote_approval_uuid",
+      "adapterReceiptEvidenceId": "no_send_receipt_evidence_uuid"
+    },
     "constraints": {
       "serviceWindow": "2026-05-20",
       "durationMinutes": 120,
@@ -36,12 +42,15 @@ All commands use `POST /worker`; no dispatch-specific route is added.
 }
 ```
 
+The first executable slice is `schedule.propose`; later commands in the table
+remain contract entries until their handlers are registered.
+
 ## Registry Entries
 
 | Command or view | Tool alias | Required config | Idempotency | Side effects | External execution |
 |---|---|---|---|---|---|
 | `GET view=snapshot` | `worker.snapshot` | `worker.role` | None | Read-only | Blocked |
-| `schedule.propose` | `worker.dispatch.schedule.propose` | `jobId`, `constraints` | Required | Appointment draft, adapter dry-run, approval request | Dry-run |
+| `schedule.propose` | `worker.dispatch.schedule.propose` | `jobId` or `sourceRefs`, plus `constraints` | Required | Appointment draft, adapter dry-run, approval request | Dry-run |
 | `customer_update.draft` | `worker.dispatch.customer_update.draft` | `jobId`, `updateKind` | Required | Draft message, evidence packet, approval request | Blocked |
 | `closeout.prepare` | `worker.dispatch.closeout.prepare` | `workOrderId`, `sourceRefs[]` | Required | Closeout document, QA checklist, evidence packet | Blocked |
 | `exception.route` | `worker.dispatch.exception.route` | `jobId`, `reason`, `severity` | Required | Task and decision record | Blocked |

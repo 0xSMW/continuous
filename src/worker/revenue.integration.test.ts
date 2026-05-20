@@ -48,6 +48,7 @@ import {
   evidence,
   evidencePackets,
   filingDrafts,
+  jobs,
   objects,
   objectLinks,
   objectVersions,
@@ -5559,5 +5560,252 @@ maybeDescribe("Revenue Worker integration eval", () => {
       revisionBriefResult.approvalRequestId,
     );
     expect(stringList(revisionBlockers.open)).toContain("revision_requested");
+  }, 120_000);
+
+  it("promotes approved Revenue quote handoffs into Dispatch schedule proposals through /worker", async () => {
+    const runId = randomUUID();
+    const customerObjectId = randomUUID();
+    const quoteObjectId = randomUUID();
+    const jobObjectId = randomUUID();
+    const jobRowId = randomUUID();
+    const approvalRequestId = randomUUID();
+    const adapterReceiptEvidenceId = randomUUID();
+    const tenantId = "11111111-1111-4111-8111-111111111111";
+    const [scheduleCapability] = await db
+      .select({ id: capabilities.id })
+      .from(capabilities)
+      .where(eq(capabilities.key, "schedule.propose"))
+      .limit(1);
+    const [quoteCapability] = await db
+      .select({ id: capabilities.id })
+      .from(capabilities)
+      .where(eq(capabilities.key, "quote.prepare"))
+      .limit(1);
+
+    expect(scheduleCapability?.id).toBeTruthy();
+
+    await db.insert(objects).values([
+      {
+        id: customerObjectId,
+        tenantId,
+        type: "customer",
+        name: "Dispatch Handoff Customer",
+        state: "active",
+        source: "test",
+        externalId: `ci-dispatch-customer-${runId}`,
+        data: { email: "dispatch@example.com" },
+      },
+      {
+        id: quoteObjectId,
+        tenantId,
+        type: "quote",
+        name: "Approved dispatch handoff quote",
+        state: "approved",
+        source: "test",
+        externalId: `ci-dispatch-quote-${runId}`,
+        data: {
+          totalCents: 24900,
+          total_cents: 24900,
+          currency: "USD",
+          policy: "standard_inspection",
+        },
+      },
+      {
+        id: jobObjectId,
+        tenantId,
+        type: "job",
+        name: "Approved dispatch handoff job",
+        state: "ready_to_schedule",
+        source: "test",
+        externalId: `ci-dispatch-job-object-${runId}`,
+        data: {
+          customerId: customerObjectId,
+          quoteId: quoteObjectId,
+          serviceArea: "roofing",
+          status: "ready_to_schedule",
+        },
+      },
+    ]);
+
+    await db.insert(jobs).values({
+      id: jobRowId,
+      tenantId,
+      objectId: jobObjectId,
+      state: "ready_to_schedule",
+      externalId: `ci-dispatch-job-${runId}`,
+      data: { quoteObjectId, customerObjectId, status: "ready_to_schedule" },
+    });
+
+    await db
+      .insert(objectLinks)
+      .values([
+        {
+          tenantId,
+          fromId: jobObjectId,
+          toId: customerObjectId,
+          type: "for_customer",
+        },
+        {
+          tenantId,
+          fromId: jobObjectId,
+          toId: quoteObjectId,
+          type: "from_quote",
+        },
+      ])
+      .onConflictDoNothing();
+
+    await db.insert(approvalRequests).values({
+      id: approvalRequestId,
+      tenantId,
+      objectId: quoteObjectId,
+      capabilityId: quoteCapability?.id ?? scheduleCapability?.id ?? null,
+      requesterType: "worker",
+      requesterRef: "worker:test-revenue",
+      kind: "quote_approval",
+      state: "approved",
+      priority: "high",
+      risk: "medium",
+      title: "Approved quote handoff for dispatch",
+      summary: "Quote has owner approval and can move into dispatch scheduling.",
+      requestedAction: {
+        action: "approve_quote_for_dispatch",
+        quoteObjectId,
+        jobObjectId,
+      },
+      evidence: {},
+      policy: { externalSend: "approved", schedule: "approval_required" },
+      decision: { action: "approved", note: "Approved for schedule proposal." },
+      data: { quoteObjectId, jobObjectId },
+      decidedAt: new Date(),
+    });
+
+    await db.insert(evidence).values({
+      id: adapterReceiptEvidenceId,
+      tenantId,
+      kind: "receipt",
+      name: "Revenue quote no-send receipt",
+      objectId: quoteObjectId,
+      capabilityId: quoteCapability?.id ?? scheduleCapability?.id ?? null,
+      actorType: "adapter",
+      hash: `ci-dispatch-receipt-${runId}`,
+      data: {
+        mode: "dry_run",
+        quoteObjectId,
+        jobObjectId,
+        externalMutation: false,
+        externalSend: false,
+      },
+    });
+
+    const response = await executeWorkerCommand({
+      command: "schedule.propose",
+      target: {
+        role: "dispatch_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: `ci-dispatch-schedule-${runId}`,
+      config: {
+        sourceRefs: {
+          customerObjectId,
+          quoteObjectId,
+          jobObjectId,
+          approvalRequestId,
+          adapterReceiptEvidenceId,
+        },
+        constraints: {
+          serviceWindow: "2026-05-21",
+          durationMinutes: 120,
+          crewSkills: ["roofing"],
+        },
+      },
+    });
+    const result = response.result as Awaited<
+      ReturnType<typeof import("./dispatch").proposeDispatchSchedule>
+    >;
+    const output = objectValue(result.output);
+
+    expect(response.command).toBe("schedule.propose");
+    expect(response.worker.role).toBe("dispatch_operations");
+    expect(result.created).toBe(true);
+    expect(result.workflowStepIds).toHaveLength(4);
+    expect(output.externalExecution).toBe("dry_run");
+    expect(output.externalMutation).toBe(false);
+    expect(output.externalSend).toBe(false);
+    expect(objectValue(output.sourceRefs).quoteObjectId).toBe(quoteObjectId);
+
+    const [run] = await db
+      .select()
+      .from(workerRuns)
+      .where(eq(workerRuns.id, result.workerRunId))
+      .limit(1);
+    const [appointment] = await db
+      .select()
+      .from(objects)
+      .where(eq(objects.id, result.appointmentObjectId ?? ""))
+      .limit(1);
+    const [dispatchApproval] = await db
+      .select()
+      .from(approvalRequests)
+      .where(eq(approvalRequests.id, result.approvalRequestId ?? ""))
+      .limit(1);
+    const [adapterAction] = await db
+      .select()
+      .from(adapterActions)
+      .where(eq(adapterActions.id, result.adapterActionId ?? ""))
+      .limit(1);
+    const [packet] = await db
+      .select()
+      .from(evidencePackets)
+      .where(eq(evidencePackets.id, result.packetId ?? ""))
+      .limit(1);
+    const [view] = await db
+      .select()
+      .from(generatedViews)
+      .where(and(eq(generatedViews.tenantId, tenantId), eq(generatedViews.key, "dispatch.schedule.review")))
+      .limit(1);
+
+    expect(run?.source).toBe("continuous.dispatch_worker");
+    expect(run?.state).toBe("done");
+    expect(appointment?.type).toBe("appointment");
+    expect(appointment?.state).toBe("approval_required");
+    expect(dispatchApproval?.state).toBe("pending");
+    expect(dispatchApproval?.kind).toBe("dispatch_schedule_approval");
+    expect(adapterAction?.mode).toBe("dry_run");
+    expect(objectValue(adapterAction?.receipt).externalMutation).toBe(false);
+    expect(packet?.kind).toBe("dispatch_packet");
+    expect(view?.key).toBe("dispatch.schedule.review");
+    expect(result.snapshot.controls.externalExecution).toBe("dry_run");
+
+    const replay = await executeWorkerCommand({
+      command: "schedule.propose",
+      target: {
+        role: "dispatch_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: `ci-dispatch-schedule-${runId}`,
+      config: {
+        sourceRefs: {
+          customerObjectId,
+          quoteObjectId,
+          jobObjectId,
+          approvalRequestId,
+          adapterReceiptEvidenceId,
+        },
+        constraints: {
+          serviceWindow: "2026-05-21",
+          durationMinutes: 120,
+          crewSkills: ["roofing"],
+        },
+      },
+    });
+    const replayResult = replay.result as Awaited<
+      ReturnType<typeof import("./dispatch").proposeDispatchSchedule>
+    >;
+
+    expect(replayResult.created).toBe(false);
+    expect(replayResult.workerRunId).toBe(result.workerRunId);
+    expect(replayResult.appointmentObjectId).toBe(result.appointmentObjectId);
   }, 120_000);
 });

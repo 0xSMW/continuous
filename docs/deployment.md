@@ -120,7 +120,7 @@ seeded owner user and must match an active user before approval records or
 operator decisions can be written. The deploy path also writes a hashed
 control-plane token catalog and scopes that credential to
 `CONTROL_PLANE_ALLOWED_TENANTS=continuous-demo` and
-`CONTROL_PLANE_ALLOWED_WORKER_ROLES=revenue_operations,owner_chief_of_staff`;
+`CONTROL_PLANE_ALLOWED_WORKER_ROLES=revenue_operations,owner_chief_of_staff,dispatch_operations`;
 requests to `/worker`, `/core`, or `/workflow` must carry an allowed
 `tenantSlug`, and worker requests must carry an allowed `worker.role`. Use the
 CLI path over SSH for direct operator-controlled smoke runs:
@@ -310,7 +310,7 @@ Control-plane token catalog entries have this shape when provided directly via
     "tokenSha256": "hex_sha256_of_bearer_token",
     "operatorEmail": "owner@continuoushq.com",
     "allowedTenants": ["continuous-demo"],
-    "allowedWorkerRoles": ["revenue_operations", "owner_chief_of_staff"],
+    "allowedWorkerRoles": ["revenue_operations", "owner_chief_of_staff", "dispatch_operations"],
     "allowedRoutes": ["core", "worker", "workflow", "approval"],
     "allowedAccess": ["read", "write"],
     "allowedCommands": ["*"],

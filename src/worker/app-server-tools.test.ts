@@ -69,7 +69,7 @@ describe("app-server worker tools", () => {
         command: "run",
         operatorEmail: "owner@continuoushq.com",
         worker: {
-          role: "dispatch_operations",
+          role: "finance_operations",
           tenantSlug: "continuous-demo",
         },
         idempotencyKey: "app-server-planned-worker-test",

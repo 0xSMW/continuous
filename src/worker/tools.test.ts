@@ -117,6 +117,7 @@ describe("worker tool contract", () => {
       "worker.lead.read",
       "worker.lead.classify",
       "worker.response.draft",
+      "worker.dispatch.schedule.propose",
       "worker.continue",
       "worker.approvals.list",
       "worker.approvals.decide",
@@ -213,6 +214,13 @@ describe("worker tool contract", () => {
           requiresTenant: true,
           externalExecution: "blocked",
         }),
+        expect.objectContaining({
+          role: "dispatch_operations",
+          name: "schedule.propose",
+          idempotency: "required",
+          requiresTenant: true,
+          externalExecution: "dry_run",
+        }),
       ]),
     );
     expect(workerToolSchema.registry.commands).toEqual(
@@ -238,6 +246,17 @@ describe("worker tool contract", () => {
             }),
           }),
         }),
+        expect.objectContaining({
+          role: "dispatch_operations",
+          name: "schedule.propose",
+          configSchema: expect.objectContaining({
+            required: ["constraints"],
+            oneRequired: ["jobId", "sourceRefs"],
+            properties: expect.objectContaining({
+              constraints: expect.objectContaining({ type: "object" }),
+            }),
+          }),
+        }),
       ]),
     );
     expect(workerToolSchema.registry.views).toEqual(
@@ -247,6 +266,9 @@ describe("worker tool contract", () => {
         expect.objectContaining({ role: "owner_chief_of_staff", name: "snapshot" }),
         expect.objectContaining({ role: "owner_chief_of_staff", name: "briefs" }),
         expect.objectContaining({ role: "owner_chief_of_staff", name: "decisions" }),
+        expect.objectContaining({ role: "dispatch_operations", name: "snapshot" }),
+        expect.objectContaining({ role: "dispatch_operations", name: "board" }),
+        expect.objectContaining({ role: "dispatch_operations", name: "exceptions" }),
       ]),
     );
     expect(workerToolSchema.$defs.workerTarget.properties.tenantSlug.type).toBe("string");
@@ -276,7 +298,7 @@ describe("worker tool contract", () => {
     ).rejects.toThrow("Worker role payroll_operations is not available yet.");
   });
 
-  it("exposes planned worker metadata without enabling future runtime handlers", () => {
+  it("exposes planned worker metadata without enabling unavailable runtime handlers", () => {
     const plannedCommands = workerToolSchema.registry.plannedCommands as Array<{
       role: string;
       name: string;
@@ -291,7 +313,6 @@ describe("worker tool contract", () => {
     }>;
 
     expect(workerToolSchema.registry.plannedContracts.map((contract) => contract.role)).toEqual([
-      "dispatch_operations",
       "finance_operations",
       "workforce_operations",
       "compliance_operations",
@@ -299,11 +320,6 @@ describe("worker tool contract", () => {
     ]);
     expect(workerToolSchema.registry.plannedCommands).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({
-          role: "dispatch_operations",
-          name: "schedule.propose",
-          externalExecution: "dry_run",
-        }),
         expect.objectContaining({
           role: "finance_operations",
           name: "payment_draft.prepare",
@@ -331,11 +347,6 @@ describe("worker tool contract", () => {
     }
     expect(
       plannedCommands.find(
-        (command) => command.role === "dispatch_operations" && command.name === "schedule.propose",
-      )?.configSchema.properties?.constraints?.type,
-    ).toBe("object");
-    expect(
-      plannedCommands.find(
         (command) => command.role === "systems_operations" && command.name === "connector.health.scan",
       )?.configSchema.properties?.checks?.type,
     ).toBe("array");
@@ -351,11 +362,6 @@ describe("worker tool contract", () => {
     ).toEqual(["jobId", "closeoutId"]);
     expect(
       plannedCommands.find(
-        (command) => command.role === "dispatch_operations" && command.name === "closeout.prepare",
-      )?.configSchema.properties?.sourceRefs?.type,
-    ).toBe("array");
-    expect(
-      plannedCommands.find(
         (command) => command.role === "systems_operations" && command.name === "permission.review",
       )?.configSchema.oneRequired,
     ).toEqual(["connectionId", "grantId"]);
@@ -364,6 +370,10 @@ describe("worker tool contract", () => {
         expect.objectContaining({
           role: "owner_chief_of_staff",
           name: "brief.generate",
+        }),
+        expect.objectContaining({
+          role: "dispatch_operations",
+          name: "schedule.propose",
         }),
       ]),
     );
@@ -487,6 +497,41 @@ describe("worker tool contract", () => {
     ).rejects.toThrow(
       "Idempotency key may only contain letters, numbers, dot, underscore, colon, or dash.",
     );
+  });
+
+  it("validates dispatch schedule proposal envelopes before invoking the worker", async () => {
+    await expect(
+      executeWorkerTool("worker.dispatch.schedule.propose", {
+        worker: {
+          role: "dispatch_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "bad key!",
+        config: {
+          jobId: "job_object_uuid",
+          constraints: {
+            serviceWindow: "2026-05-21",
+          },
+        },
+      }),
+    ).rejects.toThrow(
+      "Idempotency key may only contain letters, numbers, dot, underscore, colon, or dash.",
+    );
+
+    await expect(
+      executeWorkerTool("worker.dispatch.schedule.propose", {
+        worker: {
+          role: "dispatch_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "dispatch-schema-001",
+        config: {
+          constraints: {
+            durationMinutes: 120,
+          },
+        },
+      }),
+    ).rejects.toThrow("config.jobId or sourceRefs is required for schedule.propose.");
   });
 
   it("requires tenant scope for adapter reconciliation", async () => {

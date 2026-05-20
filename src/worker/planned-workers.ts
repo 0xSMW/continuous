@@ -753,8 +753,10 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
   },
 ];
 
+const runtimeWorkerRoles = new Set(["owner_chief_of_staff", "dispatch_operations"]);
+
 export const plannedWorkerContracts = allPlannedWorkerContracts.filter(
-  (contract) => contract.role !== "owner_chief_of_staff",
+  (contract) => !runtimeWorkerRoles.has(contract.role),
 );
 
 export function plannedWorkerRoles() {

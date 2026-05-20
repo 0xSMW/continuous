@@ -70,8 +70,11 @@ const ids = {
   owner: "22222222-2222-4222-8222-222222222222",
   worker: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   ownerWorker: "aaaaaaaa-aaaa-4aaa-8aaa-000000000002",
+  dispatchWorker: "aaaaaaaa-aaaa-4aaa-8aaa-000000000003",
   adapter: "56565656-5656-4565-8565-565656565656",
+  dispatchAdapter: "56565656-5656-4565-8565-000000000002",
   connection: "78787878-7878-4787-8787-787878787878",
+  dispatchConnection: "78787878-7878-4787-8787-000000000002",
   provider: "91919191-9191-4919-8919-919191919191",
   route: "92929292-9292-4929-8929-929292929292",
   budgetPolicy: "bbbbbbbb-bbbb-4bbb-8bbb-000000000001",
@@ -81,6 +84,8 @@ const ids = {
   budgetReservation: "bbbbbbbb-bbbb-4bbb-8bbb-000000000005",
   ownerBudgetAccount: "bbbbbbbb-bbbb-4bbb-8bbb-000000000006",
   ownerBudgetAllocation: "bbbbbbbb-bbbb-4bbb-8bbb-000000000007",
+  dispatchBudgetAccount: "bbbbbbbb-bbbb-4bbb-8bbb-000000000008",
+  dispatchBudgetAllocation: "bbbbbbbb-bbbb-4bbb-8bbb-000000000009",
   legalEntityObject: "33333333-3333-4333-8333-000000000101",
   workLocationObject: "33333333-3333-4333-8333-000000000102",
   personObject: "33333333-3333-4333-8333-000000000103",
@@ -154,6 +159,7 @@ const ids = {
   workflowTermination: "66666666-6666-4666-8666-000000000007",
   workflowLeadToCash: "66666666-6666-4666-8666-000000000008",
   workflowDailyOwnerBrief: "66666666-6666-4666-8666-000000000021",
+  workflowPromiseToDelivery: "66666666-6666-4666-8666-000000000022",
   workflowOpenNewState: "66666666-6666-4666-8666-000000000009",
   workflowCompensationChange: "66666666-6666-4666-8666-000000000010",
   workflowLocationChange: "66666666-6666-4666-8666-000000000011",
@@ -333,6 +339,25 @@ async function seed() {
         memory: { source_content: "quoted_only", sensitive_reveal: "approval_required" },
         policy: { external_execution: "blocked", mutation: "core_records_only" },
         kpis: { briefs_prepared: 0, decisions_ranked: 0, critical_items_found: 0 },
+      },
+      {
+        id: ids.dispatchWorker,
+        tenantId: ids.tenant,
+        managerUserId: ids.owner,
+        kind: "agent",
+        state: "training",
+        name: "Dispatch Operations Worker",
+        role: "dispatch_operations",
+        mission:
+          "Turn approved revenue handoffs into schedule proposals, customer updates, closeout packets, and exception tasks without unapproved external execution.",
+        autonomyLevel: 2,
+        scope: {
+          flows: ["promise_to_delivery", "schedule_proposal", "dispatch_exception"],
+          systems: ["calendar", "jobs", "crew_capacity"],
+        },
+        memory: { schedule_context: "tenant_scoped", customer_contact: "redacted_by_default" },
+        policy: { calendar_write: "approval_required", customer_send: "blocked", external_execution: "dry_run" },
+        kpis: { schedules_proposed: 0, approval_requests_created: 0, conflicts_found: 0 },
       },
     ])
     .onConflictDoNothing();
@@ -538,30 +563,80 @@ async function seed() {
     .onConflictDoNothing();
 
   await db
+    .insert(capabilityGrants)
+    .values(
+      [
+        capIds.schedulePropose,
+        capIds.responseDraft,
+        capIds.approvalRequest,
+        capIds.documentPacketPrepare,
+      ].map((capabilityId) => ({
+        tenantId: ids.tenant,
+        capabilityId,
+        actorType: "worker" as const,
+        actorId: ids.dispatchWorker,
+        scope: {
+          tenant_id: ids.tenant,
+          objects: ["job", "quote", "appointment", "work_order", "closeout"],
+        },
+        policy: {
+          mode: "dry_run",
+          autonomy_level: 2,
+          external_calendar_write: "approval_required",
+          customer_send: "blocked",
+        },
+      })),
+    )
+    .onConflictDoNothing();
+
+  await db
     .insert(adapters)
-    .values({
-      id: ids.adapter,
-      key: "website_form",
-      name: "Website form",
-      kind: "lead_source",
-      auth: "none",
-      capabilities: { read: ["lead.read"] },
-    })
+    .values([
+      {
+        id: ids.adapter,
+        key: "website_form",
+        name: "Website form",
+        kind: "lead_source",
+        auth: "none",
+        capabilities: { read: ["lead.read"] },
+      },
+      {
+        id: ids.dispatchAdapter,
+        key: "calendar_dry_run",
+        name: "Calendar dry-run",
+        kind: "calendar",
+        auth: "none",
+        capabilities: { dry_run: ["schedule.propose"], write: [] },
+      },
+    ])
     .onConflictDoNothing();
 
   await db
     .insert(connections)
-    .values({
-      id: ids.connection,
-      tenantId: ids.tenant,
-      adapterId: ids.adapter,
-      name: "Continuous website form",
-      state: "active",
-      externalAccountId: "continuoushq.com",
-      createdByUserId: ids.owner,
-      scopes: { reads: ["lead"] },
-      config: { executable: false, reason: "bootstrap connection only" },
-    })
+    .values([
+      {
+        id: ids.connection,
+        tenantId: ids.tenant,
+        adapterId: ids.adapter,
+        name: "Continuous website form",
+        state: "active",
+        externalAccountId: "continuoushq.com",
+        createdByUserId: ids.owner,
+        scopes: { reads: ["lead"] },
+        config: { executable: false, reason: "bootstrap connection only" },
+      },
+      {
+        id: ids.dispatchConnection,
+        tenantId: ids.tenant,
+        adapterId: ids.dispatchAdapter,
+        name: "Dispatch calendar dry-run",
+        state: "active",
+        externalAccountId: "continuous-dispatch-calendar",
+        createdByUserId: ids.owner,
+        scopes: { dryRun: ["calendar_hold"], writes: [] },
+        config: { executable: false, mode: "dry_run", reason: "schedule proposals only" },
+      },
+    ])
     .onConflictDoNothing();
 
   await db
@@ -650,6 +725,14 @@ async function seed() {
         target: "worker",
         targetId: ids.ownerWorker,
       },
+      {
+        id: ids.dispatchBudgetAccount,
+        tenantId: ids.tenant,
+        policyId: ids.budgetPolicy,
+        name: "Dispatch Operations Worker monthly intelligence budget",
+        target: "worker",
+        targetId: ids.dispatchWorker,
+      },
     ])
     .onConflictDoNothing();
 
@@ -670,6 +753,15 @@ async function seed() {
         tenantId: ids.tenant,
         poolId: ids.budgetPool,
         accountId: ids.ownerBudgetAccount,
+        units: 1000000,
+        startsAt: now,
+        endsAt: nextMonth,
+      },
+      {
+        id: ids.dispatchBudgetAllocation,
+        tenantId: ids.tenant,
+        poolId: ids.budgetPool,
+        accountId: ids.dispatchBudgetAccount,
         units: 1000000,
         startsAt: now,
         endsAt: nextMonth,
@@ -781,7 +873,7 @@ async function seed() {
         name: "Quote for roof leak inspection",
         state: "approval_required",
         externalId: "seed-quote",
-        data: { total_cents: 24900, currency: "USD" },
+        data: { total_cents: 24900, totalCents: 24900, currency: "USD", policy: "standard_inspection" },
       },
       {
         id: ids.jobObject,
@@ -1270,6 +1362,39 @@ async function seed() {
         approvals: { required: ["sensitive_reveal", "route_change"], states: { review_ready: ["owner_review"] } },
         evidence: { packet: "owner_brief_packet" },
         tests: { required: ["source_snapshot", "redaction", "decision_rationale", "no_external_mutation"] },
+      },
+      {
+        id: ids.workflowPromiseToDelivery,
+        key: "promise_to_delivery",
+        name: "Promise to delivery",
+        purpose: "Turn an approved quote handoff into a schedule proposal, customer update, job execution, closeout, and finance handoff.",
+        domain: "dispatch",
+        states: {
+          order: [
+            "sold",
+            "ready_to_schedule",
+            "schedule_proposed",
+            "approval_pending",
+            "scheduled",
+            "in_progress",
+            "closeout_ready",
+            "closed",
+            "blocked",
+          ],
+        },
+        transitions: {
+          sold: ["ready_to_schedule", "blocked"],
+          ready_to_schedule: ["schedule_proposed", "blocked"],
+          schedule_proposed: ["approval_pending", "blocked"],
+          approval_pending: ["scheduled", "blocked"],
+          scheduled: ["in_progress", "blocked"],
+          in_progress: ["closeout_ready", "blocked"],
+          closeout_ready: ["closed", "blocked"],
+        },
+        objects: { required: ["job", "quote", "appointment"], optional: ["work_order", "crew", "material", "closeout"] },
+        approvals: { required: ["dispatch_schedule_approval"], states: { approval_pending: ["dispatch_schedule_approval"] } },
+        evidence: { packet: "dispatch_packet", required: ["job_snapshot", "calendar_dry_run_receipt", "approval_request"] },
+        tests: { required: ["approved_quote_handoff", "no_external_calendar_write", "dispatch_packet"] },
       },
     ])
     .onConflictDoNothing();

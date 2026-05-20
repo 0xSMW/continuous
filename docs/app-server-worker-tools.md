@@ -5,7 +5,7 @@ discovery and registry-backed command execution:
 
 | Tool | Mode | Purpose |
 |---|---|---|
-| `continuous.worker.schema` | Read-only | Returns the registered Revenue and Owner runtime commands, planned future-worker metadata, worker tool schema, and integration boundary |
+| `continuous.worker.schema` | Read-only | Returns the registered Revenue, Owner, and Dispatch runtime commands, planned future-worker metadata, worker tool schema, and integration boundary |
 | `continuous.worker.command` | Registry-backed command | Invokes an existing worker command with the same `command`, `worker`, `idempotencyKey`, and `config` envelope used by `/worker` |
 
 The generated Codex app-server protocol defines a dynamic tool as `name`,
@@ -44,7 +44,7 @@ The app-server command tool is intentionally narrow:
 - Worker-specific options stay inside `config` and are validated by the
   command registry's `configSchema`.
 - Planned worker roles expose config schemas but remain non-executable until
-  handlers are registered.
+  handlers are registered; promoted roles move into the registered command list.
 - Caller supplies `operatorEmail`, `worker`, `idempotencyKey`, and `config`.
 - No external execution is available.
 - No production token is loaded.

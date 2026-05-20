@@ -217,6 +217,38 @@ export const workerTools = [
     },
   },
   {
+    name: "worker.dispatch.schedule.propose",
+    description: "Prepare a dry-run dispatch schedule proposal from Core job and handoff refs.",
+    registry: {
+      role: "dispatch_operations",
+      surface: "command",
+      command: "schedule.propose",
+      idempotency: "required",
+      externalExecution: "dry_run",
+      requiresTenant: true,
+    },
+    inputSchema: {
+      type: "object",
+      properties: {
+        worker: { $ref: "#/$defs/workerTarget" },
+        idempotencyKey: { type: "string" },
+        config: {
+          type: "object",
+          description:
+            "Dispatch schedule proposal config. Put Core handoff selectors under sourceRefs and schedule constraints under constraints.",
+          properties: {
+            jobId: { type: "string" },
+            sourceRefs: { $ref: "#/$defs/sourceRefs" },
+            constraints: { $ref: "#/$defs/scheduleConstraints" },
+          },
+          required: ["constraints"],
+          additionalProperties: true,
+        },
+      },
+      required: ["worker", "idempotencyKey", "config"],
+    },
+  },
+  {
     name: "worker.continue",
     description: "Continue a worker-owned approval outcome with structured config.",
     registry: {
@@ -246,7 +278,7 @@ export const workerTools = [
     name: "worker.approvals.list",
     description: "List pending or decided worker approval requests.",
     registry: {
-      role: "revenue_operations",
+      role: "*",
       surface: "view",
       view: "approvals",
     },
@@ -268,7 +300,7 @@ export const workerTools = [
     name: "worker.approvals.decide",
     description: "Decide a worker approval request with an operator action.",
     registry: {
-      role: "revenue_operations",
+      role: "*",
       surface: "command",
       command: "approval.decide",
       idempotency: "none",
@@ -554,6 +586,32 @@ export const workerToolSchema = {
       },
       required: ["from", "to"],
     },
+    sourceRefs: {
+      type: "object",
+      description: "Core handoff selectors from another worker or workflow.",
+      properties: {
+        customerObjectId: { type: "string" },
+        quoteObjectId: { type: "string" },
+        jobObjectId: { type: "string" },
+        approvalRequestId: { type: "string" },
+        adapterReceiptEvidenceId: { type: "string" },
+        workflowRunId: { type: "string" },
+      },
+      additionalProperties: true,
+    },
+    scheduleConstraints: {
+      type: "object",
+      properties: {
+        serviceWindow: { type: "string" },
+        durationMinutes: { type: "integer", minimum: 15, maximum: 480 },
+        crewSkills: {
+          type: "array",
+          minItems: 1,
+          items: { type: "string" },
+        },
+      },
+      additionalProperties: true,
+    },
   },
   tools: workerTools,
 } as const;
@@ -643,6 +701,16 @@ export async function executeWorkerTool(name: string, payload: JsonObject = {}) 
   if (name === "worker.response.draft") {
     return executeWorkerCommand({
       command: "response.draft",
+      target,
+      operatorEmail,
+      config,
+      idempotencyKey: payload.idempotencyKey,
+    });
+  }
+
+  if (name === "worker.dispatch.schedule.propose") {
+    return executeWorkerCommand({
+      command: "schedule.propose",
       target,
       operatorEmail,
       config,

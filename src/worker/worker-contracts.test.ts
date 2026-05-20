@@ -21,7 +21,7 @@ const contracts = [
     path: "docs/dispatch-operations-worker-v1-contract.md",
     role: "dispatch_operations",
     evidencePacket: "dispatch_packet",
-    runtime: false,
+    runtime: true,
   },
   {
     path: "docs/finance-operations-worker-v1-contract.md",
