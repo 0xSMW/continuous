@@ -1485,7 +1485,7 @@ export async function getRevenueWorkerSnapshot(
           sql`${tasks.state} <> 'canceled'`,
         ),
       )
-      .orderBy(desc(tasks.updatedAt))
+      .orderBy(desc(tasks.updatedAt), desc(tasks.id))
       .limit(5),
     db
       .select({
@@ -1510,7 +1510,7 @@ export async function getRevenueWorkerSnapshot(
       })
       .from(workerRuns)
       .where(and(eq(workerRuns.tenantId, workerRow.tenantId), eq(workerRuns.workerId, workerRow.id)))
-      .orderBy(desc(workerRuns.startedAt))
+      .orderBy(desc(workerRuns.startedAt), desc(workerRuns.id))
       .limit(1),
     db
       .select({

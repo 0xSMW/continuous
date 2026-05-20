@@ -2222,6 +2222,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
       throw new Error("Missing core intake refs eval case.");
     }
     const scored = scoreRevenueWorkerRun(first, evalCase);
+    expect(scored.dimensions.filter((dimension) => !dimension.passed)).toEqual([]);
     expect(scored.passed).toBe(true);
 
     const [workerRun] = await db
@@ -2375,6 +2376,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
       throw new Error("Missing source intake selector eval case.");
     }
     const scored = scoreRevenueWorkerRun(first, evalCase);
+    expect(scored.dimensions.filter((dimension) => !dimension.passed)).toEqual([]);
     expect(scored.passed).toBe(true);
 
     const [workerRun] = await db
