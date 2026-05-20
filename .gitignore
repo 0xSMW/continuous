@@ -6,6 +6,7 @@
 node_modules/
 coverage/
 backups/
+reports/recovery-drills/
 dist/
 generated/app-server/
 *.log

@@ -17,6 +17,7 @@
     "ops:backup-check": "./scripts/check-backup-age.sh",
     "ops:backup-object-check": "bun scripts/s3-backup-object.ts --check-latest",
     "ops:backup-schedule": "./scripts/install-backup-timer.sh",
+    "ops:recovery-drill": "./scripts/recovery-drill.sh",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "bun src/db/migrate.ts",
     "db:studio": "drizzle-kit studio",

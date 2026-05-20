@@ -319,13 +319,34 @@ Run a restore drill on a disposable droplet before relying on a backup for
 customer data. Rollback still requires a compatible database backup because
 migrations are forward-only.
 
+Use the recovery drill harness to exercise an app rollback and database restore
+as one measured procedure on a disposable host:
+
+```sh
+HOST=203.0.113.10 \
+  APP_TAG=sha-previous \
+  REMOTE_BACKUP_FILE=/opt/continuous/backups/postgres/continuous-postgres-20260520T000000Z.dump \
+  CONFIRM_RECOVERY_DRILL=disposable \
+  ./scripts/recovery-drill.sh
+```
+
+The harness refuses known production hosts such as `45.55.53.92` unless
+`ALLOW_PRODUCTION_RECOVERY_DRILL=true` is set. It runs `scripts/rollback-app.sh`,
+then `scripts/restore-db.sh`, captures elapsed times, and writes a local report
+under `reports/recovery-drills/` by default. Keep those drill reports out of
+committed source unless they are scrubbed and intentionally promoted into
+operator notes. The compatibility boundary is explicit: app rollback is
+tag-based, database restore is dump-backed, and restored schema/data must be
+compatible with the chosen app tag because migrations are forward-only.
+
 ## Remaining Production Hardening
 
-- Drill app tag rollback and database restore together on a disposable droplet,
-  then document the exact recovery timing and compatibility boundary.
+- Run `scripts/recovery-drill.sh` against a disposable droplet and document the
+  measured recovery timing before using the production droplet for customer
+  data.
 - Add log retention, Caddy access logs, metrics, and alerting around health,
   disk, certificate renewal, backup age, and failed jobs.
-- Split the single operator bearer token into scoped credentials before adding
-  multiple real operators or customer data.
+- Add managed token rotation, credential inventory, and request/session audit
+  records before adding multiple real operators or customer data.
 - Replace root SSH deployment with a dedicated deploy user and least-privilege
   sudo policy.

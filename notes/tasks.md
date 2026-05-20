@@ -17,7 +17,7 @@
 - Keep all worker-family HTTP controls on `/worker` with registered `worker`, `command`, `idempotencyKey`, and `config` fields; do not add worker-family-specific URL shapes.
 - Keep local worker mutation controls on `worker:tool` or `continuous.worker.command`; do not add worker-family-specific package scripts or app-server tools that bypass the command registry.
 - Provision the production object-storage bucket/key, run `scripts/install-backup-timer.sh`, and prove scheduled off-host Postgres dump retention before customer data.
-- Complete production hardening with rollback/restore drills, observability/alerts, token rotation, and non-root host access before using the droplet for real customer data.
+- Run `scripts/recovery-drill.sh` against a disposable droplet, then complete observability/alerts, token rotation, and non-root host access before using the production droplet for real customer data.
 - Extend the hashed control-plane token catalog into first-class operator auth with explicit rotation workflows and session-level audit trails before broad customer use.
 - Provision scoped adapter credentials, tested rollback playbooks, and a first controlled send only after retry readiness evidence stays green.
 - Provision actual inbox and CRM connector polling behind the persisted `lead.read` source-reader shape.

@@ -18,7 +18,7 @@
 | Restored the canonical operating-layer strategy | Revenue remains the first customer-facing worker demo, but Continuous Core must first cover entity, workforce, payroll, filings, compliance, payments, AI operations, generated UI, and evidence |
 | Added open workflow documentation | Hiring, contractor engagement, termination, payroll, filings, AI budget, and synthetic-worker lifecycle now have explicit document, approval, state, and evidence requirements |
 | Simplified the canonical data model | Replaced early one-table-per-concept naming with smaller primitives such as Worker.kind, WorkRelationship.type, FilingArtifact.type, EvidenceItem.type, and CustomerSignal.type |
-| Revenue Worker HTTP paths are guarded | There is no auth system yet, so detailed worker reads require the operator token, and the side-effecting run endpoint is disabled by default |
+| Revenue Worker HTTP paths are guarded | Operator routes require bearer credentials, and production credentials now carry tenant, worker-role, route, read/write, and command scope through the control-plane token catalog |
 | Added canonical worker API | `/worker` is the forward control-plane route; worker role, tenant selection, command, idempotency, and config live in structured payload fields for mutation commands |
 | Added worker command registry | `/worker` and `bun run worker:tool` now share registered command metadata, role allowlisting, config validation, idempotency rules, tenant requirements, and external-execution posture |
 | Hardened the worker API contract | Route-level tests now assert the generic `/worker` payload envelope, body `idempotencyKey` precedence, GET selector mapping, and malformed command config rejection |
@@ -83,6 +83,7 @@
 | Added object-storage backup wiring | Verified Postgres dumps can now upload to an S3-compatible target with checksum sidecar and `latest.json`; a systemd timer installer wires daily scheduled retention once bucket credentials are available |
 | Scoped the shared operator token | `/worker`, `/core`, and `/workflow` now enforce tenant and worker-role allowlists from `CONTROL_PLANE_ALLOWED_TENANTS` and `CONTROL_PLANE_ALLOWED_WORKER_ROLES`; deploy writes production defaults for the demo tenant and currently executable worker roles |
 | Added scoped control-plane token catalog | `/core`, `/worker`, `/workflow`, and `/approval` now authorize against route/read-write/command-scoped token catalog entries when present; deploy writes a hashed catalog entry derived from the generated worker token so future rotation does not require new API shapes |
+| Added recovery drill harness | `scripts/recovery-drill.sh` composes tag-based app rollback and confirmation-gated database restore into one measured disposable-host drill, refuses known production hosts by default, and writes a local timing/compatibility report |
 
 ### Tradeoffs
 
@@ -100,7 +101,7 @@
 | Worker selection | Runtime selection now accepts tenant or worker selectors and falls back only when a single active Revenue Worker exists |
 | Worker run lifecycle | `worker_runs` is now the idempotent lifecycle boundary for Revenue Worker runs, with events kept as the audit log |
 | Codex app-server boundary | The installed CLI has protocol generation commands, but no local daemon subcommand in this environment; keep Next MCP for Next.js diagnostics and keep app-server worker commands registry-backed rather than worker-family-specific |
-| Recovery boundary | App-only rollback is now tag-based, while destructive database restore remains dump-backed and migrations remain forward-only; full recovery still needs a drilled app/database compatibility procedure |
+| Recovery boundary | App-only rollback is tag-based and destructive database restore is dump-backed; the new drill harness makes the app/database compatibility procedure repeatable, but it still must be run on a disposable droplet before customer data |
 | Operator-token scope | The current production token now has hashed catalog metadata and per-command scope enforcement, but this is still env-backed operator auth; broad use still needs managed rotation and request/session audit records tied to credential ids |
 
 ### Current State
