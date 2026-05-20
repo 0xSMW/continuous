@@ -85,6 +85,10 @@ function stringList(value: unknown) {
     : [];
 }
 
+function stringValue(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
 maybeDescribe("Revenue Worker integration eval", () => {
   beforeAll(() => {
     execFileSync("bun", ["run", "db:migrate"], {
@@ -3658,6 +3662,122 @@ maybeDescribe("Revenue Worker integration eval", () => {
     });
 
     expect(objectValue(replay.result).created).toBe(false);
+
+    const classify = await executeWorkerCommand({
+      command: "lead.classify",
+      target: {
+        role: "revenue_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: `ci-worker-lead-classify-${runId}`,
+      config: {
+        intake: objectValue(selector.intake),
+      },
+    });
+    const classifyResult = objectValue(classify.result);
+    const classifyOutput = objectValue(classifyResult.output);
+
+    expect(classify.command).toBe("lead.classify");
+    expect(classifyResult.created).toBe(true);
+    expect(classifyOutput.source).toBe("website_form");
+    expect(classifyOutput.sourceEventId).toBe(sourceEventId);
+    expect(classifyOutput.classification).toBe("quote_ready_for_owner_approval");
+    expect(classifyOutput.externalExecution).toBe("blocked");
+    expect(classifyOutput.externalSend).toBe(false);
+
+    const draft = await executeWorkerCommand({
+      command: "response.draft",
+      target: {
+        role: "revenue_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: `ci-worker-response-draft-${runId}`,
+      config: {
+        intake: objectValue(selector.intake),
+      },
+    });
+    const draftResult = objectValue(draft.result);
+    const draftOutput = objectValue(draftResult.output);
+
+    expect(draft.command).toBe("response.draft");
+    expect(draftResult.created).toBe(true);
+    expect(draftOutput.source).toBe("website_form");
+    expect(draftOutput.sourceEventId).toBe(sourceEventId);
+    expect(draftOutput.externalExecution).toBe("blocked");
+    expect(draftOutput.externalSend).toBe(false);
+    expect(objectValue(draftOutput.quote).policy).toMatchObject({
+      approvalRequired: true,
+      externalSend: false,
+      moneyMovement: "blocked",
+    });
+
+    const [classifyRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(eq(workerRuns.id, stringValue(classifyResult.workerRunId)))
+      .limit(1);
+    const [classifyEvent] = await db
+      .select()
+      .from(events)
+      .where(eq(events.id, stringValue(classifyResult.eventId)))
+      .limit(1);
+    const [classifyEvidence] = await db
+      .select()
+      .from(evidence)
+      .where(eq(evidence.id, stringValue(classifyResult.evidenceId)))
+      .limit(1);
+    const [classifyAudit] = await db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.id, stringValue(classifyResult.auditEventId)))
+      .limit(1);
+    const [classifyUsage] = await db
+      .select()
+      .from(usageEvents)
+      .where(eq(usageEvents.id, stringValue(classifyResult.usageEventId)))
+      .limit(1);
+
+    expect(classifyRun?.mode).toBe("classification");
+    expect(objectValue(objectValue(classifyRun?.data).input).command).toBe("lead.classify");
+    expect(classifyEvent?.type).toBe("revenue_worker.lead_classify.completed");
+    expect(classifyEvidence?.kind).toBe("trace");
+    expect(classifyAudit?.type).toBe("revenue_worker.lead_classify.completed");
+    expect(classifyUsage?.units).toBeGreaterThan(0);
+
+    const [draftRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(eq(workerRuns.id, stringValue(draftResult.workerRunId)))
+      .limit(1);
+    const [draftEvent] = await db
+      .select()
+      .from(events)
+      .where(eq(events.id, stringValue(draftResult.eventId)))
+      .limit(1);
+    const [draftEvidence] = await db
+      .select()
+      .from(evidence)
+      .where(eq(evidence.id, stringValue(draftResult.evidenceId)))
+      .limit(1);
+    const [draftAudit] = await db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.id, stringValue(draftResult.auditEventId)))
+      .limit(1);
+    const [draftUsage] = await db
+      .select()
+      .from(usageEvents)
+      .where(eq(usageEvents.id, stringValue(draftResult.usageEventId)))
+      .limit(1);
+
+    expect(draftRun?.mode).toBe("draft");
+    expect(objectValue(objectValue(draftRun?.data).input).command).toBe("response.draft");
+    expect(draftEvent?.type).toBe("revenue_worker.response_draft.completed");
+    expect(draftEvidence?.kind).toBe("draft");
+    expect(draftAudit?.type).toBe("revenue_worker.response_draft.completed");
+    expect(draftUsage?.units).toBeGreaterThan(0);
 
     const run = await runRevenueWorker({
       idempotencyKey: `ci-worker-run-from-lead-read-${runId}`,

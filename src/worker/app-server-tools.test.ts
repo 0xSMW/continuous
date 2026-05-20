@@ -19,6 +19,8 @@ describe("app-server worker tools", () => {
     }
     expect(schema.registry.commands.some((command) => command.name === "run")).toBe(true);
     expect(schema.registry.commands.some((command) => command.name === "approval.decide")).toBe(true);
+    expect(schema.registry.commands.some((command) => command.name === "lead.classify")).toBe(true);
+    expect(schema.registry.commands.some((command) => command.name === "response.draft")).toBe(true);
   });
 
   it("requires a clean canonical command envelope before dispatch", async () => {

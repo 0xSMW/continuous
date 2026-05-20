@@ -45,6 +45,8 @@ const revenueWorkflowKey = "lead_to_cash";
 const source = "continuous.revenue_worker";
 const runUnits = 12000;
 const leadReadUnits = 1000;
+const leadClassifyUnits = 2000;
+const responseDraftUnits = 4000;
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -155,6 +157,20 @@ export type RevenueLeadReadResult = {
   snapshot: RevenueWorkerSnapshot;
 };
 
+export type RevenueWorkerActionResult = {
+  created: boolean;
+  idempotencyKey: string;
+  workerRunId: string | null;
+  eventId: string | null;
+  reservationId: string | null;
+  inferenceId: string | null;
+  usageEventId: string | null;
+  evidenceId: string | null;
+  auditEventId: string | null;
+  output: JsonObject;
+  snapshot: RevenueWorkerSnapshot;
+};
+
 export type RevenueWorkerContinuationResult = {
   created: boolean;
   idempotencyKey: string;
@@ -190,6 +206,8 @@ type WorkerContext = {
     reviewerUserId: string | null;
   } | null;
   leadReadCapabilityId: string | null;
+  leadClassifyCapabilityId: string | null;
+  responseDraftCapabilityId: string | null;
   quoteCapabilityId: string | null;
   briefCapabilityId: string | null;
   budgetAccountId: string;
@@ -1439,6 +1457,18 @@ async function loadWorkerContext(db: Database, selector: RevenueWorkerSelector):
     .where(and(eq(capabilities.key, "lead.read"), eq(capabilities.active, true)))
     .limit(1);
 
+  const [leadClassifyCapability] = await db
+    .select({ id: capabilities.id })
+    .from(capabilities)
+    .where(and(eq(capabilities.key, "lead.classify"), eq(capabilities.active, true)))
+    .limit(1);
+
+  const [responseDraftCapability] = await db
+    .select({ id: capabilities.id })
+    .from(capabilities)
+    .where(and(eq(capabilities.key, "response.draft"), eq(capabilities.active, true)))
+    .limit(1);
+
   const [briefCapability] = await db
     .select({ id: capabilities.id })
     .from(capabilities)
@@ -1497,6 +1527,8 @@ async function loadWorkerContext(db: Database, selector: RevenueWorkerSelector):
     tenantName: workerRow.tenantName,
     task: taskRow ?? null,
     leadReadCapabilityId: leadReadCapability?.id ?? null,
+    leadClassifyCapabilityId: leadClassifyCapability?.id ?? null,
+    responseDraftCapabilityId: responseDraftCapability?.id ?? null,
     quoteCapabilityId: quoteCapability?.id ?? null,
     briefCapabilityId: briefCapability?.id ?? null,
     budgetAccountId: budgetAccount.id,
@@ -2308,6 +2340,501 @@ export async function readRevenueLeads(input: {
     output: result.output,
     snapshot,
   };
+}
+
+function replayedRevenueActionResult(
+  run: typeof workerRuns.$inferSelect,
+  snapshot: RevenueWorkerSnapshot,
+): RevenueWorkerActionResult {
+  const output = outputData(run.data);
+
+  return {
+    created: false,
+    idempotencyKey: run.idempotencyKey,
+    workerRunId: run.id,
+    eventId: run.eventId ?? stringData(run.data, "eventId"),
+    reservationId: stringData(run.data, "reservationId"),
+    inferenceId: stringData(run.data, "inferenceId"),
+    usageEventId: stringData(run.data, "usageEventId"),
+    evidenceId: stringData(run.data, "evidenceId"),
+    auditEventId: stringData(run.data, "auditEventId"),
+    output,
+    snapshot,
+  };
+}
+
+function revenueActionOutput(command: "lead.classify" | "response.draft", leadPacket: JsonObject): JsonObject {
+  const quote = objectValue(leadPacket.quote);
+  const output = {
+    command,
+    source: leadPacket.source ?? null,
+    sourceEventId: leadPacket.sourceEventId ?? null,
+    customerName: leadPacket.customerName ?? "Customer",
+    customerIntent: leadPacket.customerIntent ?? "service request",
+    serviceArea: leadPacket.serviceArea ?? "field service",
+    urgency: leadPacket.urgency ?? "normal",
+    missingFacts: stringList(leadPacket.missingFacts),
+    classification: leadPacket.classification ?? "quote_ready_for_owner_approval",
+    expectedAction: leadPacket.expectedAction ?? "draft_customer_response",
+    externalExecution: "blocked",
+    externalSend: false,
+  };
+
+  if (command === "lead.classify") {
+    return {
+      ...output,
+      reason:
+        output.missingFacts.length > 0
+          ? "Lead needs owner-visible missing-fact review before any external send."
+          : "Lead has enough structured facts for owner quote review.",
+    };
+  }
+
+  return {
+    ...output,
+    draftResponse: leadPacket.draftResponse ?? "",
+    quote,
+    reason: "Draft response is prepared for owner review only; external send remains blocked.",
+  };
+}
+
+async function runRevenueActionCommand(input: {
+  command: "lead.classify" | "response.draft";
+  idempotencyKey: string;
+  operatorEmail: string;
+  tenantSlug?: string;
+  workerId?: string;
+  config?: JsonObject;
+  db?: Database;
+}): Promise<RevenueWorkerActionResult> {
+  const db = input.db ?? defaultDb;
+  const requestConfig = input.config ?? {};
+  const selector: RevenueWorkerSelector = {
+    tenantSlug: input.tenantSlug,
+    workerId: input.workerId,
+  };
+  const context = await loadWorkerContext(db, selector);
+  const operator = await loadOperator(db, context.worker.tenantId, input.operatorEmail);
+  const capabilityId =
+    input.command === "lead.classify"
+      ? context.leadClassifyCapabilityId
+      : context.responseDraftCapabilityId;
+
+  if (!capabilityId) {
+    throw new RevenueWorkerUnavailableError(
+      "worker_capability_missing",
+      `Revenue Worker requires the ${input.command} capability for ${input.command}.`,
+      409,
+    );
+  }
+
+  const resolvedInput = await resolveLeadIntake(db, context.worker.tenantId, requestConfig, {
+    objectId: context.task?.objectId,
+    eventId: context.task?.triggerEventId,
+  });
+  const config = resolvedInput.config;
+  const intake = resolvedInput.intake;
+  const leadPacket = leadPacketFromConfig(config);
+  const sourceObjectId = stringValue(intake.objectId) || context.task?.objectId || null;
+  const sourceEventRowId = stringValue(intake.eventId) || context.task?.triggerEventId || null;
+  const sourceEvidenceId = stringValue(intake.evidenceId) || null;
+  const intakeTrace = {
+    intake,
+    sourceObjectId,
+    sourceEventRowId,
+    sourceEvidenceId,
+  };
+  const units = input.command === "lead.classify" ? leadClassifyUnits : responseDraftUnits;
+  const mode = input.command === "lead.classify" ? "classification" : "draft";
+  const eventType =
+    input.command === "lead.classify"
+      ? "revenue_worker.lead_classify.completed"
+      : "revenue_worker.response_draft.completed";
+  const evidenceName =
+    input.command === "lead.classify"
+      ? "Revenue lead classification trace"
+      : "Revenue response draft";
+  const inputHash = hashObject({
+    schemaVersion: `revenue_worker.${input.command}.v1`,
+    command: input.command,
+    idempotencyKey: input.idempotencyKey,
+    tenantId: context.worker.tenantId,
+    workerId: context.worker.id,
+    operatorUserId: operator.id,
+    requestConfig,
+    config,
+    ...intakeTrace,
+    leadPacket: leadPacket.sourceSnapshot,
+  });
+
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${source}:${input.idempotencyKey}`}))`,
+    );
+
+    const [existingRun] = await tx
+      .select()
+      .from(workerRuns)
+      .where(
+        and(
+          eq(workerRuns.tenantId, context.worker.tenantId),
+          eq(workerRuns.source, source),
+          eq(workerRuns.idempotencyKey, input.idempotencyKey),
+        ),
+      )
+      .limit(1);
+
+    if (existingRun) {
+      const existingInput = objectValue(existingRun.data.input);
+      const existingHash = stringValue(existingInput.inputHash);
+
+      if (stringValue(existingInput.command) !== input.command || (existingHash && existingHash !== inputHash)) {
+        throw new RevenueWorkerUnavailableError(
+          "worker_idempotency_conflict",
+          "This idempotency key was already used with different worker input.",
+          409,
+        );
+      }
+
+      return {
+        created: false as const,
+        run: existingRun,
+      };
+    }
+
+    const now = new Date();
+    const [grant] = await tx
+      .select({ id: capabilityGrants.id })
+      .from(capabilityGrants)
+      .innerJoin(capabilities, eq(capabilityGrants.capabilityId, capabilities.id))
+      .where(
+        and(
+          eq(capabilityGrants.tenantId, context.worker.tenantId),
+          eq(capabilityGrants.actorType, "worker"),
+          eq(capabilityGrants.actorId, context.worker.id),
+          eq(capabilityGrants.capabilityId, capabilityId),
+          eq(capabilityGrants.active, true),
+          eq(capabilities.active, true),
+          sql`(${capabilityGrants.startsAt} is null or ${capabilityGrants.startsAt} <= ${now})`,
+          sql`(${capabilityGrants.endsAt} is null or ${capabilityGrants.endsAt} > ${now})`,
+        ),
+      )
+      .limit(1);
+
+    if (!grant) {
+      throw new RevenueWorkerUnavailableError(
+        "worker_capability_not_granted",
+        `Revenue Worker is not actively granted ${input.command}.`,
+        403,
+      );
+    }
+
+    const output = revenueActionOutput(input.command, leadPacket);
+    const [reservation] = await tx
+      .insert(budgetReservations)
+      .values({
+        tenantId: context.worker.tenantId,
+        accountId: context.budgetAccountId,
+        taskId: context.task?.id,
+        units,
+        state: "used",
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: budgetReservations.id });
+    const [run] = await tx
+      .insert(workerRuns)
+      .values({
+        tenantId: context.worker.tenantId,
+        workerId: context.worker.id,
+        taskId: context.task?.id ?? null,
+        capabilityId,
+        budgetAccountId: context.budgetAccountId,
+        source,
+        idempotencyKey: input.idempotencyKey,
+        state: "running",
+        mode,
+        data: {
+          input: {
+            command: input.command,
+            inputHash,
+            config: requestConfig,
+            resolvedConfig: config,
+            ...intakeTrace,
+            leadPacket: leadPacket.sourceSnapshot,
+            operator: {
+              userId: operator.id,
+              email: operator.email,
+            },
+          },
+          reservationId: reservation.id,
+          externalExecution: "blocked",
+        },
+        startedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: workerRuns.id });
+    const [inference] = await tx
+      .insert(inferences)
+      .values({
+        tenantId: context.worker.tenantId,
+        routeId: context.routeId,
+        budgetAccountId: context.budgetAccountId,
+        taskId: context.task?.id,
+        capabilityId,
+        actorType: "worker",
+        actorId: context.worker.id,
+        promptHash: traceHash(input.idempotencyKey, input.command),
+        request: {
+          command: input.command,
+          mode,
+          leadPacket: leadPacket.sourceSnapshot,
+          ...intakeTrace,
+          inputHash,
+        },
+        result: output,
+        safety: {
+          externalExecution: "blocked",
+          externalSend: false,
+          moneyMovement: "blocked",
+        },
+        promptTokens: input.command === "lead.classify" ? 320 : 520,
+        completionTokens: input.command === "lead.classify" ? 120 : 220,
+        units,
+        costUsd: "0.000000",
+        latencyMs: input.command === "lead.classify" ? 110 : 170,
+        createdAt: now,
+      })
+      .returning({ id: inferences.id });
+    const [usage] = await tx
+      .insert(usageEvents)
+      .values({
+        tenantId: context.worker.tenantId,
+        accountId: context.budgetAccountId,
+        reservationId: reservation.id,
+        inferenceId: inference.id,
+        taskId: context.task?.id,
+        capabilityId,
+        actorType: "worker",
+        actorId: context.worker.id,
+        units,
+        costUsd: "0.000000",
+        data: {
+          command: input.command,
+          mode,
+          workerRunId: run.id,
+          ...intakeTrace,
+          externalExecution: "blocked",
+        },
+        createdAt: now,
+      })
+      .returning({ id: usageEvents.id });
+    const [event] = await tx
+      .insert(events)
+      .values({
+        tenantId: context.worker.tenantId,
+        type: eventType,
+        source,
+        actorType: "worker",
+        actorId: context.worker.id,
+        actorRef: `worker:${context.worker.id}`,
+        objectId: sourceObjectId,
+        taskId: context.task?.id,
+        capabilityId,
+        idempotencyKey: `${input.idempotencyKey}:${input.command}`,
+        data: {
+          workerRunId: run.id,
+          command: input.command,
+          inputHash,
+          output,
+          ...intakeTrace,
+          externalExecution: "blocked",
+        },
+        occurredAt: now,
+        createdAt: now,
+      })
+      .returning({ id: events.id });
+    const [actionEvidence] = await tx
+      .insert(evidence)
+      .values({
+        tenantId: context.worker.tenantId,
+        kind: input.command === "lead.classify" ? "trace" : "draft",
+        name: evidenceName,
+        objectId: sourceObjectId,
+        taskId: context.task?.id,
+        eventId: event.id,
+        capabilityId,
+        actorType: "worker",
+        actorId: context.worker.id,
+        hash: traceHash(input.idempotencyKey, input.command),
+        data: {
+          workerRunId: run.id,
+          command: input.command,
+          inputHash,
+          output,
+          ...intakeTrace,
+          leadPacket: leadPacket.sourceSnapshot,
+          inferenceId: inference.id,
+          usageEventId: usage.id,
+          reservationId: reservation.id,
+          externalExecution: "blocked",
+          externalSend: false,
+        },
+        createdAt: now,
+      })
+      .returning({ id: evidence.id });
+    const [audit] = await tx
+      .insert(auditEvents)
+      .values({
+        tenantId: context.worker.tenantId,
+        type: eventType,
+        source,
+        actorType: "worker",
+        actorId: context.worker.id,
+        actorRef: `worker:${context.worker.id}`,
+        targetType: "worker_run",
+        targetId: run.id,
+        taskId: context.task?.id,
+        workerRunId: run.id,
+        eventId: event.id,
+        objectId: sourceObjectId,
+        capabilityId,
+        risk: "low",
+        idempotencyKey: `${input.idempotencyKey}:${input.command}`,
+        data: {
+          operatorEmail: operator.email,
+          command: input.command,
+          inputHash,
+          output,
+          evidenceId: actionEvidence.id,
+          inferenceId: inference.id,
+          usageEventId: usage.id,
+          reservationId: reservation.id,
+          ...intakeTrace,
+          externalExecution: "blocked",
+          externalSend: false,
+        },
+        createdAt: now,
+      })
+      .returning({ id: auditEvents.id });
+
+    await tx
+      .update(workerRuns)
+      .set({
+        eventId: event.id,
+        state: "done",
+        data: {
+          input: {
+            command: input.command,
+            inputHash,
+            config: requestConfig,
+            resolvedConfig: config,
+            ...intakeTrace,
+            leadPacket: leadPacket.sourceSnapshot,
+            operator: {
+              userId: operator.id,
+              email: operator.email,
+            },
+          },
+          output,
+          eventId: event.id,
+          reservationId: reservation.id,
+          inferenceId: inference.id,
+          usageEventId: usage.id,
+          evidenceId: actionEvidence.id,
+          auditEventId: audit.id,
+          externalExecution: "blocked",
+        },
+        endedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(workerRuns.id, run.id));
+
+    const nextKpis =
+      input.command === "lead.classify"
+        ? {
+            ...context.worker.kpis,
+            lastLeadClassifiedAt: now.toISOString(),
+            leads_classified: numberValue(context.worker.kpis.leads_classified) + 1,
+          }
+        : {
+            ...context.worker.kpis,
+            lastResponseDraftedAt: now.toISOString(),
+            responses_drafted: numberValue(context.worker.kpis.responses_drafted) + 1,
+          };
+
+    await tx
+      .update(workers)
+      .set({
+        kpis: nextKpis,
+        updatedAt: now,
+      })
+      .where(eq(workers.id, context.worker.id));
+
+    return {
+      created: true as const,
+      workerRunId: run.id,
+      eventId: event.id,
+      reservationId: reservation.id,
+      inferenceId: inference.id,
+      usageEventId: usage.id,
+      evidenceId: actionEvidence.id,
+      auditEventId: audit.id,
+      output,
+    };
+  });
+  const snapshot = await getRevenueWorkerSnapshot(db, {
+    tenantSlug: input.tenantSlug,
+    workerId: context.worker.id,
+    role: revenueWorkerRole,
+  });
+
+  if (!result.created) {
+    return replayedRevenueActionResult(result.run, snapshot);
+  }
+
+  return {
+    created: true,
+    idempotencyKey: input.idempotencyKey,
+    workerRunId: result.workerRunId,
+    eventId: result.eventId,
+    reservationId: result.reservationId,
+    inferenceId: result.inferenceId,
+    usageEventId: result.usageEventId,
+    evidenceId: result.evidenceId,
+    auditEventId: result.auditEventId,
+    output: result.output,
+    snapshot,
+  };
+}
+
+export async function classifyRevenueLead(input: {
+  idempotencyKey: string;
+  operatorEmail: string;
+  tenantSlug?: string;
+  workerId?: string;
+  config?: JsonObject;
+  db?: Database;
+}) {
+  return runRevenueActionCommand({
+    ...input,
+    command: "lead.classify",
+  });
+}
+
+export async function draftRevenueResponse(input: {
+  idempotencyKey: string;
+  operatorEmail: string;
+  tenantSlug?: string;
+  workerId?: string;
+  config?: JsonObject;
+  db?: Database;
+}) {
+  return runRevenueActionCommand({
+    ...input,
+    command: "response.draft",
+  });
 }
 
 export async function runRevenueWorker(input: {

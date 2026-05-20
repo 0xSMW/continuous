@@ -15,6 +15,7 @@ state, workflow state, and object versioning without external sends or money mov
 | Operator read API | `GET /worker?view=snapshot&role=revenue_operations`, bearer-token required |
 | Approval API | `GET /worker?view=approvals&role=revenue_operations` and `POST /worker` with `command=approval.decide`, bearer-token required |
 | Source read API | `POST /worker` with `command=lead.read`, `idempotencyKey`, `config.source`, optional `config.reader`, and `config.records[]`; persists website-form, inbox, and CRM source records as Core lead object/event/evidence rows and returns `config.intake` selectors |
+| Split classify/draft APIs | `POST /worker` with `command=lead.classify` or `command=response.draft`; both accept `config.intake` selectors or direct fallback `config.leadPacket`, write worker run/event/evidence/audit/budget records, and keep external sends blocked |
 | Run API | `POST /worker` with `command=run` and `config.intake` source selectors or Core references; direct `config.leadPacket` remains an operator/test fallback |
 | Continuation API | `POST /worker` with `command=continue`, `idempotencyKey`, and `config.approvalId`; V1 turns `approved` decisions into blocked no-send execution packets, `revision_requested` decisions into revised packets plus fresh pending owner approval, and `rejected` decisions into closed no-send stop packets |
 | Adapter reconciliation API | `POST /worker` with `command=adapters.reconcile` and `command=adapters.retry`, tenant-scoped and bearer-token required |
@@ -54,8 +55,8 @@ smoke test.
 | Capability | Autonomy | Notes |
 |---|---|---|
 | `lead.read` | Allowed | Website-form, authenticated-inbox, and CRM-style source records normalize into persisted Core lead intake selectors; live connector polling still comes next |
-| `lead.classify` | Allowed | Add eval set before real routing |
-| `response.draft` | Allowed | Draft only until send policy exists |
+| `lead.classify` | Allowed | Registered command now writes classification run, inference, usage, trace evidence, event, and audit proof |
+| `response.draft` | Allowed | Registered command now writes draft run, inference, usage, draft evidence, event, and audit proof; external send remains blocked |
 | `quote.prepare` | Approval required | Keep threshold, discount, and margin rules explicit |
 | `schedule.propose` | Approval required | Do not commit external calendars yet |
 | `invoice.prepare` | Approval required | Tie to job closeout evidence |

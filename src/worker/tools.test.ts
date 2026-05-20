@@ -115,6 +115,8 @@ describe("worker tool contract", () => {
       "worker.owner.decisions.list",
       "worker.run",
       "worker.lead.read",
+      "worker.lead.classify",
+      "worker.response.draft",
       "worker.continue",
       "worker.approvals.list",
       "worker.approvals.decide",
@@ -151,6 +153,20 @@ describe("worker tool contract", () => {
         expect.objectContaining({
           role: "revenue_operations",
           name: "lead.read",
+          idempotency: "required",
+          requiresTenant: true,
+          externalExecution: "blocked",
+        }),
+        expect.objectContaining({
+          role: "revenue_operations",
+          name: "lead.classify",
+          idempotency: "required",
+          requiresTenant: true,
+          externalExecution: "blocked",
+        }),
+        expect.objectContaining({
+          role: "revenue_operations",
+          name: "response.draft",
           idempotency: "required",
           requiresTenant: true,
           externalExecution: "blocked",
@@ -393,6 +409,42 @@ describe("worker tool contract", () => {
               customerName: "Acme Roof Repair",
             },
           ],
+        },
+      }),
+    ).rejects.toThrow(
+      "Idempotency key may only contain letters, numbers, dot, underscore, colon, or dash.",
+    );
+  });
+
+  it("validates split revenue action idempotency before invoking the worker", async () => {
+    await expect(
+      executeWorkerTool("worker.lead.classify", {
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "bad key!",
+        config: {
+          leadPacket: {
+            customerName: "Acme Roof Repair",
+          },
+        },
+      }),
+    ).rejects.toThrow(
+      "Idempotency key may only contain letters, numbers, dot, underscore, colon, or dash.",
+    );
+
+    await expect(
+      executeWorkerTool("worker.response.draft", {
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "bad key!",
+        config: {
+          leadPacket: {
+            customerName: "Acme Roof Repair",
+          },
         },
       }),
     ).rejects.toThrow(

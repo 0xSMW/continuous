@@ -7,7 +7,9 @@ import {
 import { PlatformUnavailableError } from "../core/errors";
 import type { JsonObject } from "../db/schema";
 import {
+  classifyRevenueLead,
   continueRevenueWorker,
+  draftRevenueResponse,
   getRevenueWorkerSnapshotSafe,
   readRevenueLeads,
   RevenueWorkerUnavailableError,
@@ -437,6 +439,58 @@ const revenueDefinition: WorkerDefinition = {
         }
 
         return readRevenueLeads({
+          idempotencyKey: context.idempotencyKey,
+          tenantSlug: context.target.tenantSlug,
+          workerId: context.target.workerId,
+          operatorEmail: context.operatorEmail,
+          config: context.config,
+        });
+      },
+    },
+    "lead.classify": {
+      name: "lead.classify",
+      description: "Classify a persisted or direct lead packet without external execution.",
+      idempotency: "required",
+      sideEffects: "internal",
+      externalExecution: "blocked",
+      requiresTenant: true,
+      configSchema: workerRunConfig,
+      async handle(context) {
+        if (!context.idempotencyKey) {
+          throw new PlatformUnavailableError(
+            "invalid_idempotency_key",
+            "A string idempotency key is required.",
+            400,
+          );
+        }
+
+        return classifyRevenueLead({
+          idempotencyKey: context.idempotencyKey,
+          tenantSlug: context.target.tenantSlug,
+          workerId: context.target.workerId,
+          operatorEmail: context.operatorEmail,
+          config: context.config,
+        });
+      },
+    },
+    "response.draft": {
+      name: "response.draft",
+      description: "Draft an owner-reviewable customer response without sending it.",
+      idempotency: "required",
+      sideEffects: "internal",
+      externalExecution: "blocked",
+      requiresTenant: true,
+      configSchema: workerRunConfig,
+      async handle(context) {
+        if (!context.idempotencyKey) {
+          throw new PlatformUnavailableError(
+            "invalid_idempotency_key",
+            "A string idempotency key is required.",
+            400,
+          );
+        }
+
+        return draftRevenueResponse({
           idempotencyKey: context.idempotencyKey,
           tenantSlug: context.target.tenantSlug,
           workerId: context.target.workerId,

@@ -182,7 +182,7 @@ policy-bound:
 | `POST /core` | Canonical Core command surface for `task.create`, `task.transition`, `object.upsert`, `object.link`, `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`, `document.packet.prepare`, `decision.record`, `approval.request`, `adapter.intent.record`, `rule.change.record`, `capability.grant`, `budget.reserve`, `budget.charge`, `budget.release`, `view.publish`, `customer_signal.record`, `payroll.preview.record`, and `payroll.preview.packet.prepare`; tenant selection and command fields live in structured `core` and `config` payloads, and no other top-level command fields are accepted |
 | `/worker?view=snapshot&role=revenue_operations` | Operator-only snapshot of worker state, active tasks, controls, budget usage, and recent events |
 | `/worker?view=approvals&role=revenue_operations` | Operator-only approval queue for worker decisions |
-| `POST /worker` | Canonical worker command surface for Revenue `lead.read`, `run`, `continue`, `approval.decide`, `adapters.reconcile`, and `adapters.retry`, plus Owner `brief.generate`, `decision_queue.prepare`, `anomaly.triage`, `approval.decide`, and `continue`; worker role, tenant selection, idempotency, and operation config live in structured payload fields |
+| `POST /worker` | Canonical worker command surface for Revenue `lead.read`, `lead.classify`, `response.draft`, `run`, `continue`, `approval.decide`, `adapters.reconcile`, and `adapters.retry`, plus Owner `brief.generate`, `decision_queue.prepare`, `anomaly.triage`, `approval.decide`, and `continue`; worker role, tenant selection, idempotency, and operation config live in structured payload fields |
 | `/approval` | Shared operator approval inbox and decision surface across Core, workflow, and worker subjects |
 | `/workflow` | Canonical workflow command surface for listing definitions/runs/steps and executing validated `start` / `transition` / `steps.execute` / `approval.decide` commands |
 | `/workflow?view=approvals` | Operator-only approval queue for workflow decisions backed by the shared approval service |
@@ -201,16 +201,20 @@ and `config` payloads.
 
 `command=lead.read` accepts source records, stores Core lead object/event/evidence
 rows, writes a read-only worker run, attributes budget/usage, and returns stable
-`config.intake` selectors. One `command=run` then accepts those selectors, or
-exact Core object/event/evidence row references when an internal workflow already
-holds them. The worker stores a source snapshot, binds the idempotency key to a
-canonical input hash, derives classification, draft response, and quote fields
-from the resolved intake packet, reserves budget, records inference and usage,
-emits an idempotent `revenue_worker.run.completed` event, captures trace and
-receipt evidence, creates an owner approval packet, updates the task to
-`approval_required`, and versions the quote object. `config.leadPacket` remains
-a direct operator/test fallback. External sends and money movement remain
-blocked until human approval and real adapter execution are implemented.
+`config.intake` selectors. `command=lead.classify` and
+`command=response.draft` can consume those selectors as explicit persisted
+substeps, writing worker run, inference, usage, event, evidence, and audit proof
+while external send remains blocked. One full `command=run` then accepts the
+same selectors, or exact Core object/event/evidence row references when an
+internal workflow already holds them. The worker stores a source snapshot, binds
+the idempotency key to a canonical input hash, derives classification, draft
+response, and quote fields from the resolved intake packet, reserves budget,
+records inference and usage, emits an idempotent
+`revenue_worker.run.completed` event, captures trace and receipt evidence,
+creates an owner approval packet, updates the task to `approval_required`, and
+versions the quote object. `config.leadPacket` remains a direct operator/test
+fallback. External sends and money movement remain blocked until human approval
+and real adapter execution are implemented.
 
 Core writes are platform-level, not worker-specific. `POST /core` now
 creates and transitions accountable tasks, upserts typed business objects with

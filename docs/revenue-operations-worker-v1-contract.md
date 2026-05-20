@@ -53,14 +53,52 @@ Read inbound lead source records before running the worker:
 ```
 
 The command returns `result.selectors[]`; pass one selector's
-`intake.source` and `intake.sourceEventId` to `command=run`:
+`intake.source` and `intake.sourceEventId` to `command=lead.classify`,
+`command=response.draft`, or the full `command=run`:
+
+```json
+{
+  "command": "lead.classify",
+  "worker": {
+    "role": "revenue_operations",
+    "id": null,
+    "tenantSlug": "continuous-demo"
+  },
+  "idempotencyKey": "rev-worker-001",
+  "config": {
+    "intake": {
+      "source": "website_form",
+      "sourceEventId": "form-2026-05-19-001"
+    }
+  }
+}
+```
+
+```json
+{
+  "command": "response.draft",
+  "worker": {
+    "role": "revenue_operations",
+    "tenantSlug": "continuous-demo"
+  },
+  "idempotencyKey": "rev-worker-draft-001",
+  "config": {
+    "intake": {
+      "source": "website_form",
+      "sourceEventId": "form-2026-05-19-001"
+    }
+  }
+}
+```
+
+The full run command consumes the same intake selector and prepares the
+approval packet plus dry-run adapter receipt:
 
 ```json
 {
   "command": "run",
   "worker": {
     "role": "revenue_operations",
-    "id": null,
     "tenantSlug": "continuous-demo"
   },
   "idempotencyKey": "rev-worker-001",
@@ -189,6 +227,8 @@ and local toolbox aliases resolve to the same handlers and validation rules.
 | `GET view=snapshot` | `worker.snapshot` | None | None | Read-only | Blocked |
 | `GET view=approvals` | `worker.approvals.list` | Optional `state` | None | Read-only | Blocked |
 | `lead.read` | `worker.lead.read` | `source`, `records[]` or `record` | Required | Core lead object/event/evidence, worker run, budget/usage, audit | Blocked |
+| `lead.classify` | `worker.lead.classify` | `config.intake` preferred, `config.leadPacket` fallback | Required | Classification worker run, budget/usage, inference, trace evidence, audit | Blocked |
+| `response.draft` | `worker.response.draft` | `config.intake` preferred, `config.leadPacket` fallback | Required | Draft worker run, budget/usage, inference, draft evidence, audit | Blocked |
 | `run` | `worker.run` | `config.intake` preferred, `config.leadPacket` fallback | Required | Internal records, budget, approval, dry-run adapter receipt | Blocked |
 | `continue` | `worker.continue` | `approvalId` | Required | Approved execution packet, revised approval packet, or rejected stop packet, workflow step, task outcome, audit/evidence | Blocked |
 | `approval.decide` | `worker.approvals.decide` | `approvalId`, `action`, optional `note` | None | Approval/task/workflow evidence only | Blocked |
