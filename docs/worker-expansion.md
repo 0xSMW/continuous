@@ -22,7 +22,7 @@ new worker family.
 | 1 | Revenue Operations Worker | Turn leads into quotes, bookings, invoices, collections, and reviews | Stable lead-to-cash simulation plus approval-backed dry-run adapters |
 | 2 | Owner Chief-of-Staff Worker | Daily decision queue, anomalies, cash/capacity brief, and task routing | Read-only cross-system summary with evidence links and no external mutation |
 | 3 | Dispatch/Ops Worker | Schedule jobs, update customers, close out work, and reduce handoff misses | `schedule.propose`, `customer_update.draft`, `closeout.prepare`, and `exception.route` are runtime; launch still needs live credential gates |
-| 4 | Finance Worker | Draft invoices, AR follow-ups, expense coding, and cash forecast | Accounting/payment adapters in draft mode, cash evidence packet, no money movement |
+| 4 | Finance Worker | Draft invoices, AR follow-ups, cash forecasts, and blocked payment drafts | Accounting/payment adapters in draft mode, cash evidence packet, dual-control proof, no money movement |
 | 5 | Workforce Worker | Hiring, onboarding, credentials, schedules, and payroll-input readiness | New-hire/contractor workflow packets, restricted document controls, payroll blockers |
 | 6 | Compliance Worker | Licenses, insurance, permits, notices, filings, and evidence binders | Rule-pack coverage, due-date obligations, source refs, and human submission approval |
 | 7 | Systems Worker | Connector health, sync repair, data quality, and workflow automation | Tenant-scoped adapter grants, rollback plans, and sync reconciliation tests |

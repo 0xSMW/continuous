@@ -92,6 +92,14 @@ describe("app-server worker tools", () => {
           command.externalExecution === "blocked",
       ),
     ).toBe(true);
+    expect(
+      schema.registry.commands.some(
+        (command) =>
+          command.role === "finance_operations" &&
+          command.name === "payment_draft.prepare" &&
+          command.externalExecution === "blocked",
+      ),
+    ).toBe(true);
   });
 
   it("requires a clean canonical command envelope before dispatch", async () => {
@@ -271,5 +279,18 @@ describe("app-server worker tools", () => {
         },
       }),
     ).rejects.toThrow("config.accounts is required for cash_forecast.generate.");
+
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.command", {
+        command: "payment_draft.prepare",
+        operatorEmail: "owner@continuoushq.com",
+        worker: {
+          role: "finance_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "app-server-finance-payment-draft-schema",
+        config: {},
+      }),
+    ).rejects.toThrow("config.billId, paymentId or sourceRefs is required for payment_draft.prepare.");
   });
 });

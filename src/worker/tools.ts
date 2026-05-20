@@ -582,6 +582,58 @@ export const workerTools = [
     },
   },
   {
+    name: "worker.finance.payment_draft.prepare",
+    description: "Prepare a payment instruction draft with dual-control evidence without moving money.",
+    registry: {
+      role: "finance_operations",
+      surface: "command",
+      command: "payment_draft.prepare",
+      idempotency: "required",
+      externalExecution: "blocked",
+      requiresTenant: true,
+    },
+    inputSchema: {
+      type: "object",
+      properties: {
+        worker: { $ref: "#/$defs/workerTarget" },
+        idempotencyKey: { type: "string" },
+        config: {
+          type: "object",
+          description:
+            "Finance payment draft config. Put bill or payment selectors, bank account refs, amount, method, evidence refs, and dual-control policy under config; external execution and money movement remain blocked.",
+          properties: {
+            billId: { type: "string" },
+            billObjectId: { type: "string" },
+            paymentId: { type: "string" },
+            paymentObjectId: { type: "string" },
+            paymentInstructionId: { type: "string" },
+            bankAccountId: { type: "string" },
+            amountCents: { type: "number", minimum: 0 },
+            currency: { type: "string" },
+            method: { type: "string" },
+            dueAt: { type: "string" },
+            payee: { type: "string" },
+            sourceRefs: { $ref: "#/$defs/sourceRefs" },
+            policy: {
+              type: "object",
+              additionalProperties: true,
+            },
+            evidenceIds: {
+              type: "array",
+              items: { type: "string" },
+            },
+            sourceEvidenceIds: {
+              type: "array",
+              items: { type: "string" },
+            },
+          },
+          additionalProperties: true,
+        },
+      },
+      required: ["worker", "idempotencyKey", "config"],
+    },
+  },
+  {
     name: "worker.continue",
     description: "Continue a worker-owned approval outcome with structured config.",
     registry: {
@@ -1118,6 +1170,16 @@ export async function executeWorkerTool(name: string, payload: JsonObject = {}) 
   if (name === "worker.finance.cash_forecast.generate") {
     return executeWorkerCommand({
       command: "cash_forecast.generate",
+      target,
+      operatorEmail,
+      config,
+      idempotencyKey: payload.idempotencyKey,
+    });
+  }
+
+  if (name === "worker.finance.payment_draft.prepare") {
+    return executeWorkerCommand({
+      command: "payment_draft.prepare",
       target,
       operatorEmail,
       config,

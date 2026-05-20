@@ -41,8 +41,10 @@ incoming handoff. Dispatch/Ops now has executable fixtures through
 `dispatch.closeout_to_finance` through `/worker command=invoice.prepare`,
 consumes persisted invoice evidence through `/worker command=ar_followup.draft`,
 and consumes forecast window/account refs through
-`/worker command=cash_forecast.generate`. It produces cash packets, invoice or
-AR drafts, cash forecasts, approval requests, generated review views, and
+`/worker command=cash_forecast.generate`, and prepares blocked payment drafts
+through `/worker command=payment_draft.prepare` from bill/payment selectors.
+It produces cash packets, invoice or AR drafts, cash forecasts, payment
+instruction drafts, dual-control approval requests, generated review views, and
 `finance.invoice_to_owner_review` approval handoffs while customer sends,
 payment links, external execution, and money movement remain blocked. Live
 calendar, customer-send, accounting, payment, and bank credentials remain

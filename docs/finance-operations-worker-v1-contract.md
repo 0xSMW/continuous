@@ -3,17 +3,17 @@
 This contract defines the finance worker for invoice drafts, AR follow-up,
 expense coding, cash forecast, and payment draft preparation. V1 never moves
 money and never sends external payment communications without approval.
-The first executable slices are `invoice.prepare`, `ar_followup.draft`, and
-`cash_forecast.generate`; the
-remaining Finance commands stay contract-defined until their runtime handlers
-are promoted through the same generic worker registry.
+The first executable slices are `invoice.prepare`, `ar_followup.draft`,
+`cash_forecast.generate`, and `payment_draft.prepare`; expense coding and live
+execution gates stay contract-defined until their runtime handlers are promoted
+through the same generic worker registry.
 
 ## Header
 
 | Field | Value |
 |---|---|
 | Worker role | `finance_operations` |
-| First outcome | Cash packet with invoice draft, AR queue, and forecast evidence |
+| First outcome | Cash packet with invoice draft, AR queue, forecast evidence, and blocked payment draft |
 | Autonomy level | `2` |
 | External execution | `dry_run`; money movement blocked |
 
@@ -94,6 +94,33 @@ Cash forecast uses the same envelope with account and cash-driver refs inside
 }
 ```
 
+Payment draft preparation uses bill or payment selectors plus dual-control
+policy under `config`; it prepares review artifacts only and does not submit ACH,
+payment links, refunds, settlements, or bank writes:
+
+```json
+{
+  "command": "payment_draft.prepare",
+  "worker": {
+    "role": "finance_operations",
+    "tenantSlug": "continuous-demo"
+  },
+  "idempotencyKey": "finance-payment-draft-001",
+  "config": {
+    "sourceRefs": {
+      "paymentId": "payment_row_or_payment_object_uuid"
+    },
+    "payee": "Acme Roofing Supplies",
+    "method": "ach",
+    "policy": {
+      "requireOwnerApproval": true,
+      "requireDualControl": true,
+      "moneyMovement": "blocked"
+    }
+  }
+}
+```
+
 ## Registry Entries
 
 | Command or view | Tool alias | Required config | Idempotency | Side effects | External execution |
@@ -103,7 +130,7 @@ Cash forecast uses the same envelope with account and cash-driver refs inside
 | `ar_followup.draft` | `worker.finance.ar_followup.draft` | `invoiceId`, `tonePolicy` | Required | AR follow-up draft, cash packet, approval request, generated review view | Blocked |
 | `expense_code.propose` | `worker.finance.expense_code.propose` | `receiptId` or `expenseId` | Required | Coding proposal and evidence | Blocked |
 | `cash_forecast.generate` | `worker.finance.cash_forecast.generate` | `window`, `accounts[]` | Required | Forecast object, cash packet, approval request, generated review view | Blocked |
-| `payment_draft.prepare` | `worker.finance.payment_draft.prepare` | `billId` or `paymentId` | Required | Payment instruction draft only | Blocked |
+| `payment_draft.prepare` | `worker.finance.payment_draft.prepare` | `billId`, `paymentId`, or `sourceRefs` | Required | Payment object, Payment instruction draft, cash packet, dual-control approval request, generated review view | Blocked |
 | `approval.decide` | `worker.approvals.decide` | `approvalId`, `action`, optional `note` | None | Approval/task/workflow evidence only | Blocked |
 
 ## Core Object Map
@@ -166,9 +193,9 @@ details, and private memo fields are redacted.
 ## Evals
 
 Golden cases cover invoice accuracy from closeout, AR follow-up drafting from an
-invoice, disputed and paid invoice blocking, expense coding accuracy, stale bank
-feed forecast, budget pressure, idempotent replay, no unauthorized sends, and no
-money movement.
+invoice, payment draft preparation from payment evidence, disputed and paid
+invoice blocking, expense coding accuracy, stale bank feed forecast, budget
+pressure, idempotent replay, no unauthorized sends, and no money movement.
 
 ## Security
 

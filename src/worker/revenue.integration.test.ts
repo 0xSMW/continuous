@@ -52,6 +52,7 @@ import {
   objects,
   objectLinks,
   objectVersions,
+  payments,
   paymentInstructions,
   payrollLiabilities,
   payrollLines,
@@ -6627,6 +6628,168 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(cashForecastReplayResult.created).toBe(false);
     expect(cashForecastReplayResult.workerRunId).toBe(cashForecastResult.workerRunId);
     expect(cashForecastReplayResult.cashForecastObjectId).toBe(cashForecastResult.cashForecastObjectId);
+
+    const paymentDraftResponse = await executeAppServerWorkerTool("continuous.worker.command", {
+      command: "payment_draft.prepare",
+      operatorEmail: "owner@continuoushq.com",
+      worker: {
+        role: "finance_operations",
+        tenantSlug: "continuous-demo",
+      },
+      idempotencyKey: `ci-finance-payment-draft-${runId}`,
+      config: {
+        sourceRefs: {
+          paymentId: "44444444-4444-4444-8444-000000000007",
+        },
+        payee: "Acme Roofing Supplies",
+        method: "ach",
+        policy: {
+          requireOwnerApproval: true,
+          requireDualControl: true,
+          moneyMovement: "blocked",
+        },
+      },
+    });
+    const paymentDraftEnvelope = objectValue(paymentDraftResponse);
+    const paymentDraftResult = objectValue(paymentDraftEnvelope.result) as Awaited<
+      ReturnType<typeof import("./finance").prepareFinancePaymentDraft>
+    >;
+    const paymentDraftOutput = objectValue(paymentDraftResult.output);
+    const [paymentDraftRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(eq(workerRuns.id, paymentDraftResult.workerRunId))
+      .limit(1);
+    const [paymentDraftObject] = await db
+      .select()
+      .from(objects)
+      .where(eq(objects.id, paymentDraftResult.paymentObjectId ?? ""))
+      .limit(1);
+    const [paymentDraftPayment] = await db
+      .select()
+      .from(payments)
+      .where(eq(payments.id, paymentDraftResult.paymentId ?? ""))
+      .limit(1);
+    const [paymentDraftInstruction] = await db
+      .select()
+      .from(paymentInstructions)
+      .where(eq(paymentInstructions.id, paymentDraftResult.paymentInstructionId ?? ""))
+      .limit(1);
+    const [paymentDraftApproval] = await db
+      .select()
+      .from(approvalRequests)
+      .where(eq(approvalRequests.id, paymentDraftResult.approvalRequestId ?? ""))
+      .limit(1);
+    const [paymentDraftPacket] = await db
+      .select()
+      .from(evidencePackets)
+      .where(eq(evidencePackets.id, paymentDraftResult.packetId ?? ""))
+      .limit(1);
+    const [paymentDraftDocument] = await db
+      .select()
+      .from(documents)
+      .where(eq(documents.id, paymentDraftResult.documentId ?? ""))
+      .limit(1);
+    const [paymentDraftWorkflow] = await db
+      .select()
+      .from(workflowRuns)
+      .where(eq(workflowRuns.id, paymentDraftResult.workflowRunId ?? ""))
+      .limit(1);
+    const [paymentDraftView] = await db
+      .select()
+      .from(generatedViews)
+      .where(and(eq(generatedViews.tenantId, tenantId), eq(generatedViews.key, "finance.payment.review")))
+      .limit(1);
+    const [paymentDraftReservation] = await db
+      .select()
+      .from(budgetReservations)
+      .where(eq(budgetReservations.id, stringValue(objectValue(paymentDraftRun?.data).reservationId)))
+      .limit(1);
+    const [paymentDraftUsage] = await db
+      .select()
+      .from(usageEvents)
+      .where(eq(usageEvents.id, stringValue(objectValue(paymentDraftRun?.data).usageEventId)))
+      .limit(1);
+    const [paymentDraftAudit] = await db
+      .select()
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.workerRunId, paymentDraftResult.workerRunId),
+          eq(auditEvents.type, "finance_worker.payment_draft_prepare.completed"),
+        ),
+      )
+      .limit(1);
+
+    expect(paymentDraftEnvelope.command).toBe("payment_draft.prepare");
+    expect(objectValue(paymentDraftEnvelope.worker).role).toBe("finance_operations");
+    expect(paymentDraftResult.created).toBe(true);
+    expect(paymentDraftResult.workflowStepIds).toHaveLength(3);
+    expect(paymentDraftOutput.externalExecution).toBe("blocked");
+    expect(paymentDraftOutput.externalMutation).toBe(false);
+    expect(paymentDraftOutput.externalSend).toBe(false);
+    expect(paymentDraftOutput.paymentLink).toBe("blocked");
+    expect(paymentDraftOutput.moneyMovement).toBe("blocked");
+    expect(paymentDraftOutput.requiresApproval).toBe(true);
+    expect(paymentDraftOutput.requiresDualControl).toBe(true);
+    expect(paymentDraftOutput.paymentInstructionId).toBe(paymentDraftResult.paymentInstructionId);
+    expect(paymentDraftRun?.source).toBe("continuous.finance_worker");
+    expect(paymentDraftRun?.state).toBe("done");
+    expect(paymentDraftObject?.type).toBe("payment");
+    expect(paymentDraftObject?.state).toBe("dual_control_pending");
+    expect(paymentDraftPayment?.state).toBe("dual_control_pending");
+    expect(paymentDraftInstruction?.kind).toBe("finance_payment_draft");
+    expect(paymentDraftInstruction?.state).toBe("dual_control_pending");
+    expect(objectValue(paymentDraftInstruction?.data).moneyMovement).toBe("blocked");
+    expect(paymentDraftWorkflow?.state).toBe("dual_control_pending");
+    expect(paymentDraftApproval?.state).toBe("pending");
+    expect(paymentDraftApproval?.kind).toBe("finance_payment_draft_approval");
+    expect(paymentDraftPacket?.kind).toBe("cash_packet");
+    expect(paymentDraftDocument?.kind).toBe("finance_payment_draft");
+    expect(paymentDraftView?.key).toBe("finance.payment.review");
+    expect(objectValue(paymentDraftView?.contract).externalExecution).toBe("blocked");
+    expect(objectValue(paymentDraftView?.actions).decisionCommand).toBe("approval.decide");
+    expect(objectValue(objectValue(paymentDraftView?.data).latest).paymentInstructionId).toBe(
+      paymentDraftResult.paymentInstructionId,
+    );
+    expect(paymentDraftReservation?.state).toBe("used");
+    expect(paymentDraftUsage?.reservationId).toBe(paymentDraftReservation?.id);
+    expect(objectValue(paymentDraftAudit?.data).moneyMovement).toBe("blocked");
+    expect(
+      paymentDraftResult.snapshot.paymentDrafts.some(
+        (payment) => payment.id === paymentDraftResult.paymentObjectId,
+      ),
+    ).toBe(true);
+
+    const paymentDraftReplayResponse = await executeWorkerCommand({
+      command: "payment_draft.prepare",
+      target: {
+        role: "finance_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: `ci-finance-payment-draft-${runId}`,
+      config: {
+        sourceRefs: {
+          paymentId: "44444444-4444-4444-8444-000000000007",
+        },
+        payee: "Acme Roofing Supplies",
+        method: "ach",
+        policy: {
+          requireOwnerApproval: true,
+          requireDualControl: true,
+          moneyMovement: "blocked",
+        },
+      },
+    });
+    const paymentDraftReplayResult = paymentDraftReplayResponse.result as Awaited<
+      ReturnType<typeof import("./finance").prepareFinancePaymentDraft>
+    >;
+
+    expect(paymentDraftReplayResult.created).toBe(false);
+    expect(paymentDraftReplayResult.workerRunId).toBe(paymentDraftResult.workerRunId);
+    expect(paymentDraftReplayResult.paymentObjectId).toBe(paymentDraftResult.paymentObjectId);
+    expect(paymentDraftReplayResult.paymentInstructionId).toBe(paymentDraftResult.paymentInstructionId);
 
     const exceptionResponse = await executeWorkerCommand({
       command: "exception.route",

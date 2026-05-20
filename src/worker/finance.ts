@@ -27,6 +27,7 @@ import {
   objectLinks,
   objects,
   objectVersions,
+  payments,
   paymentInstructions,
   tasks,
   tenants,
@@ -48,12 +49,15 @@ const financeSource = "continuous.finance_worker";
 const invoicePrepareCapabilityKey = "invoice.prepare";
 const arFollowupDraftCapabilityKey = "payment_link.prepare";
 const cashForecastGenerateCapabilityKey = "cash_forecast.generate";
+const paymentDraftPrepareCapabilityKey = "ach_draft.prepare";
 const invoiceDraftWorkflowKey = "invoice_draft";
 const arFollowupWorkflowKey = "ar_followup";
 const cashForecastWorkflowKey = "cash_forecast";
+const paymentDraftWorkflowKey = "payment_draft";
 const invoicePrepareUnits = 3600;
 const arFollowupDraftUnits = 2600;
 const cashForecastGenerateUnits = 3100;
+const paymentDraftPrepareUnits = 3400;
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -147,6 +151,30 @@ export type FinanceCashForecastGenerateResult = {
   snapshot: FinanceWorkerSnapshot;
 };
 
+export type FinancePaymentDraftPrepareResult = {
+  created: boolean;
+  idempotencyKey: string;
+  workerRunId: string;
+  taskId: string | null;
+  eventId: string | null;
+  paymentObjectId: string | null;
+  paymentId: string | null;
+  paymentInstructionId: string | null;
+  sourcePaymentObjectId: string | null;
+  sourcePaymentInstructionId: string | null;
+  billObjectId: string | null;
+  approvalRequestId: string | null;
+  evidenceId: string | null;
+  draftEvidenceId: string | null;
+  packetId: string | null;
+  documentId: string | null;
+  workflowRunId: string | null;
+  workflowStepIds: string[];
+  financePaymentViewId: string | null;
+  output: JsonObject;
+  snapshot: FinanceWorkerSnapshot;
+};
+
 export type FinanceWorkerSnapshot = {
   worker: {
     id: string;
@@ -187,6 +215,12 @@ export type FinanceWorkerSnapshot = {
     data: JsonObject;
   }>;
   cashForecasts: Array<{
+    id: string;
+    name: string;
+    state: string;
+    data: JsonObject;
+  }>;
+  paymentDrafts: Array<{
     id: string;
     name: string;
     state: string;
@@ -1099,6 +1133,222 @@ async function loadCashForecastRefs(db: Database, tenantId: string, config: Json
   };
 }
 
+async function loadPaymentDraftRefs(db: Database, tenantId: string, config: JsonObject) {
+  const sourceRefs = objectValue(config.sourceRefs);
+  const bankAccountRef =
+    optionalString(config.bankAccountId) ??
+    optionalString(sourceRefs.bankAccountId);
+  const billRef =
+    optionalString(config.billId) ??
+    optionalString(config.billObjectId) ??
+    optionalString(sourceRefs.billId) ??
+    optionalString(sourceRefs.billObjectId);
+  const paymentRef =
+    optionalString(config.paymentId) ??
+    optionalString(config.paymentObjectId) ??
+    optionalString(config.paymentInstructionId) ??
+    optionalString(sourceRefs.paymentId) ??
+    optionalString(sourceRefs.paymentObjectId) ??
+    optionalString(sourceRefs.paymentInstructionId);
+
+  if (!billRef && !paymentRef) {
+    throw new PlatformUnavailableError(
+      "invalid_worker_command_config",
+      "config.billId, paymentId, or sourceRefs.paymentId is required for payment_draft.prepare.",
+      400,
+    );
+  }
+
+  for (const [fieldName, ref] of [
+    ["config.billId", billRef],
+    ["config.paymentId", paymentRef],
+  ] as const) {
+    if (ref && !uuidPattern.test(ref)) {
+      throw new PlatformUnavailableError(
+        "invalid_worker_command_config",
+        `${fieldName} must be a tenant-scoped Core object, payment, or payment instruction id.`,
+        400,
+      );
+    }
+  }
+
+  const billObject = billRef ? await getObjectById(db, tenantId, billRef) : null;
+
+  if (billRef && billObject?.type !== "bill") {
+    throw new PlatformUnavailableError(
+      "finance_bill_not_found",
+      "Finance payment draft requires a tenant-scoped bill object when config.billId is provided.",
+      404,
+    );
+  }
+
+  let sourcePaymentInstruction: typeof paymentInstructions.$inferSelect | null = null;
+  let sourcePaymentRow: typeof payments.$inferSelect | null = null;
+  let sourcePaymentObject: typeof objects.$inferSelect | null = null;
+
+  if (paymentRef) {
+    [sourcePaymentInstruction = null] = await db
+      .select()
+      .from(paymentInstructions)
+      .where(and(eq(paymentInstructions.tenantId, tenantId), eq(paymentInstructions.id, paymentRef)))
+      .limit(1);
+
+    if (!sourcePaymentInstruction) {
+      [sourcePaymentRow = null] = await db
+        .select()
+        .from(payments)
+        .where(and(eq(payments.tenantId, tenantId), eq(payments.id, paymentRef)))
+        .limit(1);
+    }
+
+    if (!sourcePaymentInstruction && !sourcePaymentRow) {
+      const object = await getObjectById(db, tenantId, paymentRef);
+
+      if (object?.type === "payment") {
+        sourcePaymentObject = object;
+      } else if (object) {
+        throw new PlatformUnavailableError(
+          "finance_payment_not_found",
+          "Finance payment draft requires a tenant-scoped payment object when config.paymentId is provided.",
+          404,
+        );
+      }
+    }
+
+    if (sourcePaymentInstruction?.objectId) {
+      sourcePaymentObject = await getObjectById(db, tenantId, sourcePaymentInstruction.objectId);
+    }
+
+    if (sourcePaymentRow?.objectId) {
+      sourcePaymentObject = await getObjectById(db, tenantId, sourcePaymentRow.objectId);
+    }
+
+    if (!sourcePaymentInstruction && !sourcePaymentRow && !sourcePaymentObject) {
+      throw new PlatformUnavailableError(
+        "finance_payment_not_found",
+        "Finance payment draft requires a tenant-scoped payment row, payment instruction, or payment object.",
+        404,
+      );
+    }
+  }
+
+  if (bankAccountRef && !uuidPattern.test(bankAccountRef)) {
+    throw new PlatformUnavailableError(
+      "invalid_worker_command_config",
+      "config.bankAccountId must be a tenant-scoped bank account id.",
+      400,
+    );
+  }
+
+  const bankAccountConditions = [eq(bankAccounts.tenantId, tenantId)];
+
+  if (bankAccountRef) {
+    bankAccountConditions.push(eq(bankAccounts.id, bankAccountRef));
+  }
+
+  const [bankAccount] = await db
+    .select({ id: bankAccounts.id, name: bankAccounts.name, data: bankAccounts.data })
+    .from(bankAccounts)
+    .where(and(...bankAccountConditions))
+    .orderBy(bankAccounts.createdAt)
+    .limit(1);
+
+  if (!bankAccount) {
+    throw new PlatformUnavailableError(
+      "finance_bank_account_missing",
+      bankAccountRef
+        ? "Finance payment draft requires a tenant-scoped bank account matching config.bankAccountId."
+        : "Finance payment draft requires a tenant-scoped bank account reference.",
+      409,
+    );
+  }
+
+  const billData = objectValue(billObject?.data);
+  const paymentObjectData = objectValue(sourcePaymentObject?.data);
+  const sourcePaymentInstructionData = objectValue(sourcePaymentInstruction?.data);
+  const sourcePaymentRowData = objectValue(sourcePaymentRow?.data);
+  const sourceData =
+    Object.keys(sourcePaymentInstructionData).length > 0
+      ? sourcePaymentInstructionData
+      : Object.keys(paymentObjectData).length > 0
+        ? paymentObjectData
+        : Object.keys(sourcePaymentRowData).length > 0
+          ? sourcePaymentRowData
+          : billData;
+  const amountCents =
+    optionalNumber(config.amountCents) ??
+    optionalNumber(sourcePaymentInstruction?.amountCents) ??
+    optionalNumber(sourceData.amountCents) ??
+    optionalNumber(sourceData.amount_cents) ??
+    optionalNumber(billData.totalCents) ??
+    optionalNumber(billData.amountCents) ??
+    0;
+  const currency =
+    optionalString(config.currency) ??
+    optionalString(sourcePaymentInstruction?.currency) ??
+    optionalString(sourceData.currency) ??
+    optionalString(billData.currency) ??
+    "USD";
+  const method =
+    optionalString(config.method) ??
+    optionalString(sourceData.method) ??
+    optionalString(sourceData.rail) ??
+    "ach";
+  const dueAt =
+    optionalString(config.dueAt) ??
+    optionalString(sourceData.dueAt) ??
+    optionalString(sourceData.due_at) ??
+    optionalString(billData.dueAt);
+  const payee =
+    optionalString(config.payee) ??
+    optionalString(sourceData.payee) ??
+    optionalString(sourceData.vendorName) ??
+    optionalString(billData.vendorName) ??
+    optionalString(billObject?.name) ??
+    optionalString(sourcePaymentObject?.name) ??
+    "Unspecified payee";
+  const sourceEvidenceIds = Array.from(
+    new Set([
+      ...stringList(config.evidenceIds),
+      ...stringList(sourceRefs.evidenceIds),
+      ...stringList(config.sourceEvidenceIds),
+      ...stringList(sourceRefs.sourceEvidenceIds),
+      ...stringList(billData.sourceEvidenceIds),
+      ...stringList(sourceData.sourceEvidenceIds),
+    ]),
+  );
+  const sourceEvidence = await loadEvidenceRefs(db, tenantId, sourceEvidenceIds, "config.sourceRefs.evidenceIds");
+  const policy = objectValue(config.policy);
+  const blockers = [
+    ...(amountCents <= 0 ? ["payment_amount_not_positive"] : []),
+    ...(sourcePaymentInstruction?.state === "paid" ? ["payment_instruction_already_paid"] : []),
+    ...(sourcePaymentRow?.state === "settled" ? ["payment_already_settled"] : []),
+    ...(booleanValue(policy.requireDualControl, true) ? [] : ["dual_control_policy_missing"]),
+  ];
+
+  return {
+    sourceRefs,
+    billObject,
+    sourcePaymentInstruction,
+    sourcePaymentRow,
+    sourcePaymentObject,
+    bankAccount,
+    amountCents,
+    currency,
+    method,
+    dueAt,
+    payee,
+    sourceEvidenceIds: sourceEvidence.map((row) => row.id),
+    blockers,
+    policy: {
+      requireDualControl: true,
+      ...policy,
+      moneyMovement: "blocked",
+      externalExecution: "blocked",
+    } satisfies JsonObject,
+  };
+}
+
 async function replayedInvoicePrepare(
   db: Database,
   context: FinanceContext,
@@ -1197,6 +1447,47 @@ async function replayedCashForecastGenerate(
     workflowRunId: optionalString(data.workflowRunId) ?? optionalString(output.workflowRunId) ?? null,
     workflowStepIds: getWorkflowStepIds(data),
     financeCashViewId: optionalString(data.financeCashViewId) ?? optionalString(output.financeCashViewId) ?? null,
+    output,
+    snapshot: await getFinanceWorkerSnapshot(db, {
+      role: financeWorkerRole,
+      tenantSlug: context.worker.tenantSlug,
+      workerId: context.worker.id,
+    }),
+  };
+}
+
+async function replayedPaymentDraftPrepare(
+  db: Database,
+  context: FinanceContext,
+  run: typeof workerRuns.$inferSelect,
+): Promise<FinancePaymentDraftPrepareResult> {
+  const data = objectValue(run.data);
+  const output = outputData(data);
+
+  return {
+    created: false,
+    idempotencyKey: run.idempotencyKey,
+    workerRunId: run.id,
+    taskId: run.taskId,
+    eventId: run.eventId ?? optionalString(data.eventId) ?? null,
+    paymentObjectId: optionalString(data.paymentObjectId) ?? optionalString(output.paymentObjectId) ?? null,
+    paymentId: optionalString(data.paymentId) ?? optionalString(output.paymentId) ?? null,
+    paymentInstructionId:
+      optionalString(data.paymentInstructionId) ?? optionalString(output.paymentInstructionId) ?? null,
+    sourcePaymentObjectId:
+      optionalString(data.sourcePaymentObjectId) ?? optionalString(output.sourcePaymentObjectId) ?? null,
+    sourcePaymentInstructionId:
+      optionalString(data.sourcePaymentInstructionId) ?? optionalString(output.sourcePaymentInstructionId) ?? null,
+    billObjectId: optionalString(data.billObjectId) ?? optionalString(output.billObjectId) ?? null,
+    approvalRequestId: optionalString(data.approvalRequestId) ?? optionalString(output.approvalRequestId) ?? null,
+    evidenceId: optionalString(data.evidenceId) ?? optionalString(output.evidenceId) ?? null,
+    draftEvidenceId: optionalString(data.draftEvidenceId) ?? optionalString(output.draftEvidenceId) ?? null,
+    packetId: optionalString(data.packetId) ?? optionalString(output.packetId) ?? null,
+    documentId: optionalString(data.documentId) ?? optionalString(output.documentId) ?? null,
+    workflowRunId: optionalString(data.workflowRunId) ?? optionalString(output.workflowRunId) ?? null,
+    workflowStepIds: getWorkflowStepIds(data),
+    financePaymentViewId:
+      optionalString(data.financePaymentViewId) ?? optionalString(output.financePaymentViewId) ?? null,
     output,
     snapshot: await getFinanceWorkerSnapshot(db, {
       role: financeWorkerRole,
@@ -3898,6 +4189,952 @@ export async function generateFinanceCashForecast(input: {
   };
 }
 
+export async function prepareFinancePaymentDraft(input: {
+  idempotencyKey: string;
+  tenantSlug?: string;
+  workerId?: string;
+  operatorEmail: string;
+  config?: JsonObject;
+  db?: Database;
+}): Promise<FinancePaymentDraftPrepareResult> {
+  const db = input.db ?? defaultDb;
+  const context = await loadFinanceContext({
+    db,
+    selector: { role: financeWorkerRole, tenantSlug: input.tenantSlug, workerId: input.workerId },
+    operatorEmail: input.operatorEmail,
+    capabilityKey: paymentDraftPrepareCapabilityKey,
+    capabilityLabel: "ach_draft.prepare",
+  });
+  const config = input.config ?? {};
+  const refs = await loadPaymentDraftRefs(db, context.worker.tenantId, config);
+  const draftState = refs.blockers.length === 0 ? "dual_control_pending" : "draft";
+  const taskState = refs.blockers.length === 0 ? "approval_required" : "blocked";
+  const workflowState = refs.blockers.length === 0 ? "dual_control_pending" : "blocked";
+  const inputHash = hashObject({
+    schemaVersion: "finance.payment_draft.prepare.v1",
+    tenantId: context.worker.tenantId,
+    workerId: context.worker.id,
+    idempotencyKey: input.idempotencyKey,
+    config,
+    billObjectId: refs.billObject?.id ?? null,
+    sourcePaymentObjectId: refs.sourcePaymentObject?.id ?? null,
+    sourcePaymentInstructionId: refs.sourcePaymentInstruction?.id ?? null,
+    sourcePaymentId: refs.sourcePaymentRow?.id ?? null,
+    amountCents: refs.amountCents,
+    currency: refs.currency,
+    method: refs.method,
+    sourceEvidenceIds: refs.sourceEvidenceIds,
+  });
+  const now = new Date();
+
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${financeSource}:${input.idempotencyKey}`}))`,
+    );
+
+    const [existingRun] = await tx
+      .select()
+      .from(workerRuns)
+      .where(
+        and(
+          eq(workerRuns.tenantId, context.worker.tenantId),
+          eq(workerRuns.source, financeSource),
+          eq(workerRuns.idempotencyKey, input.idempotencyKey),
+        ),
+      )
+      .limit(1);
+
+    if (existingRun) {
+      const existingInput = objectValue(objectValue(existingRun.data).input);
+      const existingHash = optionalString(existingInput.inputHash);
+
+      if (existingHash && existingHash !== inputHash) {
+        throw new PlatformUnavailableError(
+          "worker_idempotency_conflict",
+          "A Finance payment draft already exists for this idempotency key with different input.",
+          409,
+        );
+      }
+
+      return { replay: existingRun };
+    }
+
+    const [definition] = await tx
+      .select({ id: workflowDefinitions.id })
+      .from(workflowDefinitions)
+      .where(and(eq(workflowDefinitions.key, paymentDraftWorkflowKey), eq(workflowDefinitions.active, true)))
+      .orderBy(desc(workflowDefinitions.createdAt))
+      .limit(1);
+
+    if (!definition) {
+      throw new PlatformUnavailableError(
+        "worker_workflow_definition_missing",
+        "Finance Operations Worker requires the payment_draft workflow definition.",
+        409,
+      );
+    }
+
+    const paymentData = {
+      billObjectId: refs.billObject?.id ?? null,
+      sourcePaymentObjectId: refs.sourcePaymentObject?.id ?? null,
+      sourcePaymentInstructionId: refs.sourcePaymentInstruction?.id ?? null,
+      sourcePaymentId: refs.sourcePaymentRow?.id ?? null,
+      sourceRefs: refs.sourceRefs,
+      sourceEvidenceIds: refs.sourceEvidenceIds,
+      bankAccountId: refs.bankAccount.id,
+      bankAccountName: refs.bankAccount.name,
+      payee: refs.payee,
+      amountCents: refs.amountCents,
+      currency: refs.currency,
+      method: refs.method,
+      dueAt: refs.dueAt ?? null,
+      blockers: refs.blockers,
+      policy: refs.policy,
+      dualControl: "required",
+      requiresDualControl: true,
+      externalExecution: "blocked",
+      externalMutation: false,
+      externalSend: false,
+      paymentLink: "blocked",
+      moneyMovement: "blocked",
+    } satisfies JsonObject;
+
+    const [paymentObject] = await tx
+      .insert(objects)
+      .values({
+        tenantId: context.worker.tenantId,
+        type: "payment",
+        name: `Payment draft for ${refs.payee}`,
+        state: draftState,
+        source: financeSource,
+        externalId: `finance-payment-draft:${input.idempotencyKey}`,
+        data: paymentData,
+        createdByUserId: context.operator.id,
+        createdByWorkerId: context.worker.id,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: objects.id });
+
+    await tx.insert(objectVersions).values({
+      tenantId: context.worker.tenantId,
+      objectId: paymentObject.id,
+      version: 1,
+      data: paymentData,
+      changedByType: "worker",
+      changedById: context.worker.id,
+      reason: "finance payment draft",
+      createdAt: now,
+    });
+
+    const [payment] = await tx
+      .insert(payments)
+      .values({
+        tenantId: context.worker.tenantId,
+        objectId: paymentObject.id,
+        state: draftState,
+        externalId: `finance-payment-draft:${input.idempotencyKey}`,
+        data: paymentData,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: payments.id });
+
+    const [paymentInstruction] = await tx
+      .insert(paymentInstructions)
+      .values({
+        tenantId: context.worker.tenantId,
+        bankAccountId: refs.bankAccount.id,
+        objectId: paymentObject.id,
+        kind: "finance_payment_draft",
+        state: draftState,
+        amountCents: refs.amountCents,
+        currency: refs.currency,
+        data: {
+          ...paymentData,
+          paymentId: payment.id,
+          paymentObjectId: paymentObject.id,
+        },
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: paymentInstructions.id });
+
+    const linkValues = [
+      ...(refs.billObject
+        ? [
+            {
+              tenantId: context.worker.tenantId,
+              fromId: paymentObject.id,
+              toId: refs.billObject.id,
+              type: "draft_for_bill",
+              data: { source: financeSource },
+              effectiveAt: now,
+            },
+          ]
+        : []),
+      ...(refs.sourcePaymentObject
+        ? [
+            {
+              tenantId: context.worker.tenantId,
+              fromId: paymentObject.id,
+              toId: refs.sourcePaymentObject.id,
+              type: "prepared_from_payment",
+              data: { source: financeSource },
+              effectiveAt: now,
+            },
+          ]
+        : []),
+    ];
+
+    if (linkValues.length > 0) {
+      await tx.insert(objectLinks).values(linkValues).onConflictDoNothing();
+    }
+
+    const [task] = await tx
+      .insert(tasks)
+      .values({
+        tenantId: context.worker.tenantId,
+        objectId: paymentObject.id,
+        capabilityId: context.capabilityId,
+        title: `Review payment draft for ${refs.payee}`,
+        state: taskState,
+        priority: "high",
+        ownerType: "worker",
+        ownerId: context.worker.id,
+        ownerRef: `worker:${context.worker.id}`,
+        reviewerUserId: context.reviewerUserId,
+        evidence: {
+          required: ["payment_instruction", "dual_control_packet", "source_payment_or_bill"],
+          blockers: refs.blockers,
+          sourceEvidenceIds: refs.sourceEvidenceIds,
+        },
+        outcome: {
+          status: refs.blockers.length > 0 ? "payment_draft_blocked" : "dual_control_required",
+          externalExecution: "blocked",
+          moneyMovement: "blocked",
+        },
+        cost: { units: paymentDraftPrepareUnits },
+        kpi: { payment_drafts_prepared: 1 },
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: tasks.id });
+
+    const runInput = {
+      command: "payment_draft.prepare",
+      inputHash,
+      config,
+      paymentObjectId: paymentObject.id,
+      paymentId: payment.id,
+      paymentInstructionId: paymentInstruction.id,
+      billObjectId: refs.billObject?.id ?? null,
+      sourcePaymentObjectId: refs.sourcePaymentObject?.id ?? null,
+      sourcePaymentInstructionId: refs.sourcePaymentInstruction?.id ?? null,
+      sourcePaymentId: refs.sourcePaymentRow?.id ?? null,
+      amountCents: refs.amountCents,
+      currency: refs.currency,
+      method: refs.method,
+    } satisfies JsonObject;
+
+    const [workerRun] = await tx
+      .insert(workerRuns)
+      .values({
+        tenantId: context.worker.tenantId,
+        workerId: context.worker.id,
+        taskId: task.id,
+        capabilityId: context.capabilityId,
+        connectionId: context.accountingConnectionId,
+        budgetAccountId: context.budgetAccountId,
+        source: financeSource,
+        idempotencyKey: input.idempotencyKey,
+        state: "running",
+        mode: "simulation",
+        data: {
+          input: runInput,
+          output: {},
+        },
+        startedAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: workerRuns.id });
+
+    const [workflowRun] = await tx
+      .insert(workflowRuns)
+      .values({
+        tenantId: context.worker.tenantId,
+        definitionId: definition.id,
+        objectId: paymentObject.id,
+        workerId: context.worker.id,
+        state: workflowState,
+        idempotencyKey: input.idempotencyKey,
+        data: {
+          workerRunId: workerRun.id,
+          paymentObjectId: paymentObject.id,
+          paymentId: payment.id,
+          paymentInstructionId: paymentInstruction.id,
+          inputHash,
+          dualControl: "required",
+          requiresDualControl: true,
+          externalExecution: "blocked",
+          moneyMovement: "blocked",
+        },
+        blockers: { open: refs.blockers },
+        metrics: {
+          budgetUnits: paymentDraftPrepareUnits,
+          amountCents: refs.amountCents,
+          blockerCount: refs.blockers.length,
+        },
+        startedAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: workflowRuns.id });
+
+    const [reservation] = await tx
+      .insert(budgetReservations)
+      .values({
+        tenantId: context.worker.tenantId,
+        accountId: context.budgetAccountId,
+        taskId: task.id,
+        units: paymentDraftPrepareUnits,
+        state: "used",
+        expiresAt: new Date(now.getTime() + 15 * 60 * 1000),
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: budgetReservations.id });
+
+    const [inference] = await tx
+      .insert(inferences)
+      .values({
+        tenantId: context.worker.tenantId,
+        budgetAccountId: context.budgetAccountId,
+        taskId: task.id,
+        capabilityId: context.capabilityId,
+        actorType: "worker",
+        actorId: context.worker.id,
+        promptHash: traceHash(input.idempotencyKey, "finance-payment-draft"),
+        request: {
+          mode: "deterministic",
+          objective: "Prepare a payment instruction draft from tenant-scoped bill or payment evidence.",
+          billObjectId: refs.billObject?.id ?? null,
+          sourcePaymentObjectId: refs.sourcePaymentObject?.id ?? null,
+          sourcePaymentInstructionId: refs.sourcePaymentInstruction?.id ?? null,
+          inputHash,
+        },
+        result: {
+          paymentObjectId: paymentObject.id,
+          paymentId: payment.id,
+          paymentInstructionId: paymentInstruction.id,
+          amountCents: refs.amountCents,
+          currency: refs.currency,
+          blockers: refs.blockers,
+        },
+        safety: {
+          externalExecution: "blocked",
+          externalMutation: false,
+          externalSend: false,
+          paymentLink: "blocked",
+          moneyMovement: "blocked",
+          dualControl: "required",
+          requiresDualControl: true,
+        },
+        promptTokens: 260,
+        completionTokens: 115,
+        units: paymentDraftPrepareUnits,
+        costUsd: "0.000000",
+        latencyMs: 78,
+        createdAt: now,
+      })
+      .returning({ id: inferences.id });
+
+    const [usage] = await tx
+      .insert(usageEvents)
+      .values({
+        tenantId: context.worker.tenantId,
+        accountId: context.budgetAccountId,
+        reservationId: reservation.id,
+        inferenceId: inference.id,
+        taskId: task.id,
+        capabilityId: context.capabilityId,
+        actorType: "worker",
+        actorId: context.worker.id,
+        units: paymentDraftPrepareUnits,
+        costUsd: "0.000000",
+        data: {
+          mode: "deterministic",
+          workerRunId: workerRun.id,
+          workflowRunId: workflowRun.id,
+          paymentObjectId: paymentObject.id,
+          paymentInstructionId: paymentInstruction.id,
+        },
+        createdAt: now,
+      })
+      .returning({ id: usageEvents.id });
+
+    const [event] = await tx
+      .insert(events)
+      .values({
+        tenantId: context.worker.tenantId,
+        type: "finance_worker.payment_draft_prepare.completed",
+        source: financeSource,
+        actorType: "worker",
+        actorId: context.worker.id,
+        actorRef: `worker:${context.worker.id}`,
+        objectId: paymentObject.id,
+        taskId: task.id,
+        capabilityId: context.capabilityId,
+        connectionId: context.accountingConnectionId,
+        idempotencyKey: input.idempotencyKey,
+        data: {
+          workerRunId: workerRun.id,
+          workflowRunId: workflowRun.id,
+          paymentObjectId: paymentObject.id,
+          paymentId: payment.id,
+          paymentInstructionId: paymentInstruction.id,
+          billObjectId: refs.billObject?.id ?? null,
+          amountCents: refs.amountCents,
+          currency: refs.currency,
+          dualControl: "required",
+          requiresDualControl: true,
+          externalExecution: "blocked",
+          externalMutation: false,
+          externalSend: false,
+          paymentLink: "blocked",
+          moneyMovement: "blocked",
+          inputHash,
+        },
+        occurredAt: now,
+        createdAt: now,
+      })
+      .returning({ id: events.id });
+
+    await tx.update(workerRuns).set({ eventId: event.id, updatedAt: now }).where(eq(workerRuns.id, workerRun.id));
+
+    const [traceEvidence] = await tx
+      .insert(evidence)
+      .values({
+        tenantId: context.worker.tenantId,
+        kind: "trace",
+        name: "Finance payment draft trace",
+        objectId: paymentObject.id,
+        taskId: task.id,
+        eventId: event.id,
+        capabilityId: context.capabilityId,
+        actorType: "worker",
+        actorId: context.worker.id,
+        hash: inputHash,
+        data: {
+          inputHash,
+          paymentObjectId: paymentObject.id,
+          paymentId: payment.id,
+          paymentInstructionId: paymentInstruction.id,
+          sourceEvidenceIds: refs.sourceEvidenceIds,
+          externalExecution: "blocked",
+          moneyMovement: "blocked",
+          dualControl: "required",
+          requiresDualControl: true,
+        },
+        createdAt: now,
+      })
+      .returning({ id: evidence.id });
+
+    const [draftEvidence] = await tx
+      .insert(evidence)
+      .values({
+        tenantId: context.worker.tenantId,
+        kind: "draft",
+        name: "Payment instruction draft",
+        objectId: paymentObject.id,
+        taskId: task.id,
+        eventId: event.id,
+        capabilityId: context.capabilityId,
+        actorType: "worker",
+        actorId: context.worker.id,
+        hash: traceHash(input.idempotencyKey, "payment_draft"),
+        data: {
+          ...paymentData,
+          paymentId: payment.id,
+          paymentObjectId: paymentObject.id,
+          paymentInstructionId: paymentInstruction.id,
+        },
+        createdAt: now,
+      })
+      .returning({ id: evidence.id });
+
+    const [document] = await tx
+      .insert(documents)
+      .values({
+        tenantId: context.worker.tenantId,
+        objectId: paymentObject.id,
+        workflowRunId: workflowRun.id,
+        kind: "finance_payment_draft",
+        name: `Payment draft for ${refs.payee}`,
+        state: draftState,
+        sensitivity: "high",
+        hash: traceHash(input.idempotencyKey, "document"),
+        data: {
+          ...paymentData,
+          paymentId: payment.id,
+          paymentInstructionId: paymentInstruction.id,
+        },
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: documents.id });
+
+    const [packet] = await tx
+      .insert(evidencePackets)
+      .values({
+        tenantId: context.worker.tenantId,
+        documentId: document.id,
+        objectId: paymentObject.id,
+        taskId: task.id,
+        workflowRunId: workflowRun.id,
+        eventId: event.id,
+        capabilityId: context.capabilityId,
+        kind: "cash_packet",
+        name: "Finance payment draft evidence packet",
+        state: refs.blockers.length > 0 ? "blocked" : "review_ready",
+        sensitivity: "high",
+        evidenceIds: { ids: [traceEvidence.id, draftEvidence.id, ...refs.sourceEvidenceIds] },
+        documentIds: { ids: [document.id] },
+        data: {
+          paymentObjectId: paymentObject.id,
+          paymentId: payment.id,
+          paymentInstructionId: paymentInstruction.id,
+          billObjectId: refs.billObject?.id ?? null,
+          amountCents: refs.amountCents,
+          currency: refs.currency,
+          workflowRunId: workflowRun.id,
+          dualControl: "required",
+          requiresDualControl: true,
+          externalExecution: "blocked",
+          externalMutation: false,
+          externalSend: false,
+          paymentLink: "blocked",
+          moneyMovement: "blocked",
+        },
+        hash: traceHash(input.idempotencyKey, "payment_packet"),
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: evidencePackets.id });
+
+    const [approval] = await tx
+      .insert(approvalRequests)
+      .values({
+        tenantId: context.worker.tenantId,
+        taskId: task.id,
+        workerRunId: workerRun.id,
+        workflowRunId: workflowRun.id,
+        eventId: event.id,
+        objectId: paymentObject.id,
+        capabilityId: context.capabilityId,
+        requesterType: "worker",
+        requesterId: context.worker.id,
+        requesterRef: `worker:${context.worker.id}`,
+        reviewerUserId: context.reviewerUserId,
+        kind: "finance_payment_draft_approval",
+        state: "pending",
+        priority: "high",
+        risk: "critical",
+        title: `Dual-control payment draft review for ${refs.payee}`,
+        summary:
+          "Finance Operations Worker prepared a payment instruction draft for dual-control review; external execution and money movement remain blocked.",
+        requestedAction: {
+          action: refs.blockers.length > 0 ? "request_revision" : "approve_draft",
+          paymentObjectId: paymentObject.id,
+          paymentId: payment.id,
+          paymentInstructionId: paymentInstruction.id,
+          billObjectId: refs.billObject?.id ?? null,
+          amountCents: refs.amountCents,
+          currency: refs.currency,
+          blockers: refs.blockers,
+          dualControl: "required",
+          requiresDualControl: true,
+          externalExecution: "blocked",
+          moneyMovement: "blocked",
+        },
+        evidence: {
+          packetId: packet.id,
+          documentId: document.id,
+          traceEvidenceId: traceEvidence.id,
+          draftEvidenceId: draftEvidence.id,
+          paymentInstructionIds: [paymentInstruction.id],
+          sourceEvidenceIds: refs.sourceEvidenceIds,
+        },
+        policy: {
+          paymentDraft: "dual_control_required",
+          paymentLink: "blocked",
+          moneyMovement: "blocked",
+          externalExecution: "blocked",
+        },
+        data: {
+          workerRunId: workerRun.id,
+          workflowRunId: workflowRun.id,
+          paymentObjectId: paymentObject.id,
+          paymentId: payment.id,
+          paymentInstructionId: paymentInstruction.id,
+        },
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: approvalRequests.id });
+
+    const stepRows = await tx
+      .insert(workflowSteps)
+      .values([
+        {
+          tenantId: context.worker.tenantId,
+          definitionId: definition.id,
+          workflowRunId: workflowRun.id,
+          eventId: event.id,
+          objectId: paymentObject.id,
+          workerId: context.worker.id,
+          capabilityId: context.capabilityId,
+          kind: "handoff",
+          name: "Payment source evidence accepted",
+          state: "done",
+          toState: "validation",
+          idempotencyKey: `${input.idempotencyKey}:source_context`,
+          input: { sourceRefs: refs.sourceRefs },
+          output: {
+            billObjectId: refs.billObject?.id ?? null,
+            sourcePaymentObjectId: refs.sourcePaymentObject?.id ?? null,
+            sourcePaymentInstructionId: refs.sourcePaymentInstruction?.id ?? null,
+          },
+          startedAt: now,
+          completedAt: now,
+          updatedAt: now,
+        },
+        {
+          tenantId: context.worker.tenantId,
+          definitionId: definition.id,
+          workflowRunId: workflowRun.id,
+          eventId: event.id,
+          objectId: paymentObject.id,
+          workerId: context.worker.id,
+          capabilityId: context.capabilityId,
+          kind: "worker_action",
+          name: "Payment instruction draft prepared",
+          state: "done",
+          fromState: "validation",
+          toState: refs.blockers.length > 0 ? "blocked" : "dual_control_pending",
+          idempotencyKey: `${input.idempotencyKey}:payment_draft`,
+          input: { paymentObjectId: paymentObject.id },
+          output: {
+            paymentId: payment.id,
+            paymentInstructionId: paymentInstruction.id,
+            draftEvidenceId: draftEvidence.id,
+          },
+          startedAt: now,
+          completedAt: now,
+          updatedAt: now,
+        },
+        {
+          tenantId: context.worker.tenantId,
+          definitionId: definition.id,
+          workflowRunId: workflowRun.id,
+          eventId: event.id,
+          approvalRequestId: approval.id,
+          objectId: paymentObject.id,
+          workerId: context.worker.id,
+          capabilityId: context.capabilityId,
+          kind: "approval_request",
+          name: "Dual-control payment approval requested",
+          state: "done",
+          fromState: refs.blockers.length > 0 ? "blocked" : "dual_control_pending",
+          toState: workflowState,
+          idempotencyKey: `${input.idempotencyKey}:approval_requested`,
+          input: { approvalRequestId: approval.id },
+          output: { packetId: packet.id, documentId: document.id },
+          startedAt: now,
+          completedAt: now,
+          updatedAt: now,
+        },
+      ])
+      .returning({ id: workflowSteps.id });
+
+    const workflowStepIds = stepRows.map((step) => step.id);
+    const viewKey = "finance.payment.review";
+    const viewVersion = "1.0.0";
+    const viewValues = {
+      capabilityId: context.capabilityId,
+      key: viewKey,
+      version: viewVersion,
+      name: "Finance payment review",
+      purpose: "Let an operator review a payment instruction draft and dual-control evidence without moving money.",
+      surface: "web",
+      objectType: "payment",
+      taskState: taskState as "approval_required" | "blocked",
+      contract: {
+        sections: ["PaymentSummary", "SourceEvidence", "DualControl", "EvidenceTimeline", "ActionBar"],
+        externalExecution: "blocked",
+        moneyMovement: "blocked",
+      } as JsonObject,
+      actions: {
+        decisionSurface: "/approval",
+        decisionCommand: "approval.decide",
+        valid: ["approved", "revision_requested", "rejected"],
+        paymentActions: ["approve_draft", "request_dual_control", "reject"],
+        externalExecution: "blocked",
+        moneyMovement: "blocked",
+      } as JsonObject,
+      data: {
+        latest: {
+          approvalRequestId: approval.id,
+          workerRunId: workerRun.id,
+          workflowRunId: workflowRun.id,
+          taskId: task.id,
+          paymentObjectId: paymentObject.id,
+          paymentId: payment.id,
+          paymentInstructionId: paymentInstruction.id,
+          billObjectId: refs.billObject?.id ?? null,
+          packetId: packet.id,
+          documentId: document.id,
+          traceEvidenceId: traceEvidence.id,
+          draftEvidenceId: draftEvidence.id,
+          amountCents: refs.amountCents,
+          currency: refs.currency,
+          payee: refs.payee,
+          method: refs.method,
+          blockers: refs.blockers,
+          dualControl: "required",
+          requiresDualControl: true,
+          externalExecution: "blocked",
+          externalMutation: false,
+          externalSend: false,
+          paymentLink: "blocked",
+          moneyMovement: "blocked",
+        },
+      } as JsonObject,
+      mask: {
+        account_numbers: "redacted",
+        bank_fields: "redacted",
+        payment_tokens: "blocked",
+        moneyMovement: "blocked",
+      } as JsonObject,
+      active: true,
+      updatedAt: now,
+    };
+    const [existingView] = await tx
+      .select({ id: generatedViews.id })
+      .from(generatedViews)
+      .where(
+        and(
+          eq(generatedViews.tenantId, context.worker.tenantId),
+          eq(generatedViews.key, viewKey),
+          eq(generatedViews.version, viewVersion),
+        ),
+      )
+      .limit(1);
+    const [view] = existingView
+      ? await tx
+          .update(generatedViews)
+          .set(viewValues)
+          .where(eq(generatedViews.id, existingView.id))
+          .returning({ id: generatedViews.id })
+      : await tx
+          .insert(generatedViews)
+          .values({
+            tenantId: context.worker.tenantId,
+            ...viewValues,
+            createdAt: now,
+          })
+          .returning({ id: generatedViews.id });
+
+    await tx.insert(events).values({
+      tenantId: context.worker.tenantId,
+      type: existingView ? "view.updated" : "view.published",
+      source: financeSource,
+      actorType: "worker",
+      actorId: context.worker.id,
+      actorRef: `worker:${context.worker.id}`,
+      objectId: paymentObject.id,
+      taskId: task.id,
+      capabilityId: context.capabilityId,
+      idempotencyKey: `${input.idempotencyKey}:finance_payment_view`,
+      data: {
+        key: viewKey,
+        version: viewVersion,
+        viewId: view.id,
+        workerRunId: workerRun.id,
+        workflowRunId: workflowRun.id,
+      },
+      occurredAt: now,
+      createdAt: now,
+    });
+
+    await tx.insert(auditEvents).values({
+      tenantId: context.worker.tenantId,
+      type: "finance_worker.payment_draft_prepare.completed",
+      source: financeSource,
+      actorType: "worker",
+      actorId: context.worker.id,
+      actorRef: `worker:${context.worker.id}`,
+      targetType: "worker_run",
+      targetId: workerRun.id,
+      taskId: task.id,
+      workerRunId: workerRun.id,
+      approvalRequestId: approval.id,
+      eventId: event.id,
+      objectId: paymentObject.id,
+      capabilityId: context.capabilityId,
+      risk: "critical",
+      idempotencyKey: `${input.idempotencyKey}:audit`,
+      data: {
+        operatorEmail: context.operator.email,
+        inputHash,
+        paymentObjectId: paymentObject.id,
+        paymentInstructionId: paymentInstruction.id,
+        amountCents: refs.amountCents,
+        currency: refs.currency,
+        dualControl: "required",
+        requiresDualControl: true,
+        externalExecution: "blocked",
+        externalMutation: false,
+        externalSend: false,
+        paymentLink: "blocked",
+        moneyMovement: "blocked",
+      },
+      createdAt: now,
+    });
+
+    const output = {
+      paymentObjectId: paymentObject.id,
+      paymentId: payment.id,
+      paymentInstructionId: paymentInstruction.id,
+      sourcePaymentObjectId: refs.sourcePaymentObject?.id ?? null,
+      sourcePaymentInstructionId: refs.sourcePaymentInstruction?.id ?? null,
+      billObjectId: refs.billObject?.id ?? null,
+      approvalRequestId: approval.id,
+      evidenceId: traceEvidence.id,
+      draftEvidenceId: draftEvidence.id,
+      packetId: packet.id,
+      documentId: document.id,
+      workflowRunId: workflowRun.id,
+      workflowStepIds,
+      financePaymentViewId: view.id,
+      state: draftState,
+      payee: refs.payee,
+      method: refs.method,
+      amountCents: refs.amountCents,
+      currency: refs.currency,
+      dueAt: refs.dueAt ?? null,
+      blockers: refs.blockers,
+      dualControl: "required",
+      requiresDualControl: true,
+      externalExecution: "blocked",
+      externalMutation: false,
+      externalSend: false,
+      paymentLink: "blocked",
+      moneyMovement: "blocked",
+      requiresApproval: true,
+    } satisfies JsonObject;
+
+    await tx
+      .update(workerRuns)
+      .set({
+        state: "done",
+        eventId: event.id,
+        data: {
+          input: runInput,
+          output,
+          eventId: event.id,
+          taskId: task.id,
+          paymentObjectId: paymentObject.id,
+          paymentId: payment.id,
+          paymentInstructionId: paymentInstruction.id,
+          billObjectId: refs.billObject?.id ?? null,
+          sourcePaymentObjectId: refs.sourcePaymentObject?.id ?? null,
+          sourcePaymentInstructionId: refs.sourcePaymentInstruction?.id ?? null,
+          approvalRequestId: approval.id,
+          evidenceId: traceEvidence.id,
+          draftEvidenceId: draftEvidence.id,
+          packetId: packet.id,
+          documentId: document.id,
+          workflowRunId: workflowRun.id,
+          workflowStepIds,
+          financePaymentViewId: view.id,
+          reservationId: reservation.id,
+          inferenceId: inference.id,
+          usageEventId: usage.id,
+        },
+        endedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(workerRuns.id, workerRun.id));
+
+    await tx
+      .update(workers)
+      .set({
+        kpis: {
+          ...context.worker.kpis,
+          payment_drafts_prepared: numberValue(context.worker.kpis.payment_drafts_prepared) + 1,
+          dual_control_packets: numberValue(context.worker.kpis.dual_control_packets) + 1,
+          owner_review_packets: numberValue(context.worker.kpis.owner_review_packets) + 1,
+        },
+        updatedAt: now,
+      })
+      .where(eq(workers.id, context.worker.id));
+
+    return {
+      replay: null,
+      workerRunId: workerRun.id,
+      taskId: task.id,
+      eventId: event.id,
+      paymentObjectId: paymentObject.id,
+      paymentId: payment.id,
+      paymentInstructionId: paymentInstruction.id,
+      sourcePaymentObjectId: refs.sourcePaymentObject?.id ?? null,
+      sourcePaymentInstructionId: refs.sourcePaymentInstruction?.id ?? null,
+      billObjectId: refs.billObject?.id ?? null,
+      approvalRequestId: approval.id,
+      evidenceId: traceEvidence.id,
+      draftEvidenceId: draftEvidence.id,
+      packetId: packet.id,
+      documentId: document.id,
+      workflowRunId: workflowRun.id,
+      workflowStepIds,
+      financePaymentViewId: view.id,
+      output,
+    };
+  });
+
+  if (result.replay) {
+    return replayedPaymentDraftPrepare(db, context, result.replay);
+  }
+
+  return {
+    created: true,
+    idempotencyKey: input.idempotencyKey,
+    workerRunId: result.workerRunId,
+    taskId: result.taskId,
+    eventId: result.eventId,
+    paymentObjectId: result.paymentObjectId,
+    paymentId: result.paymentId,
+    paymentInstructionId: result.paymentInstructionId,
+    sourcePaymentObjectId: result.sourcePaymentObjectId,
+    sourcePaymentInstructionId: result.sourcePaymentInstructionId,
+    billObjectId: result.billObjectId,
+    approvalRequestId: result.approvalRequestId,
+    evidenceId: result.evidenceId,
+    draftEvidenceId: result.draftEvidenceId,
+    packetId: result.packetId,
+    documentId: result.documentId,
+    workflowRunId: result.workflowRunId,
+    workflowStepIds: result.workflowStepIds,
+    financePaymentViewId: result.financePaymentViewId,
+    output: result.output,
+    snapshot: await getFinanceWorkerSnapshot(db, {
+      role: financeWorkerRole,
+      tenantSlug: context.worker.tenantSlug,
+      workerId: context.worker.id,
+    }),
+  };
+}
+
 export async function getFinanceWorkerSnapshot(
   db: Database = defaultDb,
   selector: FinanceWorkerSelector = {},
@@ -3993,6 +5230,23 @@ export async function getFinanceWorkerSnapshot(
     .where(and(eq(objects.tenantId, worker.tenantId), eq(objects.type, "cash_forecast")))
     .orderBy(desc(objects.updatedAt))
     .limit(10);
+  const paymentDraftRows = await db
+    .select({
+      id: objects.id,
+      name: objects.name,
+      state: objects.state,
+      data: objects.data,
+    })
+    .from(objects)
+    .where(
+      and(
+        eq(objects.tenantId, worker.tenantId),
+        eq(objects.type, "payment"),
+        eq(objects.source, financeSource),
+      ),
+    )
+    .orderBy(desc(objects.updatedAt))
+    .limit(10);
   const approvalRows = await db
     .select({
       id: approvalRequests.id,
@@ -4063,6 +5317,12 @@ export async function getFinanceWorkerSnapshot(
       state: forecast.state,
       data: forecast.data,
     })),
+    paymentDrafts: paymentDraftRows.map((payment) => ({
+      id: payment.id,
+      name: payment.name,
+      state: payment.state,
+      data: payment.data,
+    })),
     approvals: approvalRows,
     latestRun: latestRun
       ? {
@@ -4103,6 +5363,7 @@ export async function getFinanceWorkerSnapshotSafe(selector: FinanceWorkerSelect
         invoices: [],
         arFollowups: [],
         cashForecasts: [],
+        paymentDrafts: [],
         approvals: [],
         latestRun: null,
       },

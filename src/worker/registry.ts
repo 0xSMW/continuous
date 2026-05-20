@@ -39,6 +39,7 @@ import {
   generateFinanceCashForecast,
   getFinanceWorkerSnapshotSafe,
   prepareFinanceInvoice,
+  prepareFinancePaymentDraft,
 } from "./finance";
 import { plannedWorkerContractForRole } from "./planned-workers";
 import { normalizeIdempotencyKey } from "./security";
@@ -596,6 +597,34 @@ const financeCashForecastGenerateConfig: WorkerConfigSchema = {
   },
   additionalProperties: true,
 };
+const financePaymentDraftPrepareConfig: WorkerConfigSchema = {
+  type: "object",
+  oneRequired: ["billId", "paymentId", "sourceRefs"],
+  properties: {
+    billId: { type: "string" },
+    billObjectId: { type: "string" },
+    paymentId: { type: "string" },
+    paymentObjectId: { type: "string" },
+    paymentInstructionId: { type: "string" },
+    bankAccountId: { type: "string" },
+    amountCents: { type: "number", minimum: 0 },
+    currency: { type: "string" },
+    method: { type: "string" },
+    dueAt: { type: "string" },
+    payee: { type: "string" },
+    sourceRefs: jsonObjectConfig,
+    policy: jsonObjectConfig,
+    evidenceIds: {
+      type: "array",
+      items: { type: "string" },
+    },
+    sourceEvidenceIds: {
+      type: "array",
+      items: { type: "string" },
+    },
+  },
+  additionalProperties: true,
+};
 
 const revenueDefinition: WorkerDefinition = {
   role: revenueWorkerRole,
@@ -964,6 +993,32 @@ const financeDefinition: WorkerDefinition = {
         }
 
         return generateFinanceCashForecast({
+          idempotencyKey: context.idempotencyKey,
+          tenantSlug: context.target.tenantSlug,
+          workerId: context.target.workerId,
+          operatorEmail: context.operatorEmail,
+          config: context.config,
+        });
+      },
+    },
+    "payment_draft.prepare": {
+      name: "payment_draft.prepare",
+      description: "Prepare a payment instruction draft with dual-control evidence and no money movement.",
+      idempotency: "required",
+      sideEffects: "internal",
+      externalExecution: "blocked",
+      requiresTenant: true,
+      configSchema: financePaymentDraftPrepareConfig,
+      async handle(context) {
+        if (!context.idempotencyKey) {
+          throw new PlatformUnavailableError(
+            "invalid_idempotency_key",
+            "A string idempotency key is required.",
+            400,
+          );
+        }
+
+        return prepareFinancePaymentDraft({
           idempotencyKey: context.idempotencyKey,
           tenantSlug: context.target.tenantSlug,
           workerId: context.target.workerId,

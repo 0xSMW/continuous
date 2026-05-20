@@ -169,6 +169,7 @@ const ids = {
   workflowInvoiceDraft: "66666666-6666-4666-8666-000000000023",
   workflowArFollowup: "66666666-6666-4666-8666-000000000024",
   workflowCashForecast: "66666666-6666-4666-8666-000000000025",
+  workflowPaymentDraft: "66666666-6666-4666-8666-000000000026",
   workflowOpenNewState: "66666666-6666-4666-8666-000000000009",
   workflowCompensationChange: "66666666-6666-4666-8666-000000000010",
   workflowLocationChange: "66666666-6666-4666-8666-000000000011",
@@ -1613,6 +1614,29 @@ async function seed() {
         approvals: { required: ["finance_cash_forecast_approval"], states: { review_ready: ["finance_cash_forecast_approval"] } },
         evidence: { packet: "cash_packet", required: ["account_snapshot", "cash_forecast", "approval_request"] },
         tests: { required: ["source_accounts", "cash_packet", "money_movement_blocked", "idempotent_replay"] },
+      },
+      {
+        id: ids.workflowPaymentDraft,
+        key: "payment_draft",
+        name: "Payment draft",
+        purpose:
+          "Turn bill or payment evidence into a dual-control payment instruction draft while money movement remains blocked.",
+        domain: "finance",
+        states: {
+          order: ["draft", "validation", "dual_control_pending", "ready_to_pay", "blocked"],
+        },
+        transitions: {
+          draft: ["validation", "blocked"],
+          validation: ["dual_control_pending", "blocked"],
+          dual_control_pending: ["ready_to_pay", "blocked"],
+        },
+        objects: { required: ["payment", "payment_instruction"], optional: ["bill", "bank_account"] },
+        approvals: {
+          required: ["finance_payment_draft_approval"],
+          states: { dual_control_pending: ["finance_payment_draft_approval"] },
+        },
+        evidence: { packet: "cash_packet", required: ["payment_instruction", "dual_control_packet", "source_payment_or_bill"] },
+        tests: { required: ["payment_instruction_draft", "dual_control_required", "money_movement_blocked"] },
       },
     ])
     .onConflictDoNothing();

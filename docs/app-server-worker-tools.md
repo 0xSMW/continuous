@@ -18,10 +18,11 @@ agents can inspect payload requirements before handlers exist.
 `continuous.worker.command`, `/worker`, and `worker:tool` all run through that
 same registry validation before dispatch.
 The CI integration suite exercises `continuous.worker.command` on real
-Revenue `lead.read` and `run`, Owner `brief.generate`, and Dispatch
-`schedule.propose` commands, proving the app-server boundary writes the same
-worker run, approval, evidence, budget, event, adapter dry-run, generated view,
-and workflow records as `/worker`. Dispatch `customer_update.draft`,
+Revenue `lead.read` and `run`, Owner `brief.generate`, Dispatch
+`schedule.propose`, and Finance `payment_draft.prepare` commands, proving the
+app-server boundary writes the same worker run, approval, evidence, budget,
+event, adapter dry-run, generated view, and workflow records as `/worker`.
+Dispatch `customer_update.draft`,
 `closeout.prepare`, and `exception.route` are also schema-discoverable through
 the same registry-backed command list and keep customer-send, QA, Finance
 handoff, exception reason, severity, and related Core refs under `config`.
@@ -39,6 +40,12 @@ window, account refs, optional cash drivers, and approval policy under
 `config`, then writes a cash forecast object, cash packet, approval request,
 generated review view, workflow, budget, and audit proof while external
 execution and money movement remain blocked.
+Finance `payment_draft.prepare` is also registry-backed: bill or payment
+selectors, bank account refs, amount/method overrides, evidence refs, and
+dual-control policy live under `config`; the command writes payment draft,
+payment instruction, cash packet, approval, generated review view, workflow,
+budget, and audit proof while ACH, payment links, bank writes, and money
+movement remain blocked.
 
 ```sh
 bun run app-server:worker-tools
@@ -96,6 +103,10 @@ bun run worker:tool worker.finance.ar_followup.draft --payload='{"worker":{"role
 
 ```sh
 bun run worker:tool worker.finance.cash_forecast.generate --payload='{"worker":{"role":"finance_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-finance-cash-forecast-001","config":{"window":{"from":"2026-05-01T00:00:00.000Z","to":"2026-06-01T00:00:00.000Z"},"accounts":["Operating account"],"startingBalanceCents":500000,"policy":{"requireOwnerApproval":true,"moneyMovement":"blocked"}}}'
+```
+
+```sh
+bun run worker:tool worker.finance.payment_draft.prepare --payload='{"worker":{"role":"finance_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-finance-payment-draft-001","config":{"sourceRefs":{"paymentId":"payment_row_or_payment_object_uuid"},"payee":"Acme Roofing Supplies","method":"ach","policy":{"requireOwnerApproval":true,"requireDualControl":true,"moneyMovement":"blocked"}}}'
 ```
 
 ```http

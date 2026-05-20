@@ -124,6 +124,7 @@ describe("worker tool contract", () => {
       "worker.finance.invoice.prepare",
       "worker.finance.ar_followup.draft",
       "worker.finance.cash_forecast.generate",
+      "worker.finance.payment_draft.prepare",
       "worker.continue",
       "worker.approvals.list",
       "worker.approvals.decide",
@@ -277,6 +278,13 @@ describe("worker tool contract", () => {
           requiresTenant: true,
           externalExecution: "blocked",
         }),
+        expect.objectContaining({
+          role: "finance_operations",
+          name: "payment_draft.prepare",
+          idempotency: "required",
+          requiresTenant: true,
+          externalExecution: "blocked",
+        }),
       ]),
     );
     expect(workerToolSchema.registry.commands).toEqual(
@@ -380,6 +388,19 @@ describe("worker tool contract", () => {
             properties: expect.objectContaining({
               window: expect.objectContaining({ type: "object" }),
               accounts: expect.objectContaining({ type: "array", minItems: 1 }),
+              policy: expect.objectContaining({ type: "object" }),
+            }),
+          }),
+        }),
+        expect.objectContaining({
+          role: "finance_operations",
+          name: "payment_draft.prepare",
+          configSchema: expect.objectContaining({
+            oneRequired: ["billId", "paymentId", "sourceRefs"],
+            properties: expect.objectContaining({
+              sourceRefs: expect.objectContaining({ type: "object" }),
+              bankAccountId: expect.objectContaining({ type: "string" }),
+              amountCents: expect.objectContaining({ type: "number", minimum: 0 }),
               policy: expect.objectContaining({ type: "object" }),
             }),
           }),
@@ -863,6 +884,48 @@ describe("worker tool contract", () => {
         },
       }),
     ).rejects.toThrow("config.accounts is required for cash_forecast.generate.");
+  });
+
+  it("validates finance payment draft envelopes before invoking the worker", async () => {
+    await expect(
+      executeWorkerTool("worker.finance.payment_draft.prepare", {
+        worker: {
+          role: "finance_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "bad key!",
+        config: {
+          paymentId: "payment_uuid",
+        },
+      }),
+    ).rejects.toThrow(
+      "Idempotency key may only contain letters, numbers, dot, underscore, colon, or dash.",
+    );
+
+    await expect(
+      executeWorkerTool("worker.finance.payment_draft.prepare", {
+        worker: {
+          role: "finance_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "finance-payment-draft-schema-001",
+        config: {},
+      }),
+    ).rejects.toThrow("config.billId, paymentId or sourceRefs is required for payment_draft.prepare.");
+
+    await expect(
+      executeWorkerTool("worker.finance.payment_draft.prepare", {
+        worker: {
+          role: "finance_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "finance-payment-draft-schema-002",
+        config: {
+          paymentId: "payment_uuid",
+          amountCents: -1,
+        },
+      }),
+    ).rejects.toThrow("config.amountCents must be greater than or equal to 0.");
   });
 
   it("requires tenant scope for adapter reconciliation", async () => {

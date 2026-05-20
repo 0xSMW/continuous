@@ -84,18 +84,23 @@ calendar/send credentials.
 
 ## Phase 4: Finance Worker
 
-Runtime slices are registered as `/worker command=invoice.prepare` and
-`/worker command=ar_followup.draft` for `worker.role=finance_operations`.
+Runtime slices are registered as `/worker command=invoice.prepare`,
+`/worker command=ar_followup.draft`, `/worker command=cash_forecast.generate`,
+and `/worker command=payment_draft.prepare` for
+`worker.role=finance_operations`.
 Invoice preparation consumes Dispatch closeout refs from `config.sourceRefs`,
 creates an invoice draft, cash packet, approval request, and accounting dry-run
 receipt. AR follow-up consumes persisted invoice refs from `config.invoiceId`,
 creates a blocked draft, cash packet, approval request, and generated review
-view. Cash forecast is registered as `/worker command=cash_forecast.generate`;
-it consumes forecast windows, account refs, and cash-driver inputs from
+view. Cash forecast consumes forecast windows, account refs, and cash-driver inputs from
 `config`, writes a cash forecast object, cash packet, approval request, and
-generated review view. These commands keep sends, payment links, external
-execution, and money movement blocked. Remaining Finance work is payment draft
-and live credential readiness.
+generated review view. Payment draft consumes bill or payment selectors from
+`config`/`config.sourceRefs`, writes a payment object, payment instruction
+draft, cash packet, dual-control approval request, generated review view,
+workflow, budget, and audit proof. These commands keep sends, payment links,
+external execution, and money movement blocked. Remaining Finance work is
+expense coding, live accounting/payment credential readiness, and dual-control
+execution gates.
 
 | Dependency | Implementation target |
 |---|---|
