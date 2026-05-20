@@ -251,10 +251,11 @@ maybeDescribe("Revenue Worker integration eval", () => {
     const credentialId = `ci-managed-${randomUUID()}`;
     const token = `ci-managed-token-${randomUUID()}`;
     const tokenFingerprint = controlPlaneTokenFingerprint(token);
-    const upsert = await upsertControlPlaneCredential({
+    const upsertIdempotencyKey = `ci-credential-upsert-${randomUUID()}`;
+    const upsertInput = {
       operatorEmail: "owner@continuoushq.com",
       tenantSlug: "continuous-demo",
-      idempotencyKey: `ci-credential-upsert-${randomUUID()}`,
+      idempotencyKey: upsertIdempotencyKey,
       credentialId,
       displayName: "CI managed operator",
       tokenFingerprint: tokenFingerprint ?? undefined,
@@ -267,7 +268,8 @@ maybeDescribe("Revenue Worker integration eval", () => {
         source: "ci",
       },
       db,
-    });
+    };
+    const upsert = await upsertControlPlaneCredential(upsertInput);
 
     expect(upsert.created).toBe(true);
 
@@ -279,6 +281,22 @@ maybeDescribe("Revenue Worker integration eval", () => {
 
     expect(storedCredential.tokenFingerprint).toBe(tokenFingerprint);
     expect(JSON.stringify(storedCredential.evidence)).not.toContain(token);
+    const upsertReplay = await upsertControlPlaneCredential(upsertInput);
+
+    expect(upsertReplay.created).toBe(false);
+    expect(upsertReplay.updated).toBe(false);
+    expect(upsertReplay.controlPlaneCredentialId).toBe(upsert.controlPlaneCredentialId);
+    expect(upsertReplay.eventId).toBe(upsert.eventId);
+    expect(upsertReplay.auditEventId).toBe(upsert.auditEventId);
+    await expect(
+      upsertControlPlaneCredential({
+        ...upsertInput,
+        displayName: "Changed CI managed operator",
+      }),
+    ).rejects.toMatchObject({
+      code: "core_command_idempotency_conflict",
+      status: 409,
+    });
 
     const request = new Request("http://localhost/worker", {
       headers: {
@@ -315,10 +333,11 @@ maybeDescribe("Revenue Worker integration eval", () => {
         authorization: `Bearer ${rotatedToken}`,
       },
     });
-    const rotation = await attestControlPlaneTokenRotation({
+    const rotationIdempotencyKey = `ci-credential-rotation-${randomUUID()}`;
+    const rotationInput = {
       operatorEmail: "owner@continuoushq.com",
       tenantSlug: "continuous-demo",
-      idempotencyKey: `ci-credential-rotation-${randomUUID()}`,
+      idempotencyKey: rotationIdempotencyKey,
       credentialId,
       previousCredentialId: credentialId,
       previousTokenFingerprint: tokenFingerprint ?? undefined,
@@ -328,9 +347,25 @@ maybeDescribe("Revenue Worker integration eval", () => {
         source: "ci",
       },
       db,
-    });
+    };
+    const rotation = await attestControlPlaneTokenRotation(rotationInput);
 
     expect(rotation.tokenRotationAttestationId).toBeTruthy();
+    const rotationReplay = await attestControlPlaneTokenRotation(rotationInput);
+
+    expect(rotationReplay.created).toBe(false);
+    expect(rotationReplay.tokenRotationAttestationId).toBe(rotation.tokenRotationAttestationId);
+    expect(rotationReplay.eventId).toBe(rotation.eventId);
+    expect(rotationReplay.auditEventId).toBe(rotation.auditEventId);
+    await expect(
+      attestControlPlaneTokenRotation({
+        ...rotationInput,
+        reason: "Changed CI rotation bridge proof",
+      }),
+    ).rejects.toMatchObject({
+      code: "core_command_idempotency_conflict",
+      status: 409,
+    });
 
     await db
       .update(controlPlaneCredentials)
@@ -392,19 +427,36 @@ maybeDescribe("Revenue Worker integration eval", () => {
       message: "Control-plane credential fingerprint does not match managed credential inventory.",
     });
 
-    const revoke = await revokeControlPlaneCredential({
+    const revokeIdempotencyKey = `ci-credential-revoke-${randomUUID()}`;
+    const revokeInput = {
       operatorEmail: "owner@continuoushq.com",
       tenantSlug: "continuous-demo",
-      idempotencyKey: `ci-credential-revoke-${randomUUID()}`,
+      idempotencyKey: revokeIdempotencyKey,
       credentialId,
       reason: "CI revocation proof",
       evidence: {
         source: "ci",
       },
       db,
-    });
+    };
+    const revoke = await revokeControlPlaneCredential(revokeInput);
 
     expect(revoke.revoked).toBe(true);
+    const revokeReplay = await revokeControlPlaneCredential(revokeInput);
+
+    expect(revokeReplay.revoked).toBe(false);
+    expect(revokeReplay.controlPlaneCredentialId).toBe(revoke.controlPlaneCredentialId);
+    expect(revokeReplay.eventId).toBe(revoke.eventId);
+    expect(revokeReplay.auditEventId).toBe(revoke.auditEventId);
+    await expect(
+      revokeControlPlaneCredential({
+        ...revokeInput,
+        reason: "Changed CI revocation proof",
+      }),
+    ).rejects.toMatchObject({
+      code: "core_command_idempotency_conflict",
+      status: 409,
+    });
 
     const denied = await authorizeManagedControlPlaneCredential({
       request: rotatedRequest,
@@ -440,15 +492,17 @@ maybeDescribe("Revenue Worker integration eval", () => {
 
     expect(authSession?.id).toBeTruthy();
 
-    const review = await reviewControlPlaneSessions({
+    const reviewIdempotencyKey = `ci-session-review-${randomUUID()}`;
+    const reviewInput = {
       operatorEmail: "owner@continuoushq.com",
       tenantSlug: "continuous-demo",
-      idempotencyKey: `ci-session-review-${randomUUID()}`,
+      idempotencyKey: reviewIdempotencyKey,
       credentialId,
       outcome: "denied",
       limit: 10,
       db,
-    });
+    };
+    const review = await reviewControlPlaneSessions(reviewInput);
 
     expect(review.reviewed).toBe(true);
     expect(review.counts.denied).toBeGreaterThanOrEqual(1);
@@ -460,6 +514,21 @@ maybeDescribe("Revenue Worker integration eval", () => {
         }),
       ]),
     );
+    const reviewReplay = await reviewControlPlaneSessions(reviewInput);
+
+    expect(reviewReplay.reviewed).toBe(false);
+    expect(reviewReplay.reviewViewId).toBe(review.reviewViewId);
+    expect(reviewReplay.eventId).toBe(review.eventId);
+    expect(reviewReplay.auditEventId).toBe(review.auditEventId);
+    await expect(
+      reviewControlPlaneSessions({
+        ...reviewInput,
+        outcome: "allowed",
+      }),
+    ).rejects.toMatchObject({
+      code: "core_command_idempotency_conflict",
+      status: 409,
+    });
   });
 
   it("creates headless core tasks with event and audit proof", async () => {
@@ -687,8 +756,19 @@ maybeDescribe("Revenue Worker integration eval", () => {
         ref: `worker:${worker.id}`,
       },
       input: {
-        prompt: "Changed input must replay the original inference.",
+        prompt: "Classify this lead for quote readiness.",
+        customerName: "Acme Roof Repair",
         token: null,
+        inputRefs: {
+          sourceObjectId: "33333333-3333-4333-8333-000000000001",
+          token: null,
+        },
+      },
+      redaction: {
+        fields: ["token"],
+      },
+      evaluation: {
+        caseId: "ci.lead_classification",
       },
       db,
     });
@@ -706,6 +786,41 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(replay.inferenceId).toBe(result.inferenceId);
     expect(replay.usageEventId).toBe(result.usageEventId);
     expect(auditCount.value).toBe(1);
+    await expect(
+      executeAiInference({
+        operatorEmail: "owner@continuoushq.com",
+        tenantSlug: "continuous-demo",
+        idempotencyKey,
+        routeKey: "low_cost_fast",
+        budgetAccountId: budgetAccount.id,
+        maxUnits: 750,
+        capabilityId: capability.id,
+        actor: {
+          type: "worker",
+          id: worker.id,
+          ref: `worker:${worker.id}`,
+        },
+        input: {
+          prompt: "Changed input must conflict with the original inference.",
+          customerName: "Acme Roof Repair",
+          token: null,
+          inputRefs: {
+            sourceObjectId: "33333333-3333-4333-8333-000000000001",
+            token: null,
+          },
+        },
+        redaction: {
+          fields: ["token"],
+        },
+        evaluation: {
+          caseId: "ci.lead_classification",
+        },
+        db,
+      }),
+    ).rejects.toMatchObject({
+      code: "core_command_idempotency_conflict",
+      status: 409,
+    });
   }, 120_000);
 
   it("records payroll preview statements, lines, liabilities, traces, and proof", async () => {

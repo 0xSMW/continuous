@@ -21,6 +21,11 @@ import type {
   ControlPlaneScopeResult,
 } from "../worker/security";
 import { PlatformUnavailableError } from "./errors";
+import {
+  assertCoreIdempotencyReplay,
+  coreIdempotencyFingerprint,
+  type CoreIdempotencyFingerprint,
+} from "./idempotency";
 import { loadOperatorContext } from "./operators";
 
 type Database = typeof defaultDb;
@@ -500,12 +505,17 @@ async function existingCredentialAuditResult(
   tenantId: string,
   idempotencyKey: string,
   suffix: string,
+  replay?: {
+    command: string;
+    fingerprint: CoreIdempotencyFingerprint;
+  },
 ) {
   const [existingAudit] = await tx
     .select({
       auditEventId: auditEvents.id,
       eventId: auditEvents.eventId,
       targetId: auditEvents.targetId,
+      data: auditEvents.data,
     })
     .from(auditEvents)
     .where(
@@ -520,6 +530,14 @@ async function existingCredentialAuditResult(
 
   if (!existingAudit?.targetId) {
     return null;
+  }
+
+  if (replay) {
+    assertCoreIdempotencyReplay({
+      command: replay.command,
+      fingerprint: replay.fingerprint,
+      storedData: existingAudit.data,
+    });
   }
 
   const [credential] = await tx
@@ -835,6 +853,19 @@ export async function upsertControlPlaneCredential(input: ControlPlaneCredential
   const commands = listObject(input.allowedCommands);
   const expiresAt = optionalDate(input.expiresAt, "config.expiresAt");
   const evidence = jsonObject(input.evidence);
+  const idempotency = coreIdempotencyFingerprint("control_plane.credential.upsert", {
+    credentialId,
+    displayName,
+    credentialOperatorEmail,
+    state,
+    tokenFingerprint,
+    scope,
+    routes,
+    access,
+    commands,
+    expiresAt: expiresAt?.toISOString() ?? null,
+    evidence,
+  });
 
   return db.transaction(async (tx) => {
     await tx.execute(
@@ -846,6 +877,10 @@ export async function upsertControlPlaneCredential(input: ControlPlaneCredential
       operator.tenantId,
       input.idempotencyKey,
       "credential_upserted",
+      {
+        command: "control_plane.credential.upsert",
+        fingerprint: idempotency,
+      },
     );
 
     if (existingReplay) {
@@ -939,6 +974,7 @@ export async function upsertControlPlaneCredential(input: ControlPlaneCredential
           access,
           commands,
           hasTokenFingerprint: Boolean(tokenFingerprint),
+          idempotency,
         },
         occurredAt: now,
       })
@@ -962,6 +998,7 @@ export async function upsertControlPlaneCredential(input: ControlPlaneCredential
           credentialId,
           state,
           evidence,
+          idempotency,
           rawTokenStored: false,
         },
       })
@@ -989,6 +1026,11 @@ export async function revokeControlPlaneCredential(input: ControlPlaneCredential
   const credentialId = requiredStringMax(input.credentialId, "config.credentialId", 140);
   const reason = cleanString(input.reason) ?? "Control-plane credential revoked.";
   const evidence = jsonObject(input.evidence);
+  const idempotency = coreIdempotencyFingerprint("control_plane.credential.revoke", {
+    credentialId,
+    reason,
+    evidence,
+  });
 
   return db.transaction(async (tx) => {
     await tx.execute(
@@ -1000,6 +1042,10 @@ export async function revokeControlPlaneCredential(input: ControlPlaneCredential
       operator.tenantId,
       input.idempotencyKey,
       "credential_revoked",
+      {
+        command: "control_plane.credential.revoke",
+        fingerprint: idempotency,
+      },
     );
 
     if (existingReplay) {
@@ -1067,6 +1113,7 @@ export async function revokeControlPlaneCredential(input: ControlPlaneCredential
           credentialId,
           reason,
           alreadyRevoked,
+          idempotency,
         },
         occurredAt: now,
       })
@@ -1091,6 +1138,7 @@ export async function revokeControlPlaneCredential(input: ControlPlaneCredential
           reason,
           evidence,
           alreadyRevoked,
+          idempotency,
         },
       })
       .returning({ id: auditEvents.id });
@@ -1116,7 +1164,14 @@ export async function reviewControlPlaneSessions(input: ControlPlaneSessionRevie
   const credentialId = cleanString(input.credentialId);
   const outcome = cleanString(input.outcome);
   const limit = parseSessionReviewLimit(input.limit);
-  const since = optionalDate(input.since, "config.since") ?? new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const requestedSince = optionalDate(input.since, "config.since");
+  const since = requestedSince ?? new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const idempotency = coreIdempotencyFingerprint("control_plane.session.review", {
+    credentialId: credentialId ?? null,
+    outcome: outcome ?? null,
+    since: requestedSince?.toISOString() ?? null,
+    limit,
+  });
 
   return db.transaction(async (tx) => {
     await tx.execute(
@@ -1128,6 +1183,7 @@ export async function reviewControlPlaneSessions(input: ControlPlaneSessionRevie
         auditEventId: auditEvents.id,
         eventId: auditEvents.eventId,
         targetId: auditEvents.targetId,
+        data: auditEvents.data,
       })
       .from(auditEvents)
       .where(
@@ -1141,6 +1197,12 @@ export async function reviewControlPlaneSessions(input: ControlPlaneSessionRevie
       .limit(1);
 
     if (existingAudit?.targetId) {
+      assertCoreIdempotencyReplay({
+        command: "control_plane.session.review",
+        fingerprint: idempotency,
+        storedData: existingAudit.data,
+      });
+
       const [view] = await tx
         .select()
         .from(uiContracts)
@@ -1226,6 +1288,7 @@ export async function reviewControlPlaneSessions(input: ControlPlaneSessionRevie
           filters,
           counts,
           authSessionIds: sessions.map((session) => session.id),
+          idempotency,
         },
         occurredAt: now,
       })
@@ -1248,6 +1311,7 @@ export async function reviewControlPlaneSessions(input: ControlPlaneSessionRevie
           reviewViewId: view.id,
           filters,
           counts,
+          idempotency,
         },
       })
       .returning({ id: auditEvents.id });
@@ -1326,6 +1390,10 @@ async function existingRotationResult(
   tx: Transaction,
   tenantId: string,
   idempotencyKey: string,
+  replay?: {
+    command: string;
+    fingerprint: CoreIdempotencyFingerprint;
+  },
 ) {
   const [existing] = await tx
     .select({
@@ -1352,6 +1420,20 @@ async function existingRotationResult(
 
   if (!existing) {
     return null;
+  }
+
+  if (replay) {
+    const [audit] = await tx
+      .select({ data: auditEvents.data })
+      .from(auditEvents)
+      .where(eq(auditEvents.id, existing.auditEventId ?? ""))
+      .limit(1);
+
+    assertCoreIdempotencyReplay({
+      command: replay.command,
+      fingerprint: replay.fingerprint,
+      storedData: audit?.data,
+    });
   }
 
   return {
@@ -1389,17 +1471,31 @@ export async function attestControlPlaneTokenRotation(
     "config.nextTokenFingerprint",
     true,
   );
-  const rotatedAt = optionalDate(input.rotatedAt, "config.rotatedAt") ?? new Date();
+  const requestedRotatedAt = optionalDate(input.rotatedAt, "config.rotatedAt");
+  const rotatedAt = requestedRotatedAt ?? new Date();
   const authSessionId = optionalUuid(input.authSessionId, "config.authSessionId");
   const reason = cleanString(input.reason) ?? "Operator attested control-plane token rotation.";
   const evidence = jsonObject(input.evidence);
+  const idempotency = coreIdempotencyFingerprint("control_plane.token_rotation.attest", {
+    credentialId,
+    previousCredentialId,
+    previousTokenFingerprint,
+    nextTokenFingerprint,
+    rotatedAt: requestedRotatedAt?.toISOString() ?? null,
+    authSessionId,
+    reason,
+    evidence,
+  });
 
   return db.transaction(async (tx) => {
     await tx.execute(
       sql`select pg_advisory_xact_lock(hashtext(${operator.tenantId}), hashtext(${`${controlPlaneSource}:${input.idempotencyKey}`}))`,
     );
 
-    const existing = await existingRotationResult(tx, operator.tenantId, input.idempotencyKey);
+    const existing = await existingRotationResult(tx, operator.tenantId, input.idempotencyKey, {
+      command: "control_plane.token_rotation.attest",
+      fingerprint: idempotency,
+    });
 
     if (existing) {
       return existing;
@@ -1440,6 +1536,7 @@ export async function attestControlPlaneTokenRotation(
       evidence,
       rotatedAt: rotatedAt.toISOString(),
       attestedAt: rotation.attestedAt.toISOString(),
+      idempotency,
     };
     const [event] = await tx
       .insert(events)

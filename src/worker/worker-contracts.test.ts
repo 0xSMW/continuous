@@ -52,6 +52,19 @@ const contracts = [
 const runtimeRoles = new Set<string>(
   contracts.filter((contract) => contract.runtime).map((contract) => contract.role),
 );
+const workerFamilyNames = "(?:revenue|dispatch|finance|workforce|compliance|systems|owner)";
+const workerFamilyRoutePattern = new RegExp(
+  `^app/(?:api/)?${workerFamilyNames}[^/]*worker/`,
+);
+const apiCommandRoutePattern = new RegExp(
+  `^app/api/(?:worker|workers|core|workflow|approval|approvals|revenue|dispatch|finance|workforce|compliance|systems|owner)(?:/|-)`,
+);
+const forbiddenWorkerUrlPattern = new RegExp(
+  `(?:^|["'\`\\s(])/(?:api/(?:worker|workers|core|workflow|approval|approvals|revenue|dispatch|finance|workforce|compliance|systems|owner)(?:[-/][a-z0-9-]+)?|workers?/${workerFamilyNames}(?:[-/][a-z0-9-]+)?|${workerFamilyNames}[a-z0-9-]*worker)(?:/|["'\`\\s),.;]|$)`,
+);
+const forbiddenWorkerNamespacePattern = new RegExp(
+  `continuous\\.(?:revenue|dispatch|finance|owner|workforce|compliance|systems)_worker|(?:revenue|dispatch|finance|owner|workforce|compliance|systems)_worker\\.`,
+);
 
 function read(path: string) {
   return readFileSync(join(root, path), "utf8");
@@ -82,10 +95,6 @@ function trackedTextFiles(paths: string[]) {
 describe("future worker contracts", () => {
   it("does not expose worker-family-specific HTTP route files", () => {
     const routeFiles = listFiles("app").filter((path) => path.endsWith("/route.ts")).sort();
-    const workerFamilyRoutePattern =
-      /^app\/(?:api\/)?(?:revenue|dispatch|finance|workforce|compliance|systems|owner)[^/]*worker\//;
-    const apiCommandRoutePattern =
-      /^app\/api\/(?:worker|workers|core|workflow|approval|approvals|revenue|dispatch|finance|workforce|compliance|systems|owner)(?:\/|-)/;
 
     expect(routeFiles).toEqual([
       "app/api/health/route.ts",
@@ -99,8 +108,6 @@ describe("future worker contracts", () => {
   });
 
   it("does not document or script worker-specific HTTP URLs", () => {
-    const forbiddenWorkerUrlPattern =
-      /(?:^|["'`\s(])\/(?:api\/(?:worker|workers|core|workflow|approval|approvals|revenue|dispatch|finance|workforce|compliance|systems|owner)(?:[-/][a-z0-9-]+)?|(?:revenue|dispatch|finance|workforce|compliance|systems|owner)[a-z0-9-]*worker)(?:\/|["'`\s),.;]|$)/;
     const files = trackedTextFiles([
       "app",
       "docs",
@@ -117,9 +124,27 @@ describe("future worker contracts", () => {
     expect(offenders).toEqual([]);
   });
 
+  it("treats worker-family URL shapes as non-canonical", () => {
+    const path = (...segments: string[]) => `/${segments.join("/")}`;
+    const nonCanonical = [
+      path("api", "revenue-worker"),
+      path("api", "revenue-worker", "run"),
+      path("api", "worker", "revenue"),
+      path("worker", "revenue"),
+      path("workers", "finance"),
+      path("dispatch-worker"),
+    ];
+
+    for (const url of nonCanonical) {
+      expect(forbiddenWorkerUrlPattern.test(` ${url} `)).toBe(true);
+    }
+
+    expect(forbiddenWorkerUrlPattern.test(" /worker ")).toBe(false);
+    expect(forbiddenWorkerUrlPattern.test(" /core ")).toBe(false);
+    expect(forbiddenWorkerUrlPattern.test(" /workflow ")).toBe(false);
+  });
+
   it("keeps persisted worker source and event names role-qualified under the generic worker namespace", () => {
-    const forbiddenNamespacePattern =
-      /continuous\.(?:revenue|dispatch|finance|owner|workforce|compliance|systems)_worker|(?:revenue|dispatch|finance|owner|workforce|compliance|systems)_worker\./;
     const files = trackedTextFiles([
       "app",
       "docs",
@@ -131,7 +156,7 @@ describe("future worker contracts", () => {
       "STRATEGY.md",
       "package.json",
     ]);
-    const offenders = files.filter((path) => forbiddenNamespacePattern.test(read(path)));
+    const offenders = files.filter((path) => forbiddenWorkerNamespacePattern.test(read(path)));
 
     expect(offenders).toEqual([]);
     expect(read("src/worker/revenue.ts")).toContain("worker.revenue_operations.run.completed");

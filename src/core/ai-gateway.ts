@@ -21,6 +21,11 @@ import {
 } from "../db/schema";
 import { chargeBudget, reserveBudget } from "./budgets";
 import { PlatformUnavailableError } from "./errors";
+import {
+  assertCoreIdempotencyReplay,
+  coreIdempotencyFingerprint,
+  type CoreIdempotencyFingerprint,
+} from "./idempotency";
 import { loadOperatorContext } from "./operators";
 
 type Database = typeof defaultDb;
@@ -384,12 +389,18 @@ async function routeFor(input: {
   return route;
 }
 
-async function replayedInference(input: { db: Database; tenantId: string; idempotencyKey: string }) {
+async function replayedInference(input: {
+  db: Database;
+  tenantId: string;
+  idempotencyKey: string;
+  fingerprint: CoreIdempotencyFingerprint;
+}) {
   const [audit] = await input.db
     .select({
       auditEventId: auditEvents.id,
       eventId: auditEvents.eventId,
       targetId: auditEvents.targetId,
+      data: auditEvents.data,
     })
     .from(auditEvents)
     .where(
@@ -405,6 +416,12 @@ async function replayedInference(input: { db: Database; tenantId: string; idempo
   if (!audit?.targetId) {
     return null;
   }
+
+  assertCoreIdempotencyReplay({
+    command: "ai.infer",
+    fingerprint: input.fingerprint,
+    storedData: audit.data,
+  });
 
   const [inference] = await input.db
     .select()
@@ -467,7 +484,32 @@ export async function executeAiInference(input: AiInferInput): Promise<AiInferRe
     operatorUserId: operator.userId,
     operatorActorRef: operator.actorRef,
   });
-  const replay = await replayedInference({ db, tenantId: operator.tenantId, idempotencyKey });
+  const routeSelector = {
+    routeKey: cleanString(input.routeKey) ?? null,
+    routePurpose: cleanString(input.routePurpose) ?? "default",
+  };
+  const rawInput = jsonObject(input.input);
+  const redaction = jsonObject(input.redaction);
+  const evaluation = jsonObject(input.evaluation);
+  const idempotency = coreIdempotencyFingerprint("ai.infer", {
+    ...routeSelector,
+    budgetAccountId,
+    maxUnits,
+    costUsd,
+    actor,
+    taskId: taskId ?? null,
+    objectId: objectId ?? null,
+    capabilityId: capabilityId ?? null,
+    input: rawInput,
+    redaction,
+    evaluation,
+  });
+  const replay = await replayedInference({
+    db,
+    tenantId: operator.tenantId,
+    idempotencyKey,
+    fingerprint: idempotency,
+  });
 
   if (replay) {
     return replay;
@@ -484,11 +526,10 @@ export async function executeAiInference(input: AiInferInput): Promise<AiInferRe
   const route = await routeFor({
     db,
     tenantId: operator.tenantId,
-    routeKey: input.routeKey,
-    routePurpose: input.routePurpose,
+    routeKey: routeSelector.routeKey ?? undefined,
+    routePurpose: routeSelector.routePurpose,
   });
-  const fields = redactionFields(input.redaction);
-  const rawInput = jsonObject(input.input);
+  const fields = redactionFields(redaction);
   const redactedInput = redactValue(rawInput, fields) as JsonObject;
   const redactedInputRefs = objectValue(redactValue(rawInput.inputRefs, fields));
   const promptHash = hashObject({
@@ -509,7 +550,7 @@ export async function executeAiInference(input: AiInferInput): Promise<AiInferRe
       mode: cleanString(input.redaction?.mode) ?? "key_redaction",
       fields: Array.from(fields).sort(),
     },
-    evaluation: jsonObject(input.evaluation),
+    evaluation,
     maxUnits,
     externalExecution: "blocked",
   };
@@ -618,6 +659,7 @@ export async function executeAiInference(input: AiInferInput): Promise<AiInferRe
     actor,
     providerExecution: "disabled",
     externalExecution: "blocked",
+    idempotency,
   };
   const [event] = await db
     .insert(events)
