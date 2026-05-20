@@ -1539,7 +1539,24 @@ maybeDescribe("Revenue Worker integration eval", () => {
       tenantSlug: "continuous-demo",
       idempotencyKey: `ci-core-connection-upsert-${runId}`,
       adapterKey,
-      name: "Replay should return the first connection",
+      name: "Google Workspace lead inbox CI",
+      state: "active",
+      externalAccountId: `leads-${runId}@continuoushq.com`,
+      scopes: {
+        reads: ["lead.read"],
+      },
+      config: {
+        sources: ["google_workspace_inbox"],
+        providers: ["google_workspace"],
+        readerKinds: ["inbox"],
+        polling: {
+          enabled: true,
+          source: "google_workspace_inbox",
+          provider: "google_workspace",
+          credentialRef: "env:GOOGLE_WORKSPACE_TOKEN",
+        },
+        externalExecution: "blocked",
+      },
       db,
     });
     const healthResult = await recordCoreConnectionHealth({
@@ -1566,6 +1583,15 @@ maybeDescribe("Revenue Worker integration eval", () => {
       tenantSlug: "continuous-demo",
       idempotencyKey: `ci-core-connection-health-${runId}`,
       connectionId: connectionResult.connectionId,
+      checks: [
+        "state",
+        "adapter",
+        "external_execution",
+        "credential_ref",
+        "source_metadata",
+        "scopes",
+        "polling",
+      ],
       db,
     });
     const credentialCheck = healthResult.checks.find((check) => objectValue(check).key === "credential_ref");
@@ -1946,7 +1972,13 @@ maybeDescribe("Revenue Worker integration eval", () => {
       tenantSlug: "continuous-demo",
       idempotencyKey: `ci-core-evidence-${runId}`,
       kind: "snapshot",
-      name: "Different name should replay existing evidence",
+      name: "Agency notice source snapshot",
+      objectId: objectResult.objectId,
+      eventId: eventResult.eventId,
+      data: {
+        receivedBy: "operator",
+        documentState: "legible",
+      },
       db,
     });
 
@@ -1979,7 +2011,19 @@ maybeDescribe("Revenue Worker integration eval", () => {
       tenantSlug: "continuous-demo",
       idempotencyKey: `ci-core-packet-${runId}`,
       kind: "agency_notice_packet",
-      name: "Replay returns the first packet",
+      name: "Agency notice evidence packet",
+      state: "review_ready",
+      sensitivity: "high",
+      objectId: objectResult.objectId,
+      eventId: eventResult.eventId,
+      evidenceIds: [evidenceResult.evidenceId],
+      documentIds: [documentResult.documentId],
+      sections: {
+        order: ["summary", "source", "decision"],
+      },
+      data: {
+        decisionId: decisionResult.decisionId,
+      },
       db,
     });
 
@@ -1991,16 +2035,45 @@ maybeDescribe("Revenue Worker integration eval", () => {
       tenantSlug: "continuous-demo",
       idempotencyKey: `ci-core-adapter-intent-${runId}`,
       connectionId: connection?.id ?? "",
-      operation: "different_operation",
+      operation: "draft_agency_response",
+      mode: "dry_run",
+      eventId: eventResult.eventId,
+      request: {
+        objectId: objectResult.objectId,
+        externalSend: false,
+      },
+      data: {
+        source: "core_primitive_ci",
+      },
+      maxAttempts: 2,
       db,
     });
     const ruleChangeReplay = await recordRuleChange({
       operatorEmail: "owner@continuoushq.com",
       tenantSlug: "continuous-demo",
       idempotencyKey: `ci-core-rule-change-${runId}`,
-      ruleKey: "different.rule",
-      changeType: "different_change",
-      title: "Replay should return the first rule change",
+      rulePackId: rulePack?.id,
+      ruleKey: "agency_notice.response_window",
+      changeType: "operator_policy_update",
+      title: "Agency notice response window update",
+      state: "proposed",
+      decision: "owner_review_required",
+      rationale: "Rule changes need owner review before compliance automation changes.",
+      sourceRefs: {
+        source: "ci",
+      },
+      before: {
+        responseWindowDays: 14,
+      },
+      after: {
+        responseWindowDays: 10,
+      },
+      impact: {
+        objects: [objectResult.objectId],
+      },
+      data: {
+        externalExecution: "blocked",
+      },
       db,
     });
 
@@ -2105,7 +2178,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
       toObjectId: customer.objectId,
       type: "about_customer",
       data: {
-        confidence: "should_replay",
+        confidence: "operator_confirmed",
       },
       db,
     });
@@ -2114,8 +2187,22 @@ maybeDescribe("Revenue Worker integration eval", () => {
       tenantSlug: "continuous-demo",
       idempotencyKey: `ci-view-publish-${runId}`,
       key: `ci.notice.review.${runId}`,
-      name: "Different name should replay",
-      purpose: "Replay existing view.",
+      name: "Notice review",
+      purpose: "Render an operator review packet for an agency notice.",
+      objectType: "agency_notice",
+      taskState: "approval_required",
+      contract: {
+        sections: ["summary", "evidence", "actions"],
+      },
+      actions: {
+        valid: ["approve", "request_revision"],
+      },
+      data: {
+        objectId: notice.objectId,
+      },
+      mask: {
+        pii: "redacted_by_default",
+      },
       db,
     });
 
@@ -2219,7 +2306,16 @@ maybeDescribe("Revenue Worker integration eval", () => {
       tenantSlug: "continuous-demo",
       idempotencyKey: `ci-customer-signal-${runId}`,
       type: "review",
-      name: "Replay returns existing signal",
+      name: "CI Google review request",
+      state: "requested",
+      source: "ci.core",
+      externalId: `ci-review-${runId}`,
+      customerObjectId: customerObject?.id,
+      relatedObjectId: jobObject?.id,
+      data: {
+        platform: "google",
+        requestStatus: "prepared",
+      },
       db,
     });
     const [signalCount] = await db
