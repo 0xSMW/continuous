@@ -169,7 +169,8 @@ Use the same route for operational worker commands:
 }
 ```
 
-Due retry execution uses the same shape and remains blocked:
+Due retry execution uses the same shape and remains blocked while recording
+live-credential readiness and rollback proof:
 
 ```json
 {

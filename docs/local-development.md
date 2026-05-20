@@ -202,7 +202,8 @@ curl -X POST http://localhost:3000/worker \
 }'
 ```
 
-Due retry execution uses the same envelope and remains blocked/dry-run:
+Due retry execution uses the same envelope and remains blocked/dry-run while
+recording live-credential readiness and rollback proof:
 
 ```sh
 curl -X POST http://localhost:3000/worker \

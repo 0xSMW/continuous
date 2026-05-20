@@ -45,7 +45,7 @@ smoke test.
 | Budget | Reservation before model/tool work and usage attribution after |
 | Evidence | Source snapshot, prompt/result trace, approval, and adapter receipt |
 | Approval | First-class `approval_requests`, approval decision evidence, audit trail, and allowed workflow advancement while external execution remains blocked |
-| Adapter safety | Dry-run mode, receipt evidence, attempt metadata, reconciliation worker output, due retry execution, retry/review system tasks, workflow retry/review/post-retry states, and audit/evidence records are persisted; scoped live credentials are still blocked |
+| Adapter safety | Dry-run mode, receipt evidence, attempt metadata, reconciliation worker output, due retry execution, retry/review system tasks, workflow retry/review/post-retry states, live-credential readiness checks, rollback plans, and audit/evidence records are persisted; scoped live execution is still blocked |
 | Eval | Golden lead/quote cases cover direct packets, Core row intake refs, source-selector intake, normal urgency, expected classification, approval, budget, adapter receipt, and idempotency outputs in CI |
 | Launch | Production smoke proves no external mutation without approval and receipt capture |
 
@@ -94,6 +94,6 @@ smoke test.
 ## Milestones
 
 1. Expand read-only real lead intake beyond website-form source records into authenticated inbox and CRM source readers.
-2. Extend blocked retry execution into scoped live credential checks and rollback paths for failed or uncertain adapter results.
+2. Provision scoped live credentials, tested rollback playbooks, and a first controlled send after the persisted retry readiness gate stays green.
 3. Keep missing-fact, pricing override, and policy-risk eval fixtures green as the worker expands toward higher autonomy.
 4. Raise autonomy only for Revenue read, classify, and draft capabilities; owner brief generation belongs to the Owner Chief-of-Staff worker.

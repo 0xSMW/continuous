@@ -19,7 +19,7 @@
 - Provision the production object-storage bucket/key, run `scripts/install-backup-timer.sh`, and prove scheduled off-host Postgres dump retention before customer data.
 - Complete production hardening with tag-based deploy rollback, observability/alerts, scoped tokens, non-root host access, and a restore drill before using the droplet for real customer data.
 - Replace the bootstrap shared operator token with first-class operator auth, per-command scopes, token rotation, and session-level audit trails before broad customer use.
-- Extend blocked adapter retry execution into scoped live credentials and rollback paths before allowing external sends or money movement.
+- Provision scoped adapter credentials, tested rollback playbooks, and a first controlled send only after retry readiness evidence stays green.
 - Expand read-only real lead intake from website-form `lead.read` records into authenticated inbox and CRM source readers.
 - Use `docs/revenue-operations-worker-expansion.md` as the expansion gate list for the next worker iteration.
 - Use `docs/revenue-operations-worker-v1-contract.md` as the machine-actionable contract for run and approval effects.

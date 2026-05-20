@@ -193,7 +193,7 @@ and local toolbox aliases resolve to the same handlers and validation rules.
 | `continue` | `worker.continue` | `approvalId` | Required | Approved execution packet, revised approval packet, or rejected stop packet, workflow step, task outcome, audit/evidence | Blocked |
 | `approval.decide` | `worker.approvals.decide` | `approvalId`, `action`, optional `note` | None | Approval/task/workflow evidence only | Blocked |
 | `adapters.reconcile` | `worker.adapters.reconcile` | Tenant-scoped `worker.tenantSlug`, optional integer `limit` | None | Adapter reconciliation audit/evidence plus retry/review system tasks | Blocked |
-| `adapters.retry` | `worker.adapters.retry` | Tenant-scoped `worker.tenantSlug`, optional integer `limit` | None | Executes due dry-run retry rows, closes retry tasks, and writes blocked receipt evidence | Blocked |
+| `adapters.retry` | `worker.adapters.retry` | Tenant-scoped `worker.tenantSlug`, optional integer `limit` | None | Executes due dry-run retry rows, closes retry tasks, and writes blocked receipt evidence with live-credential readiness and rollback proof | Blocked |
 
 ## Run Config
 

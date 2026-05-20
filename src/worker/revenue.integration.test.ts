@@ -4014,6 +4014,9 @@ maybeDescribe("Revenue Worker integration eval", () => {
 
     expect(stringList(retryOutput.retryRunIds)).toContain(first.adapterRunId);
     expect(stringList(retryOutput.retryActionIds)).toContain(first.adapterActionId);
+    expect(retryOutput.liveCredentialChecks).toBeGreaterThanOrEqual(2);
+    expect(retryOutput.rollbackPlans).toBeGreaterThanOrEqual(2);
+    expect(retryOutput.blockedLiveExecutions).toBeGreaterThanOrEqual(2);
 
     const postRetry = await reconcileAdapterLedger({
       tenantSlug: "continuous-demo",
@@ -4253,6 +4256,8 @@ maybeDescribe("Revenue Worker integration eval", () => {
       expect(objectValue(task.outcome).decision).toBe("retry_scheduled");
       expect(objectValue(task.outcome).externalExecution).toBe("blocked");
       expect(objectValue(task.outcome).executable).toBe(false);
+      expect(objectValue(objectValue(task.outcome).liveCredentialCheck).state).toBe("blocked");
+      expect(objectValue(objectValue(task.outcome).rollbackPlan).state).toBe("required");
     }
     expect(retryEvents).toHaveLength(2);
     expect(retryEvents.every((event) => event.type === "adapter.retry_task.created")).toBe(true);
@@ -4279,6 +4284,9 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(retryOutput.processed).toBe(2);
     expect(retryOutput.runs).toBe(1);
     expect(retryOutput.actions).toBe(1);
+    expect(retryOutput.liveCredentialChecks).toBe(2);
+    expect(retryOutput.rollbackPlans).toBe(2);
+    expect(retryOutput.blockedLiveExecutions).toBe(2);
     expect(retryOutput.retryRunIds).toEqual([runId]);
     expect(retryOutput.retryActionIds).toEqual([actionId]);
     expect(retryOutput.closedRetryTaskIds).toEqual(
@@ -4306,16 +4314,30 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(objectValue(retriedRun?.error)).toEqual({});
     expect(objectValue(retriedRun?.receipt).externalMutation).toBe(false);
     expect(objectValue(retriedRun?.receipt).externalSend).toBe(false);
+    expect(objectValue(objectValue(retriedRun?.receipt).liveCredentialCheck).state).toBe("blocked");
+    expect(objectValue(objectValue(retriedRun?.receipt).liveCredentialCheck).missingScopes).toEqual([
+      "adapter.write",
+    ]);
+    expect(objectValue(objectValue(retriedRun?.receipt).rollbackPlan).state).toBe("required");
     expect(retriedAction?.state).toBe("done");
     expect(retriedAction?.reconciliationState).toBe("pending");
     expect(retriedAction?.nextAttemptAt).toBeNull();
     expect(objectValue(retriedAction?.error)).toEqual({});
     expect(objectValue(retriedAction?.receipt).externalMutation).toBe(false);
     expect(objectValue(retriedAction?.receipt).externalSend).toBe(false);
+    expect(objectValue(objectValue(retriedAction?.receipt).liveCredentialCheck).state).toBe(
+      "blocked",
+    );
+    expect(objectValue(objectValue(retriedAction?.receipt).rollbackPlan).state).toBe("required");
     expect(closedRetryTasks.every((task) => task.state === "done")).toBe(true);
     expect(
       closedRetryTasks.every(
         (task) => objectValue(task.outcome).status === "adapter_retry_executed",
+      ),
+    ).toBe(true);
+    expect(
+      closedRetryTasks.every(
+        (task) => objectValue(objectValue(task.outcome).liveCredentialCheck).state === "blocked",
       ),
     ).toBe(true);
     expect(retryExecutionEvidence).toHaveLength(2);
@@ -4323,6 +4345,11 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(
       retryExecutionEvidence.every(
         (item) => objectValue(item.data).externalExecution === "blocked",
+      ),
+    ).toBe(true);
+    expect(
+      retryExecutionEvidence.every(
+        (item) => objectValue(objectValue(item.data).rollbackPlan).required === true,
       ),
     ).toBe(true);
 

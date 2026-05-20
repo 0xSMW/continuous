@@ -250,7 +250,8 @@ export const workerTools = [
   },
   {
     name: "worker.adapters.retry",
-    description: "Execute due dry-run adapter retries without external execution.",
+    description:
+      "Execute due dry-run adapter retries, recording live-credential and rollback readiness while external execution stays blocked.",
     registry: {
       role: "revenue_operations",
       surface: "command",

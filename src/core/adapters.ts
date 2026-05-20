@@ -5,6 +5,7 @@ import {
   adapterActions,
   adapterRuns,
   auditEvents,
+  connections,
   evidence,
   events,
   tasks,
@@ -22,6 +23,11 @@ type DatabaseExecutor = Database | Transaction;
 type AdapterRunRow = typeof adapterRuns.$inferSelect;
 type AdapterActionRow = typeof adapterActions.$inferSelect;
 type ReconciliationDecision = "matched" | "retry_scheduled" | "needs_review";
+type AdapterExecutionSafety = {
+  liveCredentialCheck: JsonObject;
+  rollbackPlan: JsonObject;
+  executionGate: JsonObject;
+};
 
 const source = "continuous.adapter_reconciliation";
 const revenueWorkflowKey = "lead_to_cash";
@@ -46,6 +52,9 @@ export type AdapterRetryExecutionResult = {
   processed: number;
   runs: number;
   actions: number;
+  liveCredentialChecks: number;
+  rollbackPlans: number;
+  blockedLiveExecutions: number;
   retryRunIds: string[];
   retryActionIds: string[];
   closedRetryTaskIds: string[];
@@ -74,6 +83,12 @@ function stringValue(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+function stringList(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+    : [];
+}
+
 function uuidValue(value: unknown) {
   const valueString = stringValue(value);
   return valueString && uuidPattern.test(valueString) ? valueString : undefined;
@@ -89,6 +104,178 @@ function appendString(value: unknown, item: string) {
 
 function nextAttemptTime(now: Date, attempt: number) {
   return new Date(now.getTime() + Math.min(attempt, 6) * 5 * 60 * 1000);
+}
+
+function requestedLiveScopes(input: { operation: string; request?: JsonObject; data?: JsonObject }) {
+  const explicitScopes = [
+    ...stringList(input.request?.requiredLiveScopes),
+    ...stringList(input.request?.requiredScopes),
+    ...stringList(input.data?.requiredLiveScopes),
+    ...stringList(input.data?.requiredScopes),
+  ];
+  if (explicitScopes.length > 0) {
+    return Array.from(new Set(explicitScopes));
+  }
+
+  const operation = input.operation.toLowerCase();
+  if (operation.includes("payment")) {
+    return ["payment_link.create"];
+  }
+  if (operation.includes("invoice")) {
+    return ["invoice.write"];
+  }
+  if (operation.includes("schedule") || operation.includes("calendar")) {
+    return ["calendar.write"];
+  }
+  if (operation.includes("response") || operation.includes("message") || operation.includes("email")) {
+    return ["message.send"];
+  }
+
+  return ["adapter.write"];
+}
+
+function grantedLiveScopes(scopes: JsonObject) {
+  return Array.from(
+    new Set([
+      ...stringList(scopes.write),
+      ...stringList(scopes.writes),
+      ...stringList(scopes.send),
+      ...stringList(scopes.sends),
+      ...stringList(scopes.execute),
+      ...stringList(scopes.executes),
+      ...stringList(scopes.actions),
+      ...stringList(scopes.live),
+    ]),
+  );
+}
+
+function rollbackPlanFor(input: {
+  operation: string;
+  request?: JsonObject;
+  data?: JsonObject;
+  connectionConfig?: JsonObject;
+}) {
+  const configuredPlan = objectValue(
+    input.request?.rollbackPlan ?? input.data?.rollbackPlan ?? input.connectionConfig?.rollbackPlan,
+  );
+  const configuredSteps = stringList(configuredPlan.steps);
+  const ready = configuredPlan.ready === true && configuredSteps.length > 0;
+
+  return {
+    state: ready ? "ready" : "required",
+    ready,
+    required: true,
+    operation: input.operation,
+    strategy: stringValue(configuredPlan.strategy) ?? "manual_reconciliation",
+    reason: ready ? "rollback_plan_present" : "rollback_plan_missing",
+    steps: ready
+      ? configuredSteps
+      : [
+          "confirm no external mutation occurred",
+          "reconcile the external system using the adapter receipt and idempotency key",
+          "escalate to owner review before replaying any live action",
+        ],
+    evidenceRequired: Array.from(
+      new Set([
+        ...stringList(configuredPlan.evidenceRequired),
+        "adapter_receipt",
+        "live_credential_check",
+        "post_retry_reconciliation",
+      ]),
+    ),
+  };
+}
+
+async function adapterExecutionSafetyFor(
+  db: DatabaseExecutor,
+  input: {
+    tenantId: string;
+    targetType: "adapter_run" | "adapter_action";
+    targetId: string;
+    connectionId: string;
+    operation: string;
+    request?: JsonObject;
+    data?: JsonObject;
+    now: Date;
+  },
+): Promise<AdapterExecutionSafety> {
+  const [connection] = await db
+    .select({
+      id: connections.id,
+      state: connections.state,
+      scopes: connections.scopes,
+      config: connections.config,
+    })
+    .from(connections)
+    .where(and(eq(connections.tenantId, input.tenantId), eq(connections.id, input.connectionId)))
+    .limit(1);
+  const connectionConfig = objectValue(connection?.config);
+  const requiredScopes = requestedLiveScopes({
+    operation: input.operation,
+    request: input.request,
+    data: input.data,
+  });
+  const grantedScopes = grantedLiveScopes(objectValue(connection?.scopes));
+  const missingScopes = requiredScopes.filter((scope) => !grantedScopes.includes(scope));
+  const liveEnabled =
+    connectionConfig.executable === true || connectionConfig.externalExecution === "enabled";
+  const credentialRef =
+    stringValue(connectionConfig.credentialRef) ??
+    stringValue(connectionConfig.secretRef) ??
+    stringValue(connectionConfig.tokenRef) ??
+    stringValue(connectionConfig.vaultRef) ??
+    null;
+  const hasCredential = Boolean(credentialRef || connectionConfig.authConfigured === true);
+  const rollbackPlan = rollbackPlanFor({
+    operation: input.operation,
+    request: input.request,
+    data: input.data,
+    connectionConfig,
+  });
+  const blockers = [
+    ...(connection ? [] : ["connection_missing"]),
+    ...(connection?.state === "active" ? [] : ["connection_not_active"]),
+    ...(liveEnabled ? [] : ["live_execution_not_enabled"]),
+    ...(hasCredential ? [] : ["credential_reference_missing"]),
+    ...missingScopes.map((scope) => `missing_scope:${scope}`),
+    ...(rollbackPlan.ready === true ? [] : ["rollback_plan_required"]),
+  ];
+  const readinessState = blockers.length === 0 ? "ready" : "blocked";
+  const liveCredentialCheck = {
+    state: readinessState,
+    checkedAt: input.now.toISOString(),
+    targetType: input.targetType,
+    targetId: input.targetId,
+    connectionId: input.connectionId,
+    connectionState: connection?.state ?? "missing",
+    credentialState: hasCredential ? "configured" : "missing",
+    credentialRef,
+    requiredScopes,
+    grantedScopes,
+    missingScopes,
+    blockers,
+    externalExecution: "blocked",
+    executable: false,
+  };
+  const executionGate = {
+    state: "blocked",
+    checkedAt: input.now.toISOString(),
+    targetType: input.targetType,
+    targetId: input.targetId,
+    connectionId: input.connectionId,
+    readinessState,
+    blockers: Array.from(new Set([...blockers, "live_adapter_executor_disabled"])),
+    externalExecution: "blocked",
+    externalMutation: false,
+    externalSend: false,
+    executable: false,
+  };
+
+  return {
+    liveCredentialCheck,
+    rollbackPlan,
+    executionGate,
+  };
 }
 
 function decisionFor(row: {
@@ -475,6 +662,14 @@ async function createFollowupTask(
     ? `Retry adapter ${input.targetType === "adapter_run" ? "run" : "action"} ${input.operation}`
     : `Review adapter ${input.targetType === "adapter_run" ? "run" : "action"} ${input.operation}`;
   const idempotencyKey = `${input.targetType}:${input.targetId}:${input.decision}:task:${input.attempt}`;
+  const safety = await adapterExecutionSafetyFor(db, {
+    tenantId: input.tenantId,
+    targetType: input.targetType,
+    targetId: input.targetId,
+    connectionId: input.connectionId,
+    operation: input.operation,
+    now: input.now,
+  });
   const [task] = await db
     .insert(tasks)
     .values({
@@ -503,6 +698,9 @@ async function createFollowupTask(
         operation: input.operation,
         externalExecution: "blocked",
         executable: false,
+        liveCredentialCheck: safety.liveCredentialCheck,
+        rollbackPlan: safety.rollbackPlan,
+        executionGate: safety.executionGate,
       },
       kpi: {
         risk: isRetry ? "adapter_retry_pending" : "adapter_review_required",
@@ -536,6 +734,9 @@ async function createFollowupTask(
         operation: input.operation,
         externalExecution: "blocked",
         executable: false,
+        liveCredentialCheck: safety.liveCredentialCheck,
+        rollbackPlan: safety.rollbackPlan,
+        executionGate: safety.executionGate,
       },
       occurredAt: input.now,
     })
@@ -567,6 +768,9 @@ async function createFollowupTask(
         maxAttempts: input.maxAttempts,
         externalExecution: "blocked",
         executable: false,
+        liveCredentialCheck: safety.liveCredentialCheck,
+        rollbackPlan: safety.rollbackPlan,
+        executionGate: safety.executionGate,
       },
     })
     .returning({ id: auditEvents.id });
@@ -591,6 +795,9 @@ async function createFollowupTask(
         maxAttempts: input.maxAttempts,
         externalExecution: "blocked",
         executable: false,
+        liveCredentialCheck: safety.liveCredentialCheck,
+        rollbackPlan: safety.rollbackPlan,
+        executionGate: safety.executionGate,
       },
     })
     .returning({ id: evidence.id });
@@ -612,6 +819,9 @@ async function closeRetryTasks(
     eventId: string;
     auditEventId: string;
     evidenceId: string;
+    liveCredentialCheck: JsonObject;
+    rollbackPlan: JsonObject;
+    executionGate: JsonObject;
     now: Date;
   },
 ) {
@@ -659,6 +869,9 @@ async function closeRetryTasks(
           retryEvidenceId: input.evidenceId,
           externalExecution: "blocked",
           executable: false,
+          liveCredentialCheck: input.liveCredentialCheck,
+          rollbackPlan: input.rollbackPlan,
+          executionGate: input.executionGate,
         },
         updatedAt: input.now,
       })
@@ -684,6 +897,9 @@ async function recordRetryExecution(
     operation: string;
     receipt: JsonObject;
     response?: JsonObject;
+    liveCredentialCheck: JsonObject;
+    rollbackPlan: JsonObject;
+    executionGate: JsonObject;
     now: Date;
   },
 ) {
@@ -698,6 +914,9 @@ async function recordRetryExecution(
     externalExecution: "blocked",
     externalMutation: false,
     externalSend: false,
+    liveCredentialCheck: input.liveCredentialCheck,
+    rollbackPlan: input.rollbackPlan,
+    executionGate: input.executionGate,
   };
   const [event] = await db
     .insert(events)
@@ -770,6 +989,9 @@ async function recordRetryExecution(
     eventId: event.id,
     auditEventId: audit.id,
     evidenceId: proof.id,
+    liveCredentialCheck: input.liveCredentialCheck,
+    rollbackPlan: input.rollbackPlan,
+    executionGate: input.executionGate,
     now: input.now,
   });
 
@@ -778,6 +1000,9 @@ async function recordRetryExecution(
     auditEventId: audit.id,
     evidenceId: proof.id,
     closedRetryTaskIds,
+    liveCredentialCheck: input.liveCredentialCheck,
+    rollbackPlan: input.rollbackPlan,
+    executionGate: input.executionGate,
   };
 }
 
@@ -978,6 +1203,15 @@ async function reconcileRun(db: DatabaseExecutor, row: AdapterRunRow, now: Date)
 }
 
 async function executeActionRetry(db: DatabaseExecutor, row: AdapterActionRow, now: Date) {
+  const safety = await adapterExecutionSafetyFor(db, {
+    tenantId: row.tenantId,
+    targetType: "adapter_action",
+    targetId: row.id,
+    connectionId: row.connectionId,
+    operation: row.operation,
+    request: row.request,
+    now,
+  });
   const response = {
     ...row.response,
     status: "retry_executed",
@@ -985,6 +1219,9 @@ async function executeActionRetry(db: DatabaseExecutor, row: AdapterActionRow, n
     attempt: row.attempt,
     externalExecution: "blocked",
     externalSend: false,
+    liveCredentialCheck: safety.liveCredentialCheck,
+    rollbackPlan: safety.rollbackPlan,
+    executionGate: safety.executionGate,
   };
   const receipt = {
     ...row.receipt,
@@ -993,6 +1230,9 @@ async function executeActionRetry(db: DatabaseExecutor, row: AdapterActionRow, n
     externalMutation: false,
     externalSend: false,
     reconciliationState: "pending",
+    liveCredentialCheck: safety.liveCredentialCheck,
+    rollbackPlan: safety.rollbackPlan,
+    executionGate: safety.executionGate,
   };
   const updated = await db
     .update(adapterActions)
@@ -1031,6 +1271,9 @@ async function executeActionRetry(db: DatabaseExecutor, row: AdapterActionRow, n
     operation: row.operation,
     receipt,
     response,
+    liveCredentialCheck: safety.liveCredentialCheck,
+    rollbackPlan: safety.rollbackPlan,
+    executionGate: safety.executionGate,
     now,
   });
 
@@ -1038,6 +1281,15 @@ async function executeActionRetry(db: DatabaseExecutor, row: AdapterActionRow, n
 }
 
 async function executeRunRetry(db: DatabaseExecutor, row: AdapterRunRow, now: Date) {
+  const safety = await adapterExecutionSafetyFor(db, {
+    tenantId: row.tenantId,
+    targetType: "adapter_run",
+    targetId: row.id,
+    connectionId: row.connectionId,
+    operation: row.operation,
+    data: row.data,
+    now,
+  });
   const receipt = {
     ...row.receipt,
     retryExecutedAt: now.toISOString(),
@@ -1045,6 +1297,9 @@ async function executeRunRetry(db: DatabaseExecutor, row: AdapterRunRow, now: Da
     externalMutation: false,
     externalSend: false,
     reconciliationState: "pending",
+    liveCredentialCheck: safety.liveCredentialCheck,
+    rollbackPlan: safety.rollbackPlan,
+    executionGate: safety.executionGate,
   };
   const data = {
     ...row.data,
@@ -1052,6 +1307,9 @@ async function executeRunRetry(db: DatabaseExecutor, row: AdapterRunRow, now: Da
     externalExecution: "blocked",
     externalMutation: false,
     externalSend: false,
+    liveCredentialCheck: safety.liveCredentialCheck,
+    rollbackPlan: safety.rollbackPlan,
+    executionGate: safety.executionGate,
   };
   const updated = await db
     .update(adapterRuns)
@@ -1088,6 +1346,9 @@ async function executeRunRetry(db: DatabaseExecutor, row: AdapterRunRow, now: Da
     maxAttempts: row.maxAttempts,
     operation: row.operation,
     receipt,
+    liveCredentialCheck: safety.liveCredentialCheck,
+    rollbackPlan: safety.rollbackPlan,
+    executionGate: safety.executionGate,
     now,
   });
 
@@ -1225,6 +1486,9 @@ export async function executeAdapterRetries(input: {
     processed: 0,
     runs: 0,
     actions: 0,
+    liveCredentialChecks: 0,
+    rollbackPlans: 0,
+    blockedLiveExecutions: 0,
     retryRunIds: [],
     retryActionIds: [],
     closedRetryTaskIds: [],
@@ -1263,6 +1527,9 @@ export async function executeAdapterRetries(input: {
 
       result.processed += 1;
       result.actions += 1;
+      result.liveCredentialChecks += 1;
+      result.rollbackPlans += 1;
+      result.blockedLiveExecutions += executed.executionGate.state === "blocked" ? 1 : 0;
       result.retryActionIds.push(row.id);
       result.eventIds.push(executed.eventId);
       result.auditEventIds.push(executed.auditEventId);
@@ -1279,6 +1546,9 @@ export async function executeAdapterRetries(input: {
 
       result.processed += 1;
       result.runs += 1;
+      result.liveCredentialChecks += 1;
+      result.rollbackPlans += 1;
+      result.blockedLiveExecutions += executed.executionGate.state === "blocked" ? 1 : 0;
       result.retryRunIds.push(row.id);
       result.eventIds.push(executed.eventId);
       result.auditEventIds.push(executed.auditEventId);
