@@ -128,12 +128,11 @@ export const workerTools = [
         config: {
           type: "object",
           description:
-            "Read-only source intake configuration. Records are persisted as Core lead object/event/evidence rows and returned as config.intake selectors for worker.run.",
+            "Read-only source intake configuration. Provide source records directly or reference an active connection through config.reader; records are persisted as Core lead object/event/evidence rows and returned as config.intake selectors for worker.run.",
           properties: {
             source: { type: "string" },
             sourceKind: { type: "string" },
             reader: { $ref: "#/$defs/sourceReader" },
-            sourceReader: { $ref: "#/$defs/sourceReader" },
             records: {
               type: "array",
               minItems: 1,

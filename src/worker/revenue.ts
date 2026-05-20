@@ -4,6 +4,7 @@ import { and, count, desc, eq, sql } from "drizzle-orm";
 
 import { db as defaultDb } from "../db/client";
 import {
+  adapters,
   adapterActions,
   adapterRuns,
   approvalRequests,
@@ -872,6 +873,31 @@ type ParsedLeadSourceRecord = {
   leadPacket: JsonObject;
 };
 
+type LeadSourceReader = {
+  kind: string;
+  source: string;
+  provider: string;
+  credentialRef: string | null;
+  connectionRef: string | null;
+  cursor: string | null;
+  authState: string;
+  readOnly: true;
+  externalExecution: "blocked";
+  externalSend: false;
+  connectionId?: string | null;
+  connectionName?: string | null;
+  connectionExternalAccountId?: string | null;
+  sourceMode?: "payload" | "connection_buffer";
+};
+
+type LeadSourceConnection = typeof connections.$inferSelect;
+type LeadSourceConnectionCandidate = {
+  connection: LeadSourceConnection;
+  adapterKey: string;
+  adapterKind: string;
+  adapterCapabilities: JsonObject;
+};
+
 function inferredSourceReaderKind(sourceName: string) {
   const source = sourceName.toLowerCase();
 
@@ -903,7 +929,7 @@ function rejectEmbeddedReaderCredentials(reader: JsonObject) {
   }
 }
 
-function parseSourceReader(config: JsonObject, sourceName: string) {
+function parseSourceReader(config: JsonObject, sourceName: string): LeadSourceReader {
   const reader = objectValue(config.reader ?? config.sourceReader);
   rejectEmbeddedReaderCredentials(reader);
 
@@ -1083,7 +1109,7 @@ function occurredAtFor(readerKind: string, record: JsonObject, payload: JsonObje
   );
 }
 
-function configRecords(config: JsonObject) {
+function configRecords(config: JsonObject, sourceReader: LeadSourceReader) {
   const record = objectValue(config.record);
 
   if (Object.keys(record).length > 0) {
@@ -1093,6 +1119,10 @@ function configRecords(config: JsonObject) {
   const records = config.records ?? config.items ?? config.leads;
 
   if (!Array.isArray(records)) {
+    if (sourceReader.credentialRef || sourceReader.connectionRef) {
+      return null;
+    }
+
     throw new RevenueWorkerUnavailableError(
       "worker_lead_read_records_missing",
       "config.records must be a non-empty array for lead.read.",
@@ -1139,7 +1169,7 @@ function optionalRecordDate(value: unknown, field: string) {
   return date;
 }
 
-function parseLeadSourceRecords(config: JsonObject) {
+function parseLeadSourceRequest(config: JsonObject) {
   const sourceName = stringValue(config.source ?? objectValue(config.intake).source);
 
   if (!sourceName) {
@@ -1151,8 +1181,25 @@ function parseLeadSourceRecords(config: JsonObject) {
   }
 
   const sourceReader = parseSourceReader(config, sourceName);
+  const records = configRecords(config, sourceReader);
 
-  const records = configRecords(config).map((record, index): ParsedLeadSourceRecord => {
+  return { sourceName, sourceReader, records };
+}
+
+function parseLeadSourceRecords(
+  sourceName: string,
+  sourceReader: LeadSourceReader,
+  recordInputs: JsonObject[],
+) {
+  if (recordInputs.length === 0) {
+    throw new RevenueWorkerUnavailableError(
+      "worker_lead_read_records_missing",
+      "connection-backed lead.read did not find any source records.",
+      409,
+    );
+  }
+
+  const records = recordInputs.map((record, index): ParsedLeadSourceRecord => {
     const payload = objectValue(record.payload ?? record.data ?? record.raw);
     const lead = objectValue(record.leadPacket ?? record.lead);
     const readerKind = stringValue(sourceReader.kind, "source_record");
@@ -1199,6 +1246,203 @@ function parseLeadSourceRecords(config: JsonObject) {
   });
 
   return { sourceName, sourceReader, records };
+}
+
+function normalizeConnectionRef(value: string) {
+  return value.replace(/^connection:/, "").trim();
+}
+
+function normalizeMatchToken(value: unknown) {
+  return stringValue(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function stringTokenList(...values: unknown[]) {
+  return Array.from(
+    new Set(
+      values
+        .flatMap((value) => stringList(value).concat(stringValue(value)))
+        .map(normalizeMatchToken)
+        .filter((value) => value.length > 0),
+    ),
+  );
+}
+
+function tokensMatch(left: string, right: string) {
+  return left === right || left.startsWith(`${right}_`) || right.startsWith(`${left}_`);
+}
+
+function connectionCompatibleWithReader(
+  candidate: LeadSourceConnectionCandidate,
+  sourceReader: LeadSourceReader,
+) {
+  const connectionConfig = objectValue(candidate.connection.config);
+  const connectionReader = objectValue(connectionConfig.reader ?? connectionConfig.sourceReader);
+  const capabilities = objectValue(candidate.adapterCapabilities);
+  const sourceTokens = stringTokenList(sourceReader.source, sourceReader.provider, sourceReader.kind);
+  const connectionTokens = stringTokenList(
+    candidate.adapterKey,
+    candidate.adapterKind === "lead_source" ? "" : candidate.adapterKind,
+    connectionConfig.source,
+    connectionConfig.provider,
+    connectionConfig.kind,
+    connectionReader.source,
+    connectionReader.provider,
+    connectionReader.kind,
+    connectionConfig.sources,
+    connectionConfig.supportedSources,
+    connectionConfig.providers,
+    connectionConfig.supportedProviders,
+    connectionConfig.readerKinds,
+    connectionConfig.supportedReaderKinds,
+    capabilities.sources,
+    capabilities.supportedSources,
+    capabilities.providers,
+    capabilities.supportedProviders,
+    capabilities.readerKinds,
+    capabilities.supportedReaderKinds,
+  );
+
+  return sourceTokens.some((sourceToken) =>
+    connectionTokens.some((connectionToken) => tokensMatch(sourceToken, connectionToken)),
+  );
+}
+
+function connectionRecordArrays(config: JsonObject, readerKind: string): unknown[][] {
+  const inbox = objectValue(config.inbox);
+  const crm = objectValue(config.crm);
+  const sourceConfig = objectValue(config.source);
+  const leads = objectValue(config.leads);
+  const candidates: unknown[] = [
+    config.leadRecords,
+    config.pendingLeadRecords,
+    config.sourceRecords,
+    config.records,
+    sourceConfig.records,
+    leads.records,
+  ];
+
+  if (readerKind === "inbox") {
+    candidates.push(config.messages, inbox.messages, inbox.records);
+  }
+
+  if (readerKind === "crm") {
+    candidates.push(config.deals, config.opportunities, crm.deals, crm.opportunities, crm.records);
+  }
+
+  return candidates.filter((candidate): candidate is unknown[] => Array.isArray(candidate));
+}
+
+function recordCursor(sourceReader: LeadSourceReader, record: JsonObject) {
+  const payload = objectValue(record.payload ?? record.data ?? record.raw);
+  const lead = objectValue(record.leadPacket ?? record.lead);
+
+  return sourceEventIdFor(sourceReader.kind, record, lead, payload);
+}
+
+function recordsFromConnection(connection: LeadSourceConnection, sourceReader: LeadSourceReader) {
+  const config = objectValue(connection.config);
+  const arrays = connectionRecordArrays(config, sourceReader.kind);
+  const records = arrays[0]?.map((item) => objectValue(item)).filter((item) => Object.keys(item).length > 0) ?? [];
+  const previousCursor = stringValue(objectValue(config.lastLeadRead).cursor);
+  const cursorIndex = previousCursor
+    ? records.findIndex((record) => recordCursor(sourceReader, record) === previousCursor)
+    : -1;
+  const unreadRecords = cursorIndex >= 0 ? records.slice(cursorIndex + 1) : records;
+
+  if (unreadRecords.length === 0) {
+    throw new RevenueWorkerUnavailableError(
+      previousCursor
+        ? "worker_lead_read_connection_records_exhausted"
+        : "worker_lead_read_connection_records_missing",
+      previousCursor
+        ? "The referenced connection has no unread buffered lead source records after its cursor."
+        : "The referenced connection has no buffered lead source records to read.",
+      409,
+    );
+  }
+
+  return unreadRecords.slice(0, 25);
+}
+
+async function resolveLeadSourceConnection(
+  db: Database,
+  tenantId: string,
+  sourceReader: LeadSourceReader,
+) {
+  const refs = [sourceReader.connectionRef, sourceReader.credentialRef]
+    .filter((ref): ref is string => Boolean(ref))
+    .map(normalizeConnectionRef);
+
+  if (refs.length === 0) {
+    throw new RevenueWorkerUnavailableError(
+      "worker_lead_read_records_missing",
+      "config.records are required unless config.reader references an active connection.",
+      400,
+    );
+  }
+
+  const rows = await db
+    .select({
+      connection: connections,
+      adapterKey: adapters.key,
+      adapterKind: adapters.kind,
+      adapterCapabilities: adapters.capabilities,
+    })
+    .from(connections)
+    .innerJoin(adapters, eq(connections.adapterId, adapters.id))
+    .where(and(eq(connections.tenantId, tenantId), eq(connections.state, "active")))
+    .orderBy(connections.createdAt);
+  const connection = rows.find((row) => {
+    return refs.some(
+      (ref) =>
+        ref === row.connection.id ||
+        ref === row.connection.externalAccountId ||
+        ref === row.connection.name ||
+        `connection:${row.connection.id}` === sourceReader.credentialRef ||
+        (row.connection.externalAccountId
+          ? `connection:${row.connection.externalAccountId}` === sourceReader.credentialRef
+          : false),
+    );
+  });
+
+  if (!connection) {
+    throw new RevenueWorkerUnavailableError(
+      "worker_lead_read_connection_missing",
+      "config.reader must reference an active tenant connection for connection-backed lead.read.",
+      404,
+    );
+  }
+
+  if (!connectionCompatibleWithReader(connection, sourceReader)) {
+    throw new RevenueWorkerUnavailableError(
+      "worker_lead_read_connection_incompatible",
+      "config.reader references a connection that is not compatible with the requested lead source.",
+      409,
+    );
+  }
+
+  const records = recordsFromConnection(connection.connection, sourceReader);
+
+  return {
+    connection: connection.connection,
+    records,
+    sourceReader: {
+      ...sourceReader,
+      connectionId: connection.connection.id,
+      connectionName: connection.connection.name,
+      connectionExternalAccountId: connection.connection.externalAccountId ?? null,
+      sourceMode: "connection_buffer" as const,
+    },
+  };
+}
+
+function lastSourceCursor(records: ParsedLeadSourceRecord[]) {
+  const last = records.at(-1);
+
+  return last?.sourceEventId ?? null;
 }
 
 function revisedPacketFromOriginal(params: {
@@ -1876,13 +2120,29 @@ export async function readRevenueLeads(input: {
 }): Promise<RevenueLeadReadResult> {
   const db = input.db ?? defaultDb;
   const requestConfig = input.config ?? {};
-  const { sourceName, sourceReader, records } = parseLeadSourceRecords(requestConfig);
+  const sourceRequest = parseLeadSourceRequest(requestConfig);
   const context = await loadWorkerContext(db, {
     tenantSlug: input.tenantSlug,
     workerId: input.workerId,
   });
   const operator = await loadOperator(db, context.worker.tenantId, input.operatorEmail);
   const capabilityId = context.leadReadCapabilityId;
+  const connectionRead = sourceRequest.records
+    ? null
+    : await resolveLeadSourceConnection(
+        db,
+        context.worker.tenantId,
+        sourceRequest.sourceReader,
+      );
+  const sourceReader = connectionRead?.sourceReader ?? {
+    ...sourceRequest.sourceReader,
+    sourceMode: "payload" as const,
+  };
+  const { sourceName, records } = parseLeadSourceRecords(
+    sourceRequest.sourceName,
+    sourceReader,
+    connectionRead?.records ?? sourceRequest.records ?? [],
+  );
 
   if (!capabilityId) {
     throw new RevenueWorkerUnavailableError(
@@ -1900,6 +2160,7 @@ export async function readRevenueLeads(input: {
     operatorUserId: operator.id,
     config: requestConfig,
     source: sourceName,
+    sourceReader,
     records: records.map((record) => record.leadPacket),
   });
 
@@ -1997,6 +2258,7 @@ export async function readRevenueLeads(input: {
           source: sourceName,
           sourceReader,
           readCount: records.length,
+          connectionId: connectionRead?.connection.id ?? null,
           externalExecution: "blocked",
         },
         createdAt: now,
@@ -2020,6 +2282,7 @@ export async function readRevenueLeads(input: {
             config: requestConfig,
             source: sourceName,
             sourceReader,
+            connectionId: connectionRead?.connection.id ?? null,
             operator: {
               userId: operator.id,
               email: operator.email,
@@ -2211,9 +2474,37 @@ export async function readRevenueLeads(input: {
       evidenceIds: selectors.map((selector) => selector.evidenceId),
       reservationId: reservation.id,
       usageEventId: usage.id,
+      connectionId: connectionRead?.connection.id ?? null,
+      cursor: lastSourceCursor(records),
       externalExecution: "blocked",
       externalSend: false,
     };
+
+    if (connectionRead) {
+      const connectionConfig = objectValue(connectionRead.connection.config);
+
+      await tx
+        .update(connections)
+        .set({
+          lastSyncAt: now,
+          updatedAt: now,
+          config: {
+            ...connectionConfig,
+            lastLeadRead: {
+              command: "lead.read",
+              workerRunId: run.id,
+              idempotencyKey: input.idempotencyKey,
+              source: sourceName,
+              readCount: records.length,
+              cursor: lastSourceCursor(records),
+              readAt: now.toISOString(),
+              externalExecution: "blocked",
+            },
+          },
+        })
+        .where(eq(connections.id, connectionRead.connection.id));
+    }
+
     const [event] = await tx
       .insert(events)
       .values({

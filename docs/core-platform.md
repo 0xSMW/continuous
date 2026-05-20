@@ -199,9 +199,10 @@ workflow approvals share `approval_requests`, `audit_events`, and evidence;
 `/approval` lists and decides those shared records with structured `approval`
 and `config` payloads.
 
-`command=lead.read` accepts source records, stores Core lead object/event/evidence
-rows, writes a read-only worker run, attributes budget/usage, and returns stable
-`config.intake` selectors. `command=lead.classify` and
+`command=lead.read` accepts direct source records or a read-only active
+connection reference, stores Core lead object/event/evidence rows, writes a
+read-only worker run, attributes budget/usage, records connection cursor proof,
+and returns stable `config.intake` selectors. `command=lead.classify` and
 `command=response.draft` can consume those selectors as explicit persisted
 substeps, writing worker run, inference, usage, event, evidence, and audit proof
 while external send remains blocked. One full `command=run` then accepts the

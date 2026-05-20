@@ -12,7 +12,7 @@ raising autonomy or permitting external sends.
 | `worker.role` | Yes | Explicit worker family selector; no default role is assumed |
 | `worker.tenantSlug` | No | Required when an operator email spans tenants |
 | `worker.id` | No | Required when multiple Revenue Workers match |
-| `config.source` + optional `config.reader` + `config.records[]` | Required for `lead.read` | Reads website-form, inbox, or CRM lead records into persisted Core source object/event/evidence rows |
+| `config.source` plus direct `config.records[]` / `config.record` or `config.reader` | Required for `lead.read` | Reads direct or connection-buffered website-form, inbox, or CRM lead records into persisted Core source object/event/evidence rows |
 | `config.intake` | Preferred for useful runs | References persisted Core lead source identity or object/event/evidence rows used to derive classification, draft, quote, evidence, and approval packet |
 | `config.leadPacket` | Fallback only | Direct source payload for operator tests and controlled evals |
 
@@ -226,7 +226,7 @@ and local toolbox aliases resolve to the same handlers and validation rules.
 |---|---|---|---|---|---|
 | `GET view=snapshot` | `worker.snapshot` | None | None | Read-only | Blocked |
 | `GET view=approvals` | `worker.approvals.list` | Optional `state` | None | Read-only | Blocked |
-| `lead.read` | `worker.lead.read` | `source`, `records[]` or `record` | Required | Core lead object/event/evidence, worker run, budget/usage, audit | Blocked |
+| `lead.read` | `worker.lead.read` | `source`, direct `records[]` / `record`, or `reader` referencing an active connection | Required | Core lead object/event/evidence, worker run, budget/usage, connection cursor proof, audit | Blocked |
 | `lead.classify` | `worker.lead.classify` | `config.intake` preferred, `config.leadPacket` fallback | Required | Classification worker run, budget/usage, inference, trace evidence, audit | Blocked |
 | `response.draft` | `worker.response.draft` | `config.intake` preferred, `config.leadPacket` fallback | Required | Draft worker run, budget/usage, inference, draft evidence, audit | Blocked |
 | `run` | `worker.run` | `config.intake` preferred, `config.leadPacket` fallback | Required | Internal records, budget, approval, dry-run adapter receipt | Blocked |
@@ -247,8 +247,9 @@ For `command=lead.read`, use:
 | `source` | Yes | Source system name, for example `website_form` or later `gmail` |
 | `reader.kind` | For inbox/CRM readers | `inbox` or `crm`; defaults are inferred for website-form and generic source records |
 | `reader.provider` | No | External source family, such as `google_workspace` or `hubspot`; stored as source-reader metadata |
-| `reader.credentialRef` | Required for inbox/CRM readers | Opaque credential or connection reference; never embed credential material in `config.reader` |
-| `records[].sourceEventId` | One stable id is required | Stable external source event, form, message, deal, or row id; inbox readers may provide `messageId`, and CRM readers may provide `externalId` |
+| `reader.credentialRef` | Required for inbox/CRM readers | Opaque credential or `connection:<id>` reference; never embed credential material in `config.reader` |
+| `reader.connectionRef` | For connection-backed reads | Optional explicit active connection id, name, or external account id; if no `records[]` are sent, the worker reads buffered source records from the connection config |
+| `records[].sourceEventId` | Required for direct records | Stable external source event, form, message, deal, or row id; inbox readers may provide `messageId`, and CRM readers may provide `externalId` |
 | `records[].messageId`, `threadId`, `from`, `subject`, `snippet`, `receivedAt` | Inbox readers | Used to normalize inbox messages into lead source snapshots |
 | `records[].externalId`, `companyName`, `contactName`, `dealName`, `stage`, `updatedAt` | CRM readers | Used to normalize CRM lead or deal rows into lead source snapshots |
 | `records[].customerName` | No | Used to name the Core lead object; defaults to `Customer` |
@@ -285,11 +286,16 @@ whose `result.output.selectors[]` contains:
 |---|---|
 | `source` | Source system name used for lookup |
 | `sourceEventId` | External source id used as the stable selector |
-| `sourceReader` | Read-only reader metadata, including kind, provider, credential reference, and blocked external-execution state |
+| `sourceReader` | Read-only reader metadata, including kind, provider, credential reference, optional connection id, source mode, and blocked external-execution state |
 | `objectId` | Core lead object row persisted from the source record |
 | `eventId` | Core `lead.received` event row persisted or reused for the source record |
 | `evidenceId` | Source snapshot evidence row |
 | `intake` | Minimal `{source, sourceEventId}` payload for a later `command=run` |
+
+When records are read from a connection, `result.output.connectionId` and
+`result.output.cursor` are set, and the connection receives `lastLeadRead`
+metadata with the worker run id, cursor, read count, timestamp, and blocked
+external-execution posture.
 
 `POST /worker` with `command=run` returns a generic command response whose
 `result.output` contains worker-derived data:
@@ -318,7 +324,9 @@ whose `result.output.selectors[]` contains:
 | Budget account and active policy exist | `worker_budget_missing` or `worker_budget_policy_missing` |
 | Budget capacity remains under policy | `worker_budget_exceeded` |
 | Required capability exists and is actively granted to the worker | `worker_capability_missing` or `worker_capability_not_granted` |
-| Adapter connection exists and is active | `worker_connection_missing` |
+| Referenced adapter connection exists and is active | `worker_lead_read_connection_missing` |
+| Referenced connection matches the requested source/provider/kind | `worker_lead_read_connection_incompatible` |
+| Connection-backed read has unread buffered source records after the last cursor | `worker_lead_read_connection_records_missing` or `worker_lead_read_connection_records_exhausted` |
 
 ## Effects
 

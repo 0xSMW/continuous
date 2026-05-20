@@ -222,7 +222,7 @@ describe("worker tool contract", () => {
           name: "lead.read",
           configSchema: expect.objectContaining({
             required: ["source"],
-            oneRequired: ["record", "records", "items", "leads"],
+            oneRequired: ["record", "records", "items", "leads", "reader"],
             properties: expect.objectContaining({
               records: expect.objectContaining({ minItems: 1, maxItems: 25 }),
             }),
@@ -604,7 +604,7 @@ describe("worker tool contract", () => {
           source: "website_form",
         },
       }),
-    ).rejects.toThrow("config.record, records, items or leads is required for lead.read.");
+    ).rejects.toThrow("config.record, records, items, leads or reader is required for lead.read.");
   });
 
   it("requires source reader credential references without embedded credential material", async () => {

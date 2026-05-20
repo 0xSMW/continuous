@@ -26,6 +26,7 @@ import { createCoreTask, transitionCoreTask } from "../core/tasks";
 import { executeWorkflowSteps, startWorkflowRun } from "../core/workflows";
 import { db, pool } from "../db/client";
 import {
+  adapters,
   adapterActions,
   adapterRuns,
   approvalRequests,
@@ -3866,6 +3867,168 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(inboxLeadPacket.customerIntent).toBe("Need emergency roof leak inspection");
     expect(objectValue(inboxLeadPacket.sourceReader).kind).toBe("inbox");
     expect(objectValue(inboxLeadPacket.sourceRecord).messageId).toBe(inboxMessageId);
+
+    await db
+      .insert(adapters)
+      .values({
+        key: "google_workspace",
+        name: "Google Workspace",
+        kind: "inbox",
+        auth: "oauth",
+        capabilities: {
+          read: ["lead.read"],
+          sources: ["google_workspace_inbox"],
+          providers: ["google_workspace"],
+          readerKinds: ["inbox"],
+        },
+      })
+      .onConflictDoUpdate({
+        target: adapters.key,
+        set: {
+          name: "Google Workspace",
+          kind: "inbox",
+          capabilities: {
+            read: ["lead.read"],
+            sources: ["google_workspace_inbox"],
+            providers: ["google_workspace"],
+            readerKinds: ["inbox"],
+          },
+        },
+      });
+    const [googleAdapter] = await db
+      .select({ id: adapters.id })
+      .from(adapters)
+      .where(eq(adapters.key, "google_workspace"))
+      .limit(1);
+    const [seedConnection] = await db.select({ tenantId: connections.tenantId }).from(connections).limit(1);
+    const [connection] = await db
+      .insert(connections)
+      .values({
+        tenantId: seedConnection.tenantId,
+        adapterId: googleAdapter.id,
+        name: `Google Workspace buffer ${runId}`,
+        state: "active",
+        externalAccountId: `google-workspace-demo-${runId}`,
+        scopes: { reads: ["lead"] },
+        config: {
+          executable: false,
+          sources: ["google_workspace_inbox"],
+          providers: ["google_workspace"],
+          readerKinds: ["inbox"],
+        },
+      })
+      .returning();
+    const bufferedMessageId = `gmail:buffered:${runId}`;
+
+    await db
+      .update(connections)
+      .set({
+        config: {
+          executable: false,
+          inbox: {
+            messages: [
+              {
+                messageId: bufferedMessageId,
+                threadId: `thread:buffered:${runId}`,
+                from: "Buffered Buyer <buffered@example.com>",
+                subject: "Need gutter repair estimate",
+                snippet: "The gutter pulled away during the last storm.",
+                receivedAt: "2026-05-19T04:00:00.000Z",
+              },
+            ],
+          },
+        },
+      })
+      .where(eq(connections.id, connection.id));
+
+    const bufferedRead = await executeWorkerCommand({
+      command: "lead.read",
+      target: {
+        role: "revenue_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: `ci-worker-connection-buffer-read-${runId}`,
+      config: {
+        source: "google_workspace_inbox",
+        reader: {
+          kind: "inbox",
+          provider: "google_workspace",
+          credentialRef: `connection:${connection.id}`,
+          mode: "read_only",
+        },
+      },
+    });
+    const bufferedResult = objectValue(bufferedRead.result);
+    const bufferedOutput = objectValue(bufferedResult.output);
+    const bufferedReader = objectValue(bufferedOutput.sourceReader);
+    const bufferedSelector = objectValue(
+      Array.isArray(bufferedResult.selectors) ? bufferedResult.selectors[0] : null,
+    );
+    const [updatedConnection] = await db
+      .select()
+      .from(connections)
+      .where(eq(connections.id, connection.id))
+      .limit(1);
+    const lastLeadRead = objectValue(objectValue(updatedConnection?.config).lastLeadRead);
+
+    expect(bufferedRead.command).toBe("lead.read");
+    expect(bufferedResult.readCount).toBe(1);
+    expect(bufferedReader.sourceMode).toBe("connection_buffer");
+    expect(bufferedReader.connectionId).toBe(connection.id);
+    expect(bufferedSelector.sourceEventId).toBe(bufferedMessageId);
+    expect(bufferedOutput.connectionId).toBe(connection.id);
+    expect(bufferedOutput.cursor).toBe(bufferedMessageId);
+    expect(updatedConnection?.lastSyncAt).toBeTruthy();
+    expect(lastLeadRead).toMatchObject({
+      command: "lead.read",
+      workerRunId: bufferedResult.workerRunId,
+      readCount: 1,
+      cursor: bufferedMessageId,
+      externalExecution: "blocked",
+    });
+
+    await expect(
+      executeWorkerCommand({
+        command: "lead.read",
+        target: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        operatorEmail: "owner@continuoushq.com",
+        idempotencyKey: `ci-worker-connection-buffer-reread-${runId}`,
+        config: {
+          source: "google_workspace_inbox",
+          reader: {
+            kind: "inbox",
+            provider: "google_workspace",
+            credentialRef: `connection:${connection.id}`,
+            mode: "read_only",
+          },
+        },
+      }),
+    ).rejects.toThrow("no unread buffered lead source records");
+
+    await expect(
+      executeWorkerCommand({
+        command: "lead.read",
+        target: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        operatorEmail: "owner@continuoushq.com",
+        idempotencyKey: `ci-worker-connection-buffer-mismatch-${runId}`,
+        config: {
+          source: "hubspot_crm",
+          reader: {
+            kind: "crm",
+            provider: "hubspot",
+            credentialRef: `connection:${connection.id}`,
+            mode: "read_only",
+          },
+        },
+      }),
+    ).rejects.toThrow("not compatible with the requested lead source");
 
     const inboxRun = await runRevenueWorker({
       idempotencyKey: `ci-worker-run-from-inbox-read-${runId}`,
