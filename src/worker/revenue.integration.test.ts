@@ -5901,5 +5901,109 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(replayResult.created).toBe(false);
     expect(replayResult.workerRunId).toBe(result.workerRunId);
     expect(replayResult.appointmentObjectId).toBe(result.appointmentObjectId);
+
+    const appointmentObjectId = result.appointmentObjectId ?? "";
+    expect(appointmentObjectId).toBeTruthy();
+
+    const customerUpdateResponse = await executeWorkerCommand({
+      command: "customer_update.draft",
+      target: {
+        role: "dispatch_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: `ci-dispatch-customer-update-${runId}`,
+      config: {
+        jobId: jobObjectId,
+        updateKind: "schedule_proposed",
+        channel: "email",
+        sourceRefs: {
+          customerObjectId,
+          quoteObjectId,
+          appointmentObjectId,
+        },
+        messageContext: {
+          customerFacingSummary: "We have prepared a proposed service window and are reviewing it before sending.",
+        },
+      },
+    });
+    const customerUpdateResult = customerUpdateResponse.result as Awaited<
+      ReturnType<typeof import("./dispatch").draftDispatchCustomerUpdate>
+    >;
+    const customerUpdateOutput = objectValue(customerUpdateResult.output);
+    const [customerUpdateRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(eq(workerRuns.id, customerUpdateResult.workerRunId))
+      .limit(1);
+    const [customerUpdateObject] = await db
+      .select()
+      .from(objects)
+      .where(eq(objects.id, customerUpdateResult.customerUpdateObjectId ?? ""))
+      .limit(1);
+    const [customerUpdateApproval] = await db
+      .select()
+      .from(approvalRequests)
+      .where(eq(approvalRequests.id, customerUpdateResult.approvalRequestId ?? ""))
+      .limit(1);
+    const [customerUpdatePacket] = await db
+      .select()
+      .from(evidencePackets)
+      .where(eq(evidencePackets.id, customerUpdateResult.packetId ?? ""))
+      .limit(1);
+    const [customerUpdateView] = await db
+      .select()
+      .from(generatedViews)
+      .where(and(eq(generatedViews.tenantId, tenantId), eq(generatedViews.key, "dispatch.customer_update.review")))
+      .limit(1);
+
+    expect(customerUpdateResponse.command).toBe("customer_update.draft");
+    expect(customerUpdateResponse.worker.role).toBe("dispatch_operations");
+    expect(customerUpdateResult.created).toBe(true);
+    expect(customerUpdateResult.workflowStepIds).toHaveLength(3);
+    expect(customerUpdateOutput.externalExecution).toBe("blocked");
+    expect(customerUpdateOutput.externalSend).toBe(false);
+    expect(customerUpdateOutput.jobObjectId).toBe(jobObjectId);
+    expect(customerUpdateOutput.customerUpdateObjectId).toBe(customerUpdateResult.customerUpdateObjectId);
+    expect(objectValue(customerUpdateOutput.draft).body).toContain("proposed service window");
+    expect(customerUpdateRun?.source).toBe("continuous.dispatch_worker");
+    expect(customerUpdateRun?.state).toBe("done");
+    expect(customerUpdateObject?.type).toBe("customer_update");
+    expect(customerUpdateObject?.state).toBe("approval_required");
+    expect(objectValue(customerUpdateObject?.data).externalSend).toBe(false);
+    expect(customerUpdateApproval?.state).toBe("pending");
+    expect(customerUpdateApproval?.kind).toBe("dispatch_customer_update_approval");
+    expect(customerUpdatePacket?.kind).toBe("dispatch_customer_update_packet");
+    expect(customerUpdateView?.key).toBe("dispatch.customer_update.review");
+
+    const customerUpdateReplay = await executeWorkerCommand({
+      command: "customer_update.draft",
+      target: {
+        role: "dispatch_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: `ci-dispatch-customer-update-${runId}`,
+      config: {
+        jobId: jobObjectId,
+        updateKind: "schedule_proposed",
+        channel: "email",
+        sourceRefs: {
+          customerObjectId,
+          quoteObjectId,
+          appointmentObjectId,
+        },
+        messageContext: {
+          customerFacingSummary: "We have prepared a proposed service window and are reviewing it before sending.",
+        },
+      },
+    });
+    const customerUpdateReplayResult = customerUpdateReplay.result as Awaited<
+      ReturnType<typeof import("./dispatch").draftDispatchCustomerUpdate>
+    >;
+
+    expect(customerUpdateReplayResult.created).toBe(false);
+    expect(customerUpdateReplayResult.workerRunId).toBe(customerUpdateResult.workerRunId);
+    expect(customerUpdateReplayResult.customerUpdateObjectId).toBe(customerUpdateResult.customerUpdateObjectId);
   }, 120_000);
 });

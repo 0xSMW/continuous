@@ -118,6 +118,7 @@ describe("worker tool contract", () => {
       "worker.lead.classify",
       "worker.response.draft",
       "worker.dispatch.schedule.propose",
+      "worker.dispatch.customer_update.draft",
       "worker.continue",
       "worker.approvals.list",
       "worker.approvals.decide",
@@ -221,6 +222,13 @@ describe("worker tool contract", () => {
           requiresTenant: true,
           externalExecution: "dry_run",
         }),
+        expect.objectContaining({
+          role: "dispatch_operations",
+          name: "customer_update.draft",
+          idempotency: "required",
+          requiresTenant: true,
+          externalExecution: "blocked",
+        }),
       ]),
     );
     expect(workerToolSchema.registry.commands).toEqual(
@@ -254,6 +262,16 @@ describe("worker tool contract", () => {
             oneRequired: ["jobId", "sourceRefs"],
             properties: expect.objectContaining({
               constraints: expect.objectContaining({ type: "object" }),
+            }),
+          }),
+        }),
+        expect.objectContaining({
+          role: "dispatch_operations",
+          name: "customer_update.draft",
+          configSchema: expect.objectContaining({
+            required: ["jobId", "updateKind"],
+            properties: expect.objectContaining({
+              messageContext: expect.objectContaining({ type: "object" }),
             }),
           }),
         }),
@@ -532,6 +550,37 @@ describe("worker tool contract", () => {
         },
       }),
     ).rejects.toThrow("config.jobId or sourceRefs is required for schedule.propose.");
+  });
+
+  it("validates dispatch customer update draft envelopes before invoking the worker", async () => {
+    await expect(
+      executeWorkerTool("worker.dispatch.customer_update.draft", {
+        worker: {
+          role: "dispatch_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "bad key!",
+        config: {
+          jobId: "job_object_uuid",
+          updateKind: "schedule_proposed",
+        },
+      }),
+    ).rejects.toThrow(
+      "Idempotency key may only contain letters, numbers, dot, underscore, colon, or dash.",
+    );
+
+    await expect(
+      executeWorkerTool("worker.dispatch.customer_update.draft", {
+        worker: {
+          role: "dispatch_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "dispatch-customer-update-schema-001",
+        config: {
+          jobId: "job_object_uuid",
+        },
+      }),
+    ).rejects.toThrow("config.updateKind is required for customer_update.draft.");
   });
 
   it("requires tenant scope for adapter reconciliation", async () => {

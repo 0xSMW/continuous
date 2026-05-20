@@ -42,8 +42,9 @@ All commands use `POST /worker`; no dispatch-specific route is added.
 }
 ```
 
-The first executable slice is `schedule.propose`; later commands in the table
-remain contract entries until their handlers are registered.
+The first executable slices are `schedule.propose` and
+`customer_update.draft`; later commands in the table remain contract entries
+until their handlers are registered.
 
 ## Registry Entries
 
@@ -109,7 +110,7 @@ unless the operator has reveal approval.
 | View | Subject | Actions | Empty/error states |
 |---|---|---|---|
 | `dispatch.schedule.review` | `appointment` | `approve_schedule`, `request_revision`, `route_exception` | `no_slots`, `calendar_unavailable`, `crew_missing` |
-| `dispatch.customer_update.review` | `job` | `approve_send`, `edit_message`, `request_revision` | `missing_customer_contact`, `source_partial` |
+| `dispatch.customer_update.review` | `customer_update` | `approve_send`, `edit_message`, `request_revision` | `missing_customer_contact`, `source_partial` |
 | `dispatch.closeout.review` | `closeout` | `accept_closeout`, `request_rework`, `prepare_invoice` | `missing_photos`, `qa_incomplete` |
 
 ## Evals

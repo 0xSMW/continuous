@@ -27,6 +27,7 @@ import {
 } from "./owner";
 import {
   dispatchWorkerRole,
+  draftDispatchCustomerUpdate,
   getDispatchWorkerSnapshotSafe,
   proposeDispatchSchedule,
 } from "./dispatch";
@@ -408,6 +409,18 @@ const dispatchScheduleConfig: WorkerConfigSchema = {
       },
       additionalProperties: true,
     },
+  },
+  additionalProperties: true,
+};
+const dispatchCustomerUpdateConfig: WorkerConfigSchema = {
+  type: "object",
+  required: ["jobId", "updateKind"],
+  properties: {
+    jobId: { type: "string" },
+    updateKind: { type: "string" },
+    channel: { type: "string" },
+    sourceRefs: jsonObjectConfig,
+    messageContext: jsonObjectConfig,
   },
   additionalProperties: true,
 };
@@ -959,6 +972,32 @@ const workerDefinitions: Record<string, WorkerDefinition> = {
           }
 
           return proposeDispatchSchedule({
+            idempotencyKey: context.idempotencyKey,
+            tenantSlug: context.target.tenantSlug,
+            workerId: context.target.workerId,
+            operatorEmail: context.operatorEmail,
+            config: context.config,
+          });
+        },
+      },
+      "customer_update.draft": {
+        name: "customer_update.draft",
+        description: "Draft a customer update from Core job evidence without external send.",
+        idempotency: "required",
+        sideEffects: "internal",
+        externalExecution: "blocked",
+        requiresTenant: true,
+        configSchema: dispatchCustomerUpdateConfig,
+        async handle(context) {
+          if (!context.idempotencyKey) {
+            throw new PlatformUnavailableError(
+              "invalid_idempotency_key",
+              "A string idempotency key is required.",
+              400,
+            );
+          }
+
+          return draftDispatchCustomerUpdate({
             idempotencyKey: context.idempotencyKey,
             tenantSlug: context.target.tenantSlug,
             workerId: context.target.workerId,

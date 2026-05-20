@@ -33,14 +33,15 @@ Every handoff must define:
 ## Fixture Requirements
 
 Before a planned worker becomes executable, add at least one fixture for its
-incoming handoff. Dispatch/Ops now has its first executable fixture through
-`/worker command=schedule.propose`; remaining rows are still launch blockers
-for their target workers.
+incoming handoff. Dispatch/Ops now has its first executable fixtures through
+`/worker command=schedule.propose` and a blocked
+`/worker command=customer_update.draft`; remaining rows are still launch
+blockers for their target workers.
 
 | Worker | Required first fixture |
 |---|---|
 | Owner Chief-of-Staff | `revenue.lead_to_owner_review` approval packet with Revenue source evidence |
-| Dispatch/Ops | implemented: `revenue.quote_to_dispatch` approved quote with blocked adapter receipt produces a dry-run schedule proposal |
+| Dispatch/Ops | implemented: `revenue.quote_to_dispatch` approved quote with blocked adapter receipt produces a dry-run schedule proposal and blocked customer update draft |
 | Finance | `dispatch.closeout_to_finance` closeout packet with billable line summary |
 | Workforce | seeded employment or contractor packet with payroll preview blockers |
 | Compliance | `workforce.payroll_to_compliance` payroll preview with filing draft |

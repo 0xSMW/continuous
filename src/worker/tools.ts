@@ -249,6 +249,43 @@ export const workerTools = [
     },
   },
   {
+    name: "worker.dispatch.customer_update.draft",
+    description: "Draft a customer update from Core job evidence without sending it.",
+    registry: {
+      role: "dispatch_operations",
+      surface: "command",
+      command: "customer_update.draft",
+      idempotency: "required",
+      externalExecution: "blocked",
+      requiresTenant: true,
+    },
+    inputSchema: {
+      type: "object",
+      properties: {
+        worker: { $ref: "#/$defs/workerTarget" },
+        idempotencyKey: { type: "string" },
+        config: {
+          type: "object",
+          description:
+            "Dispatch customer update draft config. Put operation data under config with jobId, updateKind, optional channel, sourceRefs, and messageContext.",
+          properties: {
+            jobId: { type: "string" },
+            updateKind: { type: "string" },
+            channel: { type: "string" },
+            sourceRefs: { $ref: "#/$defs/sourceRefs" },
+            messageContext: {
+              type: "object",
+              additionalProperties: true,
+            },
+          },
+          required: ["jobId", "updateKind"],
+          additionalProperties: true,
+        },
+      },
+      required: ["worker", "idempotencyKey", "config"],
+    },
+  },
+  {
     name: "worker.continue",
     description: "Continue a worker-owned approval outcome with structured config.",
     registry: {
@@ -711,6 +748,16 @@ export async function executeWorkerTool(name: string, payload: JsonObject = {}) 
   if (name === "worker.dispatch.schedule.propose") {
     return executeWorkerCommand({
       command: "schedule.propose",
+      target,
+      operatorEmail,
+      config,
+      idempotencyKey: payload.idempotencyKey,
+    });
+  }
+
+  if (name === "worker.dispatch.customer_update.draft") {
+    return executeWorkerCommand({
+      command: "customer_update.draft",
       target,
       operatorEmail,
       config,

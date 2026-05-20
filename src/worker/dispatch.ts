@@ -43,8 +43,10 @@ export const dispatchWorkerRole = "dispatch_operations";
 
 const dispatchSource = "continuous.dispatch_worker";
 const scheduleCapabilityKey = "schedule.propose";
+const customerUpdateCapabilityKey = "response.draft";
 const workflowKey = "promise_to_delivery";
 const scheduleProposalUnits = 6000;
+const customerUpdateDraftUnits = 2500;
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -73,7 +75,7 @@ type DispatchContext = {
   reviewerUserId: string | null;
   capabilityId: string;
   budgetAccountId: string;
-  connectionId: string;
+  connectionId: string | null;
 };
 
 export type DispatchScheduleProposalResult = {
@@ -93,6 +95,25 @@ export type DispatchScheduleProposalResult = {
   workflowRunId: string | null;
   workflowStepIds: string[];
   dispatchScheduleViewId: string | null;
+  output: JsonObject;
+  snapshot: DispatchWorkerSnapshot;
+};
+
+export type DispatchCustomerUpdateDraftResult = {
+  created: boolean;
+  idempotencyKey: string;
+  workerRunId: string;
+  taskId: string | null;
+  eventId: string | null;
+  customerUpdateObjectId: string | null;
+  approvalRequestId: string | null;
+  evidenceId: string | null;
+  draftEvidenceId: string | null;
+  packetId: string | null;
+  documentId: string | null;
+  workflowRunId: string | null;
+  workflowStepIds: string[];
+  dispatchCustomerUpdateViewId: string | null;
   output: JsonObject;
   snapshot: DispatchWorkerSnapshot;
 };
@@ -265,6 +286,9 @@ async function loadDispatchContext(input: {
   db: Database;
   selector: DispatchWorkerSelector;
   operatorEmail: string;
+  capabilityKey: string;
+  capabilityLabel: string;
+  connectionKind?: string;
 }): Promise<DispatchContext> {
   const workerRows = await input.db
     .select({
@@ -316,13 +340,13 @@ async function loadDispatchContext(input: {
   const [capability] = await input.db
     .select({ id: capabilities.id })
     .from(capabilities)
-    .where(and(eq(capabilities.key, scheduleCapabilityKey), eq(capabilities.active, true)))
+    .where(and(eq(capabilities.key, input.capabilityKey), eq(capabilities.active, true)))
     .limit(1);
 
   if (!capability) {
     throw new PlatformUnavailableError(
       "worker_capability_missing",
-      "Dispatch Operations Worker requires the schedule.propose capability.",
+      `Dispatch Operations Worker requires the ${input.capabilityLabel} capability.`,
       409,
     );
   }
@@ -344,7 +368,7 @@ async function loadDispatchContext(input: {
   if (!grant) {
     throw new PlatformUnavailableError(
       "worker_capability_missing",
-      "Dispatch Operations Worker is not actively granted schedule.propose.",
+      `Dispatch Operations Worker is not actively granted ${input.capabilityLabel}.`,
       409,
     );
   }
@@ -371,24 +395,26 @@ async function loadDispatchContext(input: {
     );
   }
 
-  const [connection] = await input.db
-    .select({ id: connections.id })
-    .from(connections)
-    .innerJoin(adapters, eq(connections.adapterId, adapters.id))
-    .where(
-      and(
-        eq(connections.tenantId, worker.tenantId),
-        eq(connections.state, "active"),
-        eq(adapters.kind, "calendar"),
-      ),
-    )
-    .orderBy(connections.createdAt)
-    .limit(1);
+  const [connection] = input.connectionKind
+    ? await input.db
+        .select({ id: connections.id })
+        .from(connections)
+        .innerJoin(adapters, eq(connections.adapterId, adapters.id))
+        .where(
+          and(
+            eq(connections.tenantId, worker.tenantId),
+            eq(connections.state, "active"),
+            eq(adapters.kind, input.connectionKind),
+          ),
+        )
+        .orderBy(connections.createdAt)
+        .limit(1)
+    : [null];
 
-  if (!connection) {
+  if (input.connectionKind && !connection) {
     throw new PlatformUnavailableError(
       "worker_connection_missing",
-      "Dispatch Operations Worker has no active dry-run calendar connection.",
+      `Dispatch Operations Worker has no active ${input.connectionKind} connection.`,
       409,
     );
   }
@@ -412,7 +438,7 @@ async function loadDispatchContext(input: {
     reviewerUserId: worker.managerUserId,
     capabilityId: capability.id,
     budgetAccountId: budgetAccount.id,
-    connectionId: connection.id,
+    connectionId: connection?.id ?? null,
   };
 }
 
@@ -649,6 +675,166 @@ async function replayedScheduleProposal(
   };
 }
 
+async function loadCustomerUpdateRefs(db: Database, tenantId: string, config: JsonObject) {
+  const sourceRefs = objectValue(config.sourceRefs);
+  const jobRef =
+    optionalString(config.jobId) ??
+    optionalString(sourceRefs.jobObjectId) ??
+    optionalString(sourceRefs.jobId);
+
+  if (!jobRef) {
+    throw new PlatformUnavailableError(
+      "invalid_worker_command_config",
+      "config.jobId is required for customer_update.draft.",
+      400,
+    );
+  }
+
+  const updateKind = stringValue(config.updateKind);
+
+  if (!updateKind) {
+    throw new PlatformUnavailableError(
+      "invalid_worker_command_config",
+      "config.updateKind is required for customer_update.draft.",
+      400,
+    );
+  }
+
+  const jobObject = await resolveJobObject(db, tenantId, jobRef);
+
+  if (!jobObject) {
+    throw new PlatformUnavailableError(
+      "dispatch_job_not_found",
+      "Dispatch customer update draft requires a tenant-scoped job object.",
+      404,
+    );
+  }
+
+  const jobRow = await loadJobState(db, tenantId, jobObject.id);
+  const state = jobRow?.state ?? jobObject.state;
+
+  if (state === "closed" || state === "canceled") {
+    throw new PlatformUnavailableError(
+      "dispatch_job_not_updateable",
+      `Dispatch customer update draft requires an open job. Current state is ${state}.`,
+      409,
+    );
+  }
+
+  const jobData = {
+    ...objectValue(jobObject.data),
+    ...objectValue(jobRow?.data),
+  } satisfies JsonObject;
+  const requestedCustomerObjectId = optionalString(sourceRefs.customerObjectId);
+  const customerObjectId =
+    requestedCustomerObjectId ??
+    optionalString(jobData.customerObjectId) ??
+    optionalString(jobData.customerId);
+  const customerObject = customerObjectId ? await getObjectById(db, tenantId, customerObjectId) : null;
+
+  if (requestedCustomerObjectId && customerObject?.type !== "customer") {
+    throw new PlatformUnavailableError(
+      "dispatch_customer_not_found",
+      "Dispatch customer update draft requires a tenant-scoped customer object when config.sourceRefs.customerObjectId is provided.",
+      404,
+    );
+  }
+
+  const requestedQuoteObjectId = optionalString(sourceRefs.quoteObjectId);
+  const quoteObjectId =
+    requestedQuoteObjectId ??
+    optionalString(jobData.quoteObjectId) ??
+    optionalString(jobData.quoteId);
+  const quoteObject = quoteObjectId ? await getObjectById(db, tenantId, quoteObjectId) : null;
+
+  if (requestedQuoteObjectId && quoteObject?.type !== "quote") {
+    throw new PlatformUnavailableError(
+      "dispatch_quote_not_found",
+      "Dispatch customer update draft requires a tenant-scoped quote object when config.sourceRefs.quoteObjectId is provided.",
+      404,
+    );
+  }
+
+  const requestedAppointmentObjectId = optionalString(sourceRefs.appointmentObjectId);
+  const appointmentObject = requestedAppointmentObjectId
+    ? await getObjectById(db, tenantId, requestedAppointmentObjectId)
+    : null;
+
+  if (requestedAppointmentObjectId && appointmentObject?.type !== "appointment") {
+    throw new PlatformUnavailableError(
+      "dispatch_appointment_not_found",
+      "Dispatch customer update draft requires a tenant-scoped appointment object when config.sourceRefs.appointmentObjectId is provided.",
+      404,
+    );
+  }
+
+  return {
+    sourceRefs,
+    updateKind,
+    jobObject,
+    jobRow,
+    jobData,
+    customerObject,
+    quoteObject,
+    appointmentObject,
+  };
+}
+
+function draftCustomerUpdateMessage(input: {
+  jobName: string;
+  serviceArea: string;
+  updateKind: string;
+  context: JsonObject;
+}) {
+  const customerSummary = stringValue(input.context.customerFacingSummary);
+  const serviceArea = input.serviceArea || "your service request";
+  const subjectKind = input.updateKind.replace(/[._-]+/g, " ");
+  const defaultBody =
+    input.updateKind === "schedule_proposed"
+      ? `We have prepared a proposed service window for ${serviceArea}. A dispatcher is reviewing the details before anything is sent or placed on an external calendar.`
+      : `We have prepared a ${subjectKind} update for ${serviceArea}. A dispatcher is reviewing the details before any customer message is sent.`;
+
+  return {
+    subject: `Update on ${input.jobName}`,
+    body: customerSummary || defaultBody,
+  };
+}
+
+async function replayedCustomerUpdateDraft(
+  db: Database,
+  context: DispatchContext,
+  run: typeof workerRuns.$inferSelect,
+): Promise<DispatchCustomerUpdateDraftResult> {
+  const data = objectValue(run.data);
+  const output = outputData(data);
+
+  return {
+    created: false,
+    idempotencyKey: run.idempotencyKey,
+    workerRunId: run.id,
+    taskId: run.taskId,
+    eventId: run.eventId ?? optionalString(data.eventId) ?? null,
+    customerUpdateObjectId: optionalString(output.customerUpdateObjectId) ?? null,
+    approvalRequestId: optionalString(data.approvalRequestId) ?? optionalString(output.approvalRequestId) ?? null,
+    evidenceId: optionalString(data.evidenceId) ?? optionalString(output.evidenceId) ?? null,
+    draftEvidenceId: optionalString(data.draftEvidenceId) ?? optionalString(output.draftEvidenceId) ?? null,
+    packetId: optionalString(data.packetId) ?? optionalString(output.packetId) ?? null,
+    documentId: optionalString(data.documentId) ?? optionalString(output.documentId) ?? null,
+    workflowRunId: optionalString(data.workflowRunId) ?? optionalString(output.workflowRunId) ?? null,
+    workflowStepIds: getWorkflowStepIds(data),
+    dispatchCustomerUpdateViewId:
+      optionalString(data.dispatchCustomerUpdateViewId) ??
+      optionalString(output.dispatchCustomerUpdateViewId) ??
+      null,
+    output,
+    snapshot: await getDispatchWorkerSnapshot(db, {
+      role: dispatchWorkerRole,
+      tenantSlug: context.worker.tenantSlug,
+      workerId: context.worker.id,
+    }),
+  };
+}
+
 export async function proposeDispatchSchedule(input: {
   idempotencyKey: string;
   tenantSlug?: string;
@@ -662,10 +848,23 @@ export async function proposeDispatchSchedule(input: {
     db,
     selector: { role: dispatchWorkerRole, tenantSlug: input.tenantSlug, workerId: input.workerId },
     operatorEmail: input.operatorEmail,
+    capabilityKey: scheduleCapabilityKey,
+    capabilityLabel: "schedule.propose",
+    connectionKind: "calendar",
   });
   const config = input.config ?? {};
   const constraints = objectValue(config.constraints);
   const handoff = await loadSourceRefs(db, context.worker.tenantId, config);
+  const connectionId = context.connectionId;
+
+  if (!connectionId) {
+    throw new PlatformUnavailableError(
+      "worker_connection_missing",
+      "Dispatch schedule proposal requires an active dry-run calendar connection.",
+      409,
+    );
+  }
+
   const scheduleWindow = proposedWindow(constraints, context.worker.tenantTimezone);
   const inputHash = hashObject({
     schemaVersion: "dispatch.schedule.propose.v1",
@@ -770,7 +969,7 @@ export async function proposeDispatchSchedule(input: {
         workerId: context.worker.id,
         taskId: task.id,
         capabilityId: context.capabilityId,
-        connectionId: context.connectionId,
+        connectionId: connectionId,
         budgetAccountId: context.budgetAccountId,
         source: dispatchSource,
         idempotencyKey: input.idempotencyKey,
@@ -884,7 +1083,7 @@ export async function proposeDispatchSchedule(input: {
       .insert(adapterRuns)
       .values({
         tenantId: context.worker.tenantId,
-        connectionId: context.connectionId,
+        connectionId: connectionId,
         workerRunId: workerRun.id,
         mode: "dry_run",
         operation: "calendar_schedule_proposal",
@@ -918,7 +1117,7 @@ export async function proposeDispatchSchedule(input: {
       .insert(adapterActions)
       .values({
         tenantId: context.worker.tenantId,
-        connectionId: context.connectionId,
+        connectionId: connectionId,
         adapterRunId: adapterRun.id,
         capabilityId: context.capabilityId,
         taskId: task.id,
@@ -1043,7 +1242,7 @@ export async function proposeDispatchSchedule(input: {
         objectId: appointment.id,
         taskId: task.id,
         capabilityId: context.capabilityId,
-        connectionId: context.connectionId,
+        connectionId: connectionId,
         idempotencyKey: input.idempotencyKey,
         data: {
           workerRunId: workerRun.id,
@@ -1117,7 +1316,7 @@ export async function proposeDispatchSchedule(input: {
         eventId: event.id,
         capabilityId: context.capabilityId,
         actorType: "adapter",
-        actorId: context.connectionId,
+        actorId: connectionId,
         hash: traceHash(input.idempotencyKey, adapterRun.id, adapterAction.id),
         data: {
           mode: "dry_run",
@@ -1565,6 +1764,828 @@ export async function proposeDispatchSchedule(input: {
     workflowRunId: result.workflowRunId,
     workflowStepIds: result.workflowStepIds,
     dispatchScheduleViewId: result.dispatchScheduleViewId,
+    output: result.output,
+    snapshot: await getDispatchWorkerSnapshot(db, {
+      role: dispatchWorkerRole,
+      tenantSlug: context.worker.tenantSlug,
+      workerId: context.worker.id,
+    }),
+  };
+}
+
+export async function draftDispatchCustomerUpdate(input: {
+  idempotencyKey: string;
+  tenantSlug?: string;
+  workerId?: string;
+  operatorEmail: string;
+  config?: JsonObject;
+  db?: Database;
+}): Promise<DispatchCustomerUpdateDraftResult> {
+  const db = input.db ?? defaultDb;
+  const context = await loadDispatchContext({
+    db,
+    selector: { role: dispatchWorkerRole, tenantSlug: input.tenantSlug, workerId: input.workerId },
+    operatorEmail: input.operatorEmail,
+    capabilityKey: customerUpdateCapabilityKey,
+    capabilityLabel: "response.draft",
+  });
+  const config = input.config ?? {};
+  const handoff = await loadCustomerUpdateRefs(db, context.worker.tenantId, config);
+  const messageContext = objectValue(config.messageContext);
+  const channel = stringValue(config.channel, "email");
+  const serviceArea = stringValue(handoff.jobData.serviceArea, stringValue(handoff.jobData.service_area));
+  const draftMessage = draftCustomerUpdateMessage({
+    jobName: handoff.jobObject.name,
+    serviceArea,
+    updateKind: handoff.updateKind,
+    context: messageContext,
+  });
+  const inputHash = hashObject({
+    schemaVersion: "dispatch.customer_update.draft.v1",
+    tenantId: context.worker.tenantId,
+    workerId: context.worker.id,
+    idempotencyKey: input.idempotencyKey,
+    config,
+    jobObjectId: handoff.jobObject.id,
+    customerObjectId: handoff.customerObject?.id ?? null,
+    quoteObjectId: handoff.quoteObject?.id ?? null,
+    appointmentObjectId: handoff.appointmentObject?.id ?? null,
+    updateKind: handoff.updateKind,
+  });
+  const now = new Date();
+
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${dispatchSource}:${input.idempotencyKey}`}))`,
+    );
+
+    const [existingRun] = await tx
+      .select()
+      .from(workerRuns)
+      .where(
+        and(
+          eq(workerRuns.tenantId, context.worker.tenantId),
+          eq(workerRuns.source, dispatchSource),
+          eq(workerRuns.idempotencyKey, input.idempotencyKey),
+        ),
+      )
+      .limit(1);
+
+    if (existingRun) {
+      const existingInput = objectValue(objectValue(existingRun.data).input);
+      const existingHash = optionalString(existingInput.inputHash);
+
+      if (existingHash && existingHash !== inputHash) {
+        throw new PlatformUnavailableError(
+          "worker_idempotency_conflict",
+          "A Dispatch customer update draft already exists for this idempotency key with different input.",
+          409,
+        );
+      }
+
+      return { replay: existingRun };
+    }
+
+    const [definition] = await tx
+      .select({ id: workflowDefinitions.id })
+      .from(workflowDefinitions)
+      .where(and(eq(workflowDefinitions.key, workflowKey), eq(workflowDefinitions.active, true)))
+      .orderBy(desc(workflowDefinitions.createdAt))
+      .limit(1);
+
+    if (!definition) {
+      throw new PlatformUnavailableError(
+        "worker_workflow_definition_missing",
+        "Dispatch Operations Worker requires the promise_to_delivery workflow definition.",
+        409,
+      );
+    }
+
+    const [task] = await tx
+      .insert(tasks)
+      .values({
+        tenantId: context.worker.tenantId,
+        objectId: handoff.jobObject.id,
+        capabilityId: context.capabilityId,
+        title: `Review customer update draft for ${handoff.jobObject.name}`,
+        state: "approval_required",
+        priority: "normal",
+        ownerType: "worker",
+        ownerId: context.worker.id,
+        ownerRef: `worker:${context.worker.id}`,
+        reviewerUserId: context.reviewerUserId,
+        evidence: {
+          required: ["job_snapshot", "drafted_customer_update", "dispatch_customer_update_packet"],
+        },
+        outcome: { status: "customer_update_approval_needed" },
+        cost: { units: customerUpdateDraftUnits },
+        kpi: { customer_updates_drafted: 1 },
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: tasks.id });
+
+    const runInput = {
+      command: "customer_update.draft",
+      inputHash,
+      config,
+      jobObjectId: handoff.jobObject.id,
+      customerObjectId: handoff.customerObject?.id ?? null,
+      quoteObjectId: handoff.quoteObject?.id ?? null,
+      appointmentObjectId: handoff.appointmentObject?.id ?? null,
+      updateKind: handoff.updateKind,
+    } satisfies JsonObject;
+
+    const [workerRun] = await tx
+      .insert(workerRuns)
+      .values({
+        tenantId: context.worker.tenantId,
+        workerId: context.worker.id,
+        taskId: task.id,
+        capabilityId: context.capabilityId,
+        budgetAccountId: context.budgetAccountId,
+        source: dispatchSource,
+        idempotencyKey: input.idempotencyKey,
+        state: "running",
+        mode: "simulation",
+        data: {
+          input: runInput,
+          output: {},
+        },
+        startedAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: workerRuns.id });
+
+    const customerUpdateData = {
+      jobObjectId: handoff.jobObject.id,
+      jobRowId: handoff.jobRow?.id ?? null,
+      customerObjectId: handoff.customerObject?.id ?? null,
+      quoteObjectId: handoff.quoteObject?.id ?? null,
+      appointmentObjectId: handoff.appointmentObject?.id ?? null,
+      updateKind: handoff.updateKind,
+      channel,
+      draft: draftMessage,
+      sourceRefs: handoff.sourceRefs,
+      messageContext,
+      externalExecution: "blocked",
+      externalMutation: false,
+      externalSend: false,
+      redaction: {
+        customerContact: "redacted_by_default",
+        siteAddress: "redacted_by_default",
+      },
+    } satisfies JsonObject;
+
+    const [customerUpdate] = await tx
+      .insert(objects)
+      .values({
+        tenantId: context.worker.tenantId,
+        type: "customer_update",
+        name: `Customer update draft for ${handoff.jobObject.name}`,
+        state: "approval_required",
+        source: dispatchSource,
+        externalId: `dispatch-customer-update:${input.idempotencyKey}`,
+        data: customerUpdateData,
+        createdByUserId: context.operator.id,
+        createdByWorkerId: context.worker.id,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: objects.id });
+
+    await tx.insert(objectVersions).values({
+      tenantId: context.worker.tenantId,
+      objectId: customerUpdate.id,
+      version: 1,
+      data: customerUpdateData,
+      changedByType: "worker",
+      changedById: context.worker.id,
+      reason: "dispatch customer update draft",
+      createdAt: now,
+    });
+
+    await tx
+      .insert(objectLinks)
+      .values([
+        {
+          tenantId: context.worker.tenantId,
+          fromId: customerUpdate.id,
+          toId: handoff.jobObject.id,
+          type: "updates_job",
+          data: { source: dispatchSource },
+          effectiveAt: now,
+        },
+        ...(handoff.customerObject
+          ? [
+              {
+                tenantId: context.worker.tenantId,
+                fromId: customerUpdate.id,
+                toId: handoff.customerObject.id,
+                type: "for_customer",
+                data: { source: dispatchSource },
+                effectiveAt: now,
+              },
+            ]
+          : []),
+        ...(handoff.appointmentObject
+          ? [
+              {
+                tenantId: context.worker.tenantId,
+                fromId: customerUpdate.id,
+                toId: handoff.appointmentObject.id,
+                type: "about_appointment",
+                data: { source: dispatchSource },
+                effectiveAt: now,
+              },
+            ]
+          : []),
+      ])
+      .onConflictDoNothing();
+
+    const [workflowRun] = await tx
+      .insert(workflowRuns)
+      .values({
+        tenantId: context.worker.tenantId,
+        definitionId: definition.id,
+        objectId: handoff.jobObject.id,
+        workerId: context.worker.id,
+        state: "approval_pending",
+        idempotencyKey: input.idempotencyKey,
+        data: {
+          workerRunId: workerRun.id,
+          customerUpdateObjectId: customerUpdate.id,
+          jobObjectId: handoff.jobObject.id,
+          sourceRefs: handoff.sourceRefs,
+          inputHash,
+          externalExecution: "blocked",
+        },
+        blockers: { open: ["customer_update_approval_required", "external_send_blocked"] },
+        metrics: { budgetUnits: customerUpdateDraftUnits, customerUpdatesDrafted: 1 },
+        startedAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: workflowRuns.id });
+
+    const [reservation] = await tx
+      .insert(budgetReservations)
+      .values({
+        tenantId: context.worker.tenantId,
+        accountId: context.budgetAccountId,
+        taskId: task.id,
+        units: customerUpdateDraftUnits,
+        state: "used",
+        expiresAt: new Date(now.getTime() + 15 * 60 * 1000),
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: budgetReservations.id });
+
+    const [inference] = await tx
+      .insert(inferences)
+      .values({
+        tenantId: context.worker.tenantId,
+        budgetAccountId: context.budgetAccountId,
+        taskId: task.id,
+        capabilityId: context.capabilityId,
+        actorType: "worker",
+        actorId: context.worker.id,
+        promptHash: traceHash(input.idempotencyKey, "dispatch-customer-update"),
+        request: {
+          mode: "deterministic",
+          objective: "Draft a customer update from tenant-scoped job evidence without sending it.",
+          jobObjectId: handoff.jobObject.id,
+          updateKind: handoff.updateKind,
+          channel,
+          inputHash,
+        },
+        result: {
+          customerUpdateObjectId: customerUpdate.id,
+          draft: draftMessage,
+          requiresApproval: true,
+          externalSend: false,
+        },
+        safety: {
+          externalExecution: "blocked",
+          externalMutation: false,
+          customerSend: "blocked",
+        },
+        promptTokens: 260,
+        completionTokens: 120,
+        units: customerUpdateDraftUnits,
+        costUsd: "0.000000",
+        latencyMs: 90,
+        createdAt: now,
+      })
+      .returning({ id: inferences.id });
+
+    const [usage] = await tx
+      .insert(usageEvents)
+      .values({
+        tenantId: context.worker.tenantId,
+        accountId: context.budgetAccountId,
+        reservationId: reservation.id,
+        inferenceId: inference.id,
+        taskId: task.id,
+        capabilityId: context.capabilityId,
+        actorType: "worker",
+        actorId: context.worker.id,
+        units: customerUpdateDraftUnits,
+        costUsd: "0.000000",
+        data: {
+          mode: "deterministic",
+          workerRunId: workerRun.id,
+          workflowRunId: workflowRun.id,
+          customerUpdateObjectId: customerUpdate.id,
+        },
+        createdAt: now,
+      })
+      .returning({ id: usageEvents.id });
+
+    const [event] = await tx
+      .insert(events)
+      .values({
+        tenantId: context.worker.tenantId,
+        type: "dispatch_worker.customer_update_draft.completed",
+        source: dispatchSource,
+        actorType: "worker",
+        actorId: context.worker.id,
+        actorRef: `worker:${context.worker.id}`,
+        objectId: customerUpdate.id,
+        taskId: task.id,
+        capabilityId: context.capabilityId,
+        idempotencyKey: input.idempotencyKey,
+        data: {
+          workerRunId: workerRun.id,
+          workflowRunId: workflowRun.id,
+          jobObjectId: handoff.jobObject.id,
+          customerUpdateObjectId: customerUpdate.id,
+          updateKind: handoff.updateKind,
+          channel,
+          externalExecution: "blocked",
+          externalMutation: false,
+          externalSend: false,
+          inputHash,
+        },
+        occurredAt: now,
+        createdAt: now,
+      })
+      .returning({ id: events.id });
+
+    await tx
+      .update(workerRuns)
+      .set({ eventId: event.id, updatedAt: now })
+      .where(eq(workerRuns.id, workerRun.id));
+
+    const [traceEvidence] = await tx
+      .insert(evidence)
+      .values({
+        tenantId: context.worker.tenantId,
+        kind: "trace",
+        name: "Dispatch customer update trace",
+        objectId: customerUpdate.id,
+        taskId: task.id,
+        eventId: event.id,
+        capabilityId: context.capabilityId,
+        actorType: "worker",
+        actorId: context.worker.id,
+        hash: inputHash,
+        data: {
+          inputHash,
+          jobObjectId: handoff.jobObject.id,
+          customerObjectId: handoff.customerObject?.id ?? null,
+          quoteObjectId: handoff.quoteObject?.id ?? null,
+          appointmentObjectId: handoff.appointmentObject?.id ?? null,
+          updateKind: handoff.updateKind,
+          externalExecution: "blocked",
+          externalSend: false,
+        },
+        createdAt: now,
+      })
+      .returning({ id: evidence.id });
+
+    const [draftEvidence] = await tx
+      .insert(evidence)
+      .values({
+        tenantId: context.worker.tenantId,
+        kind: "draft",
+        name: "Customer update draft",
+        objectId: customerUpdate.id,
+        taskId: task.id,
+        eventId: event.id,
+        capabilityId: context.capabilityId,
+        actorType: "worker",
+        actorId: context.worker.id,
+        hash: traceHash(input.idempotencyKey, "customer_update_draft"),
+        data: {
+          customerUpdateObjectId: customerUpdate.id,
+          jobObjectId: handoff.jobObject.id,
+          channel,
+          draft: draftMessage,
+          externalExecution: "blocked",
+          externalSend: false,
+        },
+        createdAt: now,
+      })
+      .returning({ id: evidence.id });
+
+    const [document] = await tx
+      .insert(documents)
+      .values({
+        tenantId: context.worker.tenantId,
+        objectId: customerUpdate.id,
+        workflowRunId: workflowRun.id,
+        kind: "dispatch_customer_update_draft",
+        name: `Customer update draft for ${handoff.jobObject.name}`,
+        state: "review_ready",
+        sensitivity: "medium",
+        hash: traceHash(input.idempotencyKey, "document"),
+        data: {
+          jobObjectId: handoff.jobObject.id,
+          customerUpdateObjectId: customerUpdate.id,
+          updateKind: handoff.updateKind,
+          draft: draftMessage,
+          externalExecution: "blocked",
+          externalSend: false,
+        },
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: documents.id });
+
+    const [packet] = await tx
+      .insert(evidencePackets)
+      .values({
+        tenantId: context.worker.tenantId,
+        documentId: document.id,
+        objectId: customerUpdate.id,
+        taskId: task.id,
+        workflowRunId: workflowRun.id,
+        eventId: event.id,
+        capabilityId: context.capabilityId,
+        kind: "dispatch_customer_update_packet",
+        name: "Dispatch customer update evidence packet",
+        state: "review_ready",
+        sensitivity: "medium",
+        evidenceIds: { ids: [traceEvidence.id, draftEvidence.id] },
+        documentIds: { ids: [document.id] },
+        data: {
+          jobObjectId: handoff.jobObject.id,
+          customerUpdateObjectId: customerUpdate.id,
+          updateKind: handoff.updateKind,
+          workflowRunId: workflowRun.id,
+          externalExecution: "blocked",
+          externalMutation: false,
+          externalSend: false,
+        },
+        hash: traceHash(input.idempotencyKey, "dispatch_customer_update_packet"),
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: evidencePackets.id });
+
+    const [approval] = await tx
+      .insert(approvalRequests)
+      .values({
+        tenantId: context.worker.tenantId,
+        taskId: task.id,
+        workerRunId: workerRun.id,
+        workflowRunId: workflowRun.id,
+        eventId: event.id,
+        objectId: customerUpdate.id,
+        capabilityId: context.capabilityId,
+        requesterType: "worker",
+        requesterId: context.worker.id,
+        requesterRef: `worker:${context.worker.id}`,
+        reviewerUserId: context.reviewerUserId,
+        kind: "dispatch_customer_update_approval",
+        state: "pending",
+        priority: "normal",
+        risk: "medium",
+        title: `Approve customer update for ${handoff.jobObject.name}`,
+        summary:
+          "Dispatch Operations Worker drafted a customer update; external customer sends remain blocked.",
+        requestedAction: {
+          action: "approve_customer_update",
+          customerUpdateObjectId: customerUpdate.id,
+          jobObjectId: handoff.jobObject.id,
+          updateKind: handoff.updateKind,
+          channel,
+          externalSend: false,
+        },
+        evidence: {
+          packetId: packet.id,
+          documentId: document.id,
+          traceEvidenceId: traceEvidence.id,
+          draftEvidenceId: draftEvidence.id,
+        },
+        policy: {
+          customerSend: "blocked",
+          externalExecution: "blocked",
+        },
+        data: {
+          workerRunId: workerRun.id,
+          workflowRunId: workflowRun.id,
+          customerUpdateObjectId: customerUpdate.id,
+        },
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: approvalRequests.id });
+
+    const stepRows = await tx
+      .insert(workflowSteps)
+      .values([
+        {
+          tenantId: context.worker.tenantId,
+          definitionId: definition.id,
+          workflowRunId: workflowRun.id,
+          eventId: event.id,
+          objectId: handoff.jobObject.id,
+          workerId: context.worker.id,
+          capabilityId: context.capabilityId,
+          kind: "handoff",
+          name: "Dispatch job context accepted",
+          state: "done",
+          toState: "ready_to_update_customer",
+          idempotencyKey: `${input.idempotencyKey}:job_context`,
+          input: { sourceRefs: handoff.sourceRefs },
+          output: { jobObjectId: handoff.jobObject.id },
+          startedAt: now,
+          completedAt: now,
+          updatedAt: now,
+        },
+        {
+          tenantId: context.worker.tenantId,
+          definitionId: definition.id,
+          workflowRunId: workflowRun.id,
+          eventId: event.id,
+          objectId: customerUpdate.id,
+          workerId: context.worker.id,
+          capabilityId: context.capabilityId,
+          kind: "worker_action",
+          name: "Customer update draft prepared",
+          state: "done",
+          fromState: "ready_to_update_customer",
+          toState: "customer_update_drafted",
+          idempotencyKey: `${input.idempotencyKey}:customer_update_drafted`,
+          input: { updateKind: handoff.updateKind, channel },
+          output: { customerUpdateObjectId: customerUpdate.id, draftEvidenceId: draftEvidence.id },
+          startedAt: now,
+          completedAt: now,
+          updatedAt: now,
+        },
+        {
+          tenantId: context.worker.tenantId,
+          definitionId: definition.id,
+          workflowRunId: workflowRun.id,
+          eventId: event.id,
+          approvalRequestId: approval.id,
+          objectId: customerUpdate.id,
+          workerId: context.worker.id,
+          capabilityId: context.capabilityId,
+          kind: "approval_request",
+          name: "Customer update approval requested",
+          state: "done",
+          fromState: "customer_update_drafted",
+          toState: "approval_pending",
+          idempotencyKey: `${input.idempotencyKey}:approval_requested`,
+          input: { approvalRequestId: approval.id },
+          output: { packetId: packet.id, documentId: document.id },
+          startedAt: now,
+          completedAt: now,
+          updatedAt: now,
+        },
+      ])
+      .returning({ id: workflowSteps.id });
+
+    const workflowStepIds = stepRows.map((step) => step.id);
+    const viewKey = "dispatch.customer_update.review";
+    const viewVersion = "1.0.0";
+    const viewValues = {
+      capabilityId: context.capabilityId,
+      key: viewKey,
+      version: viewVersion,
+      name: "Dispatch customer update review",
+      purpose: "Let an operator review a customer update draft while external sends remain blocked.",
+      surface: "web",
+      objectType: "customer_update",
+      taskState: "approval_required" as const,
+      contract: {
+        sections: ["JobSummary", "DraftMessage", "EvidenceTimeline", "ActionBar"],
+        externalExecution: "blocked",
+      } as JsonObject,
+      actions: {
+        decisionSurface: "/approval",
+        decisionCommand: "approval.decide",
+        postDecisionSurface: "/worker",
+        postDecisionCommand: "continue",
+        valid: ["approved", "revision_requested", "rejected"],
+        externalExecution: "blocked",
+      } as JsonObject,
+      data: {
+        latest: {
+          approvalRequestId: approval.id,
+          workerRunId: workerRun.id,
+          workflowRunId: workflowRun.id,
+          taskId: task.id,
+          jobObjectId: handoff.jobObject.id,
+          customerObjectId: handoff.customerObject?.id ?? null,
+          customerUpdateObjectId: customerUpdate.id,
+          updateKind: handoff.updateKind,
+          channel,
+          packetId: packet.id,
+          documentId: document.id,
+          traceEvidenceId: traceEvidence.id,
+          draftEvidenceId: draftEvidence.id,
+          externalExecution: "blocked",
+          externalMutation: false,
+          externalSend: false,
+        },
+      } as JsonObject,
+      mask: {
+        customer_contact: "redacted_by_default",
+        site_address: "redacted_by_default",
+        externalExecution: "blocked",
+      } as JsonObject,
+      active: true,
+      updatedAt: now,
+    };
+    const [existingView] = await tx
+      .select({ id: generatedViews.id })
+      .from(generatedViews)
+      .where(
+        and(
+          eq(generatedViews.tenantId, context.worker.tenantId),
+          eq(generatedViews.key, viewKey),
+          eq(generatedViews.version, viewVersion),
+        ),
+      )
+      .limit(1);
+    const [view] = existingView
+      ? await tx
+          .update(generatedViews)
+          .set(viewValues)
+          .where(eq(generatedViews.id, existingView.id))
+          .returning({ id: generatedViews.id })
+      : await tx
+          .insert(generatedViews)
+          .values({
+            tenantId: context.worker.tenantId,
+            ...viewValues,
+            createdAt: now,
+          })
+          .returning({ id: generatedViews.id });
+
+    await tx.insert(events).values({
+      tenantId: context.worker.tenantId,
+      type: existingView ? "view.updated" : "view.published",
+      source: dispatchSource,
+      actorType: "worker",
+      actorId: context.worker.id,
+      actorRef: `worker:${context.worker.id}`,
+      objectId: customerUpdate.id,
+      taskId: task.id,
+      capabilityId: context.capabilityId,
+      idempotencyKey: `${input.idempotencyKey}:dispatch_customer_update_view`,
+      data: {
+        key: viewKey,
+        version: viewVersion,
+        viewId: view.id,
+        workerRunId: workerRun.id,
+        workflowRunId: workflowRun.id,
+      },
+      occurredAt: now,
+      createdAt: now,
+    });
+
+    await tx.insert(auditEvents).values({
+      tenantId: context.worker.tenantId,
+      type: "dispatch_worker.customer_update_draft.completed",
+      source: dispatchSource,
+      actorType: "worker",
+      actorId: context.worker.id,
+      actorRef: `worker:${context.worker.id}`,
+      targetType: "worker_run",
+      targetId: workerRun.id,
+      taskId: task.id,
+      workerRunId: workerRun.id,
+      approvalRequestId: approval.id,
+      eventId: event.id,
+      objectId: customerUpdate.id,
+      capabilityId: context.capabilityId,
+      risk: "medium",
+      idempotencyKey: `${input.idempotencyKey}:audit`,
+      data: {
+        operatorEmail: context.operator.email,
+        inputHash,
+        externalExecution: "blocked",
+        externalMutation: false,
+        externalSend: false,
+      },
+      createdAt: now,
+    });
+
+    const output = {
+      jobObjectId: handoff.jobObject.id,
+      customerObjectId: handoff.customerObject?.id ?? null,
+      quoteObjectId: handoff.quoteObject?.id ?? null,
+      appointmentObjectId: handoff.appointmentObject?.id ?? null,
+      customerUpdateObjectId: customerUpdate.id,
+      approvalRequestId: approval.id,
+      evidenceId: traceEvidence.id,
+      draftEvidenceId: draftEvidence.id,
+      packetId: packet.id,
+      documentId: document.id,
+      workflowRunId: workflowRun.id,
+      workflowStepIds,
+      dispatchCustomerUpdateViewId: view.id,
+      updateKind: handoff.updateKind,
+      channel,
+      draft: draftMessage,
+      sourceRefs: handoff.sourceRefs,
+      externalExecution: "blocked",
+      externalMutation: false,
+      externalSend: false,
+      requiresApproval: true,
+    } satisfies JsonObject;
+
+    await tx
+      .update(workerRuns)
+      .set({
+        state: "done",
+        eventId: event.id,
+        data: {
+          input: runInput,
+          output,
+          eventId: event.id,
+          taskId: task.id,
+          customerUpdateObjectId: customerUpdate.id,
+          approvalRequestId: approval.id,
+          evidenceId: traceEvidence.id,
+          draftEvidenceId: draftEvidence.id,
+          packetId: packet.id,
+          documentId: document.id,
+          workflowRunId: workflowRun.id,
+          workflowStepIds,
+          dispatchCustomerUpdateViewId: view.id,
+          reservationId: reservation.id,
+          inferenceId: inference.id,
+          usageEventId: usage.id,
+        },
+        endedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(workerRuns.id, workerRun.id));
+
+    await tx
+      .update(workers)
+      .set({
+        kpis: {
+          ...context.worker.kpis,
+          customer_updates_drafted: numberValue(context.worker.kpis.customer_updates_drafted) + 1,
+        },
+        updatedAt: now,
+      })
+      .where(eq(workers.id, context.worker.id));
+
+    return {
+      replay: null,
+      workerRunId: workerRun.id,
+      taskId: task.id,
+      eventId: event.id,
+      customerUpdateObjectId: customerUpdate.id,
+      approvalRequestId: approval.id,
+      evidenceId: traceEvidence.id,
+      draftEvidenceId: draftEvidence.id,
+      packetId: packet.id,
+      documentId: document.id,
+      workflowRunId: workflowRun.id,
+      workflowStepIds,
+      dispatchCustomerUpdateViewId: view.id,
+      output,
+    };
+  });
+
+  if (result.replay) {
+    return replayedCustomerUpdateDraft(db, context, result.replay);
+  }
+
+  return {
+    created: true,
+    idempotencyKey: input.idempotencyKey,
+    workerRunId: result.workerRunId,
+    taskId: result.taskId,
+    eventId: result.eventId,
+    customerUpdateObjectId: result.customerUpdateObjectId,
+    approvalRequestId: result.approvalRequestId,
+    evidenceId: result.evidenceId,
+    draftEvidenceId: result.draftEvidenceId,
+    packetId: result.packetId,
+    documentId: result.documentId,
+    workflowRunId: result.workflowRunId,
+    workflowStepIds: result.workflowStepIds,
+    dispatchCustomerUpdateViewId: result.dispatchCustomerUpdateViewId,
     output: result.output,
     snapshot: await getDispatchWorkerSnapshot(db, {
       role: dispatchWorkerRole,

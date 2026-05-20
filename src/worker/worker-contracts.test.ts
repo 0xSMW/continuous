@@ -123,6 +123,16 @@ describe("future worker contracts", () => {
     }
   });
 
+  it("keeps the Dispatch runtime contract on generic worker commands", () => {
+    const source = read("docs/dispatch-operations-worker-v1-contract.md");
+
+    expect(source).toContain("All commands use `POST /worker`; no dispatch-specific route is added.");
+    expect(source).toContain("`customer_update.draft`");
+    expect(source).toContain("`worker.dispatch.customer_update.draft`");
+    expect(source).toContain("customer update draft");
+    expect(source).not.toMatch(/\/api\/[a-z0-9-]+-worker/);
+  });
+
   it("links the future contracts from the worker expansion map", () => {
     const expansion = read("docs/worker-expansion.md");
 

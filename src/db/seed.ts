@@ -352,12 +352,12 @@ async function seed() {
           "Turn approved revenue handoffs into schedule proposals, customer updates, closeout packets, and exception tasks without unapproved external execution.",
         autonomyLevel: 2,
         scope: {
-          flows: ["promise_to_delivery", "schedule_proposal", "dispatch_exception"],
+          flows: ["promise_to_delivery", "schedule_proposal", "customer_update", "dispatch_exception"],
           systems: ["calendar", "jobs", "crew_capacity"],
         },
         memory: { schedule_context: "tenant_scoped", customer_contact: "redacted_by_default" },
         policy: { calendar_write: "approval_required", customer_send: "blocked", external_execution: "dry_run" },
-        kpis: { schedules_proposed: 0, approval_requests_created: 0, conflicts_found: 0 },
+        kpis: { schedules_proposed: 0, customer_updates_drafted: 0, approval_requests_created: 0, conflicts_found: 0 },
       },
     ])
     .onConflictDoNothing();
@@ -577,7 +577,7 @@ async function seed() {
         actorId: ids.dispatchWorker,
         scope: {
           tenant_id: ids.tenant,
-          objects: ["job", "quote", "appointment", "work_order", "closeout"],
+          objects: ["job", "quote", "appointment", "customer_update", "work_order", "closeout"],
         },
         policy: {
           mode: "dry_run",

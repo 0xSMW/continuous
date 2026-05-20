@@ -227,7 +227,7 @@ jobs:
           }
           set_control_plane_token_catalog() {
             token_hash="$(printf '%s' "$worker_token" | sha256sum | awk '{print $1}')"
-            allowed_commands='"core:view.summary","core:task.create","core:task.transition","core:object.upsert","core:adapter.upsert","core:connection.upsert","core:connection.health.record","core:object.link","core:event.ingest","core:evidence.attach","core:document.create","core:packet.prepare","core:document.packet.prepare","core:decision.record","core:approval.request","core:adapter.intent.record","core:rule.change.record","core:capability.grant","core:budget.reserve","core:budget.charge","core:budget.release","core:view.publish","core:customer_signal.record","core:payroll.preview.record","core:payroll.preview.packet.prepare","worker:view.snapshot","worker:view.approvals","worker:view.briefs","worker:view.decisions","worker:view.board","worker:view.exceptions","worker:run","worker:lead.read","worker:lead.classify","worker:response.draft","worker:schedule.propose","worker:continue","worker:approval.decide","worker:adapters.reconcile","worker:adapters.retry","worker:brief.generate","worker:decision_queue.prepare","worker:anomaly.triage","workflow:view.overview","workflow:view.approvals","workflow:start","workflow:transition","workflow:steps.execute","workflow:approval.decide","approval:view.inbox","approval:approval.decide"'
+            allowed_commands='"core:view.summary","core:task.create","core:task.transition","core:object.upsert","core:adapter.upsert","core:connection.upsert","core:connection.health.record","core:object.link","core:event.ingest","core:evidence.attach","core:document.create","core:packet.prepare","core:document.packet.prepare","core:decision.record","core:approval.request","core:adapter.intent.record","core:rule.change.record","core:capability.grant","core:budget.reserve","core:budget.charge","core:budget.release","core:view.publish","core:customer_signal.record","core:payroll.preview.record","core:payroll.preview.packet.prepare","worker:view.snapshot","worker:view.approvals","worker:view.briefs","worker:view.decisions","worker:view.board","worker:view.exceptions","worker:run","worker:lead.read","worker:lead.classify","worker:response.draft","worker:schedule.propose","worker:customer_update.draft","worker:continue","worker:approval.decide","worker:adapters.reconcile","worker:adapters.retry","worker:brief.generate","worker:decision_queue.prepare","worker:anomaly.triage","workflow:view.overview","workflow:view.approvals","workflow:start","workflow:transition","workflow:steps.execute","workflow:approval.decide","approval:view.inbox","approval:approval.decide"'
             catalog_json="$(
               printf '[{"id":"bootstrap-operator","tokenSha256":"%s","operatorEmail":"%s","allowedTenants":["continuous-demo"],"allowedWorkerRoles":["revenue_operations","owner_chief_of_staff","dispatch_operations"],"allowedRoutes":["core","worker","workflow","approval"],"allowedAccess":["read","write"],"allowedCommands":[%s]}]' \
                 "$token_hash" \
@@ -482,6 +482,7 @@ jobs:
             (.registry.commands | any(.role == "owner_chief_of_staff" and .name == "decision_queue.prepare" and .externalExecution == "blocked")) and
             (.registry.commands | any(.role == "owner_chief_of_staff" and .name == "anomaly.triage" and .externalExecution == "blocked")) and
             (.registry.commands | any(.role == "dispatch_operations" and .name == "schedule.propose" and .externalExecution == "dry_run")) and
+            (.registry.commands | any(.role == "dispatch_operations" and .name == "customer_update.draft" and .externalExecution == "blocked")) and
             (.registry.views | map(.name) | index("snapshot")) != null and
             (.registry.views | map(.name) | index("approvals")) != null and
             (.registry.views | any(.role == "owner_chief_of_staff" and .name == "briefs")) and
@@ -499,10 +500,40 @@ jobs:
             (.tools | map(.name) | index("worker.lead.classify")) != null and
             (.tools | map(.name) | index("worker.response.draft")) != null and
             (.tools | map(.name) | index("worker.dispatch.schedule.propose")) != null and
+            (.tools | map(.name) | index("worker.dispatch.customer_update.draft")) != null and
             (.tools | map(.name) | index("worker.continue")) != null and
             (.tools | map(.name) | index("worker.adapters.reconcile")) != null and
             (.tools | map(.name) | index("worker.owner.brief.generate")) != null
           ' >/dev/null
+
+          DISPATCH_CUSTOMER_UPDATE_KEY="deploy-dispatch-customer-update-smoke-$SMOKE_RUN_ID"
+          DISPATCH_CUSTOMER_UPDATE_PAYLOAD="$(
+            /usr/bin/jq -nc --arg key "$DISPATCH_CUSTOMER_UPDATE_KEY" '{
+              command: "customer_update.draft",
+              worker: {role: "dispatch_operations", tenantSlug: "continuous-demo"},
+              idempotencyKey: $key,
+              config: {
+                jobId: "33333333-3333-4333-8333-000000000005",
+                updateKind: "schedule_confirmed",
+                channel: "email",
+                messageContext: {
+                  customerFacingSummary: "Your service window is prepared for dispatcher review before any customer message is sent."
+                }
+              }
+            }'
+          )"
+          DISPATCH_CUSTOMER_UPDATE_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/worker \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$DISPATCH_CUSTOMER_UPDATE_PAYLOAD"
+          )"
+
+          echo "$DISPATCH_CUSTOMER_UPDATE_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,customerUpdateObjectId:.data.result.customerUpdateObjectId,approvalRequestId:.data.result.approvalRequestId,packetId:.data.result.packetId,viewId:.data.result.dispatchCustomerUpdateViewId,externalExecution:.data.result.output.externalExecution,externalSend:.data.result.output.externalSend}}'
+          echo "$DISPATCH_CUSTOMER_UPDATE_RESPONSE" | /usr/bin/jq -e \
+            '.error == null and .data.command == "customer_update.draft" and .data.worker.role == "dispatch_operations" and (.data.result.customerUpdateObjectId | length > 0) and (.data.result.approvalRequestId | length > 0) and (.data.result.packetId | length > 0) and (.data.result.dispatchCustomerUpdateViewId | length > 0) and .data.result.output.externalExecution == "blocked" and .data.result.output.externalSend == false' \
+            >/dev/null
 
           IDS="$(psql_db -At <<'SQL'
           with base as (

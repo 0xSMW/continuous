@@ -26,6 +26,11 @@ describe("app-server worker tools", () => {
         (command) => command.role === "dispatch_operations" && command.name === "schedule.propose",
       ),
     ).toBe(true);
+    expect(
+      schema.registry.commands.some(
+        (command) => command.role === "dispatch_operations" && command.name === "customer_update.draft",
+      ),
+    ).toBe(true);
   });
 
   it("requires a clean canonical command envelope before dispatch", async () => {
@@ -109,5 +114,22 @@ describe("app-server worker tools", () => {
         },
       }),
     ).rejects.toThrow("config.reader.credentialRef is required for inbox and CRM lead readers.");
+  });
+
+  it("applies registry schemas to dispatch commands through the app-server envelope", async () => {
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.command", {
+        command: "customer_update.draft",
+        operatorEmail: "owner@continuoushq.com",
+        worker: {
+          role: "dispatch_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "app-server-dispatch-update-schema",
+        config: {
+          jobId: "job_object_uuid",
+        },
+      }),
+    ).rejects.toThrow("config.updateKind is required for customer_update.draft.");
   });
 });

@@ -55,18 +55,21 @@ before promotion.
 
 ## Phase 3: Dispatch/Ops Worker
 
-Status: first runtime slice is registered on `/worker` for
-`schedule.propose`. It consumes a Revenue `revenue.quote_to_dispatch` handoff
-from `config.sourceRefs`, writes an appointment object, promise-to-delivery
-workflow run/steps, dry-run calendar adapter receipt, approval request,
-dispatch packet, and `dispatch.schedule.review` generated view. Remaining work
-is customer update drafts, closeout packets, exception routing, and live
-calendar credentials.
+Status: first runtime slices are registered on `/worker` for
+`schedule.propose` and `customer_update.draft`. The schedule command consumes a
+Revenue `revenue.quote_to_dispatch` handoff from `config.sourceRefs`, writes an
+appointment object, promise-to-delivery workflow run/steps, dry-run calendar
+adapter receipt, approval request, dispatch packet, and
+`dispatch.schedule.review` generated view. The customer update command consumes
+`config.jobId` plus `config.updateKind`, writes a blocked no-send draft,
+evidence packet, approval request, and `dispatch.customer_update.review` view.
+Remaining work is closeout packets, exception routing, and live calendar/send
+credentials.
 
 | Dependency | Implementation target |
 |---|---|
 | Core objects | Job, appointment, crew, asset, material, closeout, customer update |
-| Workflow | Promise-to-delivery state machine with schedule proposal and closeout packet |
+| Workflow | Promise-to-delivery state machine with schedule proposal, customer update draft, and closeout packet |
 | Capabilities | `schedule.propose`, `response.draft`, `document_packet.prepare`, `approval.request` |
 | Adapters | Calendar dry-run, map/job system dry-run, customer-message approval |
 | Launch gate | No customer update without approval; schedule conflicts create exception tasks |
