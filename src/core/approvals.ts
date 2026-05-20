@@ -1078,11 +1078,22 @@ export async function decideApproval(input: {
       }
 
       const packetId = uuidValue(approvalData.packetId ?? approvalEvidenceData.packetId);
-      const packetDocumentId = uuidValue(approvalData.packetDocumentId ?? approvalEvidenceData.packetDocumentId);
+      let packetDocumentId = uuidValue(approvalData.packetDocumentId ?? approvalEvidenceData.packetDocumentId);
       const filingDraftId = uuidValue(approvalData.filingDraftId ?? approvalEvidenceData.filingDraftId);
       const paymentInstructionIds = uuidList(
         approvalEvidenceData.paymentInstructionIds ?? approvalData.paymentInstructionIds,
       );
+
+      if (packetId && !packetDocumentId) {
+        const [packetRef] = await tx
+          .select({ documentId: evidencePackets.documentId })
+          .from(evidencePackets)
+          .where(and(eq(evidencePackets.tenantId, operator.tenantId), eq(evidencePackets.id, packetId)))
+          .limit(1);
+
+        packetDocumentId = uuidValue(packetRef?.documentId);
+      }
+
       const payrollRunState = payrollRunStateForDecision(input.action);
       const draftState = payrollDraftStateForDecision(input.action);
       const handoff = {
