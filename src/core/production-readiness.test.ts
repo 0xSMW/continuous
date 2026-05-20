@@ -13,8 +13,11 @@ describe("production readiness operations", () => {
     const readiness = read("scripts/check-production-readiness-on-host.sh");
     const attest = read("scripts/attest-non-root-access-on-host.sh");
     const install = read("scripts/install-non-root-access.sh");
+    const recoveryAttest = read("scripts/attest-recovery-drill-on-host.sh");
+    const recoveryAttestRemote = read("scripts/attest-recovery-drill.sh");
     const deployWorkflow = read(".github/workflows/deploy.yml");
     const deploymentDocs = read("docs/deployment.md");
+    const packageJson = read("package.json");
 
     expect(readiness).toContain("NON_ROOT_ACCESS_ATTESTED_AT");
     expect(readiness).toContain("NON_ROOT_ACCESS_USER");
@@ -39,6 +42,21 @@ describe("production readiness operations", () => {
     expect(read("scripts/rotate-control-plane-token-on-host.sh")).toContain('cat "$tmp" > "$file"');
     expect(read("scripts/rotate-control-plane-token-on-host.sh")).not.toContain('mv "$tmp" "$file"');
 
+    expect(readiness).toContain("RECOVERY_DRILL_REPORT_SHA256");
+    expect(readiness).toContain("attest-recovery-drill-on-host.sh");
+    expect(readiness).toContain("recovery_drill_report_verified");
+
+    expect(recoveryAttest).toContain("RECOVERY_DRILL_REPORT");
+    expect(recoveryAttest).toContain("EXPECTED_RECOVERY_DRILL_REPORT_SHA256");
+    expect(recoveryAttest).toContain("recovery_drill_host_is_production");
+    expect(recoveryAttest).toContain("RECOVERY_DRILL_REPORT_SHA256");
+    expect(recoveryAttest).toContain("Compatibility boundary:");
+
+    expect(recoveryAttestRemote).toContain("REPORT_PATH");
+    expect(recoveryAttestRemote).toContain("scp");
+    expect(recoveryAttestRemote).toContain("attest-recovery-drill-on-host.sh");
+    expect(packageJson).toContain("ops:recovery-drill-attest");
+
     expect(deployWorkflow).toContain(
       'require_production_readiness=true requires DEPLOY_USER to be a non-root deploy account.',
     );
@@ -50,6 +68,8 @@ describe("production readiness operations", () => {
 
     expect(deploymentDocs).toContain("HOST=45.55.53.92 ./scripts/install-non-root-access.sh");
     expect(deploymentDocs).toContain("SSH_USER=continuous-deploy ./scripts/deploy.sh");
+    expect(deploymentDocs).toContain("scripts/attest-recovery-drill.sh");
+    expect(deploymentDocs).toContain("strict readiness gate re-checks the report artifact and checksum");
     expect(deploymentDocs).toContain("delegates ownership of that");
     expect(deploymentDocs).toContain("rejects `DEPLOY_USER=root` before opening a customer-data deploy");
     expect(deploymentDocs).toContain("it no longer accepts a");

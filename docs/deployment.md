@@ -748,11 +748,27 @@ operator notes. The compatibility boundary is explicit: app rollback is
 tag-based, database restore is dump-backed, and restored schema/data must be
 compatible with the chosen app tag because migrations are forward-only.
 
+After a successful disposable-host drill, copy and attest the generated report
+on the production host instead of hand-editing
+`/etc/continuous/production-readiness.env`:
+
+```sh
+HOST=45.55.53.92 \
+  REPORT_PATH=reports/recovery-drills/continuous-recovery-YYYYMMDDTHHMMSSZ.md \
+  ./scripts/attest-recovery-drill.sh
+```
+
+The attestation verifies the report heading, result section, completion time,
+elapsed timing, compatibility boundary, drill host, and report SHA-256, then
+writes only non-secret `RECOVERY_DRILL_*` evidence into the readiness file. The
+strict readiness gate re-checks the report artifact and checksum on every run.
+
 ## Remaining Production Hardening
 
 - Run `scripts/recovery-drill.sh` against a disposable droplet and document the
-  measured recovery timing before using the production droplet for customer
-  data.
+  measured recovery timing, then run `scripts/attest-recovery-drill.sh` so the
+  strict gate verifies the report artifact before using the production droplet
+  for customer data.
 - Install `scripts/install-observability-timer.sh` with `ALERT_WEBHOOK_URL`
   after choosing an alert destination; deploy smoke already verifies the same
   host checks without requiring a webhook.

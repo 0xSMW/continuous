@@ -79,6 +79,45 @@ require_env_equals() {
   fi
 }
 
+check_recovery_drill_report() {
+  report="$(env_value "$READINESS_ENV_FILE" RECOVERY_DRILL_REPORT)"
+  report_sha256="$(env_value "$READINESS_ENV_FILE" RECOVERY_DRILL_REPORT_SHA256)"
+  report_host="$(env_value "$READINESS_ENV_FILE" RECOVERY_DRILL_HOST)"
+
+  if [ -z "$report" ]; then
+    record_failure "recovery_drill_report_unset"
+    return
+  fi
+
+  if [ -z "$report_sha256" ]; then
+    record_failure "recovery_drill_report_sha256_unset"
+  fi
+
+  if [ ! -x "$APP_DIR/scripts/attest-recovery-drill-on-host.sh" ]; then
+    record_failure "recovery_drill_attestation_script_missing:$APP_DIR/scripts/attest-recovery-drill-on-host.sh"
+    return
+  fi
+
+  output="$(
+    APP_DIR="$APP_DIR" \
+      READINESS_ENV_FILE="$READINESS_ENV_FILE" \
+      RECOVERY_DRILL_REPORT="$report" \
+      RECOVERY_DRILL_HOST="$report_host" \
+      EXPECTED_RECOVERY_DRILL_REPORT_SHA256="$report_sha256" \
+      WRITE_READINESS_ENV=false \
+      "$APP_DIR/scripts/attest-recovery-drill-on-host.sh" 2>&1
+  )"
+  status="$?"
+
+  if [ "$status" -eq 0 ]; then
+    record_ok "recovery_drill_report_verified"
+    printf '%s\n' "$output"
+  else
+    record_failure "recovery_drill_report_verification_failed"
+    printf '%s\n' "$output" >&2
+  fi
+}
+
 check_timer() {
   timer="$1"
 
@@ -222,6 +261,7 @@ fi
 if bool_enabled "$REQUIRE_RECOVERY_DRILL_ATTESTATION"; then
   require_env_value "$READINESS_ENV_FILE" RECOVERY_DRILL_ATTESTED_AT
   require_env_value "$READINESS_ENV_FILE" RECOVERY_DRILL_REPORT
+  check_recovery_drill_report
 else
   record_ok "recovery_drill_attestation_skipped"
 fi

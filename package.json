@@ -22,6 +22,7 @@
     "ops:production-readiness-check": "./scripts/check-production-readiness.sh",
     "ops:non-root-access": "./scripts/install-non-root-access.sh",
     "ops:recovery-drill": "./scripts/recovery-drill.sh",
+    "ops:recovery-drill-attest": "./scripts/attest-recovery-drill.sh",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "bun src/db/migrate.ts",
     "db:studio": "drizzle-kit studio",
