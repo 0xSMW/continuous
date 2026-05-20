@@ -587,6 +587,7 @@ export async function runSchedulerCycle(
     throw new Error("WORKER_RUN_TOKEN is required when the worker scheduler is enabled.");
   }
 
+  const cycleKey = new Date().toISOString();
   const workflow = await post({
     baseUrl: config.baseUrl,
     token: config.token,
@@ -618,6 +619,7 @@ export async function runSchedulerCycle(
         role: revenueWorkerRole,
         tenantSlug: config.tenantSlug,
       },
+      idempotencyKey: `scheduler-adapters-retry:${config.tenantSlug}:${cycleKey}`,
       config: {
         limit: config.adapterLimit,
       },
@@ -633,6 +635,7 @@ export async function runSchedulerCycle(
         role: revenueWorkerRole,
         tenantSlug: config.tenantSlug,
       },
+      idempotencyKey: `scheduler-adapters-reconcile:${config.tenantSlug}:${cycleKey}`,
       config: {
         limit: config.adapterLimit,
       },

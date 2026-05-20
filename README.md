@@ -45,9 +45,12 @@ Then open `http://localhost:3000`.
   `document.packet.prepare`, `decision.record`,
   `approval.request`, `adapter.intent.record`, `rule.change.record`,
   `capability.grant`, `budget.reserve`, `budget.charge`, `budget.release`,
-  `view.publish`, `customer_signal.record`, `payroll.preview.record`, and
+  `ai.infer`, `view.publish`, `customer_signal.record`, `payroll.preview.record`, and
   `payroll.preview.packet.prepare`. Core mutation requests accept only
   `command`, `core`, `idempotencyKey`, and `config` as top-level fields.
+  `ai.infer` is the deterministic Core AI gateway: route selection, redaction,
+  budget reservation/charge, inference, usage, audit, and evidence are written
+  through one reusable command while live provider execution remains blocked.
 - `/approval` is the shared approval control-plane API. Use
   `GET /approval?view=inbox&tenantSlug=continuous-demo&subject=all`, or
   `POST /approval` with `command=approval.decide`, structured `approval`, and
@@ -56,11 +59,11 @@ Then open `http://localhost:3000`.
   `GET /worker?view=snapshot&role=revenue_operations` or
   `GET /worker?view=approvals&role=revenue_operations`; use `POST /worker` with
   explicit `worker.role`, `command`, `idempotencyKey` when required, and
-  `config` payloads for side-effecting worker commands. Revenue operations runs
-  accept only `command`, `worker`, `idempotencyKey`, and `config` as top-level
-  command fields; role and tenant selectors live under `worker`, and operation
-  inputs such as source records, approval ids, retry limits, or lead payloads
-  live under `config`. Revenue operations runs can first call
+  `config` payloads for side-effecting worker commands. Worker mutation
+  requests accept only `command`, `worker`, `idempotencyKey`, and `config` as
+  top-level command fields; `worker` is limited to role, id, and tenant
+  selectors, and operation inputs such as source records, approval ids, retry
+  limits, or lead payloads live under `config`. Revenue operations runs can first call
   `command=lead.read` with `config.source` and
   `config.records[]` to persist Core lead source snapshots, then call
   `command=lead.classify`, `command=response.draft`, or the full `command=run`
@@ -103,6 +106,14 @@ operation fields so worker-specific inputs stay under `config`.
 - [Revenue Operations Worker V1 contract](docs/revenue-operations-worker-v1-contract.md)
 - [Worker expansion map](docs/worker-expansion.md)
 - [Worker execution roadmap](docs/worker-roadmap.md)
+- [Worker readiness matrix](docs/worker-readiness.md)
+- [Worker handoff contracts](docs/worker-handoffs.md)
+- [Owner Chief-of-Staff Worker V1 contract](docs/owner-chief-of-staff-worker-v1-contract.md)
+- [Dispatch Operations Worker V1 contract](docs/dispatch-operations-worker-v1-contract.md)
+- [Finance Operations Worker V1 contract](docs/finance-operations-worker-v1-contract.md)
+- [Workforce Operations Worker V1 contract](docs/workforce-operations-worker-v1-contract.md)
+- [Compliance Operations Worker V1 contract](docs/compliance-operations-worker-v1-contract.md)
+- [Systems Operations Worker V1 contract](docs/systems-operations-worker-v1-contract.md)
 - [Local development](docs/local-development.md)
 - [DigitalOcean deployment](docs/deployment.md)
 - [Infrastructure notes](infra/README.md)

@@ -6,6 +6,7 @@ import { and, count, eq, inArray, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { reconcileAdapterLedger } from "../core/adapters";
+import { executeAiInference } from "../core/ai-gateway";
 import { decideApproval, requestApproval } from "../core/approvals";
 import { reserveBudget, chargeBudget, releaseBudget } from "../core/budgets";
 import { grantCapability } from "../core/capabilities";
@@ -405,6 +406,132 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(replay.created).toBe(false);
     expect(replay.taskId).toBe(first.taskId);
     expect(taskCount.value).toBe(1);
+  }, 120_000);
+
+  it("runs Core AI gateway inference with route policy, redaction, budget, and replay proof", async () => {
+    const runId = randomUUID();
+    const idempotencyKey = `ci-core-ai-gateway-${runId}`;
+    const [worker] = await db
+      .select({ id: workers.id })
+      .from(workers)
+      .where(eq(workers.role, "revenue_operations"))
+      .limit(1);
+    const [capability] = await db
+      .select({ id: capabilities.id })
+      .from(capabilities)
+      .where(eq(capabilities.key, "lead.classify"))
+      .limit(1);
+    const [budgetAccount] = await db
+      .select({ id: budgetAccounts.id })
+      .from(budgetAccounts)
+      .where(eq(budgetAccounts.targetId, worker?.id ?? ""))
+      .limit(1);
+
+    if (!worker || !capability || !budgetAccount) {
+      throw new Error("Missing seeded AI gateway worker, capability, or budget account.");
+    }
+
+    const result = await executeAiInference({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey,
+      routeKey: "low_cost_fast",
+      budgetAccountId: budgetAccount.id,
+      maxUnits: 750,
+      capabilityId: capability.id,
+      actor: {
+        type: "worker",
+        id: worker.id,
+        ref: `worker:${worker.id}`,
+      },
+      input: {
+        prompt: "Classify this lead for quote readiness.",
+        customerName: "Acme Roof Repair",
+        token: "never-persist-this",
+      },
+      redaction: {
+        fields: ["token"],
+      },
+      evaluation: {
+        caseId: "ci.lead_classification",
+      },
+      db,
+    });
+
+    expect(result.created).toBe(true);
+    expect(result.inferenceId).toBeTruthy();
+    expect(result.reservationId).toBeTruthy();
+    expect(result.usageEventId).toBeTruthy();
+    expect(result.eventId).toBeTruthy();
+    expect(result.auditEventId).toBeTruthy();
+    expect(result.evidenceId).toBeTruthy();
+    expect(result.units).toBe(750);
+    expect(objectValue(result.request).input).toMatchObject({
+      prompt: "Classify this lead for quote readiness.",
+      customerName: "Acme Roof Repair",
+      token: "[redacted]",
+    });
+    expect(objectValue(result.result).mode).toBe("deterministic");
+    expect(objectValue(result.safety).externalExecution).toBe("blocked");
+
+    const [usage] = await db
+      .select()
+      .from(usageEvents)
+      .where(eq(usageEvents.id, result.usageEventId ?? ""))
+      .limit(1);
+    const [audit] = await db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.id, result.auditEventId ?? ""))
+      .limit(1);
+    const [proof] = await db
+      .select()
+      .from(evidence)
+      .where(eq(evidence.id, result.evidenceId ?? ""))
+      .limit(1);
+
+    expect(usage?.inferenceId).toBe(result.inferenceId);
+    expect(usage?.units).toBe(750);
+    expect(audit?.source).toBe("continuous.core.ai_gateway");
+    expect(audit?.targetType).toBe("inference");
+    expect(audit?.targetId).toBe(result.inferenceId);
+    expect(objectValue(audit?.data).providerExecution).toBe("disabled");
+    expect(proof?.kind).toBe("trace");
+    expect(JSON.stringify(proof?.data)).not.toContain("never-persist-this");
+
+    const replay = await executeAiInference({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey,
+      routeKey: "low_cost_fast",
+      budgetAccountId: budgetAccount.id,
+      maxUnits: 750,
+      capabilityId: capability.id,
+      actor: {
+        type: "worker",
+        id: worker.id,
+        ref: `worker:${worker.id}`,
+      },
+      input: {
+        prompt: "Changed input must replay the original inference.",
+        token: "changed",
+      },
+      db,
+    });
+    const [auditCount] = await db
+      .select({ value: count() })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.source, "continuous.core.ai_gateway"),
+          eq(auditEvents.idempotencyKey, `${idempotencyKey}:ai_infer`),
+        ),
+      );
+
+    expect(replay.created).toBe(false);
+    expect(replay.inferenceId).toBe(result.inferenceId);
+    expect(replay.usageEventId).toBe(result.usageEventId);
+    expect(auditCount.value).toBe(1);
   }, 120_000);
 
   it("records payroll preview statements, lines, liabilities, traces, and proof", async () => {

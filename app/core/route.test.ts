@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  executeAiInference: vi.fn(),
   attachCoreEvidence: vi.fn(),
   authorizeManagedControlPlaneCredential: vi.fn(),
   attestControlPlaneTokenRotation: vi.fn(),
@@ -32,6 +33,10 @@ const mocks = vi.hoisted(() => ({
   upsertCoreConnection: vi.fn(),
   upsertCoreObject: vi.fn(),
   recordControlPlaneAuthAttempt: vi.fn(),
+}));
+
+vi.mock("../../src/core/ai-gateway", () => ({
+  executeAiInference: mocks.executeAiInference,
 }));
 
 vi.mock("../../src/core/approvals", () => ({
@@ -242,6 +247,109 @@ describe("POST /core", () => {
       expiresAt: undefined,
       evidence: {
         owner: "ops",
+      },
+    });
+  });
+
+  it("runs deterministic AI inference through the Core command envelope", async () => {
+    mocks.executeAiInference.mockResolvedValue({
+      created: true,
+      idempotencyKey: "ai-infer-001",
+      inferenceId: "inference-1",
+      providerId: "provider-1",
+      routeId: "route-1",
+      budgetAccountId: "budget-1",
+      reservationId: "reservation-1",
+      usageEventId: "usage-1",
+      eventId: "event-1",
+      auditEventId: "audit-1",
+      evidenceId: "evidence-1",
+      promptHash: "hash-1",
+      units: 500,
+      costUsd: "0.000000",
+      request: {
+        input: {
+          prompt: "Classify lead",
+          token: "[redacted]",
+        },
+      },
+      result: {
+        mode: "deterministic",
+      },
+      safety: {
+        externalExecution: "blocked",
+      },
+    });
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "ai.infer",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "ai-infer-001",
+          config: {
+            routeKey: "low_cost_fast",
+            budgetAccountId: "budget-1",
+            maxUnits: 500,
+            actor: {
+              type: "worker",
+              id: "worker-1",
+              ref: "worker:worker-1",
+            },
+            capabilityId: "capability-1",
+            input: {
+              prompt: "Classify lead",
+              token: "raw-token",
+            },
+            redaction: {
+              fields: ["token"],
+            },
+            evaluation: {
+              caseId: "lead-classification",
+            },
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.command).toBe("ai.infer");
+    expect(body.data.result.inferenceId).toBe("inference-1");
+    expect(mocks.executeAiInference).toHaveBeenCalledWith({
+      operatorEmail: "operator@example.com",
+      idempotencyKey: "ai-infer-001",
+      tenantSlug: "continuous-demo",
+      routeKey: "low_cost_fast",
+      routePurpose: undefined,
+      budgetAccountId: "budget-1",
+      maxUnits: 500,
+      costUsd: undefined,
+      actor: {
+        type: "worker",
+        id: "worker-1",
+        ref: "worker:worker-1",
+      },
+      taskId: undefined,
+      objectId: undefined,
+      capabilityId: "capability-1",
+      input: {
+        prompt: "Classify lead",
+        token: "raw-token",
+      },
+      redaction: {
+        fields: ["token"],
+      },
+      evaluation: {
+        caseId: "lead-classification",
       },
     });
   });

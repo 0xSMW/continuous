@@ -230,7 +230,7 @@ jobs:
           }
           set_control_plane_token_catalog() {
             token_hash="$(printf '%s' "$worker_token" | sha256sum | awk '{print $1}')"
-            allowed_commands='"core:view.summary","core:task.create","core:task.transition","core:object.upsert","core:adapter.upsert","core:connection.upsert","core:connection.health.record","core:object.link","core:event.ingest","core:evidence.attach","core:document.create","core:packet.prepare","core:document.packet.prepare","core:decision.record","core:approval.request","core:adapter.intent.record","core:rule.change.record","core:capability.grant","core:budget.reserve","core:budget.charge","core:budget.release","core:view.publish","core:customer_signal.record","core:payroll.preview.record","core:payroll.preview.packet.prepare","core:control_plane.token_rotation.attest","core:control_plane.credential.upsert","core:control_plane.credential.revoke","core:control_plane.session.review","worker:view.snapshot","worker:view.approvals","worker:view.briefs","worker:view.decisions","worker:view.board","worker:view.exceptions","worker:run","worker:lead.read","worker:lead.classify","worker:response.draft","worker:schedule.propose","worker:customer_update.draft","worker:closeout.prepare","worker:exception.route","worker:invoice.prepare","worker:ar_followup.draft","worker:cash_forecast.generate","worker:continue","worker:approval.decide","worker:adapters.reconcile","worker:adapters.retry","worker:brief.generate","worker:decision_queue.prepare","worker:anomaly.triage","workflow:view.overview","workflow:view.approvals","workflow:start","workflow:transition","workflow:steps.execute","workflow:approval.decide","approval:view.inbox","approval:approval.decide"'
+            allowed_commands='"core:view.summary","core:task.create","core:task.transition","core:object.upsert","core:adapter.upsert","core:connection.upsert","core:connection.health.record","core:object.link","core:event.ingest","core:evidence.attach","core:document.create","core:packet.prepare","core:document.packet.prepare","core:decision.record","core:approval.request","core:adapter.intent.record","core:rule.change.record","core:capability.grant","core:budget.reserve","core:budget.charge","core:budget.release","core:ai.infer","core:view.publish","core:customer_signal.record","core:payroll.preview.record","core:payroll.preview.packet.prepare","core:control_plane.token_rotation.attest","core:control_plane.credential.upsert","core:control_plane.credential.revoke","core:control_plane.session.review","worker:view.snapshot","worker:view.approvals","worker:view.briefs","worker:view.decisions","worker:view.board","worker:view.exceptions","worker:run","worker:lead.read","worker:lead.classify","worker:response.draft","worker:schedule.propose","worker:customer_update.draft","worker:closeout.prepare","worker:exception.route","worker:invoice.prepare","worker:ar_followup.draft","worker:cash_forecast.generate","worker:continue","worker:approval.decide","worker:adapters.reconcile","worker:adapters.retry","worker:brief.generate","worker:decision_queue.prepare","worker:anomaly.triage","workflow:view.overview","workflow:view.approvals","workflow:start","workflow:transition","workflow:steps.execute","workflow:approval.decide","approval:view.inbox","approval:approval.decide"'
             catalog_json="$(
               printf '[{"id":"bootstrap-operator","tokenSha256":"%s","operatorEmail":"%s","allowedTenants":["continuous-demo"],"allowedWorkerRoles":["revenue_operations","owner_chief_of_staff","dispatch_operations","finance_operations"],"allowedRoutes":["core","worker","workflow","approval"],"allowedAccess":["read","write"],"allowedCommands":[%s]}]' \
                 "$token_hash" \
@@ -809,12 +809,20 @@ jobs:
             '.error == null and .data.command == "brief.generate" and .data.result.created == true and (.data.result.workerRunId | length > 0) and (.data.result.objectId | length > 0) and (.data.result.packetId | length > 0) and (.data.result.workflowStepIds | length) == 3 and (.data.result.decisionIds | length) >= 1 and (.data.result.viewIds | length) == 3 and .data.result.output.externalExecution == "blocked" and .data.result.output.externalSend == false and .data.result.snapshot.controls.externalExecution == "disabled"' \
             >/dev/null
 
+          ADAPTER_RECONCILE_PAYLOAD="$(
+            /usr/bin/jq -nc --arg key "deploy-adapters-reconcile-$RUN_ID" '{
+              command: "adapters.reconcile",
+              worker: {role: "revenue_operations", tenantSlug: "continuous-demo"},
+              idempotencyKey: $key,
+              config: {limit: 25}
+            }'
+          )"
           RESPONSE="$(
             curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
               -X POST https://continuoushq.com/worker \
               -H "authorization: Bearer $WORKER_TOKEN" \
               -H "content-type: application/json" \
-              -d '{"command":"adapters.reconcile","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{"limit":25}}'
+              -d "$ADAPTER_RECONCILE_PAYLOAD"
           )"
 
           echo "$RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:.data.result}'
@@ -1356,9 +1364,10 @@ jobs:
           fi
 
           WORKER_APPROVAL_DECISION_PAYLOAD="$(
-            /usr/bin/jq -nc --arg approvalId "$WORKER_APPROVAL_ID" '{
+            /usr/bin/jq -nc --arg approvalId "$WORKER_APPROVAL_ID" --arg key "deploy-worker-approval-decision-$WORKER_APPROVAL_ID" '{
               command: "approval.decide",
               worker: {role: "revenue_operations", tenantSlug: "continuous-demo"},
+              idempotencyKey: $key,
               config: {
                 approvalId: $approvalId,
                 action: "approved",

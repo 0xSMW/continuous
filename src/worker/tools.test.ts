@@ -68,6 +68,26 @@ describe("worker tool contract", () => {
     }
   });
 
+  it("rejects worker-family-specific local tool aliases", async () => {
+    for (const alias of [
+      "revenue.run",
+      "worker.run",
+      "lead.read",
+      "invoice.prepare",
+      "finance_operations.invoice.prepare",
+    ]) {
+      await expect(
+        executeWorkerTool(alias, {
+          worker: {
+            role: "revenue_operations",
+            tenantSlug: "continuous-demo",
+          },
+          config: {},
+        }),
+      ).rejects.toThrow(`Unknown worker tool: ${alias}`);
+    }
+  });
+
   it("keeps command tool inputs inside the worker command envelope", () => {
     for (const tool of workerTools) {
       if (tool.registry.surface !== "command") {
@@ -85,6 +105,7 @@ describe("worker tool contract", () => {
         expect((properties.config as { type?: string }).type).toBe("object");
       }
     }
+    expect(workerToolSchema.$defs.workerTarget.additionalProperties).toBe(false);
   });
 
   it("rejects local worker tool payloads with top-level operation fields", async () => {
@@ -132,6 +153,28 @@ describe("worker tool contract", () => {
       }),
     ).rejects.toThrow(
       "Worker tool payload fields must be view, worker, config, and operatorEmail. Move operation inputs into config. Unexpected fields: command.",
+    );
+
+    await expect(
+      executeWorkerTool("worker.command", {
+        command: "run",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+          leadPacket: {
+            customerName: "Acme Roof Repair",
+          },
+        },
+        idempotencyKey: "nested-worker-envelope-test-001",
+        config: {
+          intake: {
+            source: "website_form",
+            sourceEventId: "nested-worker-envelope-test-form-001",
+          },
+        },
+      }),
+    ).rejects.toThrow(
+      "worker target fields must be role, id, and tenantSlug. Move operation inputs into config. Unexpected fields: leadPacket.",
     );
   });
 
@@ -458,6 +501,7 @@ describe("worker tool contract", () => {
     const plannedCommands = workerToolSchema.registry.plannedCommands as Array<{
       role: string;
       name: string;
+      toolAlias: string;
       requiredConfig: string[];
       oneRequiredConfig?: string[];
       configSchema: {
@@ -483,6 +527,7 @@ describe("worker tool contract", () => {
       ]),
     );
     for (const command of plannedCommands) {
+      expect(command.toolAlias).toBe("worker.command");
       expect(command.configSchema.type).toBe("object");
       expect(command.configSchema.required).toEqual(command.requiredConfig);
       for (const field of command.requiredConfig) {
@@ -531,6 +576,9 @@ describe("worker tool contract", () => {
         }),
       ]),
     );
+    expect(
+      workerToolSchema.registry.plannedViews.every((view) => view.toolAlias === "worker.view"),
+    ).toBe(true);
   });
 
   it("validates worker run idempotency before invoking the worker", async () => {

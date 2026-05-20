@@ -126,12 +126,12 @@ payment links, refunds, settlements, or bank writes:
 | Command or view | Tool surface | Required config | Idempotency | Side effects | External execution |
 |---|---|---|---|---|---|
 | `GET view=snapshot` | `worker.view` | `worker.role` | None | Read-only | Blocked |
-| `invoice.prepare` | `worker.command` | `jobId`, `closeoutId`, or `sourceRefs` | Required | Invoice draft, cash packet, approval request, accounting dry-run receipt | Dry-run |
-| `ar_followup.draft` | `worker.command` | `invoiceId`, `tonePolicy` | Required | AR follow-up draft, cash packet, approval request, generated review view | Blocked |
-| `expense_code.propose` | `worker.command` | `receiptId` or `expenseId` | Required | Coding proposal and evidence | Blocked |
-| `cash_forecast.generate` | `worker.command` | `window`, `accounts[]` | Required | Forecast object, cash packet, approval request, generated review view | Blocked |
-| `payment_draft.prepare` | `worker.command` | `billId`, `paymentId`, or `sourceRefs` | Required | Payment object, Payment instruction draft, cash packet, dual-control approval request, generated review view | Blocked |
-| `approval.decide` | `worker.command` | `approvalId`, `action`, optional `note` | None | Approval/task/workflow evidence only | Blocked |
+| `invoice.prepare` | `worker.command` | `config.jobId`, `config.closeoutId`, or `config.sourceRefs` | Required | Invoice draft, cash packet, approval request, accounting dry-run receipt | Dry-run |
+| `ar_followup.draft` | `worker.command` | `config.invoiceId`, `config.tonePolicy` | Required | AR follow-up draft, cash packet, approval request, generated review view | Blocked |
+| `expense_code.propose` | `worker.command` | `config.receiptId` or `config.expenseId` | Required | Coding proposal and evidence | Blocked |
+| `cash_forecast.generate` | `worker.command` | `config.window`, `config.accounts[]` | Required | Forecast object, cash packet, approval request, generated review view | Blocked |
+| `payment_draft.prepare` | `worker.command` | `config.billId`, `config.paymentId`, or `config.sourceRefs` | Required | Payment object, Payment instruction draft, cash packet, dual-control approval request, generated review view | Blocked |
+| `approval.decide` | `worker.command` | `config.approvalId`, `config.action`, optional `config.note` | None | Approval/task/workflow evidence only | Blocked |
 
 ## Core Object Map
 

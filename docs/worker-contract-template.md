@@ -13,7 +13,7 @@ routes.
 | Autonomy level | `0`, `1`, or `2` for V1 |
 | External execution | `blocked`, `dry_run`, or `approved_only` |
 
-## API
+## API Shape
 
 `POST /worker` is the only worker mutation surface.
 
@@ -38,6 +38,8 @@ Only `command`, `worker`, `idempotencyKey`, and `config` are accepted as
 top-level command fields. Worker selection belongs under `worker`; operation
 inputs such as source records, approval ids, retry limits, draft payloads, or
 adapter selectors belong under `config`.
+The `worker` object is only a selector and must not contain operation fields;
+accepted worker selector fields are `role`, `id`, and `tenantSlug`.
 
 ## Command Registry
 

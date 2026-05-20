@@ -415,6 +415,45 @@ describe("/worker route", () => {
     expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
   });
 
+  it("rejects operation fields nested under the worker selector", async () => {
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/worker", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "run",
+          worker: {
+            role: "revenue_operations",
+            tenantSlug: "continuous-demo",
+            leadPacket: {
+              customerName: "Acme Roof Repair",
+            },
+          },
+          idempotencyKey: "nested-worker-operation-field-001",
+          config: {
+            intake: {
+              source: "website_form",
+              sourceEventId: "nested-worker-operation-field-form-001",
+            },
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toEqual({
+      code: "invalid_worker_target",
+      message:
+        "worker target fields must be role, id, and tenantSlug. Move operation inputs into config. Unexpected fields: leadPacket.",
+    });
+    expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
+  });
+
   it("rejects non-object command config before registry dispatch", async () => {
     const { POST } = await import("./route");
     const response = await POST(

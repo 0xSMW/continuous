@@ -51,11 +51,11 @@ inside `config` and use the shared `/worker` command envelope.
 | Command or view | Tool surface | Required config | Idempotency | Side effects | External execution |
 |---|---|---|---|---|---|
 | `GET view=snapshot` | `worker.view` | `worker.role` | None | Read-only | Blocked |
-| `schedule.propose` | `worker.command` | `jobId` or `sourceRefs`, plus `constraints` | Required | Appointment draft, adapter dry-run, approval request | Dry-run |
-| `customer_update.draft` | `worker.command` | `jobId`, `updateKind` | Required | Draft message, evidence packet, approval request | Blocked |
-| `closeout.prepare` | `worker.command` | `workOrderId`, optional keyed `sourceRefs` | Required | Closeout document, QA checklist, evidence packet, approval request, Finance handoff refs | Blocked |
-| `exception.route` | `worker.command` | `jobId`, `reason`, `severity`, optional keyed `sourceRefs` | Required | Blocked exception task, decision record, document, and evidence packet | Blocked |
-| `approval.decide` | `worker.command` | `approvalId`, `action`, optional `note` | None | Approval/task/workflow evidence only | Blocked |
+| `schedule.propose` | `worker.command` | `config.jobId` or `config.sourceRefs`, plus `config.constraints` | Required | Appointment draft, adapter dry-run, approval request | Dry-run |
+| `customer_update.draft` | `worker.command` | `config.jobId`, `config.updateKind` | Required | Draft message, evidence packet, approval request | Blocked |
+| `closeout.prepare` | `worker.command` | `config.workOrderId`, optional keyed `config.sourceRefs` | Required | Closeout document, QA checklist, evidence packet, approval request, Finance handoff refs | Blocked |
+| `exception.route` | `worker.command` | `config.jobId`, `config.reason`, `config.severity`, optional keyed `config.sourceRefs` | Required | Blocked exception task, decision record, document, and evidence packet | Blocked |
+| `approval.decide` | `worker.command` | `config.approvalId`, `config.action`, optional `config.note` | None | Approval/task/workflow evidence only | Blocked |
 
 ## Core Object Map
 

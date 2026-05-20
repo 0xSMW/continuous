@@ -65,19 +65,54 @@ function listFiles(path: string): string[] {
   });
 }
 
+function trackedTextFiles(paths: string[]) {
+  return paths.flatMap((path) => {
+    const entry = readdirSync(join(root, path.split("/").slice(0, -1).join("/") || "."), {
+      withFileTypes: true,
+    }).find((item) => item.name === path.split("/").at(-1));
+
+    if (entry?.isDirectory()) {
+      return listFiles(path);
+    }
+
+    return [path];
+  });
+}
+
 describe("future worker contracts", () => {
   it("does not expose worker-family-specific HTTP route files", () => {
-    const routeFiles = listFiles("app").filter((path) => path.endsWith("/route.ts"));
+    const routeFiles = listFiles("app").filter((path) => path.endsWith("/route.ts")).sort();
     const workerFamilyRoutePattern =
       /^app\/(?:api\/)?(?:revenue|dispatch|finance|workforce|compliance|systems|owner)[^/]*worker\//;
     const apiCommandRoutePattern =
       /^app\/api\/(?:worker|workers|core|workflow|approval|approvals|revenue|dispatch|finance|workforce|compliance|systems|owner)(?:\/|-)/;
 
-    expect(routeFiles).toContain("app/worker/route.ts");
-    expect(routeFiles).toContain("app/core/route.ts");
-    expect(routeFiles).toContain("app/workflow/route.ts");
+    expect(routeFiles).toEqual([
+      "app/api/health/route.ts",
+      "app/approval/route.ts",
+      "app/core/route.ts",
+      "app/worker/route.ts",
+      "app/workflow/route.ts",
+    ]);
     expect(routeFiles.filter((path) => workerFamilyRoutePattern.test(path))).toEqual([]);
     expect(routeFiles.filter((path) => apiCommandRoutePattern.test(path))).toEqual([]);
+  });
+
+  it("does not document or script worker-specific HTTP URLs", () => {
+    const forbiddenWorkerUrlPattern =
+      /(?:^|["'`\s(])\/(?:api\/(?:worker|workers|core|workflow|approval|approvals|revenue|dispatch|finance|workforce|compliance|systems|owner)(?:[-/][a-z0-9-]+)?|(?:revenue|dispatch|finance|workforce|compliance|systems|owner)[a-z0-9-]*worker)(?:\/|["'`\s),.;]|$)/;
+    const files = trackedTextFiles([
+      "app",
+      "docs",
+      "notes",
+      "scripts",
+      ".github/workflows",
+      "README.md",
+      "package.json",
+    ]);
+    const offenders = files.filter((path) => forbiddenWorkerUrlPattern.test(read(path)));
+
+    expect(offenders).toEqual([]);
   });
 
   it("keeps the current revenue contract on the generic worker API", () => {
@@ -246,6 +281,7 @@ describe("future worker contracts", () => {
     expect(rotationScript).toContain("TOKEN_ROTATION_ATTESTATION_ID");
     expect(rotationScript).toContain("NEXT_WORKER_RUN_TOKEN");
     expect(deployScript).toContain("core:control_plane.token_rotation.attest");
+    expect(deployScript).toContain("core:ai.infer");
     expect(deployScript).toContain("core:control_plane.credential.upsert");
     expect(deployScript).toContain("core:control_plane.credential.revoke");
     expect(deployScript).toContain("core:control_plane.session.review");
@@ -253,6 +289,7 @@ describe("future worker contracts", () => {
     expect(deployScript).toContain("preserving the existing bootstrap token");
     expect(deployScript).toContain('SITE_HOST="$SITE_HOST"');
     expect(deployWorkflow).toContain("core:control_plane.token_rotation.attest");
+    expect(deployWorkflow).toContain("core:ai.infer");
     expect(deployWorkflow).toContain("core:control_plane.credential.upsert");
     expect(deployWorkflow).toContain("core:control_plane.credential.revoke");
     expect(deployWorkflow).toContain("core:control_plane.session.review");

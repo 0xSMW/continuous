@@ -39,12 +39,12 @@ All commands use `POST /worker`; no workforce-specific route is added.
 | Command or view | Tool surface | Required config | Idempotency | Side effects | External execution |
 |---|---|---|---|---|---|
 | `GET view=snapshot` | `worker.view` | `worker.role` | None | Read-only | Blocked |
-| `hire.packet.prepare` | `worker.command` | `personId`, `positionId`, `workLocationId` | Required | Packet, document checklist, approval request | Blocked |
-| `contractor.packet.prepare` | `worker.command` | `personId`, `engagementId` | Required | Classification packet and blocker task | Blocked |
-| `credential.review` | `worker.command` | `personId` or `credentialId` | Required | Credential renewal task and evidence | Blocked |
-| `schedule_readiness.prepare` | `worker.command` | `personId`, `period` | Required | Readiness packet and exception tasks | Blocked |
-| `payroll_input.prepare` | `worker.command` | `employmentId`, `period` | Required | Payroll input packet plus Core `payroll.preview.record` and `payroll.preview.packet.prepare` handoff | Dry-run |
-| `approval.decide` | `worker.command` | `approvalId`, `action`, optional `note` | None | Approval/task/workflow evidence only | Blocked |
+| `hire.packet.prepare` | `worker.command` | `config.personId`, `config.positionId`, `config.workLocationId` | Required | Packet, document checklist, approval request | Blocked |
+| `contractor.packet.prepare` | `worker.command` | `config.personId`, `config.engagementId` | Required | Classification packet and blocker task | Blocked |
+| `credential.review` | `worker.command` | `config.personId` or `config.credentialId` | Required | Credential renewal task and evidence | Blocked |
+| `schedule_readiness.prepare` | `worker.command` | `config.personId`, `config.period` | Required | Readiness packet and exception tasks | Blocked |
+| `payroll_input.prepare` | `worker.command` | `config.employmentId`, `config.period` | Required | Payroll input packet plus Core `payroll.preview.record` and `payroll.preview.packet.prepare` handoff | Dry-run |
+| `approval.decide` | `worker.command` | `config.approvalId`, `config.action`, optional `config.note` | None | Approval/task/workflow evidence only | Blocked |
 
 ## Core Object Map
 

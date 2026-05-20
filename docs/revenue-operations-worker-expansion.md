@@ -12,13 +12,13 @@ state, workflow state, and object versioning without external sends or money mov
 |---|---|
 | Worker identity | `Revenue Operations Worker`, autonomy level 2, owner-managed |
 | Core loop | One operator run creates workflow run/steps, worker run, source snapshot evidence, budget, inference, usage, event, adapter run/action, approval packet, task update, and object version records |
-| Operator read API | `GET /worker?view=snapshot&role=revenue_operations`, bearer-token required |
-| Approval API | `GET /worker?view=approvals&role=revenue_operations` and `POST /worker` with `command=approval.decide`, bearer-token required |
-| Source read API | `POST /worker` with `command=lead.read`, `idempotencyKey`, `config.source`, optional `config.reader`, and direct `config.records[]` or an active connection reference; persists website-form, inbox, CRM, buffered connection, or read-only API-polled source records as Core lead object/event/evidence rows, updates connection cursor proof when connection-backed, and returns `config.intake` selectors |
-| Split classify/draft APIs | `POST /worker` with `command=lead.classify` or `command=response.draft`; both accept `config.intake` selectors or direct fallback `config.leadPacket`, write worker run/event/evidence/audit/budget records, and keep external sends blocked |
-| Run API | `POST /worker` with `command=run` and `config.intake` source selectors or Core references; direct `config.leadPacket` remains an operator/test fallback |
-| Continuation API | `POST /worker` with `command=continue`, `idempotencyKey`, and `config.approvalId`; V1 turns `approved` decisions into blocked no-send execution packets, `revision_requested` decisions into revised packets plus fresh pending owner approval, and `rejected` decisions into closed no-send stop packets |
-| Adapter reconciliation API | `POST /worker` with `command=adapters.reconcile` and `command=adapters.retry`, tenant-scoped and bearer-token required |
+| Operator read view | `GET /worker?view=snapshot&role=revenue_operations`, bearer-token required |
+| Approval controls | `GET /worker?view=approvals&role=revenue_operations` and `POST /worker` with `command=approval.decide`, bearer-token required |
+| Source read command | `POST /worker` with `command=lead.read`, `idempotencyKey`, `config.source`, optional `config.reader`, and direct `config.records[]` or an active connection reference; persists website-form, inbox, CRM, buffered connection, or read-only API-polled source records as Core lead object/event/evidence rows, updates connection cursor proof when connection-backed, and returns `config.intake` selectors |
+| Split classify/draft commands | `POST /worker` with `command=lead.classify` or `command=response.draft`; both accept `config.intake` selectors or direct fallback `config.leadPacket`, write worker run/event/evidence/audit/budget records, and keep external sends blocked |
+| Run command | `POST /worker` with `command=run` and `config.intake` source selectors or Core references; direct `config.leadPacket` remains an operator/test fallback |
+| Continuation command | `POST /worker` with `command=continue`, `idempotencyKey`, and `config.approvalId`; V1 turns `approved` decisions into blocked no-send execution packets, `revision_requested` decisions into revised packets plus fresh pending owner approval, and `rejected` decisions into closed no-send stop packets |
+| Adapter reconciliation commands | `POST /worker` with `command=adapters.reconcile` and `command=adapters.retry`, tenant-scoped and bearer-token required |
 | Scheduled internal drain | `worker-scheduler` posts `/workflow` `steps.execute`, `/worker` `lead.read` for pollable active connections, `/worker` `run` for returned intake selectors, `/worker` `adapters.retry`, and `/worker` `adapters.reconcile` on the internal Compose network with the same command envelopes |
 | Workflow packet execution | Queued `packet_prepare` steps can prepare Core packets through `/workflow` execution, carrying packet content under `workflow_steps.input.packet` and writing packet/document/event/audit/evidence/task proof |
 | Workflow approval execution | Queued `approval_request` steps can create shared workflow approval records through `/workflow` execution, carrying business approval details under `workflow_steps.input.approval` while run, step, task, event, audit, and evidence links are derived by the executor |
@@ -33,6 +33,7 @@ worker-family-specific URL paths. New worker families must register commands
 and config schemas, not new HTTP route names. The mutation envelope accepts only
 `command`, `worker`, `idempotencyKey`, and `config` as top-level fields;
 worker selectors live under `worker`, and operation inputs live under `config`.
+The `worker` object is limited to `role`, `id`, and `tenantSlug`.
 
 ## Expansion Gates
 

@@ -58,11 +58,11 @@ Approval continuations use the same payload shape:
 |---|---|---|---|---|---|
 | `GET view=snapshot` | `worker.view` | `worker.role` | None | Read-only | Blocked |
 | `GET view=briefs` | `worker.briefs.list` | Optional `state`, `from`, `to` | None | Read-only | Blocked |
-| `brief.generate` | `worker.command` | `window`, `scopes[]` | Required | Evidence, document, decision drafts, view publish | Blocked |
-| `decision_queue.prepare` | `worker.command` | `window`, optional `priorityFloor` | Required | Internal task and decision proposals | Blocked |
-| `anomaly.triage` | `worker.command` | `window`, `metricKeys[]` | Required | Internal anomaly evidence and tasks | Blocked |
-| `approval.decide` | `worker.command` | `approvalId`, `action`, optional `note` | None | Approval/task/workflow evidence only | Blocked |
-| `continue` | `worker.command` | `approvalId` | Required | Publish, revise, or stale an owner brief from a decided approval | Blocked |
+| `brief.generate` | `worker.command` | `config.window`, `config.scopes[]` | Required | Evidence, document, decision drafts, view publish | Blocked |
+| `decision_queue.prepare` | `worker.command` | `config.window`, optional `config.priorityFloor` | Required | Internal task and decision proposals | Blocked |
+| `anomaly.triage` | `worker.command` | `config.window`, `config.metricKeys[]` | Required | Internal anomaly evidence and tasks | Blocked |
+| `approval.decide` | `worker.command` | `config.approvalId`, `config.action`, optional `config.note` | None | Approval/task/workflow evidence only | Blocked |
+| `continue` | `worker.command` | `config.approvalId` | Required | Publish, revise, or stale an owner brief from a decided approval | Blocked |
 
 ## Core Object Map
 

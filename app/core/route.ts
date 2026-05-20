@@ -1,4 +1,5 @@
 import { env } from "../../src/env";
+import { executeAiInference } from "../../src/core/ai-gateway";
 import { requestApproval } from "../../src/core/approvals";
 import { reserveBudget, chargeBudget, releaseBudget } from "../../src/core/budgets";
 import { grantCapability } from "../../src/core/capabilities";
@@ -1636,6 +1637,63 @@ export async function POST(request: Request) {
     }
   }
 
+  if (command === "ai.infer") {
+    const idempotency = normalizeIdempotencyKey(
+      request.headers.get("idempotency-key") ?? body.idempotencyKey,
+    );
+
+    if (!idempotency.ok) {
+      return errorResponse(
+        {
+          code: "invalid_idempotency_key",
+          message: idempotency.message,
+        },
+        400,
+      );
+    }
+
+    try {
+      const result = await executeAiInference({
+        operatorEmail: auth.operatorEmail,
+        idempotencyKey: idempotency.key,
+        tenantSlug,
+        routeKey: optionalString(config.routeKey),
+        routePurpose: optionalString(config.routePurpose),
+        budgetAccountId: optionalString(config.budgetAccountId) ?? "",
+        maxUnits: config.maxUnits,
+        costUsd: config.costUsd,
+        actor: jsonObject(config.actor),
+        taskId: optionalString(config.taskId),
+        objectId: optionalString(config.objectId),
+        capabilityId: optionalString(config.capabilityId),
+        input: jsonObject(config.input),
+        redaction: jsonObject(config.redaction),
+        evaluation: jsonObject(config.evaluation),
+      });
+
+      return Response.json(
+        {
+          api: apiVersion,
+          data: {
+            command,
+            core: {
+              tenantSlug: tenantSlug ?? null,
+            },
+            result,
+          },
+          error: null,
+        },
+        {
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    } catch (error) {
+      return coreErrorResponse(error, "core_ai_infer_failed");
+    }
+  }
+
   if (command === "object.link") {
     const idempotency = normalizeIdempotencyKey(
       request.headers.get("idempotency-key") ?? body.idempotencyKey,
@@ -1906,7 +1964,7 @@ export async function POST(request: Request) {
     {
       code: "core_command_unsupported",
       message:
-        "Core command must be task.create, task.transition, object.upsert, adapter.upsert, connection.upsert, connection.health.record, object.link, event.ingest, evidence.attach, document.create, packet.prepare, document.packet.prepare, decision.record, approval.request, adapter.intent.record, rule.change.record, capability.grant, budget.reserve, budget.charge, budget.release, view.publish, customer_signal.record, payroll.preview.record, or payroll.preview.packet.prepare.",
+        "Core command must be task.create, task.transition, object.upsert, adapter.upsert, connection.upsert, connection.health.record, object.link, event.ingest, evidence.attach, document.create, packet.prepare, document.packet.prepare, decision.record, approval.request, adapter.intent.record, rule.change.record, capability.grant, budget.reserve, budget.charge, budget.release, ai.infer, view.publish, customer_signal.record, payroll.preview.record, or payroll.preview.packet.prepare.",
     },
     400,
   );

@@ -38,12 +38,12 @@ All commands use `POST /worker`; no systems-specific route is added.
 | Command or view | Tool surface | Required config | Idempotency | Side effects | External execution |
 |---|---|---|---|---|---|
 | `GET view=snapshot` | `worker.view` | `worker.role` | None | Read-only | Blocked |
-| `connector.health.scan` | `worker.command` | `checks[]` | Required | Health evidence and tasks | Blocked |
-| `sync.repair.plan` | `worker.command` | `connectionId`, `issueId` | Required | Repair plan, dry-run adapter actions | Dry-run |
-| `data_quality.remediate` | `worker.command` | `issueId`, `policy` | Required | Proposed object updates and evidence | Dry-run |
-| `permission.review` | `worker.command` | `connectionId` or `grantId` | Required | Permission audit packet | Blocked |
-| `automation.plan` | `worker.command` | `workflowKey`, `trigger` | Required | Automation proposal only | Blocked |
-| `approval.decide` | `worker.command` | `approvalId`, `action`, optional `note` | None | Approval/task/workflow evidence only | Blocked |
+| `connector.health.scan` | `worker.command` | `config.checks[]` | Required | Health evidence and tasks | Blocked |
+| `sync.repair.plan` | `worker.command` | `config.connectionId`, `config.issueId` | Required | Repair plan, dry-run adapter actions | Dry-run |
+| `data_quality.remediate` | `worker.command` | `config.issueId`, `config.policy` | Required | Proposed object updates and evidence | Dry-run |
+| `permission.review` | `worker.command` | `config.connectionId` or `config.grantId` | Required | Permission audit packet | Blocked |
+| `automation.plan` | `worker.command` | `config.workflowKey`, `config.trigger` | Required | Automation proposal only | Blocked |
+| `approval.decide` | `worker.command` | `config.approvalId`, `config.action`, optional `config.note` | None | Approval/task/workflow evidence only | Blocked |
 
 ## Core Object Map
 

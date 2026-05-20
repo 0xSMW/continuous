@@ -140,6 +140,27 @@ describe("app-server worker tools", () => {
         config: {},
       }),
     ).rejects.toThrow("continuous.worker.command requires operatorEmail.");
+
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.command", {
+        command: "run",
+        operatorEmail: "owner@continuoushq.com",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+          approvalId: "approval-1",
+        },
+        idempotencyKey: "app-server-nested-worker-envelope-test-001",
+        config: {
+          intake: {
+            source: "website_form",
+            sourceEventId: "app-server-nested-worker-envelope-form-001",
+          },
+        },
+      }),
+    ).rejects.toThrow(
+      "worker target fields must be role, id, and tenantSlug. Move operation inputs into config. Unexpected fields: approvalId.",
+    );
   });
 
   it("routes unavailable future workers through the shared registry guard", async () => {

@@ -102,7 +102,7 @@ The additional Core write commands are `task.transition`, `object.link`,
 `event.ingest`, `evidence.attach`, `document.create`, `decision.record`, `packet.prepare`,
 `document.packet.prepare`, `approval.request`, `adapter.intent.record`,
 `rule.change.record`, `capability.grant`, `budget.reserve`, `budget.charge`,
-`budget.release`, `view.publish`, `customer_signal.record`, `payroll.preview.record`, and
+`budget.release`, `ai.infer`, `view.publish`, `customer_signal.record`, `payroll.preview.record`, and
 `payroll.preview.packet.prepare`. Each command writes audit proof and keeps
 external execution blocked.
 
@@ -136,8 +136,8 @@ curl "http://localhost:3000/worker?view=snapshot&role=revenue_operations" \
   -H "authorization: Bearer $WORKER_RUN_TOKEN"
 ```
 
-The run API is a guarded side-effecting `POST` and is disabled by default. For
-local-only testing, start the app with:
+The run command is a guarded side-effecting `POST /worker` call and is disabled
+by default. For local-only testing, start the app with:
 
 ```sh
 read -rsp "Worker token: " WORKER_RUN_TOKEN
@@ -191,8 +191,8 @@ Agent-facing local automation can use the repo-owned worker toolbox:
 bun run worker:tool schema
 bun run worker:tool worker.view --payload='{"view":"snapshot","worker":{"role":"revenue_operations"}}'
 bun run worker:tool worker.command --payload='{"command":"lead.read","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-lead-read-002","config":{"source":"website_form","records":[{"sourceEventId":"form-local-002","customerName":"Acme Roof Repair"}]}}'
-bun run worker:tool worker.command --payload='{"command":"adapters.reconcile","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{"limit":25}}'
-bun run worker:tool worker.command --payload='{"command":"adapters.retry","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{"limit":25}}'
+bun run worker:tool worker.command --payload='{"command":"adapters.reconcile","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-adapters-reconcile-001","config":{"limit":25}}'
+bun run worker:tool worker.command --payload='{"command":"adapters.retry","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-adapters-retry-001","config":{"limit":25}}'
 ```
 
 Inbox and CRM source readers use the same `lead.read` command. They store
@@ -236,6 +236,7 @@ curl -X POST http://localhost:3000/worker \
   -d '{
     "command": "adapters.reconcile",
     "worker": {"role": "revenue_operations", "tenantSlug": "continuous-demo"},
+    "idempotencyKey": "local-adapters-reconcile-002",
     "config": {"limit": 25}
 }'
 ```
@@ -250,6 +251,7 @@ curl -X POST http://localhost:3000/worker \
   -d '{
     "command": "adapters.retry",
     "worker": {"role": "revenue_operations", "tenantSlug": "continuous-demo"},
+    "idempotencyKey": "local-adapters-retry-002",
     "config": {"limit": 25}
   }'
 ```
@@ -266,6 +268,7 @@ curl -X POST http://localhost:3000/worker \
   -d "{
     \"command\": \"approval.decide\",
     \"worker\": {\"role\": \"revenue_operations\", \"tenantSlug\": \"continuous-demo\"},
+    \"idempotencyKey\": \"local-approval-decision-$APPROVAL_ID\",
     \"config\": {\"approvalId\": \"$APPROVAL_ID\", \"action\": \"approved\"}
 }"
 ```

@@ -29,7 +29,7 @@ supports `task.create`, `task.transition`, `object.upsert`, `object.link`,
 `adapter.upsert`, `connection.upsert`, `connection.health.record`,
 `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`, `document.packet.prepare`,
 `decision.record`, `approval.request`, `capability.grant`, `budget.reserve`,
-`budget.charge`, `budget.release`, `view.publish`, `adapter.intent.record`,
+`budget.charge`, `budget.release`, `ai.infer`, `view.publish`, `adapter.intent.record`,
 `rule.change.record`, `customer_signal.record`,
 `payroll.preview.record`, and `payroll.preview.packet.prepare`, all with the
 same bearer token used by worker and workflow commands.

@@ -153,7 +153,7 @@ Other supported Core commands are `task.transition`, `object.link`,
 `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`, `document.packet.prepare`,
 `decision.record`, `approval.request`, `adapter.intent.record`,
 `rule.change.record`, `capability.grant`, `budget.reserve`, `budget.charge`,
-`budget.release`, `view.publish`, `customer_signal.record`, `payroll.preview.record`, and
+`budget.release`, `ai.infer`, `view.publish`, `customer_signal.record`, `payroll.preview.record`, and
 `payroll.preview.packet.prepare`.
 
 Use the same route for operational worker commands:
@@ -165,6 +165,7 @@ Use the same route for operational worker commands:
     "role": "revenue_operations",
     "tenantSlug": "continuous-demo"
   },
+  "idempotencyKey": "local-adapters-reconcile-001",
   "config": {
     "limit": 25
   }
@@ -181,6 +182,7 @@ live-credential readiness and rollback proof:
     "role": "revenue_operations",
     "tenantSlug": "continuous-demo"
   },
+  "idempotencyKey": "local-adapters-retry-001",
   "config": {
     "limit": 25
   }
@@ -197,10 +199,10 @@ bun run worker:tool worker.view <<'JSON'
 JSON
 
 bun run worker:tool worker.command <<'JSON'
-{"command":"adapters.reconcile","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{"limit":25}}
+{"command":"adapters.reconcile","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-adapters-reconcile-002","config":{"limit":25}}
 JSON
 
 bun run worker:tool worker.command <<'JSON'
-{"command":"adapters.retry","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{"limit":25}}
+{"command":"adapters.retry","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-adapters-retry-002","config":{"limit":25}}
 JSON
 ```

@@ -102,6 +102,7 @@ export const workerToolSchema = {
         tenantSlug: { type: "string" },
       },
       required: ["role"],
+      additionalProperties: false,
     },
     leadPacket: {
       type: "object",
@@ -261,6 +262,7 @@ const workerCommandToolEnvelopeFields = new Set([
 ]);
 
 const workerViewToolEnvelopeFields = new Set(["view", "worker", "config", "operatorEmail"]);
+const workerTargetEnvelopeFields = new Set(["role", "id", "tenantSlug"]);
 
 function workerToolEnvelope(name: string) {
   if (name === "worker.command") {
@@ -292,6 +294,26 @@ function assertWorkerToolEnvelope(name: string, payload: JsonObject) {
   if (unexpectedFields.length > 0) {
     throw new Error(
       `Worker tool payload fields must be ${envelope.description}. Move operation inputs into config. Unexpected fields: ${unexpectedFields.join(", ")}.`,
+    );
+  }
+
+  const worker = payload.worker;
+
+  if (worker === undefined || worker === null) {
+    return;
+  }
+
+  if (!worker || typeof worker !== "object" || Array.isArray(worker)) {
+    throw new Error("worker must be an object with role, id, and tenantSlug selectors.");
+  }
+
+  const unexpectedWorkerFields = Object.keys(worker as Record<string, unknown>).filter(
+    (field) => !workerTargetEnvelopeFields.has(field),
+  );
+
+  if (unexpectedWorkerFields.length > 0) {
+    throw new Error(
+      `worker target fields must be role, id, and tenantSlug. Move operation inputs into config. Unexpected fields: ${unexpectedWorkerFields.join(", ")}.`,
     );
   }
 }

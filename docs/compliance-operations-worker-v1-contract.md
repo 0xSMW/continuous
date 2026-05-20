@@ -38,12 +38,12 @@ All commands use `POST /worker`; no compliance-specific route is added.
 | Command or view | Tool surface | Required config | Idempotency | Side effects | External execution |
 |---|---|---|---|---|---|
 | `GET view=snapshot` | `worker.view` | `worker.role` | None | Read-only | Blocked |
-| `obligation.scan` | `worker.command` | `scope`, `jurisdiction` | Required | Obligation proposals and evidence | Blocked |
-| `notice.response.prepare` | `worker.command` | `noticeId` | Required | Response draft, packet, approval request | Blocked |
-| `license.renewal.prepare` | `worker.command` | `licenseId` | Required | Renewal packet and blocker tasks | Blocked |
-| `filing.prepare` | `worker.command` | `filingRequirementId`, `period` | Required | Filing draft packet | Blocked |
-| `evidence_binder.export` | `worker.command` | `objectIds[]`, `purpose` | Required | Export document and audit evidence | Blocked |
-| `approval.decide` | `worker.command` | `approvalId`, `action`, optional `note` | None | Approval/task/workflow evidence only | Blocked |
+| `obligation.scan` | `worker.command` | `config.scope`, `config.jurisdiction` | Required | Obligation proposals and evidence | Blocked |
+| `notice.response.prepare` | `worker.command` | `config.noticeId` | Required | Response draft, packet, approval request | Blocked |
+| `license.renewal.prepare` | `worker.command` | `config.licenseId` | Required | Renewal packet and blocker tasks | Blocked |
+| `filing.prepare` | `worker.command` | `config.filingRequirementId`, `config.period` | Required | Filing draft packet | Blocked |
+| `evidence_binder.export` | `worker.command` | `config.objectIds[]`, `config.purpose` | Required | Export document and audit evidence | Blocked |
+| `approval.decide` | `worker.command` | `config.approvalId`, `config.action`, optional `config.note` | None | Approval/task/workflow evidence only | Blocked |
 
 ## Core Object Map
 

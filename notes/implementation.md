@@ -18,7 +18,7 @@
 | Restored the canonical operating-layer strategy | Revenue remains the first customer-facing worker demo, but Continuous Core must first cover entity, workforce, payroll, filings, compliance, payments, AI operations, generated UI, and evidence |
 | Added open workflow documentation | Hiring, contractor engagement, termination, payroll, filings, AI budget, and synthetic-worker lifecycle now have explicit document, approval, state, and evidence requirements |
 | Simplified the canonical data model | Replaced early one-table-per-concept naming with smaller primitives such as Worker.kind, WorkRelationship.type, FilingArtifact.type, EvidenceItem.type, and CustomerSignal.type |
-| Revenue Worker HTTP paths are guarded | Operator routes require bearer credentials, and production credentials now carry tenant, worker-role, route, read/write, and command scope through the control-plane token catalog |
+| Canonical worker HTTP surface is guarded | Operator routes require bearer credentials, and production credentials now carry tenant, worker-role, route, read/write, and command scope through the control-plane token catalog |
 | Added canonical worker API | `/worker` is the forward control-plane route; worker role, tenant selection, command, idempotency, and config live in structured payload fields for mutation commands |
 | Added worker command registry | `/worker` and `bun run worker:tool` now share registered command metadata, role allowlisting, config validation, idempotency rules, tenant requirements, and external-execution posture |
 | Hardened the worker API contract | Route-level tests now assert the generic `/worker` payload envelope, body `idempotencyKey` precedence, GET selector mapping, and malformed command config rejection |
@@ -82,6 +82,7 @@
 | Added payroll preview kernel | Pay statements, payroll lines, payroll liabilities, and payroll calculation traces now persist as first-class Core tables; `POST /core` `command=payroll.preview.record` records preview artifacts with event, audit, and trace evidence while external execution stays blocked |
 | Added payroll preview packet handoff | `POST /core` `command=payroll.preview.packet.prepare` gathers preview artifacts into variance reports, pay statement documents, approval packets, pending approval requests, and blocked payroll funding/tax draft records |
 | Added payroll approval handoff | Shared approval decisions for `payroll_preview_approval` now transition the payroll run plus funding, tax, filing, packet, audit, and evidence handoff records while keeping external execution, submission, and money movement blocked |
+| Added Core AI gateway | `POST /core` now supports `command=ai.infer`, selecting an active model route, redacting configured request fields, reserving and charging budget, and writing inference, usage, event, audit, and evidence proof while live provider execution remains blocked |
 | Agent build path uses app-server protocol tooling plus Next.js MCP | The installed Codex app-server CLI exposes protocol generation/help commands; `.mcp.json` keeps the Next.js 16 MCP bridge for route/runtime diagnostics |
 | Added app-server worker command control | `continuous.worker.schema` exposes the registry, and `continuous.worker.command` invokes registered worker commands through the same `command`, `worker`, `idempotencyKey`, and `config` envelope without loading production tokens |
 | Added registry-owned worker config schemas | `/worker`, `worker:tool`, and `continuous.worker.command` now share per-command `configSchema` checks for required fields, enums, integer bounds, and non-empty arrays before handlers run |
@@ -101,7 +102,7 @@
 | Added deploy smoke for split Revenue commands | The production deploy workflow now exercises `lead.read` followed by `lead.classify` and `response.draft` through `/worker`, then checks persisted worker run, event, evidence, audit, and usage rows before the full `run` smoke |
 | Protected operational artifacts during deploy sync | Deploy rsync still deletes stale source files, but now excludes `backups/`, `logs/`, and `reports/recovery-drills/` so local database dumps, Caddy/observability logs, and recovery evidence are not removed during a release |
 | Added expansion readiness and handoff contracts | `docs/worker-readiness.md` tracks each worker against shared launch gates, and `docs/worker-handoffs.md` defines Core-record handoffs from Revenue into Owner, Dispatch, Finance, Workforce, Compliance, and Systems expansion paths |
-| Rejected mixed worker intake sources | Revenue Worker now treats persisted `config.intake` Core row references as authoritative and rejects requests that also include direct `leadPacket` or `lead` payloads |
+| Rejected mixed worker intake sources | Revenue Worker now treats persisted `config.intake` Core row references as authoritative and rejects requests that also include direct `config.leadPacket` or `config.lead` payloads |
 | Added Revenue workflow spine | Revenue Worker runs now create a `lead_to_cash` workflow run plus durable workflow steps for intake, packet preparation, adapter dry-run, approval request, and approval decision continuation |
 | Added worker continuation command | `POST /worker` `command=continue` is a generic idempotent continuation surface; V1 consumes `config.approvalId` for approved, revision-requested, or rejected approvals, prepares blocked no-send execution packets, revised approval packets, or rejected stop packets, creates document/evidence packet records, and keeps external execution blocked |
 | Added tag-based app rollback | Deploys now tag app images by commit, persist `PREVIOUS_APP_TAG`, and expose a no-migration rollback path through the deploy workflow and `scripts/rollback-app.sh` for compatible app-only rollbacks |
@@ -141,6 +142,7 @@
 | Operator-token scope | The current production token now has hashed catalog metadata, per-command scope enforcement, durable auth session records, deploy-time token-rotation attestations, managed credential inventory, revocation enforcement, and operator session review views; broad use still needs broader operator review policy and customer-specific credential handling |
 | Alerting boundary | Deploy smoke now proves the host observability check, but recurring alerts are not active until `scripts/install-observability-timer.sh` is run with a real `ALERT_WEBHOOK_URL` |
 | Readiness boundary | The production readiness gate is strict and opt-in; it is expected to fail until object-storage credentials, backup and observability timers, alert webhook, recovery drill report, production connector credentials, and non-root host access are all actually provisioned and attested |
+| Worker selector boundary | `/worker`, `worker.command`, and `continuous.worker.command` now treat `worker` as a strict selector object with only `role`, `id`, and `tenantSlug`; every operation-specific field must live under `config` |
 
 ### Current State
 
@@ -184,9 +186,10 @@ The canonical HTTP shape is now `/worker` with explicit worker roles:
 `GET /worker?view=snapshot&role=revenue_operations` for state,
 `GET /worker?view=approvals&role=revenue_operations` for approval queues, and
 `POST /worker` with `command`, `worker`, `idempotencyKey`, and `config` for
-side-effecting operations. The route rejects ad hoc top-level operation fields;
-role and tenant selectors live under `worker`, while source records, approval
-ids, retry limits, and direct fallback payloads live under `config`. Adapter
+side-effecting operations. The route rejects ad hoc top-level operation fields
+and operation fields nested under `worker`; role, id, and tenant selectors live
+under `worker`, while source records, approval ids, retry limits, and direct
+fallback payloads live under `config`. Adapter
 reconciliation and retry execution use the same route with
 `command=adapters.reconcile` or `command=adapters.retry`, a tenant-scoped
 `worker` target, and `config.limit`; approval continuations use

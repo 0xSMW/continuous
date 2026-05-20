@@ -24,6 +24,9 @@ top-level command fields. Worker role, tenant selection, and worker id live
 under `worker`; operation-specific inputs such as source records, approval ids,
 retry limits, pricing overrides, and direct fallback lead payloads live under
 `config`.
+The `worker` object is a strict selector; it accepts only `role`, `id`, and
+`tenantSlug`, so operation fields cannot move there as a second ad hoc payload
+shape.
 
 Read inbound lead source records before running the worker:
 
@@ -226,14 +229,14 @@ and local toolbox aliases resolve to the same handlers and validation rules.
 |---|---|---|---|---|---|
 | `GET view=snapshot` | `worker.view` | None | None | Read-only | Blocked |
 | `GET view=approvals` | `worker.view` | Optional `state` | None | Read-only | Blocked |
-| `lead.read` | `worker.command` | `source`, direct `records[]` / `record`, or `reader` referencing an active connection | Required | Core lead object/event/evidence, worker run, budget/usage, connection cursor proof, audit | Blocked |
+| `lead.read` | `worker.command` | `config.source`, direct `config.records[]` / `config.record`, or `config.reader` referencing an active connection | Required | Core lead object/event/evidence, worker run, budget/usage, connection cursor proof, audit | Blocked |
 | `lead.classify` | `worker.command` | One of `config.intake`, `config.leadPacket`, or `config.lead` | Required | Classification worker run, budget/usage, inference, trace evidence, audit | Blocked |
 | `response.draft` | `worker.command` | One of `config.intake`, `config.leadPacket`, or `config.lead` | Required | Draft worker run, budget/usage, inference, draft evidence, audit | Blocked |
 | `run` | `worker.command` | One of `config.intake`, `config.leadPacket`, or `config.lead` | Required | Internal records, budget, approval, dry-run adapter receipt | Blocked |
-| `continue` | `worker.command` | `approvalId` | Required | Approved execution packet, revised approval packet, or rejected stop packet, workflow step, task outcome, audit/evidence | Blocked |
-| `approval.decide` | `worker.command` | `approvalId`, `action`, optional `note` | None | Approval/task/workflow evidence only | Blocked |
-| `adapters.reconcile` | `worker.command` | Tenant-scoped `worker.tenantSlug`, optional integer `limit` | None | Adapter reconciliation audit/evidence plus retry/review system tasks | Blocked |
-| `adapters.retry` | `worker.command` | Tenant-scoped `worker.tenantSlug`, optional integer `limit` | None | Executes due dry-run retry rows, closes retry tasks, and writes blocked receipt evidence with live-credential readiness and rollback proof | Blocked |
+| `continue` | `worker.command` | `config.approvalId` | Required | Approved execution packet, revised approval packet, or rejected stop packet, workflow step, task outcome, audit/evidence | Blocked |
+| `approval.decide` | `worker.command` | `config.approvalId`, `config.action`, optional `config.note` | None | Approval/task/workflow evidence only | Blocked |
+| `adapters.reconcile` | `worker.command` | Tenant-scoped `worker.tenantSlug`, optional integer `config.limit` | None | Adapter reconciliation audit/evidence plus retry/review system tasks | Blocked |
+| `adapters.retry` | `worker.command` | Tenant-scoped `worker.tenantSlug`, optional integer `config.limit` | None | Executes due dry-run retry rows, closes retry tasks, and writes blocked receipt evidence with live-credential readiness and rollback proof | Blocked |
 
 ## Run Config
 
@@ -267,8 +270,8 @@ For `command=lead.read`, use:
 | `intake.objectId` | Internal workflows | Core `objects.id` for the lead spine |
 | `intake.eventId` | Internal workflows | Core `events.id` for the `lead.received` event |
 | `intake.evidenceId` | Internal workflows | Core `evidence.id` for the source snapshot |
-| `leadPacket.*` | Explicit fallback | Backward-compatible direct payload alias for evals and operator tests |
-| `lead.*` | Explicit fallback | Direct payload alias for controlled local tooling that cannot yet persist intake |
+| `config.leadPacket.*` | Explicit fallback | Backward-compatible direct payload alias for evals and operator tests |
+| `config.lead.*` | Explicit fallback | Direct payload alias for controlled local tooling that cannot yet persist intake |
 | `pricing.baseCents` | No | Optional deterministic quote override for evals and controlled tests |
 
 If `config.intake` includes a source selector or Core row references, do not

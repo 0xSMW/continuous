@@ -179,7 +179,7 @@ policy-bound:
 
 | Surface | Behavior |
 |---|---|
-| `POST /core` | Canonical Core command surface for `task.create`, `task.transition`, `object.upsert`, `adapter.upsert`, `connection.upsert`, `connection.health.record`, `object.link`, `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`, `document.packet.prepare`, `decision.record`, `approval.request`, `adapter.intent.record`, `rule.change.record`, `capability.grant`, `budget.reserve`, `budget.charge`, `budget.release`, `view.publish`, `customer_signal.record`, `payroll.preview.record`, `payroll.preview.packet.prepare`, `control_plane.token_rotation.attest`, `control_plane.credential.upsert`, `control_plane.credential.revoke`, and `control_plane.session.review`; tenant selection and command fields live in structured `core` and `config` payloads, and no other top-level command fields are accepted |
+| `POST /core` | Canonical Core command surface for `task.create`, `task.transition`, `object.upsert`, `adapter.upsert`, `connection.upsert`, `connection.health.record`, `object.link`, `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`, `document.packet.prepare`, `decision.record`, `approval.request`, `adapter.intent.record`, `rule.change.record`, `capability.grant`, `budget.reserve`, `budget.charge`, `budget.release`, `ai.infer`, `view.publish`, `customer_signal.record`, `payroll.preview.record`, `payroll.preview.packet.prepare`, `control_plane.token_rotation.attest`, `control_plane.credential.upsert`, `control_plane.credential.revoke`, and `control_plane.session.review`; tenant selection and command fields live in structured `core` and `config` payloads, and no other top-level command fields are accepted |
 | `GET /core?tenantSlug=...` | Tenant-scoped Core summary for active tasks, recent events, approvals, workers, capabilities, graph counts, and ledger counts |
 | `/worker?view=snapshot&role=revenue_operations` | Operator-only snapshot of worker state, active tasks, controls, budget usage, and recent events |
 | `/worker?view=approvals&role=revenue_operations` | Operator-only approval queue for worker decisions |
@@ -238,6 +238,11 @@ allowing managed credential refs for read-only polling. `adapter.intent.record` 
 with event, audit, and trace proof while external mutation remains blocked;
 `rule.change.record` writes a rule-change object, object version, decision,
 event, audit, and trace evidence before rule packs or obligations are changed.
+`ai.infer` is the Core AI gateway boundary: it selects an active model route,
+redacts configured request fields, reserves and charges budget, writes the
+inference and usage rows, and records event, audit, and trace evidence. V1 uses
+deterministic no-provider execution, so live provider calls remain blocked
+while every worker gets a reusable inference ledger.
 `customer_signal.record` adds satisfaction, feedback, complaint,
 testimonial, and review records as typed customer signals. `payroll.preview.record`
 writes pay statements, payroll lines, liabilities, calculation traces, audit

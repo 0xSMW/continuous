@@ -48,6 +48,7 @@ function configObject(value: unknown):
 }
 
 const workerCommandEnvelopeFields = new Set(["command", "worker", "idempotencyKey", "config"]);
+const workerTargetEnvelopeFields = new Set(["role", "id", "tenantSlug"]);
 async function readBody(request: Request) {
   if (!request.headers.get("content-type")?.includes("application/json")) {
     return {};
@@ -67,6 +68,40 @@ function targetFrom(value: unknown): WorkerTargetInput {
     id: optionalString(target.id),
     tenantSlug: optionalString(target.tenantSlug),
   };
+}
+
+function validateWorkerTarget(value: unknown):
+  | { ok: true }
+  | { ok: false; error: { code: string; message: string } } {
+  if (value === undefined || value === null) {
+    return { ok: true };
+  }
+
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {
+      ok: false,
+      error: {
+        code: "invalid_worker_target",
+        message: "worker must be an object with role, id, and tenantSlug selectors.",
+      },
+    };
+  }
+
+  const unexpectedFields = Object.keys(value as Record<string, unknown>).filter(
+    (field) => !workerTargetEnvelopeFields.has(field),
+  );
+
+  if (unexpectedFields.length > 0) {
+    return {
+      ok: false,
+      error: {
+        code: "invalid_worker_target",
+        message: `worker target fields must be role, id, and tenantSlug. Move operation inputs into config. Unexpected fields: ${unexpectedFields.join(", ")}.`,
+      },
+    };
+  }
+
+  return { ok: true };
 }
 
 function idempotencyKeyFrom(body: Record<string, unknown>, request: Request) {
@@ -250,6 +285,7 @@ export async function POST(request: Request) {
   const configResult = configObject(body.config);
   const config = configResult.ok ? configResult.value : {};
   const target = targetFrom(body.worker);
+  const targetResult = validateWorkerTarget(body.worker);
   const auth = authorizeControlPlaneAccess({
     enabled: env.WORKER_RUN_ENABLED,
     appEnv: env.APP_ENV,
@@ -287,6 +323,10 @@ export async function POST(request: Request) {
       },
       400,
     );
+  }
+
+  if (!targetResult.ok) {
+    return errorResponse(targetResult.error, 400);
   }
 
   if (!configResult.ok) {

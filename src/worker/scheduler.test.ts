@@ -157,6 +157,7 @@ describe("worker scheduler", () => {
           role: "revenue_operations",
           tenantSlug: "continuous-demo",
         },
+        idempotencyKey: expect.stringMatching(/^scheduler-adapters-retry:continuous-demo:/),
         config: {
           limit: 11,
         },
@@ -172,6 +173,7 @@ describe("worker scheduler", () => {
           role: "revenue_operations",
           tenantSlug: "continuous-demo",
         },
+        idempotencyKey: expect.stringMatching(/^scheduler-adapters-reconcile:continuous-demo:/),
         config: {
           limit: 11,
         },
