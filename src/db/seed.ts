@@ -239,6 +239,7 @@ const capIds = {
   sensitiveReveal: "10000000-0000-4000-8000-000000000013",
   achDraftPrepare: "10000000-0000-4000-8000-000000000014",
   workerRead: "10000000-0000-4000-8000-000000000015",
+  exceptionRoute: "10000000-0000-4000-8000-000000000016",
 };
 
 const leadToCashStates = {
@@ -362,6 +363,7 @@ async function seed() {
           schedules_proposed: 0,
           customer_updates_drafted: 0,
           closeouts_prepared: 0,
+          exceptions_routed: 0,
           approval_requests_created: 0,
           conflicts_found: 0,
         },
@@ -431,6 +433,16 @@ async function seed() {
         sideEffect: "internal",
         description: "Prepare invoice details for approved or completed work.",
         evidence: { required: ["job_closeout", "invoice_draft"] },
+      },
+      {
+        id: capIds.exceptionRoute,
+        key: "exception.route",
+        name: "Route exception",
+        class: "task",
+        risk: "medium",
+        sideEffect: "internal",
+        description: "Route dispatch blockers into tenant-scoped review tasks with decision and evidence proof.",
+        evidence: { required: ["exception_context", "route_decision"] },
       },
       {
         id: capIds.paymentLinkPrepare,
@@ -577,6 +589,7 @@ async function seed() {
         capIds.responseDraft,
         capIds.approvalRequest,
         capIds.documentPacketPrepare,
+        capIds.exceptionRoute,
       ].map((capabilityId) => ({
         tenantId: ids.tenant,
         capabilityId,

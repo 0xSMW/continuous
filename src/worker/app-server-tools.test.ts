@@ -36,6 +36,14 @@ describe("app-server worker tools", () => {
         (command) => command.role === "dispatch_operations" && command.name === "closeout.prepare",
       ),
     ).toBe(true);
+    expect(
+      schema.registry.commands.some(
+        (command) =>
+          command.role === "dispatch_operations" &&
+          command.name === "exception.route" &&
+          command.externalExecution === "blocked",
+      ),
+    ).toBe(true);
   });
 
   it("requires a clean canonical command envelope before dispatch", async () => {
@@ -153,5 +161,21 @@ describe("app-server worker tools", () => {
         },
       }),
     ).rejects.toThrow("config.workOrderId is required for closeout.prepare.");
+
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.command", {
+        command: "exception.route",
+        operatorEmail: "owner@continuoushq.com",
+        worker: {
+          role: "dispatch_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "app-server-dispatch-exception-schema",
+        config: {
+          jobId: "job_object_uuid",
+          reason: "missing_photos",
+        },
+      }),
+    ).rejects.toThrow("config.severity is required for exception.route.");
   });
 });

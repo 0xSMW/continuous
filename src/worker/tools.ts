@@ -342,6 +342,50 @@ export const workerTools = [
     },
   },
   {
+    name: "worker.dispatch.exception.route",
+    description: "Route a dispatch exception into Core task, decision, and evidence records.",
+    registry: {
+      role: "dispatch_operations",
+      surface: "command",
+      command: "exception.route",
+      idempotency: "required",
+      externalExecution: "blocked",
+      requiresTenant: true,
+    },
+    inputSchema: {
+      type: "object",
+      properties: {
+        worker: { $ref: "#/$defs/workerTarget" },
+        idempotencyKey: { type: "string" },
+        config: {
+          type: "object",
+          description:
+            "Dispatch exception config. Put the job selector, reason, severity, and optional related Core refs under config.",
+          properties: {
+            jobId: { type: "string" },
+            reason: { type: "string" },
+            severity: { enum: ["low", "medium", "high", "critical"] },
+            kind: { type: "string" },
+            notes: { type: "string" },
+            note: { type: "string" },
+            sourceRefs: { $ref: "#/$defs/sourceRefs" },
+            evidenceIds: {
+              type: "array",
+              items: { type: "string" },
+            },
+            sourceEvidenceIds: {
+              type: "array",
+              items: { type: "string" },
+            },
+          },
+          required: ["jobId", "reason", "severity"],
+          additionalProperties: true,
+        },
+      },
+      required: ["worker", "idempotencyKey", "config"],
+    },
+  },
+  {
     name: "worker.continue",
     description: "Continue a worker-owned approval outcome with structured config.",
     registry: {
@@ -686,9 +730,23 @@ export const workerToolSchema = {
         customerObjectId: { type: "string" },
         quoteObjectId: { type: "string" },
         jobObjectId: { type: "string" },
+        jobId: { type: "string" },
+        workOrderObjectId: { type: "string" },
+        workOrderId: { type: "string" },
+        appointmentObjectId: { type: "string" },
+        customerUpdateObjectId: { type: "string" },
+        closeoutObjectId: { type: "string" },
         approvalRequestId: { type: "string" },
         adapterReceiptEvidenceId: { type: "string" },
         workflowRunId: { type: "string" },
+        evidenceIds: {
+          type: "array",
+          items: { type: "string" },
+        },
+        sourceEvidenceIds: {
+          type: "array",
+          items: { type: "string" },
+        },
       },
       additionalProperties: true,
     },
@@ -824,6 +882,16 @@ export async function executeWorkerTool(name: string, payload: JsonObject = {}) 
   if (name === "worker.dispatch.closeout.prepare") {
     return executeWorkerCommand({
       command: "closeout.prepare",
+      target,
+      operatorEmail,
+      config,
+      idempotencyKey: payload.idempotencyKey,
+    });
+  }
+
+  if (name === "worker.dispatch.exception.route") {
+    return executeWorkerCommand({
+      command: "exception.route",
       target,
       operatorEmail,
       config,

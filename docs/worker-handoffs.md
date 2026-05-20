@@ -36,13 +36,15 @@ Before a planned worker becomes executable, add at least one fixture for its
 incoming handoff. Dispatch/Ops now has executable fixtures through
 `/worker command=schedule.propose`, blocked
 `/worker command=customer_update.draft`, and blocked
-`/worker command=closeout.prepare`; remaining rows are still launch blockers
-for their target workers.
+`/worker command=closeout.prepare`, and blocked
+`/worker command=exception.route`; live calendar/customer-send credentials
+remain the Dispatch launch blocker, and remaining rows are still launch
+blockers for their target workers.
 
 | Worker | Required first fixture |
 |---|---|
 | Owner Chief-of-Staff | `revenue.lead_to_owner_review` approval packet with Revenue source evidence |
-| Dispatch/Ops | implemented: `revenue.quote_to_dispatch` approved quote with blocked adapter receipt produces a dry-run schedule proposal, blocked customer update draft, and blocked closeout packet |
+| Dispatch/Ops | implemented: `revenue.quote_to_dispatch` approved quote with blocked adapter receipt produces a dry-run schedule proposal, blocked customer update draft, blocked closeout packet, and blocked exception route task |
 | Finance | `dispatch.closeout_to_finance` closeout packet with billable line summary |
 | Workforce | seeded employment or contractor packet with payroll preview blockers |
 | Compliance | `workforce.payroll_to_compliance` payroll preview with filing draft |

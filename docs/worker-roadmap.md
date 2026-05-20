@@ -56,7 +56,8 @@ before promotion.
 ## Phase 3: Dispatch/Ops Worker
 
 Status: first runtime slices are registered on `/worker` for
-`schedule.propose`, `customer_update.draft`, and `closeout.prepare`. The
+`schedule.propose`, `customer_update.draft`, `closeout.prepare`, and
+`exception.route`. The
 schedule command consumes a Revenue `revenue.quote_to_dispatch` handoff from
 `config.sourceRefs`, writes an appointment object, promise-to-delivery workflow
 run/steps, dry-run calendar adapter receipt, approval request, dispatch packet,
@@ -67,14 +68,17 @@ draft, evidence packet, approval request, and
 `config.workOrderId` and keyed `config.sourceRefs`, writes a closeout object,
 QA checklist, evidence packet, approval request, `dispatch.closeout.review`
 view, and `dispatch.closeout_to_finance` handoff refs while invoice/payment
-execution stays blocked. Remaining work is exception routing and live
+execution stays blocked. The exception command consumes `config.jobId`,
+`config.reason`, `config.severity`, and optional keyed `config.sourceRefs`,
+writes a blocked task, decision record, evidence packet, document, and workflow
+steps, and keeps external recovery blocked. Remaining work is live
 calendar/send credentials.
 
 | Dependency | Implementation target |
 |---|---|
 | Core objects | Job, appointment, crew, asset, material, closeout, customer update |
-| Workflow | Promise-to-delivery state machine with schedule proposal, customer update draft, and closeout packet |
-| Capabilities | `schedule.propose`, `response.draft`, `document_packet.prepare`, `approval.request` |
+| Workflow | Promise-to-delivery state machine with schedule proposal, customer update draft, closeout packet, and exception route |
+| Capabilities | `schedule.propose`, `response.draft`, `document_packet.prepare`, `exception.route`, `approval.request` |
 | Adapters | Calendar dry-run, map/job system dry-run, customer-message approval |
 | Launch gate | No customer update without approval; schedule conflicts create exception tasks |
 

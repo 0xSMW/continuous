@@ -20,9 +20,10 @@ same registry validation before dispatch.
 The CI integration suite exercises `continuous.worker.command` on real
 Revenue `lead.read` and `run` commands, proving the app-server boundary writes
 the same worker run, approval, evidence, budget, and event records as `/worker`.
-Dispatch `customer_update.draft` and `closeout.prepare` are also
-schema-discoverable through the same registry-backed command list and keep
-customer-send, QA, and Finance handoff data under `config`.
+Dispatch `customer_update.draft`, `closeout.prepare`, and `exception.route`
+are also schema-discoverable through the same registry-backed command list and
+keep customer-send, QA, Finance handoff, exception reason, severity, and
+related Core refs under `config`.
 
 ```sh
 bun run app-server:worker-tools

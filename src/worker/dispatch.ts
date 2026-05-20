@@ -14,6 +14,7 @@ import {
   capabilities,
   capabilityGrants,
   connections,
+  decisions,
   documents,
   evidence,
   evidencePackets,
@@ -45,10 +46,12 @@ const dispatchSource = "continuous.dispatch_worker";
 const scheduleCapabilityKey = "schedule.propose";
 const customerUpdateCapabilityKey = "response.draft";
 const closeoutCapabilityKey = "document_packet.prepare";
+const exceptionRouteCapabilityKey = "exception.route";
 const workflowKey = "promise_to_delivery";
 const scheduleProposalUnits = 6000;
 const customerUpdateDraftUnits = 2500;
 const closeoutPrepareUnits = 4500;
+const exceptionRouteUnits = 1800;
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -135,6 +138,23 @@ export type DispatchCloseoutPrepareResult = {
   workflowRunId: string | null;
   workflowStepIds: string[];
   dispatchCloseoutViewId: string | null;
+  output: JsonObject;
+  snapshot: DispatchWorkerSnapshot;
+};
+
+export type DispatchExceptionRouteResult = {
+  created: boolean;
+  idempotencyKey: string;
+  workerRunId: string;
+  taskId: string | null;
+  eventId: string | null;
+  decisionId: string | null;
+  evidenceId: string | null;
+  decisionEvidenceId: string | null;
+  packetId: string | null;
+  documentId: string | null;
+  workflowRunId: string | null;
+  workflowStepIds: string[];
   output: JsonObject;
   snapshot: DispatchWorkerSnapshot;
 };
@@ -1013,6 +1033,147 @@ async function loadCloseoutRefs(db: Database, tenantId: string, config: JsonObje
   };
 }
 
+function normalizeExceptionSeverity(value: unknown) {
+  const severity = stringValue(value, "medium").toLowerCase();
+
+  if (severity === "critical") {
+    return { severity: "critical", priority: "urgent" as const, risk: "critical" as const };
+  }
+
+  if (severity === "high") {
+    return { severity: "high", priority: "high" as const, risk: "high" as const };
+  }
+
+  if (severity === "low") {
+    return { severity: "low", priority: "low" as const, risk: "low" as const };
+  }
+
+  return { severity: "medium", priority: "normal" as const, risk: "medium" as const };
+}
+
+async function loadExceptionRefs(db: Database, tenantId: string, config: JsonObject) {
+  const sourceRefs = objectValue(config.sourceRefs);
+  const jobRef =
+    optionalString(config.jobId) ??
+    optionalString(sourceRefs.jobObjectId) ??
+    optionalString(sourceRefs.jobId);
+
+  if (!jobRef) {
+    throw new PlatformUnavailableError(
+      "invalid_worker_command_config",
+      "config.jobId is required for exception.route.",
+      400,
+    );
+  }
+
+  const reason = stringValue(config.reason);
+
+  if (!reason) {
+    throw new PlatformUnavailableError(
+      "invalid_worker_command_config",
+      "config.reason is required for exception.route.",
+      400,
+    );
+  }
+
+  const severityInput = stringValue(config.severity);
+
+  if (!severityInput) {
+    throw new PlatformUnavailableError(
+      "invalid_worker_command_config",
+      "config.severity is required for exception.route.",
+      400,
+    );
+  }
+
+  const jobObject = await resolveJobObject(db, tenantId, jobRef);
+
+  if (!jobObject) {
+    throw new PlatformUnavailableError(
+      "dispatch_job_not_found",
+      "Dispatch exception route requires a tenant-scoped job object.",
+      404,
+    );
+  }
+
+  const jobRow = await loadJobState(db, tenantId, jobObject.id);
+  const jobData = {
+    ...objectValue(jobObject.data),
+    ...objectValue(jobRow?.data),
+  } satisfies JsonObject;
+  const customerObjectId =
+    optionalString(sourceRefs.customerObjectId) ??
+    optionalString(jobData.customerObjectId) ??
+    optionalString(jobData.customerId);
+  const customerObject = customerObjectId ? await getObjectById(db, tenantId, customerObjectId) : null;
+
+  if (customerObjectId && customerObject?.type !== "customer") {
+    throw new PlatformUnavailableError(
+      "dispatch_customer_not_found",
+      "Dispatch exception route requires a tenant-scoped customer object when config.sourceRefs.customerObjectId is provided.",
+      404,
+    );
+  }
+
+  const workOrderObjectId = optionalString(sourceRefs.workOrderObjectId) ?? optionalString(sourceRefs.workOrderId);
+  const workOrderObject = workOrderObjectId ? await getObjectById(db, tenantId, workOrderObjectId) : null;
+
+  if (workOrderObjectId && workOrderObject?.type !== "work_order") {
+    throw new PlatformUnavailableError(
+      "dispatch_work_order_not_found",
+      "Dispatch exception route requires a tenant-scoped work_order object when config.sourceRefs.workOrderObjectId is provided.",
+      404,
+    );
+  }
+
+  const appointmentObjectId = optionalString(sourceRefs.appointmentObjectId);
+  const appointmentObject = appointmentObjectId ? await getObjectById(db, tenantId, appointmentObjectId) : null;
+
+  if (appointmentObjectId && appointmentObject?.type !== "appointment") {
+    throw new PlatformUnavailableError(
+      "dispatch_appointment_not_found",
+      "Dispatch exception route requires a tenant-scoped appointment object when config.sourceRefs.appointmentObjectId is provided.",
+      404,
+    );
+  }
+
+  const closeoutObjectId = optionalString(sourceRefs.closeoutObjectId);
+  const closeoutObject = closeoutObjectId ? await getObjectById(db, tenantId, closeoutObjectId) : null;
+
+  if (closeoutObjectId && closeoutObject?.type !== "closeout") {
+    throw new PlatformUnavailableError(
+      "dispatch_closeout_not_found",
+      "Dispatch exception route requires a tenant-scoped closeout object when config.sourceRefs.closeoutObjectId is provided.",
+      404,
+    );
+  }
+
+  const sourceEvidenceIds = Array.from(
+    new Set([
+      ...stringList(config.evidenceIds),
+      ...stringList(sourceRefs.evidenceIds),
+      ...stringList(config.sourceEvidenceIds),
+      ...stringList(sourceRefs.sourceEvidenceIds),
+    ]),
+  );
+  const sourceEvidence = await loadEvidenceRefs(db, tenantId, sourceEvidenceIds, "config.sourceRefs.evidenceIds");
+
+  return {
+    sourceRefs,
+    reason,
+    severity: normalizeExceptionSeverity(config.severity),
+    routeKind: stringValue(config.kind, stringValue(sourceRefs.kind, "dispatch_exception")),
+    notes: stringValue(config.notes, stringValue(config.note)),
+    jobObject,
+    jobRow,
+    customerObject,
+    workOrderObject,
+    appointmentObject,
+    closeoutObject,
+    sourceEvidenceIds: sourceEvidence.map((row) => row.id),
+  };
+}
+
 function normalizeCloseoutQuality(config: JsonObject, photoEvidenceIds: string[]) {
   const qaInput = objectValue(config.qaChecklist ?? config.qualityChecklist);
   const completionNotes = stringValue(
@@ -1080,6 +1241,37 @@ async function replayedCloseoutPrepare(
     workflowStepIds: getWorkflowStepIds(data),
     dispatchCloseoutViewId:
       optionalString(data.dispatchCloseoutViewId) ?? optionalString(output.dispatchCloseoutViewId) ?? null,
+    output,
+    snapshot: await getDispatchWorkerSnapshot(db, {
+      role: dispatchWorkerRole,
+      tenantSlug: context.worker.tenantSlug,
+      workerId: context.worker.id,
+    }),
+  };
+}
+
+async function replayedExceptionRoute(
+  db: Database,
+  context: DispatchContext,
+  run: typeof workerRuns.$inferSelect,
+): Promise<DispatchExceptionRouteResult> {
+  const data = objectValue(run.data);
+  const output = outputData(data);
+
+  return {
+    created: false,
+    idempotencyKey: run.idempotencyKey,
+    workerRunId: run.id,
+    taskId: run.taskId,
+    eventId: run.eventId ?? optionalString(data.eventId) ?? null,
+    decisionId: optionalString(data.decisionId) ?? optionalString(output.decisionId) ?? null,
+    evidenceId: optionalString(data.evidenceId) ?? optionalString(output.evidenceId) ?? null,
+    decisionEvidenceId:
+      optionalString(data.decisionEvidenceId) ?? optionalString(output.decisionEvidenceId) ?? null,
+    packetId: optionalString(data.packetId) ?? optionalString(output.packetId) ?? null,
+    documentId: optionalString(data.documentId) ?? optionalString(output.documentId) ?? null,
+    workflowRunId: optionalString(data.workflowRunId) ?? optionalString(output.workflowRunId) ?? null,
+    workflowStepIds: getWorkflowStepIds(data),
     output,
     snapshot: await getDispatchWorkerSnapshot(db, {
       role: dispatchWorkerRole,
@@ -3754,6 +3946,628 @@ export async function prepareDispatchCloseout(input: {
     workflowRunId: result.workflowRunId,
     workflowStepIds: result.workflowStepIds,
     dispatchCloseoutViewId: result.dispatchCloseoutViewId,
+    output: result.output,
+    snapshot: await getDispatchWorkerSnapshot(db, {
+      role: dispatchWorkerRole,
+      tenantSlug: context.worker.tenantSlug,
+      workerId: context.worker.id,
+    }),
+  };
+}
+
+export async function routeDispatchException(input: {
+  idempotencyKey: string;
+  tenantSlug?: string;
+  workerId?: string;
+  operatorEmail: string;
+  config?: JsonObject;
+  db?: Database;
+}): Promise<DispatchExceptionRouteResult> {
+  const db = input.db ?? defaultDb;
+  const context = await loadDispatchContext({
+    db,
+    selector: { role: dispatchWorkerRole, tenantSlug: input.tenantSlug, workerId: input.workerId },
+    operatorEmail: input.operatorEmail,
+    capabilityKey: exceptionRouteCapabilityKey,
+    capabilityLabel: "exception.route",
+  });
+  const config = input.config ?? {};
+  const route = await loadExceptionRefs(db, context.worker.tenantId, config);
+  const inputHash = hashObject({
+    schemaVersion: "dispatch.exception.route.v1",
+    tenantId: context.worker.tenantId,
+    workerId: context.worker.id,
+    idempotencyKey: input.idempotencyKey,
+    config,
+    jobObjectId: route.jobObject.id,
+    customerObjectId: route.customerObject?.id ?? null,
+    workOrderObjectId: route.workOrderObject?.id ?? null,
+    appointmentObjectId: route.appointmentObject?.id ?? null,
+    closeoutObjectId: route.closeoutObject?.id ?? null,
+    sourceEvidenceIds: route.sourceEvidenceIds,
+    reason: route.reason,
+    severity: route.severity.severity,
+  });
+  const now = new Date();
+  const normalizedReason = route.reason.replace(/\s+/g, "_").toLowerCase();
+  const title = `Route ${route.severity.severity} dispatch exception for ${route.jobObject.name}`;
+
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${dispatchSource}:${input.idempotencyKey}`}))`,
+    );
+
+    const [existingRun] = await tx
+      .select()
+      .from(workerRuns)
+      .where(
+        and(
+          eq(workerRuns.tenantId, context.worker.tenantId),
+          eq(workerRuns.source, dispatchSource),
+          eq(workerRuns.idempotencyKey, input.idempotencyKey),
+        ),
+      )
+      .limit(1);
+
+    if (existingRun) {
+      const existingInput = objectValue(objectValue(existingRun.data).input);
+      const existingHash = optionalString(existingInput.inputHash);
+
+      if (existingHash && existingHash !== inputHash) {
+        throw new PlatformUnavailableError(
+          "worker_idempotency_conflict",
+          "A Dispatch exception route already exists for this idempotency key with different input.",
+          409,
+        );
+      }
+
+      return { replay: existingRun };
+    }
+
+    const [definition] = await tx
+      .select({ id: workflowDefinitions.id })
+      .from(workflowDefinitions)
+      .where(and(eq(workflowDefinitions.key, workflowKey), eq(workflowDefinitions.active, true)))
+      .orderBy(desc(workflowDefinitions.createdAt))
+      .limit(1);
+
+    if (!definition) {
+      throw new PlatformUnavailableError(
+        "worker_workflow_definition_missing",
+        "Dispatch Operations Worker requires the promise_to_delivery workflow definition.",
+        409,
+      );
+    }
+
+    const [task] = await tx
+      .insert(tasks)
+      .values({
+        tenantId: context.worker.tenantId,
+        objectId: route.jobObject.id,
+        capabilityId: context.capabilityId,
+        title,
+        state: "blocked",
+        priority: route.severity.priority,
+        ownerType: "worker",
+        ownerId: context.worker.id,
+        ownerRef: `worker:${context.worker.id}`,
+        reviewerUserId: context.reviewerUserId,
+        evidence: {
+          required: ["exception_context", "route_decision", "dispatch_exception_packet"],
+          reason: route.reason,
+          severity: route.severity.severity,
+          sourceEvidenceIds: route.sourceEvidenceIds,
+        },
+        outcome: {
+          status: "dispatch_exception_routed",
+          routeKind: route.routeKind,
+          reason: route.reason,
+          severity: route.severity.severity,
+        },
+        cost: { units: exceptionRouteUnits },
+        kpi: { exceptions_routed: 1 },
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: tasks.id });
+
+    const runInput = {
+      command: "exception.route",
+      inputHash,
+      config,
+      jobObjectId: route.jobObject.id,
+      customerObjectId: route.customerObject?.id ?? null,
+      workOrderObjectId: route.workOrderObject?.id ?? null,
+      appointmentObjectId: route.appointmentObject?.id ?? null,
+      closeoutObjectId: route.closeoutObject?.id ?? null,
+      sourceEvidenceIds: route.sourceEvidenceIds,
+      reason: route.reason,
+      severity: route.severity.severity,
+    } satisfies JsonObject;
+
+    const [workerRun] = await tx
+      .insert(workerRuns)
+      .values({
+        tenantId: context.worker.tenantId,
+        workerId: context.worker.id,
+        taskId: task.id,
+        capabilityId: context.capabilityId,
+        budgetAccountId: context.budgetAccountId,
+        source: dispatchSource,
+        idempotencyKey: input.idempotencyKey,
+        state: "running",
+        mode: "simulation",
+        data: {
+          input: runInput,
+          output: {},
+        },
+        startedAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: workerRuns.id });
+
+    const [workflowRun] = await tx
+      .insert(workflowRuns)
+      .values({
+        tenantId: context.worker.tenantId,
+        definitionId: definition.id,
+        objectId: route.jobObject.id,
+        workerId: context.worker.id,
+        state: "blocked",
+        idempotencyKey: input.idempotencyKey,
+        data: {
+          workerRunId: workerRun.id,
+          taskId: task.id,
+          jobObjectId: route.jobObject.id,
+          sourceRefs: route.sourceRefs,
+          reason: route.reason,
+          severity: route.severity.severity,
+          inputHash,
+          externalExecution: "blocked",
+        },
+        blockers: { open: [`dispatch_exception:${normalizedReason}`] },
+        metrics: {
+          budgetUnits: exceptionRouteUnits,
+          exceptionsRouted: 1,
+          severity: route.severity.severity,
+        },
+        startedAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: workflowRuns.id });
+
+    const [reservation] = await tx
+      .insert(budgetReservations)
+      .values({
+        tenantId: context.worker.tenantId,
+        accountId: context.budgetAccountId,
+        taskId: task.id,
+        units: exceptionRouteUnits,
+        state: "used",
+        expiresAt: new Date(now.getTime() + 15 * 60 * 1000),
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: budgetReservations.id });
+
+    const [inference] = await tx
+      .insert(inferences)
+      .values({
+        tenantId: context.worker.tenantId,
+        budgetAccountId: context.budgetAccountId,
+        taskId: task.id,
+        capabilityId: context.capabilityId,
+        actorType: "worker",
+        actorId: context.worker.id,
+        promptHash: traceHash(input.idempotencyKey, "dispatch-exception"),
+        request: {
+          mode: "deterministic",
+          objective: "Route a dispatch exception into tenant-scoped review work without external execution.",
+          jobObjectId: route.jobObject.id,
+          reason: route.reason,
+          severity: route.severity.severity,
+          inputHash,
+        },
+        result: {
+          taskId: task.id,
+          routeKind: route.routeKind,
+          reason: route.reason,
+          severity: route.severity.severity,
+          externalExecution: "blocked",
+        },
+        safety: {
+          externalExecution: "blocked",
+          externalMutation: false,
+          customerSend: "blocked",
+        },
+        promptTokens: 180,
+        completionTokens: 80,
+        units: exceptionRouteUnits,
+        costUsd: "0.000000",
+        latencyMs: 70,
+        createdAt: now,
+      })
+      .returning({ id: inferences.id });
+
+    const [usage] = await tx
+      .insert(usageEvents)
+      .values({
+        tenantId: context.worker.tenantId,
+        accountId: context.budgetAccountId,
+        reservationId: reservation.id,
+        inferenceId: inference.id,
+        taskId: task.id,
+        capabilityId: context.capabilityId,
+        actorType: "worker",
+        actorId: context.worker.id,
+        units: exceptionRouteUnits,
+        costUsd: "0.000000",
+        data: {
+          mode: "deterministic",
+          workerRunId: workerRun.id,
+          workflowRunId: workflowRun.id,
+          routeKind: route.routeKind,
+        },
+        createdAt: now,
+      })
+      .returning({ id: usageEvents.id });
+
+    const [event] = await tx
+      .insert(events)
+      .values({
+        tenantId: context.worker.tenantId,
+        type: "dispatch_worker.exception_route.completed",
+        source: dispatchSource,
+        actorType: "worker",
+        actorId: context.worker.id,
+        actorRef: `worker:${context.worker.id}`,
+        objectId: route.jobObject.id,
+        taskId: task.id,
+        capabilityId: context.capabilityId,
+        idempotencyKey: input.idempotencyKey,
+        data: {
+          workerRunId: workerRun.id,
+          workflowRunId: workflowRun.id,
+          jobObjectId: route.jobObject.id,
+          customerObjectId: route.customerObject?.id ?? null,
+          workOrderObjectId: route.workOrderObject?.id ?? null,
+          appointmentObjectId: route.appointmentObject?.id ?? null,
+          closeoutObjectId: route.closeoutObject?.id ?? null,
+          reason: route.reason,
+          severity: route.severity.severity,
+          routeKind: route.routeKind,
+          externalExecution: "blocked",
+          externalMutation: false,
+          externalSend: false,
+          inputHash,
+        },
+        occurredAt: now,
+        createdAt: now,
+      })
+      .returning({ id: events.id });
+
+    await tx
+      .update(workerRuns)
+      .set({ eventId: event.id, updatedAt: now })
+      .where(eq(workerRuns.id, workerRun.id));
+
+    const [decision] = await tx
+      .insert(decisions)
+      .values({
+        tenantId: context.worker.tenantId,
+        taskId: task.id,
+        eventId: event.id,
+        workflowRunId: workflowRun.id,
+        capabilityId: context.capabilityId,
+        actorType: "worker",
+        actorId: context.worker.id,
+        kind: "dispatch_exception_route",
+        state: "proposed",
+        decision: "route_to_dispatch_review",
+        rationale:
+          route.notes ||
+          `Route ${route.severity.severity} dispatch exception for operator review before external execution.`,
+        data: {
+          workerRunId: workerRun.id,
+          jobObjectId: route.jobObject.id,
+          reason: route.reason,
+          severity: route.severity.severity,
+          routeKind: route.routeKind,
+          sourceRefs: route.sourceRefs,
+          externalExecution: "blocked",
+        },
+        createdAt: now,
+      })
+      .returning({ id: decisions.id });
+
+    const [traceEvidence] = await tx
+      .insert(evidence)
+      .values({
+        tenantId: context.worker.tenantId,
+        kind: "trace",
+        name: "Dispatch exception route trace",
+        objectId: route.jobObject.id,
+        taskId: task.id,
+        eventId: event.id,
+        capabilityId: context.capabilityId,
+        actorType: "worker",
+        actorId: context.worker.id,
+        hash: inputHash,
+        data: {
+          inputHash,
+          jobObjectId: route.jobObject.id,
+          reason: route.reason,
+          severity: route.severity.severity,
+          routeKind: route.routeKind,
+          sourceEvidenceIds: route.sourceEvidenceIds,
+          externalExecution: "blocked",
+        },
+        createdAt: now,
+      })
+      .returning({ id: evidence.id });
+
+    const [decisionEvidence] = await tx
+      .insert(evidence)
+      .values({
+        tenantId: context.worker.tenantId,
+        kind: "note",
+        name: "Dispatch exception route decision",
+        objectId: route.jobObject.id,
+        taskId: task.id,
+        eventId: event.id,
+        capabilityId: context.capabilityId,
+        actorType: "worker",
+        actorId: context.worker.id,
+        hash: traceHash(input.idempotencyKey, "exception_route_decision"),
+        data: {
+          decisionId: decision.id,
+          taskId: task.id,
+          jobObjectId: route.jobObject.id,
+          reason: route.reason,
+          severity: route.severity.severity,
+          routeKind: route.routeKind,
+          recommendedAction: "operator_review",
+          externalExecution: "blocked",
+        },
+        createdAt: now,
+      })
+      .returning({ id: evidence.id });
+
+    const [document] = await tx
+      .insert(documents)
+      .values({
+        tenantId: context.worker.tenantId,
+        objectId: route.jobObject.id,
+        workflowRunId: workflowRun.id,
+        kind: "dispatch_exception_packet",
+        name: `Dispatch exception packet for ${route.jobObject.name}`,
+        state: "review_ready",
+        sensitivity: route.severity.risk,
+        hash: traceHash(input.idempotencyKey, "document"),
+        data: {
+          jobObjectId: route.jobObject.id,
+          taskId: task.id,
+          decisionId: decision.id,
+          reason: route.reason,
+          severity: route.severity.severity,
+          routeKind: route.routeKind,
+          sourceEvidenceIds: route.sourceEvidenceIds,
+          externalExecution: "blocked",
+        },
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: documents.id });
+
+    const [packet] = await tx
+      .insert(evidencePackets)
+      .values({
+        tenantId: context.worker.tenantId,
+        documentId: document.id,
+        objectId: route.jobObject.id,
+        taskId: task.id,
+        workflowRunId: workflowRun.id,
+        eventId: event.id,
+        capabilityId: context.capabilityId,
+        kind: "dispatch_exception_packet",
+        name: "Dispatch exception evidence packet",
+        state: "review_ready",
+        sensitivity: route.severity.risk,
+        evidenceIds: { ids: [traceEvidence.id, decisionEvidence.id, ...route.sourceEvidenceIds] },
+        documentIds: { ids: [document.id] },
+        data: {
+          jobObjectId: route.jobObject.id,
+          taskId: task.id,
+          decisionId: decision.id,
+          reason: route.reason,
+          severity: route.severity.severity,
+          routeKind: route.routeKind,
+          externalExecution: "blocked",
+          externalMutation: false,
+          externalSend: false,
+        },
+        hash: traceHash(input.idempotencyKey, "dispatch_exception_packet"),
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: evidencePackets.id });
+
+    const stepRows = await tx
+      .insert(workflowSteps)
+      .values([
+        {
+          tenantId: context.worker.tenantId,
+          definitionId: definition.id,
+          workflowRunId: workflowRun.id,
+          eventId: event.id,
+          objectId: route.jobObject.id,
+          workerId: context.worker.id,
+          capabilityId: context.capabilityId,
+          kind: "worker_action",
+          name: "Dispatch exception detected",
+          state: "done",
+          toState: "blocked",
+          idempotencyKey: `${input.idempotencyKey}:exception_detected`,
+          input: { sourceRefs: route.sourceRefs },
+          output: { taskId: task.id, reason: route.reason, severity: route.severity.severity },
+          startedAt: now,
+          completedAt: now,
+          updatedAt: now,
+        },
+        {
+          tenantId: context.worker.tenantId,
+          definitionId: definition.id,
+          workflowRunId: workflowRun.id,
+          eventId: event.id,
+          objectId: route.jobObject.id,
+          workerId: context.worker.id,
+          capabilityId: context.capabilityId,
+          kind: "decision",
+          name: "Exception route decision recorded",
+          state: "done",
+          fromState: "blocked",
+          toState: "blocked",
+          idempotencyKey: `${input.idempotencyKey}:route_decision`,
+          input: { taskId: task.id },
+          output: { decisionId: decision.id, packetId: packet.id, documentId: document.id },
+          startedAt: now,
+          completedAt: now,
+          updatedAt: now,
+        },
+      ])
+      .returning({ id: workflowSteps.id });
+
+    const workflowStepIds = stepRows.map((step) => step.id);
+
+    await tx.insert(auditEvents).values({
+      tenantId: context.worker.tenantId,
+      type: "dispatch_worker.exception_route.completed",
+      source: dispatchSource,
+      actorType: "worker",
+      actorId: context.worker.id,
+      actorRef: `worker:${context.worker.id}`,
+      targetType: "worker_run",
+      targetId: workerRun.id,
+      taskId: task.id,
+      workerRunId: workerRun.id,
+      eventId: event.id,
+      objectId: route.jobObject.id,
+      capabilityId: context.capabilityId,
+      risk: route.severity.risk,
+      idempotencyKey: `${input.idempotencyKey}:audit`,
+      data: {
+        operatorEmail: context.operator.email,
+        inputHash,
+        decisionId: decision.id,
+        packetId: packet.id,
+        reason: route.reason,
+        severity: route.severity.severity,
+        externalExecution: "blocked",
+        externalMutation: false,
+        externalSend: false,
+      },
+      createdAt: now,
+    });
+
+    const output = {
+      jobObjectId: route.jobObject.id,
+      customerObjectId: route.customerObject?.id ?? null,
+      workOrderObjectId: route.workOrderObject?.id ?? null,
+      appointmentObjectId: route.appointmentObject?.id ?? null,
+      closeoutObjectId: route.closeoutObject?.id ?? null,
+      taskId: task.id,
+      decisionId: decision.id,
+      evidenceId: traceEvidence.id,
+      decisionEvidenceId: decisionEvidence.id,
+      packetId: packet.id,
+      documentId: document.id,
+      workflowRunId: workflowRun.id,
+      workflowStepIds,
+      reason: route.reason,
+      severity: route.severity.severity,
+      routeKind: route.routeKind,
+      sourceRefs: route.sourceRefs,
+      sourceEvidenceIds: route.sourceEvidenceIds,
+      externalExecution: "blocked",
+      externalMutation: false,
+      externalSend: false,
+      requiresOperatorReview: true,
+    } satisfies JsonObject;
+
+    await tx
+      .update(workerRuns)
+      .set({
+        state: "done",
+        eventId: event.id,
+        data: {
+          input: runInput,
+          output,
+          eventId: event.id,
+          taskId: task.id,
+          decisionId: decision.id,
+          evidenceId: traceEvidence.id,
+          decisionEvidenceId: decisionEvidence.id,
+          packetId: packet.id,
+          documentId: document.id,
+          workflowRunId: workflowRun.id,
+          workflowStepIds,
+          reservationId: reservation.id,
+          inferenceId: inference.id,
+          usageEventId: usage.id,
+        },
+        endedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(workerRuns.id, workerRun.id));
+
+    await tx
+      .update(workers)
+      .set({
+        kpis: {
+          ...context.worker.kpis,
+          exceptions_routed: numberValue(context.worker.kpis.exceptions_routed) + 1,
+          conflicts_found:
+            normalizedReason.includes("conflict") || normalizedReason.includes("double_book")
+              ? numberValue(context.worker.kpis.conflicts_found) + 1
+              : numberValue(context.worker.kpis.conflicts_found),
+        },
+        updatedAt: now,
+      })
+      .where(eq(workers.id, context.worker.id));
+
+    return {
+      replay: null,
+      workerRunId: workerRun.id,
+      taskId: task.id,
+      eventId: event.id,
+      decisionId: decision.id,
+      evidenceId: traceEvidence.id,
+      decisionEvidenceId: decisionEvidence.id,
+      packetId: packet.id,
+      documentId: document.id,
+      workflowRunId: workflowRun.id,
+      workflowStepIds,
+      output,
+    };
+  });
+
+  if (result.replay) {
+    return replayedExceptionRoute(db, context, result.replay);
+  }
+
+  return {
+    created: true,
+    idempotencyKey: input.idempotencyKey,
+    workerRunId: result.workerRunId,
+    taskId: result.taskId,
+    eventId: result.eventId,
+    decisionId: result.decisionId,
+    evidenceId: result.evidenceId,
+    decisionEvidenceId: result.decisionEvidenceId,
+    packetId: result.packetId,
+    documentId: result.documentId,
+    workflowRunId: result.workflowRunId,
+    workflowStepIds: result.workflowStepIds,
     output: result.output,
     snapshot: await getDispatchWorkerSnapshot(db, {
       role: dispatchWorkerRole,

@@ -120,6 +120,7 @@ describe("worker tool contract", () => {
       "worker.dispatch.schedule.propose",
       "worker.dispatch.customer_update.draft",
       "worker.dispatch.closeout.prepare",
+      "worker.dispatch.exception.route",
       "worker.continue",
       "worker.approvals.list",
       "worker.approvals.decide",
@@ -237,6 +238,13 @@ describe("worker tool contract", () => {
           requiresTenant: true,
           externalExecution: "blocked",
         }),
+        expect.objectContaining({
+          role: "dispatch_operations",
+          name: "exception.route",
+          idempotency: "required",
+          requiresTenant: true,
+          externalExecution: "blocked",
+        }),
       ]),
     );
     expect(workerToolSchema.registry.commands).toEqual(
@@ -291,6 +299,19 @@ describe("worker tool contract", () => {
             properties: expect.objectContaining({
               sourceRefs: expect.objectContaining({ type: "object" }),
               qaChecklist: expect.objectContaining({ type: "object" }),
+            }),
+          }),
+        }),
+        expect.objectContaining({
+          role: "dispatch_operations",
+          name: "exception.route",
+          configSchema: expect.objectContaining({
+            required: ["jobId", "reason", "severity"],
+            properties: expect.objectContaining({
+              severity: expect.objectContaining({
+                enum: ["low", "medium", "high", "critical"],
+              }),
+              sourceRefs: expect.objectContaining({ type: "object" }),
             }),
           }),
         }),
@@ -632,6 +653,39 @@ describe("worker tool contract", () => {
         },
       }),
     ).rejects.toThrow("config.workOrderId is required for closeout.prepare.");
+  });
+
+  it("validates dispatch exception route envelopes before invoking the worker", async () => {
+    await expect(
+      executeWorkerTool("worker.dispatch.exception.route", {
+        worker: {
+          role: "dispatch_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "bad key!",
+        config: {
+          jobId: "job_object_uuid",
+          reason: "missing_photos",
+          severity: "high",
+        },
+      }),
+    ).rejects.toThrow(
+      "Idempotency key may only contain letters, numbers, dot, underscore, colon, or dash.",
+    );
+
+    await expect(
+      executeWorkerTool("worker.dispatch.exception.route", {
+        worker: {
+          role: "dispatch_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "dispatch-exception-schema-001",
+        config: {
+          jobId: "job_object_uuid",
+          reason: "missing_photos",
+        },
+      }),
+    ).rejects.toThrow("config.severity is required for exception.route.");
   });
 
   it("requires tenant scope for adapter reconciliation", async () => {

@@ -227,7 +227,7 @@ jobs:
           }
           set_control_plane_token_catalog() {
             token_hash="$(printf '%s' "$worker_token" | sha256sum | awk '{print $1}')"
-            allowed_commands='"core:view.summary","core:task.create","core:task.transition","core:object.upsert","core:adapter.upsert","core:connection.upsert","core:connection.health.record","core:object.link","core:event.ingest","core:evidence.attach","core:document.create","core:packet.prepare","core:document.packet.prepare","core:decision.record","core:approval.request","core:adapter.intent.record","core:rule.change.record","core:capability.grant","core:budget.reserve","core:budget.charge","core:budget.release","core:view.publish","core:customer_signal.record","core:payroll.preview.record","core:payroll.preview.packet.prepare","worker:view.snapshot","worker:view.approvals","worker:view.briefs","worker:view.decisions","worker:view.board","worker:view.exceptions","worker:run","worker:lead.read","worker:lead.classify","worker:response.draft","worker:schedule.propose","worker:customer_update.draft","worker:closeout.prepare","worker:continue","worker:approval.decide","worker:adapters.reconcile","worker:adapters.retry","worker:brief.generate","worker:decision_queue.prepare","worker:anomaly.triage","workflow:view.overview","workflow:view.approvals","workflow:start","workflow:transition","workflow:steps.execute","workflow:approval.decide","approval:view.inbox","approval:approval.decide"'
+            allowed_commands='"core:view.summary","core:task.create","core:task.transition","core:object.upsert","core:adapter.upsert","core:connection.upsert","core:connection.health.record","core:object.link","core:event.ingest","core:evidence.attach","core:document.create","core:packet.prepare","core:document.packet.prepare","core:decision.record","core:approval.request","core:adapter.intent.record","core:rule.change.record","core:capability.grant","core:budget.reserve","core:budget.charge","core:budget.release","core:view.publish","core:customer_signal.record","core:payroll.preview.record","core:payroll.preview.packet.prepare","worker:view.snapshot","worker:view.approvals","worker:view.briefs","worker:view.decisions","worker:view.board","worker:view.exceptions","worker:run","worker:lead.read","worker:lead.classify","worker:response.draft","worker:schedule.propose","worker:customer_update.draft","worker:closeout.prepare","worker:exception.route","worker:continue","worker:approval.decide","worker:adapters.reconcile","worker:adapters.retry","worker:brief.generate","worker:decision_queue.prepare","worker:anomaly.triage","workflow:view.overview","workflow:view.approvals","workflow:start","workflow:transition","workflow:steps.execute","workflow:approval.decide","approval:view.inbox","approval:approval.decide"'
             catalog_json="$(
               printf '[{"id":"bootstrap-operator","tokenSha256":"%s","operatorEmail":"%s","allowedTenants":["continuous-demo"],"allowedWorkerRoles":["revenue_operations","owner_chief_of_staff","dispatch_operations"],"allowedRoutes":["core","worker","workflow","approval"],"allowedAccess":["read","write"],"allowedCommands":[%s]}]' \
                 "$token_hash" \
@@ -484,6 +484,7 @@ jobs:
             (.registry.commands | any(.role == "dispatch_operations" and .name == "schedule.propose" and .externalExecution == "dry_run")) and
             (.registry.commands | any(.role == "dispatch_operations" and .name == "customer_update.draft" and .externalExecution == "blocked")) and
             (.registry.commands | any(.role == "dispatch_operations" and .name == "closeout.prepare" and .externalExecution == "blocked")) and
+            (.registry.commands | any(.role == "dispatch_operations" and .name == "exception.route" and .externalExecution == "blocked")) and
             (.registry.views | map(.name) | index("snapshot")) != null and
             (.registry.views | map(.name) | index("approvals")) != null and
             (.registry.views | any(.role == "owner_chief_of_staff" and .name == "briefs")) and
@@ -503,6 +504,7 @@ jobs:
             (.tools | map(.name) | index("worker.dispatch.schedule.propose")) != null and
             (.tools | map(.name) | index("worker.dispatch.customer_update.draft")) != null and
             (.tools | map(.name) | index("worker.dispatch.closeout.prepare")) != null and
+            (.tools | map(.name) | index("worker.dispatch.exception.route")) != null and
             (.tools | map(.name) | index("worker.continue")) != null and
             (.tools | map(.name) | index("worker.adapters.reconcile")) != null and
             (.tools | map(.name) | index("worker.owner.brief.generate")) != null
@@ -577,6 +579,39 @@ jobs:
           echo "$DISPATCH_CLOSEOUT_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,closeoutObjectId:.data.result.closeoutObjectId,approvalRequestId:.data.result.approvalRequestId,packetId:.data.result.packetId,viewId:.data.result.dispatchCloseoutViewId,financeHandoff:.data.result.output.financeHandoff.name,externalExecution:.data.result.output.externalExecution,externalSend:.data.result.output.externalSend}}'
           echo "$DISPATCH_CLOSEOUT_RESPONSE" | /usr/bin/jq -e \
             '.error == null and .data.command == "closeout.prepare" and .data.worker.role == "dispatch_operations" and (.data.result.closeoutObjectId | length > 0) and (.data.result.approvalRequestId | length > 0) and (.data.result.packetId | length > 0) and (.data.result.dispatchCloseoutViewId | length > 0) and .data.result.output.financeHandoff.name == "dispatch.closeout_to_finance" and .data.result.output.externalExecution == "blocked" and .data.result.output.externalSend == false' \
+            >/dev/null
+
+          DISPATCH_CLOSEOUT_OBJECT_ID="$(echo "$DISPATCH_CLOSEOUT_RESPONSE" | /usr/bin/jq -r '.data.result.closeoutObjectId')"
+          DISPATCH_EXCEPTION_KEY="deploy-dispatch-exception-smoke-$SMOKE_RUN_ID"
+          DISPATCH_EXCEPTION_PAYLOAD="$(
+            /usr/bin/jq -nc --arg key "$DISPATCH_EXCEPTION_KEY" --arg closeout_id "$DISPATCH_CLOSEOUT_OBJECT_ID" '{
+              command: "exception.route",
+              worker: {role: "dispatch_operations", tenantSlug: "continuous-demo"},
+              idempotencyKey: $key,
+              config: {
+                jobId: "33333333-3333-4333-8333-000000000005",
+                reason: "missing_photos",
+                severity: "high",
+                sourceRefs: {
+                  customerObjectId: "33333333-3333-4333-8333-000000000001",
+                  workOrderObjectId: "33333333-3333-4333-8333-000000000013",
+                  closeoutObjectId: $closeout_id
+                },
+                notes: "Deploy smoke exception route; external execution remains blocked."
+              }
+            }'
+          )"
+          DISPATCH_EXCEPTION_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/worker \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$DISPATCH_EXCEPTION_PAYLOAD"
+          )"
+
+          echo "$DISPATCH_EXCEPTION_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,taskId:.data.result.taskId,decisionId:.data.result.decisionId,packetId:.data.result.packetId,documentId:.data.result.documentId,workflowRunId:.data.result.workflowRunId,reason:.data.result.output.reason,severity:.data.result.output.severity,externalExecution:.data.result.output.externalExecution,externalSend:.data.result.output.externalSend,requiresOperatorReview:.data.result.output.requiresOperatorReview}}'
+          echo "$DISPATCH_EXCEPTION_RESPONSE" | /usr/bin/jq -e \
+            '.error == null and .data.command == "exception.route" and .data.worker.role == "dispatch_operations" and (.data.result.taskId | length > 0) and (.data.result.decisionId | length > 0) and (.data.result.packetId | length > 0) and (.data.result.documentId | length > 0) and (.data.result.workflowRunId | length > 0) and .data.result.output.externalExecution == "blocked" and .data.result.output.externalSend == false and .data.result.output.requiresOperatorReview == true' \
             >/dev/null
 
           IDS="$(psql_db -At <<'SQL'

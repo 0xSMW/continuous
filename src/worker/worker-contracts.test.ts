@@ -133,6 +133,9 @@ describe("future worker contracts", () => {
     expect(source).toContain("`closeout.prepare`");
     expect(source).toContain("`worker.dispatch.closeout.prepare`");
     expect(source).toContain("closeout packet");
+    expect(source).toContain("`exception.route`");
+    expect(source).toContain("`worker.dispatch.exception.route`");
+    expect(source).toContain("exception task");
     expect(source).not.toMatch(/\/api\/[a-z0-9-]+-worker/);
   });
 

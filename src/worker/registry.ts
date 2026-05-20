@@ -31,6 +31,7 @@ import {
   getDispatchWorkerSnapshotSafe,
   prepareDispatchCloseout,
   proposeDispatchSchedule,
+  routeDispatchException,
 } from "./dispatch";
 import { plannedWorkerContractForRole } from "./planned-workers";
 import { normalizeIdempotencyKey } from "./security";
@@ -449,6 +450,31 @@ const dispatchCloseoutConfig: WorkerConfigSchema = {
     billableLines: {
       type: "array",
       items: jsonObjectConfig,
+    },
+  },
+  additionalProperties: true,
+};
+const dispatchExceptionRouteConfig: WorkerConfigSchema = {
+  type: "object",
+  required: ["jobId", "reason", "severity"],
+  properties: {
+    jobId: { type: "string" },
+    reason: { type: "string" },
+    severity: {
+      type: "string",
+      enum: ["low", "medium", "high", "critical"],
+    },
+    kind: { type: "string" },
+    notes: { type: "string" },
+    note: { type: "string" },
+    sourceRefs: jsonObjectConfig,
+    evidenceIds: {
+      type: "array",
+      items: { type: "string" },
+    },
+    sourceEvidenceIds: {
+      type: "array",
+      items: { type: "string" },
     },
   },
   additionalProperties: true,
@@ -1053,6 +1079,32 @@ const workerDefinitions: Record<string, WorkerDefinition> = {
           }
 
           return prepareDispatchCloseout({
+            idempotencyKey: context.idempotencyKey,
+            tenantSlug: context.target.tenantSlug,
+            workerId: context.target.workerId,
+            operatorEmail: context.operatorEmail,
+            config: context.config,
+          });
+        },
+      },
+      "exception.route": {
+        name: "exception.route",
+        description: "Route a dispatch exception into Core task, decision, and evidence records.",
+        idempotency: "required",
+        sideEffects: "internal",
+        externalExecution: "blocked",
+        requiresTenant: true,
+        configSchema: dispatchExceptionRouteConfig,
+        async handle(context) {
+          if (!context.idempotencyKey) {
+            throw new PlatformUnavailableError(
+              "invalid_idempotency_key",
+              "A string idempotency key is required.",
+              400,
+            );
+          }
+
+          return routeDispatchException({
             idempotencyKey: context.idempotencyKey,
             tenantSlug: context.target.tenantSlug,
             workerId: context.target.workerId,

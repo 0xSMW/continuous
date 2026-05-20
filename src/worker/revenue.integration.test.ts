@@ -6183,5 +6183,113 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(closeoutReplayResult.created).toBe(false);
     expect(closeoutReplayResult.workerRunId).toBe(closeoutResult.workerRunId);
     expect(closeoutReplayResult.closeoutObjectId).toBe(closeoutResult.closeoutObjectId);
+
+    const exceptionResponse = await executeWorkerCommand({
+      command: "exception.route",
+      target: {
+        role: "dispatch_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: `ci-dispatch-exception-${runId}`,
+      config: {
+        jobId: jobObjectId,
+        reason: "missing_photos",
+        severity: "high",
+        sourceRefs: {
+          customerObjectId,
+          workOrderObjectId,
+          appointmentObjectId,
+          closeoutObjectId: closeoutResult.closeoutObjectId,
+          evidenceIds: [completionEvidenceId],
+        },
+        notes: "Route missing photo exception before finance handoff.",
+      },
+    });
+    const exceptionResult = exceptionResponse.result as Awaited<
+      ReturnType<typeof import("./dispatch").routeDispatchException>
+    >;
+    const exceptionOutput = objectValue(exceptionResult.output);
+    const [exceptionRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(eq(workerRuns.id, exceptionResult.workerRunId))
+      .limit(1);
+    const [exceptionTask] = await db
+      .select()
+      .from(tasks)
+      .where(eq(tasks.id, exceptionResult.taskId ?? ""))
+      .limit(1);
+    const [exceptionDecision] = await db
+      .select()
+      .from(decisions)
+      .where(eq(decisions.id, exceptionResult.decisionId ?? ""))
+      .limit(1);
+    const [exceptionPacket] = await db
+      .select()
+      .from(evidencePackets)
+      .where(eq(evidencePackets.id, exceptionResult.packetId ?? ""))
+      .limit(1);
+    const [exceptionDocument] = await db
+      .select()
+      .from(documents)
+      .where(eq(documents.id, exceptionResult.documentId ?? ""))
+      .limit(1);
+
+    expect(exceptionResponse.command).toBe("exception.route");
+    expect(exceptionResponse.worker.role).toBe("dispatch_operations");
+    expect(exceptionResult.created).toBe(true);
+    expect(exceptionResult.workflowStepIds).toHaveLength(2);
+    expect(exceptionOutput.externalExecution).toBe("blocked");
+    expect(exceptionOutput.externalSend).toBe(false);
+    expect(exceptionOutput.requiresOperatorReview).toBe(true);
+    expect(exceptionOutput.jobObjectId).toBe(jobObjectId);
+    expect(exceptionOutput.workOrderObjectId).toBe(workOrderObjectId);
+    expect(exceptionOutput.closeoutObjectId).toBe(closeoutResult.closeoutObjectId);
+    expect(exceptionOutput.reason).toBe("missing_photos");
+    expect(exceptionOutput.severity).toBe("high");
+    expect(exceptionOutput.taskId).toBe(exceptionResult.taskId);
+    expect(exceptionOutput.decisionId).toBe(exceptionResult.decisionId);
+    expect(exceptionRun?.source).toBe("continuous.dispatch_worker");
+    expect(exceptionRun?.state).toBe("done");
+    expect(exceptionTask?.state).toBe("blocked");
+    expect(exceptionTask?.priority).toBe("high");
+    expect(objectValue(exceptionTask?.outcome).status).toBe("dispatch_exception_routed");
+    expect(exceptionDecision?.kind).toBe("dispatch_exception_route");
+    expect(exceptionDecision?.decision).toBe("route_to_dispatch_review");
+    expect(exceptionPacket?.kind).toBe("dispatch_exception_packet");
+    expect(exceptionDocument?.kind).toBe("dispatch_exception_packet");
+    expect(exceptionResult.snapshot.exceptions.some((task) => task.id === exceptionResult.taskId)).toBe(true);
+
+    const exceptionReplay = await executeWorkerCommand({
+      command: "exception.route",
+      target: {
+        role: "dispatch_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: `ci-dispatch-exception-${runId}`,
+      config: {
+        jobId: jobObjectId,
+        reason: "missing_photos",
+        severity: "high",
+        sourceRefs: {
+          customerObjectId,
+          workOrderObjectId,
+          appointmentObjectId,
+          closeoutObjectId: closeoutResult.closeoutObjectId,
+          evidenceIds: [completionEvidenceId],
+        },
+        notes: "Route missing photo exception before finance handoff.",
+      },
+    });
+    const exceptionReplayResult = exceptionReplay.result as Awaited<
+      ReturnType<typeof import("./dispatch").routeDispatchException>
+    >;
+
+    expect(exceptionReplayResult.created).toBe(false);
+    expect(exceptionReplayResult.workerRunId).toBe(exceptionResult.workerRunId);
+    expect(exceptionReplayResult.taskId).toBe(exceptionResult.taskId);
+    expect(exceptionReplayResult.decisionId).toBe(exceptionResult.decisionId);
   }, 120_000);
 });
