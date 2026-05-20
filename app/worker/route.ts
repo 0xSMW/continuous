@@ -49,15 +49,47 @@ function configObject(value: unknown):
 
 const workerCommandEnvelopeFields = new Set(["command", "worker", "idempotencyKey", "config"]);
 const workerTargetEnvelopeFields = new Set(["role", "id", "tenantSlug"]);
-async function readBody(request: Request) {
+async function readBody(
+  request: Request,
+): Promise<
+  | { ok: true; value: Record<string, unknown> }
+  | { ok: false; status: number; error: { code: string; message: string } }
+> {
   if (!request.headers.get("content-type")?.includes("application/json")) {
-    return {};
+    return {
+      ok: false,
+      status: 415,
+      error: {
+        code: "invalid_worker_command_body",
+        message: "POST /worker requires an application/json request body.",
+      },
+    };
   }
 
   try {
-    return bodyObject(await request.json());
+    const value = await request.json();
+
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return {
+        ok: false,
+        status: 400,
+        error: {
+          code: "invalid_worker_command_body",
+          message: "Worker command body must be a JSON object.",
+        },
+      };
+    }
+
+    return { ok: true, value: value as Record<string, unknown> };
   } catch {
-    return {};
+    return {
+      ok: false,
+      status: 400,
+      error: {
+        code: "invalid_worker_command_body",
+        message: "Worker command body must be valid JSON.",
+      },
+    };
   }
 }
 
@@ -280,7 +312,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const body = await readBody(request);
+  const bodyResult = await readBody(request);
+  const body = bodyResult.ok ? bodyResult.value : {};
   const unexpectedFields = unexpectedWorkerPayloadFields(body);
   const configResult = configObject(body.config);
   const config = configResult.ok ? configResult.value : {};
@@ -313,6 +346,10 @@ export async function POST(request: Request) {
       auth,
     });
     return guardErrorResponse(auth);
+  }
+
+  if (!bodyResult.ok) {
+    return errorResponse(bodyResult.error, bodyResult.status);
   }
 
   if (unexpectedFields.length > 0) {

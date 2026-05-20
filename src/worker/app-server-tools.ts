@@ -1,6 +1,6 @@
 import type { JsonObject } from "../db/schema";
 import { executeWorkerCommand, type WorkerTargetInput } from "./registry";
-import { workerToolSchema } from "./tools";
+import { assertTrustedLocalWorkerMutation, workerToolSchema } from "./tools";
 
 export type AppServerDynamicToolSpec = {
   name: string;
@@ -153,6 +153,8 @@ export async function executeAppServerWorkerTool(name: string, args: JsonObject 
     if (!operatorEmail) {
       throw new Error("continuous.worker.command requires operatorEmail.");
     }
+
+    assertTrustedLocalWorkerMutation("continuous.worker.command");
 
     return executeWorkerCommand({
       command,

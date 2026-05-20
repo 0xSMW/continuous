@@ -490,6 +490,7 @@ export async function executeAiInference(input: AiInferInput): Promise<AiInferRe
   const fields = redactionFields(input.redaction);
   const rawInput = jsonObject(input.input);
   const redactedInput = redactValue(rawInput, fields) as JsonObject;
+  const redactedInputRefs = objectValue(redactValue(rawInput.inputRefs, fields));
   const promptHash = hashObject({
     routeKey: route.routeKey,
     model: route.model,
@@ -503,7 +504,7 @@ export async function executeAiInference(input: AiInferInput): Promise<AiInferRe
       provider: route.providerKey,
     },
     input: redactedInput,
-    inputRefs: objectValue(rawInput.inputRefs),
+    inputRefs: redactedInputRefs,
     redaction: {
       mode: cleanString(input.redaction?.mode) ?? "key_redaction",
       fields: Array.from(fields).sort(),

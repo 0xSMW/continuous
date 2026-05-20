@@ -106,6 +106,7 @@ describe("future worker contracts", () => {
       "docs",
       "notes",
       "scripts",
+      "src",
       ".github/workflows",
       "README.md",
       "package.json",
@@ -185,6 +186,9 @@ describe("future worker contracts", () => {
     expect(source).toContain("`ar_followup.draft`");
     expect(source).toContain("`cash_forecast.generate`");
     expect(source).toContain("`payment_draft.prepare`");
+    expect(source).toContain("Expense coding is a");
+    expect(source).toContain("planned follow-up command");
+    expect(source).toContain("| `expense_code.propose` | planned `worker.command` |");
     expect(source).toContain("cash packet");
     expect(source).toContain("AR follow-up draft");
     expect(source).toContain("cash forecast");
@@ -222,6 +226,7 @@ describe("future worker contracts", () => {
       "Eval",
       "UI",
       "Launch",
+      "Proof",
     ];
 
     for (const gate of gateNames) {
@@ -243,7 +248,8 @@ describe("future worker contracts", () => {
     expect(readiness).toContain(
       "Production connector credentials and approved external send remain blocked; scheduler polling needs real connection coverage",
     );
-    expect(readiness).toContain("Every promotion must update this matrix");
+    expect(readiness).toContain("Every promotion must update this matrix, the Proof column");
+    expect(readiness).toContain("deploy smoke in `.github/workflows/deploy.yml`");
   });
 
   it("keeps production readiness tied to durable auth rotation evidence", () => {

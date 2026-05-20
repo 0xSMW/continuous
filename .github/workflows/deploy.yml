@@ -166,11 +166,15 @@ jobs:
           if [[ -z "${SITE_HOSTS:-}" || "$SITE_HOSTS" == "http://:80" || "$SITE_HOSTS" == ":80" ]]; then
             SITE_HOSTS="continuoushq.com, getcontinuous.app"
           fi
-          if [[ -z "${APP_URL:-}" || "$APP_URL" == http://* ]]; then
+          if [[ -z "${APP_URL:-}" ]]; then
             first_host="$(printf '%s' "$SITE_HOSTS" | cut -d, -f1 | xargs)"
             first_host="${first_host#http://}"
             first_host="${first_host#https://}"
             APP_URL="https://$first_host"
+          fi
+          if [[ "$APP_URL" == http://* ]]; then
+            echo "::error::app_url must be an https URL."
+            exit 1
           fi
           app_url="${APP_URL:-https://continuoushq.com}"
           site_host="${app_url#https://}"
@@ -1764,6 +1768,78 @@ jobs:
           select 'core_budget_released_reservation' as kind, state, units::text
           from budget_reservations where id = '$CORE_BUDGET_RELEASE_RESERVATION_ID'::uuid;
           SQL
+
+          CORE_AI_INFER_KEY="deploy-core-ai-infer-$RUN_ID"
+          CORE_AI_INFER_PAYLOAD="$(
+            /usr/bin/jq -nc \
+              --arg key "$CORE_AI_INFER_KEY" \
+              --arg accountId "$CORE_BUDGET_ACCOUNT_ID" \
+              --arg workerId "$CORE_WORKER_ID" \
+              --arg taskId "$CORE_TASK_ID" \
+              --arg capabilityId "$CORE_CAPABILITY_ID" '{
+                command: "ai.infer",
+                core: {tenantSlug: "continuous-demo"},
+                idempotencyKey: $key,
+                config: {
+                  routeKey: "low_cost_fast",
+                  budgetAccountId: $accountId,
+                  maxUnits: 750,
+                  costUsd: "0.000000",
+                  actor: {
+                    type: "worker",
+                    id: $workerId
+                  },
+                  taskId: $taskId,
+                  capabilityId: $capabilityId,
+                  input: {
+                    instruction: "Deploy smoke deterministic inference.",
+                    customerName: "Deploy Smoke Customer",
+                    token: null,
+                    inputRefs: {
+                      taskId: $taskId,
+                      token: null
+                    }
+                  },
+                  redaction: {
+                    fields: ["customerName"]
+                  },
+                  evaluation: {
+                    source: "deploy_smoke"
+                  }
+                }
+              }'
+          )"
+          CORE_AI_INFER_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/core \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$CORE_AI_INFER_PAYLOAD"
+          )"
+
+          echo "$CORE_AI_INFER_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,inferenceId:.data.result.inferenceId,usageEventId:.data.result.usageEventId,evidenceId:.data.result.evidenceId,mode:.data.result.result.mode,externalExecution:.data.result.result.externalExecution}}'
+          echo "$CORE_AI_INFER_RESPONSE" | /usr/bin/jq -e \
+            '.error == null and .data.command == "ai.infer" and .data.result.created == true and (.data.result.inferenceId | length > 0) and (.data.result.usageEventId | length > 0) and (.data.result.evidenceId | length > 0) and .data.result.request.input.token == "[redacted]" and .data.result.request.input.customerName == "[redacted]" and .data.result.request.inputRefs.token == "[redacted]" and .data.result.result.mode == "deterministic" and .data.result.result.externalExecution == "blocked" and .data.result.safety.providerExecution == "disabled"' \
+            >/dev/null
+
+          CORE_AI_INFERENCE_ID="$(echo "$CORE_AI_INFER_RESPONSE" | /usr/bin/jq -r '.data.result.inferenceId')"
+          CORE_AI_USAGE_ID="$(echo "$CORE_AI_INFER_RESPONSE" | /usr/bin/jq -r '.data.result.usageEventId')"
+          CORE_AI_EVIDENCE_ID="$(echo "$CORE_AI_INFER_RESPONSE" | /usr/bin/jq -r '.data.result.evidenceId')"
+
+          psql_db -At <<SQL
+          select 'core_ai_inference' as kind, request->'input'->>'token', request->'input'->>'customerName', request->'inputRefs'->>'token', result->>'mode', safety->>'providerExecution'
+          from inferences where id = '$CORE_AI_INFERENCE_ID'::uuid;
+          select 'core_ai_usage' as kind, units::text, actor_type, actor_id
+          from usage_events where id = '$CORE_AI_USAGE_ID'::uuid and inference_id = '$CORE_AI_INFERENCE_ID'::uuid;
+          select 'core_ai_evidence' as kind, kind, data->>'inferenceId', data->'redactedRequest'->'input'->>'token'
+          from evidence where id = '$CORE_AI_EVIDENCE_ID'::uuid;
+          SQL
+
+          CORE_AI_PROOF_ROW="$(psql_db -Atc "select (request->'input'->>'token') || '|' || (request->'input'->>'customerName') || '|' || (request->'inputRefs'->>'token') || '|' || (result->>'mode') || '|' || (safety->>'providerExecution') from inferences where id = '$CORE_AI_INFERENCE_ID'::uuid;")"
+          if [ "$CORE_AI_PROOF_ROW" != "[redacted]|[redacted]|[redacted]|deterministic|disabled" ]; then
+            echo "Unexpected Core AI gateway proof row: $CORE_AI_PROOF_ROW" >&2
+            exit 1
+          fi
 
           CORE_OBJECT_KEY="deploy-core-object-$RUN_ID"
           CORE_OBJECT_PAYLOAD="$(

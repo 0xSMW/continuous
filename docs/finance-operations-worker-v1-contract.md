@@ -3,8 +3,9 @@
 This contract defines the finance worker for invoice drafts, AR follow-up,
 expense coding, cash forecast, and payment draft preparation. V1 never moves
 money and never sends external payment communications without approval.
-The first executable slices are `invoice.prepare`, `ar_followup.draft`,
-`cash_forecast.generate`, and `payment_draft.prepare`; expense coding and live
+The current executable slices are `invoice.prepare`, `ar_followup.draft`,
+`cash_forecast.generate`, and `payment_draft.prepare`. Expense coding is a
+planned follow-up command and is not registered in the current runtime. Live
 execution gates stay contract-defined until their runtime handlers are promoted
 through the same generic worker registry.
 
@@ -128,10 +129,15 @@ payment links, refunds, settlements, or bank writes:
 | `GET view=snapshot` | `worker.view` | `worker.role` | None | Read-only | Blocked |
 | `invoice.prepare` | `worker.command` | `config.jobId`, `config.closeoutId`, or `config.sourceRefs` | Required | Invoice draft, cash packet, approval request, accounting dry-run receipt | Dry-run |
 | `ar_followup.draft` | `worker.command` | `config.invoiceId`, `config.tonePolicy` | Required | AR follow-up draft, cash packet, approval request, generated review view | Blocked |
-| `expense_code.propose` | `worker.command` | `config.receiptId` or `config.expenseId` | Required | Coding proposal and evidence | Blocked |
 | `cash_forecast.generate` | `worker.command` | `config.window`, `config.accounts[]` | Required | Forecast object, cash packet, approval request, generated review view | Blocked |
 | `payment_draft.prepare` | `worker.command` | `config.billId`, `config.paymentId`, or `config.sourceRefs` | Required | Payment object, Payment instruction draft, cash packet, dual-control approval request, generated review view | Blocked |
 | `approval.decide` | `worker.command` | `config.approvalId`, `config.action`, optional `config.note` | None | Approval/task/workflow evidence only | Blocked |
+
+Planned follow-up command:
+
+| Command | Future surface | Required config | Promotion gate | Side effects | External execution |
+|---|---|---|---|---|---|
+| `expense_code.propose` | planned `worker.command` | `config.receiptId` or `config.expenseId` | Receipt intake fixture, policy exception eval, and approval evidence | Coding proposal and evidence | Blocked |
 
 ## Core Object Map
 

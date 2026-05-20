@@ -77,6 +77,9 @@ The app-server command tool is intentionally narrow:
 - Caller supplies `operatorEmail`, `worker`, `idempotencyKey`, and `config`.
 - No external execution is available.
 - No production token is loaded.
+- Mutation tools are trusted-local by default; in `APP_ENV=production`, set
+  `CONTINUOUS_TRUSTED_LOCAL_WORKER_TOOLS=true` only for an explicitly trusted
+  operator shell or app-server bridge.
 
 The generic local worker tool remains available for explicit operator-gated
 commands:

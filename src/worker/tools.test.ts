@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
@@ -14,6 +14,23 @@ import {
   plannedWorkerContracts,
   plannedWorkerViews,
 } from "./planned-workers";
+
+const originalAppEnv = process.env.APP_ENV;
+const originalTrustedLocalWorkerTools = process.env.CONTINUOUS_TRUSTED_LOCAL_WORKER_TOOLS;
+
+afterEach(() => {
+  if (originalAppEnv === undefined) {
+    delete process.env.APP_ENV;
+  } else {
+    process.env.APP_ENV = originalAppEnv;
+  }
+
+  if (originalTrustedLocalWorkerTools === undefined) {
+    delete process.env.CONTINUOUS_TRUSTED_LOCAL_WORKER_TOOLS;
+  } else {
+    process.env.CONTINUOUS_TRUSTED_LOCAL_WORKER_TOOLS = originalTrustedLocalWorkerTools;
+  }
+});
 
 function routeFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -176,6 +193,38 @@ describe("worker tool contract", () => {
     ).rejects.toThrow(
       "worker target fields must be role, id, and tenantSlug. Move operation inputs into config. Unexpected fields: leadPacket.",
     );
+  });
+
+  it("disables local worker mutations in production unless explicitly trusted", async () => {
+    process.env.APP_ENV = "production";
+    delete process.env.CONTINUOUS_TRUSTED_LOCAL_WORKER_TOOLS;
+
+    await expect(
+      executeWorkerTool("worker.command", {
+        command: "run",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "production-local-mutation-guard-001",
+        config: {},
+      }),
+    ).rejects.toThrow(
+      "worker.command is a trusted local mutation surface and is disabled in production unless CONTINUOUS_TRUSTED_LOCAL_WORKER_TOOLS=true.",
+    );
+
+    process.env.CONTINUOUS_TRUSTED_LOCAL_WORKER_TOOLS = "true";
+    await expect(
+      executeWorkerTool("worker.command", {
+        command: "missing.command",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "production-local-mutation-guard-002",
+        config: {},
+      }),
+    ).rejects.toThrow("Worker command must be run");
   });
 
   it("exposes registry-backed repo-owned worker tools", () => {

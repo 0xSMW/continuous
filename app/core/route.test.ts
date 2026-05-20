@@ -181,6 +181,40 @@ describe("POST /core", () => {
     });
   });
 
+  it("rejects raw token material in token rotation attestations", async () => {
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "control_plane.token_rotation.attest",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "rotation-attest-raw-token-001",
+          config: {
+            credentialId: "ops-credential",
+            token: null,
+            nextToken: null,
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toEqual({
+      code: "invalid_control_plane_token_rotation",
+      message:
+        "Token rotation attestations accept credential ids and token fingerprints only. Remove raw token fields: token, nextToken.",
+    });
+    expect(mocks.attestControlPlaneTokenRotation).not.toHaveBeenCalled();
+  });
+
   it("upserts managed control-plane credentials through the Core command envelope", async () => {
     mocks.upsertControlPlaneCredential.mockResolvedValue({
       created: true,
@@ -307,7 +341,7 @@ describe("POST /core", () => {
             capabilityId: "capability-1",
             input: {
               prompt: "Classify lead",
-              token: "raw-token",
+              token: null,
             },
             redaction: {
               fields: ["token"],
@@ -343,7 +377,7 @@ describe("POST /core", () => {
       capabilityId: "capability-1",
       input: {
         prompt: "Classify lead",
-        token: "raw-token",
+        token: null,
       },
       redaction: {
         fields: ["token"],
@@ -352,6 +386,104 @@ describe("POST /core", () => {
         caseId: "lead-classification",
       },
     });
+  });
+
+  it("preserves structured AI gateway errors", async () => {
+    mocks.executeAiInference.mockRejectedValue({
+      status: 422,
+      code: "ai_gateway_route_not_found",
+      message: "config.routeKey does not match an active model route in this tenant.",
+    });
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "ai.infer",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "ai-infer-error-001",
+          config: {
+            routeKey: "missing_route",
+            budgetAccountId: "budget-1",
+            maxUnits: 500,
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(422);
+    expect(body.error).toEqual({
+      code: "ai_gateway_route_not_found",
+      message: "config.routeKey does not match an active model route in this tenant.",
+    });
+  });
+
+  it("rejects invalid Core command bodies before command dispatch", async () => {
+    const { POST } = await import("./route");
+
+    const missingContentType = await POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+        },
+        body: JSON.stringify({
+          command: "task.create",
+        }),
+      }),
+    );
+    const malformedJson = await POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: "{",
+      }),
+    );
+    const arrayBody = await POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify([]),
+      }),
+    );
+
+    await expect(missingContentType.json()).resolves.toMatchObject({
+      error: {
+        code: "invalid_core_command_body",
+        message: "POST /core requires an application/json request body.",
+      },
+    });
+    await expect(malformedJson.json()).resolves.toMatchObject({
+      error: {
+        code: "invalid_core_command_body",
+        message: "Core command body must be valid JSON.",
+      },
+    });
+    await expect(arrayBody.json()).resolves.toMatchObject({
+      error: {
+        code: "invalid_core_command_body",
+        message: "Core command body must be a JSON object.",
+      },
+    });
+    expect(missingContentType.status).toBe(415);
+    expect(malformedJson.status).toBe(400);
+    expect(arrayBody.status).toBe(400);
+    expect(mocks.createCoreTask).not.toHaveBeenCalled();
+    expect(mocks.executeAiInference).not.toHaveBeenCalled();
   });
 
   it("rejects raw token material in managed control-plane credential payloads", async () => {

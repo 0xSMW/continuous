@@ -264,6 +264,17 @@ const workerCommandToolEnvelopeFields = new Set([
 const workerViewToolEnvelopeFields = new Set(["view", "worker", "config", "operatorEmail"]);
 const workerTargetEnvelopeFields = new Set(["role", "id", "tenantSlug"]);
 
+export function assertTrustedLocalWorkerMutation(surface: string) {
+  if (
+    process.env.APP_ENV === "production" &&
+    process.env.CONTINUOUS_TRUSTED_LOCAL_WORKER_TOOLS !== "true"
+  ) {
+    throw new Error(
+      `${surface} is a trusted local mutation surface and is disabled in production unless CONTINUOUS_TRUSTED_LOCAL_WORKER_TOOLS=true.`,
+    );
+  }
+}
+
 function workerToolEnvelope(name: string) {
   if (name === "worker.command") {
     return {
@@ -347,6 +358,8 @@ export async function executeWorkerTool(name: string, payload: JsonObject = {}) 
     if (!command) {
       throw new Error("worker.command requires command.");
     }
+
+    assertTrustedLocalWorkerMutation("worker.command");
 
     return executeWorkerCommand({
       command,

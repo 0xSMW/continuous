@@ -448,6 +448,10 @@ maybeDescribe("Revenue Worker integration eval", () => {
         prompt: "Classify this lead for quote readiness.",
         customerName: "Acme Roof Repair",
         token: "never-persist-this",
+        inputRefs: {
+          sourceObjectId: "33333333-3333-4333-8333-000000000001",
+          token: "never-persist-this-ref",
+        },
       },
       redaction: {
         fields: ["token"],
@@ -469,6 +473,14 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(objectValue(result.request).input).toMatchObject({
       prompt: "Classify this lead for quote readiness.",
       customerName: "Acme Roof Repair",
+      token: "[redacted]",
+      inputRefs: {
+        sourceObjectId: "33333333-3333-4333-8333-000000000001",
+        token: "[redacted]",
+      },
+    });
+    expect(objectValue(result.request).inputRefs).toMatchObject({
+      sourceObjectId: "33333333-3333-4333-8333-000000000001",
       token: "[redacted]",
     });
     expect(objectValue(result.result).mode).toBe("deterministic");
@@ -498,6 +510,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(objectValue(audit?.data).providerExecution).toBe("disabled");
     expect(proof?.kind).toBe("trace");
     expect(JSON.stringify(proof?.data)).not.toContain("never-persist-this");
+    expect(JSON.stringify(proof?.data)).not.toContain("never-persist-this-ref");
 
     const replay = await executeAiInference({
       operatorEmail: "owner@continuoushq.com",

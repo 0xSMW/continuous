@@ -143,6 +143,8 @@
 | Alerting boundary | Deploy smoke now proves the host observability check, but recurring alerts are not active until `scripts/install-observability-timer.sh` is run with a real `ALERT_WEBHOOK_URL` |
 | Readiness boundary | The production readiness gate is strict and opt-in; it is expected to fail until object-storage credentials, backup and observability timers, alert webhook, recovery drill report, production connector credentials, and non-root host access are all actually provisioned and attested |
 | Worker selector boundary | `/worker`, `worker.command`, and `continuous.worker.command` now treat `worker` as a strict selector object with only `role`, `id`, and `tenantSlug`; every operation-specific field must live under `config` |
+| Command body boundary | `/core` and `/worker` reject non-JSON, malformed JSON, and non-object command bodies after authentication instead of collapsing them into empty envelopes |
+| Local mutation trust boundary | `worker.command` and `continuous.worker.command` are disabled under `APP_ENV=production` unless `CONTINUOUS_TRUSTED_LOCAL_WORKER_TOOLS=true`; production automation should prefer the authenticated `/worker` route |
 
 ### Current State
 

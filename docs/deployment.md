@@ -31,7 +31,9 @@ supports `task.create`, `task.transition`, `object.upsert`, `object.link`,
 `decision.record`, `approval.request`, `capability.grant`, `budget.reserve`,
 `budget.charge`, `budget.release`, `ai.infer`, `view.publish`, `adapter.intent.record`,
 `rule.change.record`, `customer_signal.record`,
-`payroll.preview.record`, and `payroll.preview.packet.prepare`, all with the
+`payroll.preview.record`, `payroll.preview.packet.prepare`,
+`control_plane.token_rotation.attest`, `control_plane.credential.upsert`,
+`control_plane.credential.revoke`, and `control_plane.session.review`, all with the
 same bearer token used by worker and workflow commands.
 
 ## First Deploy
@@ -78,7 +80,8 @@ The `Deploy` workflow is manual-only and uses these repository secrets:
 The workflow uses `DO_API_TOKEN` to add the current GitHub runner IP as a
 temporary `/32` SSH source on `continuous-fw`, then removes that rule after the
 deploy job finishes. When `app_url` is omitted, the workflow derives `APP_URL`
-from the first hostname in `site_hosts`, matching `scripts/deploy.sh`.
+from the first hostname in `site_hosts`, matching `scripts/deploy.sh`; explicit
+`app_url` values must already be HTTPS.
 Each normal deploy tags app images as `sha-<commit>` by default, or the
 provided `app_tag`, and stores the prior app tag as `PREVIOUS_APP_TAG` in the
 remote `.env`.

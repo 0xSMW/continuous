@@ -133,6 +133,65 @@ describe("/worker route", () => {
     });
   });
 
+  it("rejects invalid worker command bodies before registry dispatch", async () => {
+    const { POST } = await import("./route");
+
+    const missingContentType = await POST(
+      new Request("http://localhost/worker", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+        },
+        body: JSON.stringify({
+          command: "run",
+        }),
+      }),
+    );
+    const malformedJson = await POST(
+      new Request("http://localhost/worker", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: "{",
+      }),
+    );
+    const arrayBody = await POST(
+      new Request("http://localhost/worker", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify([]),
+      }),
+    );
+
+    await expect(missingContentType.json()).resolves.toMatchObject({
+      error: {
+        code: "invalid_worker_command_body",
+        message: "POST /worker requires an application/json request body.",
+      },
+    });
+    await expect(malformedJson.json()).resolves.toMatchObject({
+      error: {
+        code: "invalid_worker_command_body",
+        message: "Worker command body must be valid JSON.",
+      },
+    });
+    await expect(arrayBody.json()).resolves.toMatchObject({
+      error: {
+        code: "invalid_worker_command_body",
+        message: "Worker command body must be a JSON object.",
+      },
+    });
+    expect(missingContentType.status).toBe(415);
+    expect(malformedJson.status).toBe(400);
+    expect(arrayBody.status).toBe(400);
+    expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
+  });
+
   it("denies worker commands when the managed credential inventory revokes the token", async () => {
     mocks.env.CONTROL_PLANE_ALLOWED_TENANTS = "continuous-demo";
     mocks.env.CONTROL_PLANE_ALLOWED_WORKER_ROLES = "revenue_operations";
@@ -337,6 +396,50 @@ describe("/worker route", () => {
     );
   });
 
+  it("keeps payload idempotencyKey authoritative when the header is also present", async () => {
+    mocks.executeWorkerCommand.mockResolvedValue({
+      worker: {
+        role: "revenue_operations",
+        id: null,
+        tenantSlug: "continuous-demo",
+      },
+      command: "run",
+      result: {},
+    });
+
+    const { POST } = await import("./route");
+    await POST(
+      new Request("http://localhost/worker", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+          "idempotency-key": "header-key-001",
+        },
+        body: JSON.stringify({
+          command: "run",
+          worker: {
+            role: "revenue_operations",
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "",
+          config: {
+            intake: {
+              source: "website_form",
+              sourceEventId: "body-key-form-001",
+            },
+          },
+        }),
+      }),
+    );
+
+    expect(mocks.executeWorkerCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        idempotencyKey: "",
+      }),
+    );
+  });
+
   it("rejects legacy top-level worker fields outside the command envelope", async () => {
     mocks.executeWorkerCommand.mockResolvedValue({
       worker: {
@@ -484,6 +587,42 @@ describe("/worker route", () => {
     expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
   });
 
+  it("preserves mapped worker command errors", async () => {
+    mocks.executeWorkerCommand.mockRejectedValue(
+      Object.assign(new Error("Worker command config is invalid."), {
+        status: 422,
+        code: "worker_config_invalid",
+      }),
+    );
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/worker", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "run",
+          worker: {
+            role: "revenue_operations",
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "mapped-worker-error-001",
+          config: {},
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(422);
+    expect(body.error).toEqual({
+      code: "worker_config_invalid",
+      message: "Worker command config is invalid.",
+    });
+  });
+
   it("routes GET views through role-scoped worker selectors", async () => {
     const viewResult = {
       data: {
@@ -527,6 +666,31 @@ describe("/worker route", () => {
       },
       view: "briefs",
       state: "review_ready",
+    });
+  });
+
+  it("preserves mapped worker view errors", async () => {
+    mocks.executeWorkerView.mockRejectedValue(
+      Object.assign(new Error("Worker view is unavailable."), {
+        status: 503,
+        code: "worker_view_unavailable",
+      }),
+    );
+
+    const { GET } = await import("./route");
+    const response = await GET(
+      new Request("http://localhost/worker?view=briefs&role=owner_chief_of_staff&tenantSlug=continuous-demo", {
+        headers: {
+          authorization: "Bearer test-token",
+        },
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(body.error).toEqual({
+      code: "worker_view_unavailable",
+      message: "Worker view is unavailable.",
     });
   });
 
