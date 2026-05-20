@@ -85,12 +85,13 @@ from the first hostname in `site_hosts`, matching `scripts/deploy.sh`; explicit
 Each normal deploy tags app images as `sha-<commit>` by default, or the
 provided `app_tag`, and stores the prior app tag as `PREVIOUS_APP_TAG` in the
 remote `.env`.
-Deploys also derive a control-plane token catalog from the generated
-`WORKER_RUN_TOKEN`: the raw token remains in `.env` for operator smoke calls,
-while app containers receive a hashed `CONTROL_PLANE_TOKEN_CATALOG_B64` entry
-with explicit route, command, tenant, worker-role, and read/write scope. Future
-tokens can be added with `CONTROL_PLANE_TOKENS_JSON` or the base64 catalog
-without changing `/core`, `/worker`, `/workflow`, or `/approval`.
+Deploys also derive a control-plane token catalog from the generated bootstrap
+secret in `WORKER_RUN_TOKEN`: the raw token remains in `.env` only for first
+deploy, host recovery, and operator smoke calls, while app containers receive a
+hashed `CONTROL_PLANE_TOKEN_CATALOG_B64` entry with explicit route, command,
+tenant, worker-role, and read/write scope. Future tokens can be added with
+`CONTROL_PLANE_TOKENS_JSON` or the base64 catalog without changing `/core`,
+`/worker`, `/workflow`, or `/approval`.
 Deploy syncs still use `rsync --delete` to remove stale source files, but they
 protect `backups/`, `logs/`, and `reports/recovery-drills/` so database dumps,
 Caddy/observability logs, and recovery evidence survive releases.
@@ -134,8 +135,8 @@ ssh root@45.55.53.92 'cd /opt/continuous && docker compose --profile tools run -
 ```
 
 The deploy path also starts the `worker-scheduler` profile. The scheduler uses
-`WORKER_SCHEDULER_BASE_URL=http://app:3000`, the generated worker token, and
-tenant `continuous-demo` to call the same production APIs an operator would
+`WORKER_SCHEDULER_BASE_URL=http://app:3000`, the route-scoped catalog token,
+and tenant `continuous-demo` to call the same production APIs an operator would
 call: `/workflow` with `command=steps.execute`, `/worker` with
 `command=lead.read` for active connections whose `config.polling.enabled` is
 true, `/worker` with `command=run` once for each returned intake selector, then
@@ -330,8 +331,8 @@ route wildcards such as `worker:*`. GET views are authorized as
 `<route>:view.<view>`, for example `worker:view.snapshot`.
 Treat the legacy single `WORKER_RUN_TOKEN` path as bootstrap-only. New
 control-plane credentials must set explicit `allowedRoutes`, `allowedAccess`,
-and `allowedCommands`; omitted catalog scope fields inherit wildcard access and
-are not appropriate for customer-facing operation.
+and `allowedCommands`; omitted catalog scope fields still inherit wildcard
+access for compatibility and are not appropriate for customer-facing operation.
 
 ## Production Readiness Gate
 

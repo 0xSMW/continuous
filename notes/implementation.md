@@ -126,6 +126,7 @@
 | Removed legacy worker env aliases | Compose services now use only `WORKER_*` names instead of `REVENUE_WORKER_*` fallbacks so worker runtime configuration is role-neutral |
 | Hardened workflow and approval envelopes | `/workflow` and `/approval` now reject missing content type, malformed JSON, array bodies, and non-object `config` instead of normalizing malformed mutation requests to empty objects |
 | Redacted scheduler cycle logs | Scheduler cycle logs now record command status, errors, and counts without raw worker/workflow result payloads that may contain customer or tenant data |
+| Hardened route-scoped control-plane auth | The legacy `WORKER_RUN_TOKEN` fallback is now worker-route-only, non-worker routes use explicit catalog tokens in tests/docs, and all control-plane mutation routes require an exact `application/json` media type instead of substring content-type matching |
 
 ### Tradeoffs
 

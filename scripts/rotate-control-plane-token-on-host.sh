@@ -45,7 +45,7 @@ set_env_file() {
 PREVIOUS_WORKER_RUN_TOKEN="$(env_value WORKER_RUN_TOKEN)"
 
 if [ -z "$PREVIOUS_WORKER_RUN_TOKEN" ]; then
-  echo "Missing existing WORKER_RUN_TOKEN in $APP_DIR/.env; cannot attest rotation." >&2
+  echo "Missing bootstrap token for catalog seeding in $APP_DIR/.env; cannot attest rotation." >&2
   exit 1
 fi
 

@@ -183,11 +183,11 @@ if [ -n "$previous_worker_token" ] && docker compose ps --status running app | g
     if [ -n "$TOKEN_ROTATION_OUTPUT" ]; then
       printf '%s\n' "$TOKEN_ROTATION_OUTPUT" >&2
     fi
-    echo "Pre-deploy token rotation could not be attested; preserving the existing bootstrap token for this recovery deploy." >&2
+    echo "Pre-deploy token rotation could not be attested; preserving the existing bootstrap token while retaining the catalog for this recovery deploy." >&2
     worker_token="$previous_worker_token"
   fi
 else
-  echo "No running app found for pre-deploy token rotation; writing a fresh bootstrap token without rotation attestation."
+  echo "No running app found for pre-deploy token rotation; writing a fresh bootstrap token and seeding the route-scoped catalog."
 fi
 set_env WORKER_RUN_TOKEN "$worker_token"
 set_env WORKER_RUN_ENABLED true

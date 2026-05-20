@@ -43,17 +43,17 @@ UI contract.
 bun run dev
 ```
 
-Open `http://localhost:3000` and `/api/health`. `/core` is an
-operator-only summary and uses the same bearer token as the canonical `/worker`
-control plane. Set `CONTROL_PLANE_ALLOWED_TENANTS` and
-`CONTROL_PLANE_ALLOWED_WORKER_ROLES` to comma-delimited allowlists when testing
-the production-scoped token behavior. To test command-scoped credentials, set
-`CONTROL_PLANE_TOKENS_JSON` to a token catalog. Prefer `tokenSha256` so docs,
+Open `http://localhost:3000` and `/api/health`. `/core` and `/worker` are
+operator-only control-plane routes. To test command-scoped credentials, set
+`CONTROL_PLANE_TOKENS_JSON` or `CONTROL_PLANE_TOKEN_CATALOG_B64` to a
+route-scoped token catalog. Use `WORKER_RUN_TOKEN` only long enough to
+bootstrap or rotate the catalog on a fresh host. Prefer `tokenSha256` so docs,
 shell history, and logs never carry bearer values:
 
 ```sh
-CONTROL_PLANE_TOKEN_SHA256="$(printf '%s' "$WORKER_RUN_TOKEN" | shasum -a 256 | awk '{print $1}')"
-export CONTROL_PLANE_TOKENS_JSON='[{"id":"local-worker-runner","tokenSha256":"'"$CONTROL_PLANE_TOKEN_SHA256"'","operatorEmail":"owner@continuoushq.com","allowedTenants":["continuous-demo"],"allowedWorkerRoles":["revenue_operations"],"allowedRoutes":["worker"],"allowedAccess":["write"],"allowedCommands":["worker:run"]}]'
+read -rsp "Route-scoped operator token: " CONTROL_PLANE_OPERATOR_TOKEN
+CONTROL_PLANE_TOKEN_SHA256="$(printf '%s' "$CONTROL_PLANE_OPERATOR_TOKEN" | shasum -a 256 | awk '{print $1}')"
+export CONTROL_PLANE_TOKENS_JSON='[{"id":"local-operator","tokenSha256":"'"$CONTROL_PLANE_TOKEN_SHA256"'","operatorEmail":"owner@continuoushq.com","allowedTenants":["continuous-demo"],"allowedWorkerRoles":["revenue_operations"],"allowedRoutes":["core","worker","workflow","approval"],"allowedAccess":["read","write"],"allowedCommands":["core:*","worker:*","workflow:*","approval:*"]}]'
 ```
 
 Core side effects use a structured command payload. For local-only testing,
@@ -61,7 +61,7 @@ start the app with `WORKER_RUN_ENABLED=true` and call:
 
 ```sh
 curl -X POST http://localhost:3000/core \
-  -H "authorization: Bearer $WORKER_RUN_TOKEN" \
+  -H "authorization: Bearer $CONTROL_PLANE_OPERATOR_TOKEN" \
   -H "content-type: application/json" \
   -d '{
     "command": "task.create",
@@ -81,7 +81,7 @@ and customer-signal commands use the same `command` / `core` / `config` shape:
 
 ```sh
 curl -X POST http://localhost:3000/core \
-  -H "authorization: Bearer $WORKER_RUN_TOKEN" \
+  -H "authorization: Bearer $CONTROL_PLANE_OPERATOR_TOKEN" \
   -H "content-type: application/json" \
   -d '{
     "command": "object.upsert",
@@ -125,27 +125,23 @@ build tooling needs it.
 ## Revenue Operations Worker
 
 The seed data includes the Continuous Revenue Worker for a service-SMB
-lead-to-cash slice. Detailed snapshots are operator-only and require the worker
-token:
+lead-to-cash slice. Detailed snapshots are operator-only and require a
+route-scoped operator token from the catalog:
 
 ```sh
-read -rsp "Worker token: " WORKER_RUN_TOKEN
-export WORKER_RUN_TOKEN
 bun run dev
 curl "http://localhost:3000/worker?view=snapshot&role=revenue_operations" \
-  -H "authorization: Bearer $WORKER_RUN_TOKEN"
+  -H "authorization: Bearer $CONTROL_PLANE_OPERATOR_TOKEN"
 ```
 
 The run command is a guarded side-effecting `POST /worker` call and is disabled
 by default. For local-only testing, start the app with:
 
 ```sh
-read -rsp "Worker token: " WORKER_RUN_TOKEN
 export WORKER_RUN_ENABLED=true
-export WORKER_RUN_TOKEN
 bun run dev
 curl -X POST http://localhost:3000/worker \
-  -H "authorization: Bearer $WORKER_RUN_TOKEN" \
+  -H "authorization: Bearer $CONTROL_PLANE_OPERATOR_TOKEN" \
   -H "content-type: application/json" \
   -d '{
     "command": "run",
@@ -231,7 +227,7 @@ The same reconciliation command is available through the canonical worker API:
 
 ```sh
 curl -X POST http://localhost:3000/worker \
-  -H "authorization: Bearer $WORKER_RUN_TOKEN" \
+  -H "authorization: Bearer $CONTROL_PLANE_OPERATOR_TOKEN" \
   -H "content-type: application/json" \
   -d '{
     "command": "adapters.reconcile",
@@ -246,7 +242,7 @@ recording live-credential readiness and rollback proof:
 
 ```sh
 curl -X POST http://localhost:3000/worker \
-  -H "authorization: Bearer $WORKER_RUN_TOKEN" \
+  -H "authorization: Bearer $CONTROL_PLANE_OPERATOR_TOKEN" \
   -H "content-type: application/json" \
   -d '{
     "command": "adapters.retry",
@@ -256,14 +252,14 @@ curl -X POST http://localhost:3000/worker \
   }'
 ```
 
-List and decide approvals with the same bearer token:
+List and decide approvals with the same route-scoped operator token:
 
 ```sh
 curl "http://localhost:3000/worker?view=approvals&role=revenue_operations" \
-  -H "authorization: Bearer $WORKER_RUN_TOKEN"
+  -H "authorization: Bearer $CONTROL_PLANE_OPERATOR_TOKEN"
 
 curl -X POST http://localhost:3000/worker \
-  -H "authorization: Bearer $WORKER_RUN_TOKEN" \
+  -H "authorization: Bearer $CONTROL_PLANE_OPERATOR_TOKEN" \
   -H "content-type: application/json" \
   -d "{
     \"command\": \"approval.decide\",
@@ -277,10 +273,10 @@ Workflow approvals use the shared approval ledger:
 
 ```sh
 curl "http://localhost:3000/workflow?view=approvals&tenantSlug=continuous-demo" \
-  -H "authorization: Bearer $WORKER_RUN_TOKEN"
+  -H "authorization: Bearer $CONTROL_PLANE_OPERATOR_TOKEN"
 
 curl -X POST http://localhost:3000/workflow \
-  -H "authorization: Bearer $WORKER_RUN_TOKEN" \
+  -H "authorization: Bearer $CONTROL_PLANE_OPERATOR_TOKEN" \
   -H "content-type: application/json" \
   -d "{
     \"command\": \"approval.decide\",

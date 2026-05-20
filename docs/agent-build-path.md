@@ -83,8 +83,10 @@ bun run worker:tool worker.command <<'JSON'
 JSON
 ```
 
-When the HTTP snapshot, approval, or run path is required, start the app with
-`WORKER_RUN_TOKEN` and include that bearer token on operator routes.
+When the HTTP snapshot, approval, or run path is required, use a route-scoped
+token from `CONTROL_PLANE_TOKENS_JSON` or `CONTROL_PLANE_TOKEN_CATALOG_B64`.
+Keep `WORKER_RUN_TOKEN` only as a bootstrap secret for first deploys and host
+recovery.
 `WORKER_OPERATOR_EMAIL` must match an active seeded user, defaulting to
 `owner@continuoushq.com`. Production also sets
 `CONTROL_PLANE_ALLOWED_TENANTS` and `CONTROL_PLANE_ALLOWED_WORKER_ROLES`, so
