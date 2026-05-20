@@ -23,34 +23,34 @@ const mocks = vi.hoisted(() => ({
   upsertCoreObject: vi.fn(),
 }));
 
-vi.mock("../../../src/core/approvals", () => ({
+vi.mock("../../src/core/approvals", () => ({
   requestApproval: mocks.requestApproval,
 }));
 
-vi.mock("../../../src/core/budgets", () => ({
+vi.mock("../../src/core/budgets", () => ({
   chargeBudget: mocks.chargeBudget,
   releaseBudget: mocks.releaseBudget,
   reserveBudget: mocks.reserveBudget,
 }));
 
-vi.mock("../../../src/core/capabilities", () => ({
+vi.mock("../../src/core/capabilities", () => ({
   grantCapability: mocks.grantCapability,
 }));
 
-vi.mock("../../../src/core/health", () => ({
+vi.mock("../../src/core/health", () => ({
   getHealth: mocks.getHealth,
 }));
 
-vi.mock("../../../src/core/payroll", () => ({
+vi.mock("../../src/core/payroll", () => ({
   preparePayrollPreviewPacket: mocks.preparePayrollPreviewPacket,
   recordPayrollPreview: mocks.recordPayrollPreview,
 }));
 
-vi.mock("../../../src/core/summary", () => ({
+vi.mock("../../src/core/summary", () => ({
   getCoreSummarySafe: mocks.getCoreSummarySafe,
 }));
 
-vi.mock("../../../src/core/primitives", () => ({
+vi.mock("../../src/core/primitives", () => ({
   attachCoreEvidence: mocks.attachCoreEvidence,
   createCoreDocument: mocks.createCoreDocument,
   ingestCoreEvent: mocks.ingestCoreEvent,
@@ -62,12 +62,12 @@ vi.mock("../../../src/core/primitives", () => ({
   upsertCoreObject: mocks.upsertCoreObject,
 }));
 
-vi.mock("../../../src/core/tasks", () => ({
+vi.mock("../../src/core/tasks", () => ({
   createCoreTask: mocks.createCoreTask,
   transitionCoreTask: mocks.transitionCoreTask,
 }));
 
-describe("POST /api/core", () => {
+describe("POST /core", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.stubEnv("APP_ENV", "test");
@@ -93,7 +93,7 @@ describe("POST /api/core", () => {
 
     const { POST } = await import("./route");
     const response = await POST(
-      new Request("http://localhost/api/core", {
+      new Request("http://localhost/core", {
         method: "POST",
         headers: {
           authorization: "Bearer test-token",
@@ -164,7 +164,7 @@ describe("POST /api/core", () => {
 
     const { POST } = await import("./route");
     const response = await POST(
-      new Request("http://localhost/api/core", {
+      new Request("http://localhost/core", {
         method: "POST",
         headers: {
           authorization: "Bearer test-token",
@@ -278,7 +278,7 @@ describe("POST /api/core", () => {
 
     const { POST } = await import("./route");
     const response = await POST(
-      new Request("http://localhost/api/core", {
+      new Request("http://localhost/core", {
         method: "POST",
         headers: {
           authorization: "Bearer test-token",
@@ -333,7 +333,7 @@ describe("POST /api/core", () => {
 
     const { POST } = await import("./route");
     const response = await POST(
-      new Request("http://localhost/api/core", {
+      new Request("http://localhost/core", {
         method: "POST",
         headers: {
           authorization: "Bearer test-token",
@@ -364,7 +364,7 @@ describe("POST /api/core", () => {
   it("rejects payroll.preview.record before dispatch when idempotency is invalid", async () => {
     const { POST } = await import("./route");
     const response = await POST(
-      new Request("http://localhost/api/core", {
+      new Request("http://localhost/core", {
         method: "POST",
         headers: {
           authorization: "Bearer test-token",
@@ -391,12 +391,43 @@ describe("POST /api/core", () => {
     expect(mocks.recordPayrollPreview).not.toHaveBeenCalled();
   });
 
+  it("rejects ad hoc top-level command fields", async () => {
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "task.create",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "core-envelope-test-001",
+          title: "Mis-shaped task",
+          objectId: "33333333-3333-4333-8333-000000000001",
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toEqual({
+      code: "invalid_core_command_envelope",
+      message:
+        "Core command payload fields must be command, core, idempotencyKey, and config. Move operation inputs into config. Unexpected fields: title, objectId.",
+    });
+    expect(mocks.createCoreTask).not.toHaveBeenCalled();
+  });
+
   it("requires a tenant for scoped Core summary reads", async () => {
     vi.stubEnv("CONTROL_PLANE_ALLOWED_TENANTS", "continuous-demo");
 
     const { GET } = await import("./route");
     const response = await GET(
-      new Request("http://localhost/api/core", {
+      new Request("http://localhost/core", {
         headers: {
           authorization: "Bearer test-token",
         },

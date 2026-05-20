@@ -288,7 +288,7 @@ jobs:
           )"
           PAYROLL_RESPONSE="$(
             curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
-              -X POST https://continuoushq.com/api/core \
+              -X POST https://continuoushq.com/core \
               -H "authorization: Bearer $WORKER_TOKEN" \
               -H "content-type: application/json" \
               -d "$PAYROLL_PAYLOAD"
@@ -315,7 +315,7 @@ jobs:
           )"
           PAYROLL_PACKET_RESPONSE="$(
             curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
-              -X POST https://continuoushq.com/api/core \
+              -X POST https://continuoushq.com/core \
               -H "authorization: Bearer $WORKER_TOKEN" \
               -H "content-type: application/json" \
               -d "$PAYROLL_PACKET_PAYLOAD"
@@ -565,7 +565,7 @@ jobs:
           )"
           LEAD_OBJECT_RESPONSE="$(
             curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
-              -X POST https://continuoushq.com/api/core \
+              -X POST https://continuoushq.com/core \
               -H "authorization: Bearer $WORKER_TOKEN" \
               -H "content-type: application/json" \
               -d "$LEAD_OBJECT_PAYLOAD"
@@ -601,7 +601,7 @@ jobs:
           )"
           LEAD_EVENT_RESPONSE="$(
             curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
-              -X POST https://continuoushq.com/api/core \
+              -X POST https://continuoushq.com/core \
               -H "authorization: Bearer $WORKER_TOKEN" \
               -H "content-type: application/json" \
               -d "$LEAD_EVENT_PAYLOAD"
@@ -639,7 +639,7 @@ jobs:
           )"
           LEAD_EVIDENCE_RESPONSE="$(
             curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
-              -X POST https://continuoushq.com/api/core \
+              -X POST https://continuoushq.com/core \
               -H "authorization: Bearer $WORKER_TOKEN" \
               -H "content-type: application/json" \
               -d "$LEAD_EVIDENCE_PAYLOAD"
@@ -784,7 +784,7 @@ jobs:
           )"
           CORE_RESPONSE="$(
             curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
-              -X POST https://continuoushq.com/api/core \
+              -X POST https://continuoushq.com/core \
               -H "authorization: Bearer $WORKER_TOKEN" \
               -H "content-type: application/json" \
               -d "$CORE_PAYLOAD"
@@ -825,7 +825,7 @@ jobs:
           )"
           CORE_TASK_TRANSITION_RESPONSE="$(
             curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
-              -X POST https://continuoushq.com/api/core \
+              -X POST https://continuoushq.com/core \
               -H "authorization: Bearer $WORKER_TOKEN" \
               -H "content-type: application/json" \
               -d "$CORE_TASK_TRANSITION_PAYLOAD"
@@ -867,7 +867,7 @@ jobs:
           )"
           CORE_APPROVAL_RESPONSE="$(
             curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
-              -X POST https://continuoushq.com/api/core \
+              -X POST https://continuoushq.com/core \
               -H "authorization: Bearer $WORKER_TOKEN" \
               -H "content-type: application/json" \
               -d "$CORE_APPROVAL_PAYLOAD"
@@ -946,7 +946,7 @@ jobs:
           )"
           CORE_CAPABILITY_GRANT_RESPONSE="$(
             curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
-              -X POST https://continuoushq.com/api/core \
+              -X POST https://continuoushq.com/core \
               -H "authorization: Bearer $WORKER_TOKEN" \
               -H "content-type: application/json" \
               -d "$CORE_CAPABILITY_GRANT_PAYLOAD"
@@ -984,7 +984,7 @@ jobs:
           )"
           CORE_BUDGET_RESERVE_RESPONSE="$(
             curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
-              -X POST https://continuoushq.com/api/core \
+              -X POST https://continuoushq.com/core \
               -H "authorization: Bearer $WORKER_TOKEN" \
               -H "content-type: application/json" \
               -d "$CORE_BUDGET_RESERVE_PAYLOAD"
@@ -1025,7 +1025,7 @@ jobs:
           )"
           CORE_BUDGET_CHARGE_RESPONSE="$(
             curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
-              -X POST https://continuoushq.com/api/core \
+              -X POST https://continuoushq.com/core \
               -H "authorization: Bearer $WORKER_TOKEN" \
               -H "content-type: application/json" \
               -d "$CORE_BUDGET_CHARGE_PAYLOAD"
@@ -1062,7 +1062,7 @@ jobs:
           )"
           CORE_BUDGET_RELEASE_RESERVE_RESPONSE="$(
             curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
-              -X POST https://continuoushq.com/api/core \
+              -X POST https://continuoushq.com/core \
               -H "authorization: Bearer $WORKER_TOKEN" \
               -H "content-type: application/json" \
               -d "$CORE_BUDGET_RELEASE_RESERVE_PAYLOAD"
@@ -1093,7 +1093,7 @@ jobs:
           )"
           CORE_BUDGET_RELEASE_RESPONSE="$(
             curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
-              -X POST https://continuoushq.com/api/core \
+              -X POST https://continuoushq.com/core \
               -H "authorization: Bearer $WORKER_TOKEN" \
               -H "content-type: application/json" \
               -d "$CORE_BUDGET_RELEASE_PAYLOAD"
@@ -1139,7 +1139,7 @@ jobs:
           )"
           CORE_OBJECT_RESPONSE="$(
             curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
-              -X POST https://continuoushq.com/api/core \
+              -X POST https://continuoushq.com/core \
               -H "authorization: Bearer $WORKER_TOKEN" \
               -H "content-type: application/json" \
               -d "$CORE_OBJECT_PAYLOAD"
@@ -1170,7 +1170,7 @@ jobs:
           )"
           CORE_LINK_RESPONSE="$(
             curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
-              -X POST https://continuoushq.com/api/core \
+              -X POST https://continuoushq.com/core \
               -H "authorization: Bearer $WORKER_TOKEN" \
               -H "content-type: application/json" \
               -d "$CORE_LINK_PAYLOAD"
@@ -1212,7 +1212,7 @@ jobs:
           )"
           CORE_VIEW_RESPONSE="$(
             curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
-              -X POST https://continuoushq.com/api/core \
+              -X POST https://continuoushq.com/core \
               -H "authorization: Bearer $WORKER_TOKEN" \
               -H "content-type: application/json" \
               -d "$CORE_VIEW_PAYLOAD"
@@ -1240,7 +1240,7 @@ jobs:
           )"
           CORE_EVENT_RESPONSE="$(
             curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
-              -X POST https://continuoushq.com/api/core \
+              -X POST https://continuoushq.com/core \
               -H "authorization: Bearer $WORKER_TOKEN" \
               -H "content-type: application/json" \
               -d "$CORE_EVENT_PAYLOAD"
@@ -1269,7 +1269,7 @@ jobs:
           )"
           CORE_EVIDENCE_RESPONSE="$(
             curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
-              -X POST https://continuoushq.com/api/core \
+              -X POST https://continuoushq.com/core \
               -H "authorization: Bearer $WORKER_TOKEN" \
               -H "content-type: application/json" \
               -d "$CORE_EVIDENCE_PAYLOAD"
@@ -1299,7 +1299,7 @@ jobs:
           )"
           CORE_DOCUMENT_RESPONSE="$(
             curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
-              -X POST https://continuoushq.com/api/core \
+              -X POST https://continuoushq.com/core \
               -H "authorization: Bearer $WORKER_TOKEN" \
               -H "content-type: application/json" \
               -d "$CORE_DOCUMENT_PAYLOAD"
@@ -1342,7 +1342,7 @@ jobs:
           )"
           CORE_PACKET_RESPONSE="$(
             curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
-              -X POST https://continuoushq.com/api/core \
+              -X POST https://continuoushq.com/core \
               -H "authorization: Bearer $WORKER_TOKEN" \
               -H "content-type: application/json" \
               -d "$CORE_PACKET_PAYLOAD"
@@ -1378,7 +1378,7 @@ jobs:
           )"
           CORE_DECISION_RESPONSE="$(
             curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
-              -X POST https://continuoushq.com/api/core \
+              -X POST https://continuoushq.com/core \
               -H "authorization: Bearer $WORKER_TOKEN" \
               -H "content-type: application/json" \
               -d "$CORE_DECISION_PAYLOAD"

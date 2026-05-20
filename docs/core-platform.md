@@ -179,7 +179,7 @@ policy-bound:
 
 | Surface | Behavior |
 |---|---|
-| `POST /api/core` | Canonical Core command surface for `task.create`, `task.transition`, `object.upsert`, `object.link`, `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`, `document.packet.prepare`, `decision.record`, `approval.request`, `capability.grant`, `budget.reserve`, `budget.charge`, `budget.release`, `view.publish`, `customer_signal.record`, `payroll.preview.record`, and `payroll.preview.packet.prepare`; tenant selection and command fields live in structured `core` and `config` payloads |
+| `POST /core` | Canonical Core command surface for `task.create`, `task.transition`, `object.upsert`, `object.link`, `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`, `document.packet.prepare`, `decision.record`, `approval.request`, `capability.grant`, `budget.reserve`, `budget.charge`, `budget.release`, `view.publish`, `customer_signal.record`, `payroll.preview.record`, and `payroll.preview.packet.prepare`; tenant selection and command fields live in structured `core` and `config` payloads, and no other top-level command fields are accepted |
 | `/worker?view=snapshot&role=revenue_operations` | Operator-only snapshot of worker state, active tasks, controls, budget usage, and recent events |
 | `/worker?view=approvals&role=revenue_operations` | Operator-only approval queue for worker decisions |
 | `POST /worker` | Canonical worker command surface for `lead.read`, `run`, `continue`, `approval.decide`, `adapters.reconcile`, and `adapters.retry`; worker role, tenant selection, idempotency, and operation config live in structured payload fields |
@@ -212,7 +212,7 @@ receipt evidence, creates an owner approval packet, updates the task to
 a direct operator/test fallback. External sends and money movement remain
 blocked until human approval and real adapter execution are implemented.
 
-Core writes are platform-level, not worker-specific. `POST /api/core` now
+Core writes are platform-level, not worker-specific. `POST /core` now
 creates and transitions accountable tasks, upserts typed business objects with
 object versions, links objects into a navigable business graph, ingests events,
 attaches evidence, creates document packets, records decisions, requests

@@ -35,8 +35,8 @@ Useful app surfaces for worker development:
 |---|---|
 | `/` | Runtime dashboard with public core state and redacted worker readiness |
 | `/api/health` | Machine health check |
-| `/api/core` | Operator-gated persisted primitive summary |
-| `POST /api/core` | Canonical Core command surface with `command`, `core`, `config`, and `idempotencyKey` payload fields for tasks, task transitions, approvals, capability grants, budget ledger operations, objects, object links, events, evidence, documents, packets, decisions, generated views, customer signals, and payroll preview artifacts |
+| `/core` | Operator-gated persisted primitive summary |
+| `POST /core` | Canonical Core command surface with `command`, `core`, `config`, and `idempotencyKey` payload fields for tasks, task transitions, approvals, capability grants, budget ledger operations, objects, object links, events, evidence, documents, packets, decisions, generated views, customer signals, and payroll preview artifacts |
 | `/approval?view=inbox` | Shared operator-gated approval inbox across Core, workflow, and worker subjects |
 | `POST /approval` | Shared approval decision surface with `command`, `approval`, and `config` payload fields |
 | `/worker?view=snapshot&role=revenue_operations` | Canonical operator-gated worker snapshot |

@@ -42,7 +42,7 @@ approval request, audit event, and generated UI contract.
 bun run dev
 ```
 
-Open `http://localhost:3000` and `/api/health`. `/api/core` is an
+Open `http://localhost:3000` and `/api/health`. `/core` is an
 operator-only summary and uses the same bearer token as the canonical `/worker`
 control plane. Set `CONTROL_PLANE_ALLOWED_TENANTS` and
 `CONTROL_PLANE_ALLOWED_WORKER_ROLES` to comma-delimited allowlists when testing
@@ -52,7 +52,7 @@ Core side effects use a structured command payload. For local-only testing,
 start the app with `WORKER_RUN_ENABLED=true` and call:
 
 ```sh
-curl -X POST http://localhost:3000/api/core \
+curl -X POST http://localhost:3000/core \
   -H "authorization: Bearer $WORKER_RUN_TOKEN" \
   -H "content-type: application/json" \
   -d '{
@@ -72,7 +72,7 @@ decision, approval-request, capability-grant, budget-ledger, generated-view,
 and customer-signal commands use the same `command` / `core` / `config` shape:
 
 ```sh
-curl -X POST http://localhost:3000/api/core \
+curl -X POST http://localhost:3000/core \
   -H "authorization: Bearer $WORKER_RUN_TOKEN" \
   -H "content-type: application/json" \
   -d '{

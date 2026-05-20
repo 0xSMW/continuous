@@ -24,7 +24,7 @@ commands.
 | `migrate` | Drizzle migration/seed runner |
 | `caddy` | Automatic HTTPS, HTTP redirects, and certificate renewal |
 
-`POST /api/core` is the operator-gated headless Core command surface. It
+`POST /core` is the operator-gated headless Core command surface. It
 supports `task.create`, `task.transition`, `object.upsert`, `object.link`,
 `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`,
 `document.packet.prepare`, `decision.record`, `approval.request`,
@@ -93,7 +93,7 @@ seeded owner user and must match an active user before approval records or
 operator decisions can be written. The deploy path also scopes that token to
 `CONTROL_PLANE_ALLOWED_TENANTS=continuous-demo` and
 `CONTROL_PLANE_ALLOWED_WORKER_ROLES=revenue_operations,owner_chief_of_staff`;
-requests to `/worker`, `/api/core`, or `/workflow` must carry an allowed
+requests to `/worker`, `/core`, or `/workflow` must carry an allowed
 `tenantSlug`, and worker requests must carry an allowed `worker.role`. Use the
 CLI path over SSH for direct operator-controlled smoke runs:
 
@@ -155,14 +155,14 @@ lead object, `lead.received` event, and source snapshot through
 ```
 
 Workflow handlers that already hold Core UUIDs can pass those ids under
-`config.intake`. `GET /api/core`,
+`config.intake`. `GET /core`,
 `GET /worker?view=snapshot&role=revenue_operations`, and
 `GET /worker?view=approvals&role=revenue_operations` use the same bearer token for operator-only
 snapshots and approval review. Worker-specific HTTP paths are intentionally
 absent; expand the worker control plane through registered `/worker` commands
 and payload fields.
 The deploy workflow smokes `lead.read`, the source-selector `run` path, adapter
-reconciliation, continuation, and `/api/core` task creation, task transition,
+reconciliation, continuation, and `/core` task creation, task transition,
 approval request, capability grant, budget reserve/charge/release, object,
 object-link, event, evidence, document, packet, decision, generated-view,
 shared approval inbox route, payroll preview packet handoff, and payroll

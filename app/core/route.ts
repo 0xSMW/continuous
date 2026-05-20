@@ -1,10 +1,10 @@
-import { env } from "../../../src/env";
-import { requestApproval } from "../../../src/core/approvals";
-import { reserveBudget, chargeBudget, releaseBudget } from "../../../src/core/budgets";
-import { grantCapability } from "../../../src/core/capabilities";
-import { getHealth } from "../../../src/core/health";
-import { preparePayrollPreviewPacket, recordPayrollPreview } from "../../../src/core/payroll";
-import { getCoreSummarySafe } from "../../../src/core/summary";
+import { env } from "../../src/env";
+import { requestApproval } from "../../src/core/approvals";
+import { reserveBudget, chargeBudget, releaseBudget } from "../../src/core/budgets";
+import { grantCapability } from "../../src/core/capabilities";
+import { getHealth } from "../../src/core/health";
+import { preparePayrollPreviewPacket, recordPayrollPreview } from "../../src/core/payroll";
+import { getCoreSummarySafe } from "../../src/core/summary";
 import {
   attachCoreEvidence,
   createCoreDocument,
@@ -15,21 +15,22 @@ import {
   recordCustomerSignal,
   recordCoreDecision,
   upsertCoreObject,
-} from "../../../src/core/primitives";
-import { createCoreTask, transitionCoreTask } from "../../../src/core/tasks";
-import { PlatformUnavailableError } from "../../../src/core/errors";
+} from "../../src/core/primitives";
+import { createCoreTask, transitionCoreTask } from "../../src/core/tasks";
+import { PlatformUnavailableError } from "../../src/core/errors";
 import {
   authorizeControlPlaneScope,
   authorizeWorkerRead,
   authorizeWorkerRun,
   controlPlaneScopeFromEnv,
   normalizeIdempotencyKey,
-} from "../../../src/worker/security";
-import type { JsonObject } from "../../../src/db/schema";
+} from "../../src/worker/security";
+import type { JsonObject } from "../../src/db/schema";
 
 export const dynamic = "force-dynamic";
 
 const apiVersion = "continuous.core.v1";
+const coreCommandEnvelopeFields = new Set(["command", "core", "idempotencyKey", "config"]);
 const controlPlaneScope = controlPlaneScopeFromEnv({
   allowedTenants: env.CONTROL_PLANE_ALLOWED_TENANTS,
   allowedWorkerRoles: env.CONTROL_PLANE_ALLOWED_WORKER_ROLES,
@@ -123,6 +124,10 @@ function guardErrorResponse(error: { code: string; message: string; status: numb
   );
 }
 
+function unexpectedCorePayloadFields(body: Record<string, unknown>) {
+  return Object.keys(body).filter((field) => !coreCommandEnvelopeFields.has(field));
+}
+
 export async function GET(request: Request) {
   const auth = authorizeWorkerRead({
     appEnv: env.APP_ENV,
@@ -185,6 +190,18 @@ export async function POST(request: Request) {
   }
 
   const body = await readBody(request);
+  const unexpectedFields = unexpectedCorePayloadFields(body);
+
+  if (unexpectedFields.length > 0) {
+    return errorResponse(
+      {
+        code: "invalid_core_command_envelope",
+        message: `Core command payload fields must be command, core, idempotencyKey, and config. Move operation inputs into config. Unexpected fields: ${unexpectedFields.join(", ")}.`,
+      },
+      400,
+    );
+  }
+
   const command = optionalString(body.command);
   const core = bodyObject(body.core);
   const config = bodyObject(body.config);

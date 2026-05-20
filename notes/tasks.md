@@ -26,4 +26,5 @@
 - Use `docs/revenue-operations-worker-expansion.md` as the expansion gate list for the next worker iteration.
 - Use `docs/revenue-operations-worker-v1-contract.md` as the machine-actionable contract for run and approval effects.
 - Extend Revenue Worker evals into missing-fact, pricing override, and policy-risk cases beyond the current direct lead packet, Core intake ref, source-selector intake, and normal-gutter quote cases.
+- Keep Core HTTP controls on `/core` with registered `command`, `core`, `idempotencyKey`, and `config` fields; do not add `/api/*` command paths or command-specific URLs.
 - Keep Next MCP for Next.js diagnostics; keep app-server worker tooling registry-backed and free of production-token plumbing.

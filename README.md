@@ -37,15 +37,16 @@ Then open `http://localhost:3000`.
 ## Core APIs
 
 - `/api/health` reports Postgres-backed readiness checks.
-- `/api/core` returns persisted core counts, active tasks, and recent events for tokened operators;
-  `POST /api/core` accepts structured core commands: `task.create`,
+- `/core` returns persisted core counts, active tasks, and recent events for tokened operators;
+  `POST /core` accepts structured core commands: `task.create`,
   `task.transition`, `object.upsert`, `object.link`, `event.ingest`,
   `evidence.attach`, `document.create`, `packet.prepare`,
   `document.packet.prepare`, `decision.record`,
   `approval.request`, `capability.grant`, `budget.reserve`,
   `budget.charge`, `budget.release`, `view.publish`, and
   `customer_signal.record`, `payroll.preview.record`, and
-  `payroll.preview.packet.prepare`.
+  `payroll.preview.packet.prepare`. Core mutation requests accept only
+  `command`, `core`, `idempotencyKey`, and `config` as top-level fields.
 - `/approval` is the shared approval control-plane API. Use
   `GET /approval?view=inbox&tenantSlug=continuous-demo&subject=all`, or
   `POST /approval` with `command=approval.decide`, structured `approval`, and
