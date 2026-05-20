@@ -12,7 +12,6 @@
 - Wire implementation handlers, retries, and generated views into the expanded operating workflow catalog; queued approval and packet handoffs now execute through `/workflow`.
 - Extend adapter-intent, rule-change, capability-backed, approval-backed, and packet-backed workflow execution into additional domain-specific handlers; scheduled command drain now covers workflow steps plus Revenue adapter retry/reconciliation.
 - Extend Core adapter intent and rule-change workflow handlers into future worker contract fixtures.
-- Extend `packet.prepare` coverage into new-hire, contractor, payroll, filing, termination, AI action, and rule-change workflow packet tests.
 - Extend the shared approval inbox beyond the first token-gated UI into richer evidence detail, filters, and subject-specific continuation prompts.
 - Implement runtime handlers and CI evals for Dispatch, Finance, Workforce, Compliance, and Systems from their registered contract metadata.
 - Extend the Owner Chief-of-Staff Worker beyond the first read-only brief slice into approval/revision continuations, stale-source handling, and broader factuality evals.

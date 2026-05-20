@@ -2672,6 +2672,193 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(finalError.retryable).toBe(false);
   }, 120_000);
 
+  it("prepares workflow packets for workforce, payroll, filing, AI, and rule-change domains", async () => {
+    const runId = randomUUID();
+    const packetCases = [
+      {
+        id: "new-hire",
+        workflowKey: "hire_employee",
+        fromState: "classification_review",
+        toState: "onboarding_packet_prepared",
+        stepKind: "document_packet_prepare",
+        packetKind: "new_hire_packet",
+        packetName: "CI new-hire packet",
+      },
+      {
+        id: "contractor",
+        workflowKey: "engage_contractor",
+        fromState: "classification_review",
+        toState: "contract_prepared",
+        stepKind: "document_packet_prepare",
+        packetKind: "contractor_packet",
+        packetName: "CI contractor packet",
+      },
+      {
+        id: "payroll",
+        workflowKey: "payroll_preview",
+        fromState: "preview_ready",
+        toState: "awaiting_approval",
+        stepKind: "packet_prepare",
+        packetKind: "payroll_packet",
+        packetName: "CI payroll packet",
+      },
+      {
+        id: "filing",
+        workflowKey: "filing_draft",
+        fromState: "validation",
+        toState: "review_ready",
+        stepKind: "evidence_packet_prepare",
+        packetKind: "filing_draft_packet",
+        packetName: "CI filing packet",
+      },
+      {
+        id: "termination",
+        workflowKey: "termination",
+        fromState: "final_pay_calculation",
+        toState: "approval_pending",
+        stepKind: "evidence_packet_prepare",
+        packetKind: "termination_packet",
+        packetName: "CI termination packet",
+      },
+      {
+        id: "ai-action",
+        workflowKey: "ai_budget_cycle",
+        fromState: "active",
+        toState: "usage_review",
+        stepKind: "packet_prepare",
+        packetKind: "ai_action_packet",
+        packetName: "CI AI action packet",
+      },
+      {
+        id: "rule-change",
+        workflowKey: "open_new_state",
+        fromState: "rule_review",
+        toState: "registration_ready",
+        stepKind: "document_packet_prepare",
+        packetKind: "rule_change_packet",
+        packetName: "CI rule-change packet",
+      },
+    ];
+
+    for (const packetCase of packetCases) {
+      const task = await createCoreTask({
+        operatorEmail: "owner@continuoushq.com",
+        tenantSlug: "continuous-demo",
+        idempotencyKey: `ci-domain-packet-task-${packetCase.id}-${runId}`,
+        title: `Prepare ${packetCase.packetName}`,
+        state: "active",
+        db,
+      });
+      const start = await startWorkflowRun({
+        operatorEmail: "owner@continuoushq.com",
+        tenantSlug: "continuous-demo",
+        workflowKey: packetCase.workflowKey,
+        idempotencyKey: `ci-domain-packet-run-${packetCase.id}-${runId}`,
+        initialState: packetCase.fromState,
+        data: {
+          source: "domain_packet_ci",
+          packetCase: packetCase.id,
+        },
+        db,
+      });
+      const [run] = await db
+        .select()
+        .from(workflowRuns)
+        .where(eq(workflowRuns.id, start.run.id))
+        .limit(1);
+      const [step] = await db
+        .insert(workflowSteps)
+        .values({
+          tenantId: run?.tenantId ?? "",
+          definitionId: run?.definitionId ?? "",
+          workflowRunId: start.run.id,
+          taskId: task.taskId,
+          kind: packetCase.stepKind,
+          name: `CI prepare ${packetCase.packetName}`,
+          state: "queued",
+          priority: "urgent",
+          risk: "medium",
+          fromState: packetCase.fromState,
+          toState: packetCase.toState,
+          attempt: 1,
+          maxAttempts: 2,
+          idempotencyKey: `ci-domain-packet-step-${packetCase.id}-${runId}`,
+          input: {
+            packet: {
+              kind: packetCase.packetKind,
+              name: packetCase.packetName,
+              state: "review_ready",
+              taskId: task.taskId,
+              sections: {
+                summary: `${packetCase.packetName} prepared through the generic workflow packet executor.`,
+                packetCase: packetCase.id,
+              },
+              data: {
+                source: "domain_packet_ci",
+                packetCase: packetCase.id,
+                workflowKey: packetCase.workflowKey,
+              },
+            },
+          },
+        })
+        .returning();
+
+      const execution = await executeWorkflowSteps({
+        operatorEmail: "owner@continuoushq.com",
+        tenantSlug: "continuous-demo",
+        limit: 1,
+        leaseOwner: `ci-domain-packet:${packetCase.id}:${runId}`,
+        db,
+      });
+      const [result] = execution.results;
+      const [executedStep] = await db
+        .select()
+        .from(workflowSteps)
+        .where(eq(workflowSteps.id, step.id))
+        .limit(1);
+      const [executedRun] = await db
+        .select()
+        .from(workflowRuns)
+        .where(eq(workflowRuns.id, start.run.id))
+        .limit(1);
+      const packetPreparation = objectValue(objectValue(executedStep?.output).packetPreparation);
+      const [packet] = await db
+        .select()
+        .from(evidencePackets)
+        .where(eq(evidencePackets.id, String(packetPreparation.packetId ?? "")))
+        .limit(1);
+      const [document] = await db
+        .select()
+        .from(documents)
+        .where(eq(documents.id, String(packetPreparation.documentId ?? "")))
+        .limit(1);
+      const [taskRow] = await db.select().from(tasks).where(eq(tasks.id, task.taskId)).limit(1);
+      const taskPacket = objectValue(objectValue(taskRow?.outcome).lastWorkflowPacket);
+      const packetData = objectValue(packet?.data);
+      const packetSections = objectValue(packetData.sections);
+
+      expect(execution.processed).toBe(1);
+      expect(execution.completed).toBe(1);
+      expect(result?.stepId).toBe(step.id);
+      expect(executedStep?.state).toBe("done");
+      expect(executedRun?.state).toBe(packetCase.toState);
+      expect(packetPreparation.externalExecution).toBe("blocked");
+      expect(packet?.kind).toBe(packetCase.packetKind);
+      expect(packet?.name).toBe(packetCase.packetName);
+      expect(packet?.workflowRunId).toBe(start.run.id);
+      expect(packet?.taskId).toBe(task.taskId);
+      expect(packet?.eventId).toBe(result?.eventId);
+      expect(document?.kind).toBe(packetCase.packetKind);
+      expect(document?.workflowRunId).toBe(start.run.id);
+      expect(packetData.workflowKey).toBe(packetCase.workflowKey);
+      expect(packetData.workflowStepKind).toBe(packetCase.stepKind);
+      expect(packetData.externalExecution).toBe("blocked");
+      expect(packetSections.packetCase).toBe(packetCase.id);
+      expect(taskPacket.packetId).toBe(packetPreparation.packetId);
+      expect(taskPacket.workflowStepId).toBe(step.id);
+    }
+  }, 120_000);
+
   it("continues revision-requested approval outcomes through the worker command spine", async () => {
     const runId = randomUUID();
     const [worker] = await db
