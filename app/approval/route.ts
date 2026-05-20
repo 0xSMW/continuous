@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic";
 
 const apiVersion = "continuous.approval.v1";
 const approvalCommandEnvelopeFields = new Set(["command", "approval", "idempotencyKey", "config"]);
-const approvalSubjects = new Set<ApprovalSubject>(["all", "worker", "workflow", "task"]);
+const approvalSubjects = new Set<ApprovalSubject>(["all", "core", "worker", "workflow", "task"]);
 function optionalString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
@@ -176,7 +176,7 @@ export async function GET(request: Request) {
     return errorResponse(
       {
         code: "invalid_approval_subject",
-        message: "Approval subject must be all, worker, workflow, or task.",
+        message: "Approval subject must be all, core, worker, workflow, or task.",
       },
       400,
     );
@@ -280,7 +280,7 @@ export async function POST(request: Request) {
     return errorResponse(
       {
         code: "invalid_approval_subject",
-        message: "Approval subject must be all, worker, workflow, or task.",
+        message: "Approval subject must be all, core, worker, workflow, or task.",
       },
       400,
     );
@@ -295,6 +295,16 @@ export async function POST(request: Request) {
         {
           code: "invalid_approval_decision",
           message: "approval.id and config.action are required for approval.decide.",
+        },
+        400,
+      );
+    }
+
+    if (subject === "all") {
+      return errorResponse(
+        {
+          code: "approval_subject_too_broad",
+          message: "approval.subject must be core, worker, workflow, or task for approval.decide.",
         },
         400,
       );

@@ -3,7 +3,8 @@
 import { Check, RefreshCw, RotateCcw, X } from "lucide-react";
 import { useMemo, useState, useTransition } from "react";
 
-type ApprovalSubject = "all" | "worker" | "workflow" | "task";
+type ApprovalSubject = "all" | "core" | "worker" | "workflow" | "task";
+type DecisionSubject = Exclude<ApprovalSubject, "all">;
 type ApprovalAction = "approved" | "rejected" | "revision_requested";
 
 type ApprovalRecord = {
@@ -105,6 +106,22 @@ function evidenceRefs(approval: ApprovalRecord) {
       }));
 }
 
+function decisionSubject(approval: ApprovalRecord): DecisionSubject {
+  if (approval.workerRunId || approval.subject.type === "worker_run") {
+    return "worker";
+  }
+
+  if (approval.workflowRunId || approval.subject.type === "workflow_run") {
+    return "workflow";
+  }
+
+  if (approval.taskId || approval.subject.type === "task") {
+    return "task";
+  }
+
+  return "core";
+}
+
 export function ApprovalConsole() {
   const [token, setToken] = useState("");
   const [tenantSlug, setTenantSlug] = useState("continuous-demo");
@@ -185,7 +202,7 @@ export function ApprovalConsole() {
             approval: {
               id: approval.id,
               tenantSlug,
-              subject,
+              subject: decisionSubject(approval),
             },
             config: {
               action,
@@ -225,6 +242,7 @@ export function ApprovalConsole() {
           <span>Subject</span>
           <select value={subject} onChange={(event) => setSubject(event.target.value as ApprovalSubject)}>
             <option value="all">All</option>
+            <option value="core">Core</option>
             <option value="worker">Worker</option>
             <option value="workflow">Workflow</option>
             <option value="task">Task</option>

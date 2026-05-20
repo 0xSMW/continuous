@@ -436,7 +436,7 @@ jobs:
               approval: {
                 id: $approvalId,
                 tenantSlug: "continuous-demo",
-                subject: "all"
+                subject: "core"
               },
               config: {
                 action: "approved",
@@ -459,13 +459,13 @@ jobs:
 
           APPROVAL_INBOX_RESPONSE="$(
             curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
-              "https://continuoushq.com/approval?view=inbox&tenantSlug=continuous-demo&subject=all" \
+              "https://continuoushq.com/approval?view=inbox&tenantSlug=continuous-demo&subject=core" \
               -H "authorization: Bearer $WORKER_TOKEN"
           )"
 
           echo "$APPROVAL_INBOX_RESPONSE" | /usr/bin/jq -c '{api,error,view:.data.view,subject:.data.approvals.subject,count:(.data.approvals.approvals | length)}'
           echo "$APPROVAL_INBOX_RESPONSE" | /usr/bin/jq -e \
-            '.error == null and .data.view == "inbox" and .data.approvals.subject == "all" and (.data.approvals.approvals | type) == "array"' \
+            '.error == null and .data.view == "inbox" and .data.approvals.subject == "core" and (.data.approvals.approvals | type) == "array"' \
             >/dev/null
 
           SCHEMA="$(docker compose --profile tools run --rm migrate bun run worker:tool schema </dev/null)"

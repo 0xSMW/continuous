@@ -53,6 +53,7 @@
 | Scoped Core summaries by tenant | Authenticated `GET /core` now passes the requested tenant into Core summary counts, active tasks, and recent events instead of returning global platform rows |
 | Redacted public health | `/api/health` now reports service status and check states without leaking detailed record counts or operational internals |
 | Made approval decisions explicit | `POST /approval` still uses the shared approval envelope, but decision calls must include `approval.subject` instead of falling back to a broad subject |
+| Narrowed approval decision subjects | Shared approval decisions now reject `approval.subject=all`; Core-owned approvals use the typed `core` subject, while `all` remains only an inbox filter |
 | Required explicit Revenue run input | Revenue `run`, `lead.classify`, and `response.draft` now require `config.intake`, `config.leadPacket`, or `config.lead`, so worker runs cannot silently execute placeholder lead packets |
 | Proved app-server worker execution | The CI integration suite now executes Revenue `lead.read` and `run` through `continuous.worker.command`, proving the app-server boundary uses the same registry, payload envelope, and persisted worker records as `/worker` |
 | Added first Revenue Worker eval gate | `bun run test` now includes a CI-backed Postgres integration eval that runs the seeded worker, verifies persisted output/evaluation records, and checks idempotent replay |

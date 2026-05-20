@@ -199,7 +199,8 @@ Approvals are platform records, not worker-specific records. Core, worker, and
 workflow approvals share `approval_requests`, `audit_events`, and evidence;
 `/approval` lists and decides those shared records with structured `approval`
 and `config` payloads. Decision calls must send an explicit `approval.subject`
-so the API never widens a missing subject into a broad decision.
+of `core`, `worker`, `workflow`, or `task`; `all` is only an inbox filter, never
+a decision subject.
 
 `command=lead.read` accepts direct source records or a read-only active
 connection reference, including scheduler-triggered API polling when the

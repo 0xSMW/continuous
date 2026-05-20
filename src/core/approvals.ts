@@ -36,7 +36,7 @@ const priorities = new Set<ApprovalPriority>(["low", "normal", "high", "urgent"]
 const risks = new Set<ApprovalRisk>(["low", "medium", "high", "critical"]);
 
 export type ApprovalDecisionAction = "approved" | "rejected" | "revision_requested";
-export type ApprovalSubject = "all" | "worker" | "workflow" | "task";
+export type ApprovalSubject = "all" | "core" | "worker" | "workflow" | "task";
 
 export type ApprovalRecord = {
   id: string;
@@ -209,6 +209,14 @@ function approvalEvidenceRefs(row: typeof approvalRequests.$inferSelect): Approv
 
 function approvalContinuation(row: typeof approvalRequests.$inferSelect): ApprovalRecord["continuation"] {
   const subject = approvalSubject(row);
+  const subjectScope =
+    subject.type === "worker_run"
+      ? "worker"
+      : subject.type === "workflow_run"
+        ? "workflow"
+        : subject.type === "task"
+          ? "task"
+          : "core";
   const base = {
     decisionSurface: "/approval" as const,
     decisionCommand: "approval.decide" as const,
@@ -222,7 +230,7 @@ function approvalContinuation(row: typeof approvalRequests.$inferSelect): Approv
         "Deciding this payroll approval records the payroll handoff while funding, tax submission, and money movement remain blocked.",
       postDecisionSurface: "/approval",
       postDecisionCommand: "approval.decide",
-      config: { approvalId: row.id, subject: "all", kind: row.kind },
+      config: { approvalId: row.id, subject: subjectScope, kind: row.kind },
     };
   }
 
@@ -264,7 +272,7 @@ function approvalContinuation(row: typeof approvalRequests.$inferSelect): Approv
     description: "Deciding this request records shared approval evidence and audit proof.",
     postDecisionSurface: "/approval",
     postDecisionCommand: "approval.decide",
-    config: { approvalId: row.id, kind: row.kind },
+    config: { approvalId: row.id, subject: subjectScope, kind: row.kind },
   };
 }
 
@@ -391,6 +399,10 @@ function taskStateForDecision(action: ApprovalDecisionAction) {
 }
 
 function subjectCondition(subject: ApprovalSubject) {
+  if (subject === "core") {
+    return sql`${approvalRequests.workerRunId} is null and ${approvalRequests.workflowRunId} is null and ${approvalRequests.taskId} is null`;
+  }
+
   if (subject === "worker") {
     return sql`${approvalRequests.workerRunId} is not null`;
   }
@@ -883,7 +895,7 @@ export async function decideApproval(input: {
     operatorEmail: input.operatorEmail,
     tenantSlug: input.tenantSlug,
   });
-  const subject = input.subject ?? "all";
+  const subject = input.subject ?? "core";
   const now = new Date();
   const taskState = taskStateForDecision(input.action);
 

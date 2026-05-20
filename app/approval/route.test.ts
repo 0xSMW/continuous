@@ -70,7 +70,7 @@ describe("/approval route", () => {
       operator: {
         tenantSlug: "continuous-demo",
       },
-      subject: "all",
+      subject: "worker",
       approvals: [],
     });
 
@@ -152,7 +152,7 @@ describe("/approval route", () => {
     expect(response.status).toBe(400);
     expect(body.error).toEqual({
       code: "invalid_approval_subject",
-      message: "Approval subject must be all, worker, workflow, or task.",
+      message: "Approval subject must be all, core, worker, workflow, or task.",
     });
     expect(mocks.listApprovals).not.toHaveBeenCalled();
   });
@@ -178,7 +178,7 @@ describe("/approval route", () => {
           approval: {
             id: "77777777-7777-4777-8777-000000000001",
             tenantSlug: "continuous-demo",
-            subject: "all",
+            subject: "core",
           },
           config: {
             action: "approved",
@@ -194,7 +194,7 @@ describe("/approval route", () => {
     expect(body.data.approval).toEqual({
       id: "77777777-7777-4777-8777-000000000001",
       tenantSlug: "continuous-demo",
-      subject: "all",
+      subject: "core",
     });
     expect(mocks.decideApproval).toHaveBeenCalledWith({
       approvalId: "77777777-7777-4777-8777-000000000001",
@@ -202,8 +202,40 @@ describe("/approval route", () => {
       tenantSlug: "continuous-demo",
       action: "approved",
       note: "Looks correct.",
-      subject: "all",
+      subject: "core",
     });
+  });
+
+  it("rejects broad approval decision subjects before dispatch", async () => {
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/approval", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "approval.decide",
+          approval: {
+            id: "77777777-7777-4777-8777-000000000001",
+            tenantSlug: "continuous-demo",
+            subject: "all",
+          },
+          config: {
+            action: "approved",
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toEqual({
+      code: "approval_subject_too_broad",
+      message: "approval.subject must be core, worker, workflow, or task for approval.decide.",
+    });
+    expect(mocks.decideApproval).not.toHaveBeenCalled();
   });
 
   it("rejects ad hoc top-level approval command fields", async () => {

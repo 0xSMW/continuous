@@ -486,6 +486,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
       tenantSlug: "continuous-demo",
       action: "approved",
       note: "CI payroll preview approval; execution remains blocked.",
+      subject: "core",
       db,
     });
 

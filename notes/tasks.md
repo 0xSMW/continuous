@@ -22,7 +22,6 @@
 - Provision scoped adapter credentials, tested rollback playbooks, and a first controlled send only after retry readiness evidence stays green.
 - Provision production inbox and CRM managed credential refs, create pollable active live-provider connections through `/core connection.upsert`, record readiness through `/core connection.health.record`, and monitor scheduler coverage behind the persisted connection-backed `lead.read` source-reader shape.
 - Extend Revenue `lead.classify` and `response.draft` eval scoring now that they are explicit persisted command surfaces.
-- Narrow shared approval decisions from explicit `approval.subject=all` to typed subjects wherever Core can prove the subject family.
 - Use `docs/revenue-operations-worker-expansion.md` as the expansion gate list for the next worker iteration.
 - Use `docs/revenue-operations-worker-v1-contract.md` as the machine-actionable contract for run and approval effects.
 - Keep `docs/worker-readiness.md` and `docs/worker-handoffs.md` updated in the same change as any worker promotion or new cross-worker fixture; Dispatch now has schedule proposal, customer update draft, closeout packet, and exception routing proof, Finance now has invoice draft, AR follow-up, and cash forecast cash-packet proof, and the next launch slices are live credential gating plus Finance payment runtime depth.
