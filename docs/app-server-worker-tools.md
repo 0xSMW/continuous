@@ -49,6 +49,14 @@ dual-control policy live under `config`; the command writes payment draft,
 payment instruction, cash packet, approval, generated review view, workflow,
 budget, and audit proof while ACH, payment links, bank writes, and money
 movement remain blocked.
+Workforce `hire.packet.prepare` and `payroll_input.prepare` use the same
+envelope. Hire packet config carries person, position, work-location,
+document, and policy fields under `config`; payroll input config carries
+employment, period, payroll-run, earnings, deductions, and blockers under
+`config`. The runtime writes workforce packets, restricted-document proof,
+approvals, generated review views, workflow/budget/audit proof, and a
+`readiness` view while external execution, payroll submission, tax filing, and
+money movement remain blocked or dry-run.
 
 ```sh
 bun run app-server:worker-tools
@@ -115,6 +123,14 @@ bun run worker:tool worker.command --payload='{"command":"cash_forecast.generate
 
 ```sh
 bun run worker:tool worker.command --payload='{"command":"payment_draft.prepare","worker":{"role":"finance_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-finance-payment-draft-001","config":{"sourceRefs":{"paymentId":"payment_row_or_payment_object_uuid"},"payee":"Acme Roofing Supplies","method":"ach","policy":{"requireOwnerApproval":true,"requireDualControl":true,"moneyMovement":"blocked"}}}'
+```
+
+```sh
+bun run worker:tool worker.command --payload='{"command":"hire.packet.prepare","worker":{"role":"workforce_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-workforce-hire-001","config":{"personId":"person_uuid","positionId":"field_operations_lead","workLocationId":"work_location_object_uuid","documents":[{"type":"employment_eligibility","state":"verified","sensitivity":"high"}],"policy":{"restrictedData":"redacted_by_default"}}}'
+```
+
+```sh
+bun run worker:tool worker.command --payload='{"command":"payroll_input.prepare","worker":{"role":"workforce_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-workforce-payroll-input-001","config":{"employmentId":"employment_uuid","period":"2026-05","hours":80,"earnings":[{"code":"regular_hours","amountCents":336000,"currency":"USD"}],"deductions":[]}}'
 ```
 
 ```http

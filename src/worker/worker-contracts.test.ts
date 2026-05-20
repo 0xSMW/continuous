@@ -39,7 +39,7 @@ const contracts = [
     path: "docs/workforce-operations-worker-v1-contract.md",
     role: "workforce_operations",
     evidencePacket: "workforce_packet",
-    runtime: false,
+    runtime: true,
   },
   {
     path: "docs/compliance-operations-worker-v1-contract.md",
@@ -105,6 +105,7 @@ describe("future worker contracts", () => {
       "app/api/health/route.ts",
       "app/approval/route.ts",
       "app/core/route.ts",
+      "app/health/route.ts",
       "app/worker/route.ts",
       "app/workflow/route.ts",
     ]);
@@ -235,6 +236,7 @@ describe("future worker contracts", () => {
       "owner_chief_of_staff",
       "dispatch_operations",
       "finance_operations",
+      "workforce_operations",
     ]);
     expect(workerContractForRole("revenue_operations")?.contractPath).toBe(
       "docs/revenue-operations-worker-v1-contract.md",

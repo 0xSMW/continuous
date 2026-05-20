@@ -92,7 +92,7 @@ import {
   scoreRevenueWorkerRun,
 } from "./evals";
 import { executeAppServerWorkerTool } from "./app-server-tools";
-import { executeWorkerCommand } from "./registry";
+import { executeWorkerCommand, executeWorkerView } from "./registry";
 import {
   classifyRevenueLead,
   continueRevenueWorker,
@@ -7132,6 +7132,185 @@ maybeDescribe("Revenue Worker integration eval", () => {
       revisionBriefResult.approvalRequestId,
     );
     expect(stringList(revisionBlockers.open)).toContain("revision_requested");
+  }, 120_000);
+
+  it("prepares workforce hire and payroll-readiness packets through the generic /worker registry", async () => {
+    const runId = randomUUID();
+    const tenantId = "11111111-1111-4111-8111-111111111111";
+    const personId = "55555555-5555-4555-8555-000000000003";
+    const employmentId = "55555555-5555-4555-8555-000000000004";
+    const payrollRunId = "55555555-5555-4555-8555-000000000007";
+    const workLocationObjectId = "33333333-3333-4333-8333-000000000102";
+
+    const hireResponse = await executeWorkerCommand({
+      command: "hire.packet.prepare",
+      target: {
+        role: "workforce_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: `ci-workforce-hire-${runId}`,
+      config: {
+        personId,
+        positionId: "field_operations_lead",
+        workLocationId: workLocationObjectId,
+        employmentId,
+        documents: [
+          { type: "identity_verification", state: "verified", sensitivity: "high" },
+          { type: "employment_eligibility", state: "verified", sensitivity: "high" },
+          { type: "tax_withholding", state: "provided", sensitivity: "high" },
+          { type: "direct_deposit", state: "provided", sensitivity: "high" },
+          { type: "policy_acknowledgement", state: "signed", sensitivity: "medium" },
+        ],
+      },
+    });
+    const hireResult = hireResponse.result as Awaited<
+      ReturnType<typeof import("./workforce").prepareWorkforceHirePacket>
+    >;
+    const hireOutput = objectValue(hireResult.output);
+    const [hireRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(eq(workerRuns.id, hireResult.workerRunId))
+      .limit(1);
+    const [hireObject] = await db
+      .select()
+      .from(objects)
+      .where(eq(objects.id, hireResult.employmentObjectId ?? ""))
+      .limit(1);
+    const [hireApproval] = await db
+      .select()
+      .from(approvalRequests)
+      .where(eq(approvalRequests.id, hireResult.approvalRequestId ?? ""))
+      .limit(1);
+    const [hirePacket] = await db
+      .select()
+      .from(evidencePackets)
+      .where(eq(evidencePackets.id, hireResult.packetId ?? ""))
+      .limit(1);
+    const [hireDocument] = await db
+      .select()
+      .from(documents)
+      .where(eq(documents.id, hireResult.documentId ?? ""))
+      .limit(1);
+    const [hireView] = await db
+      .select()
+      .from(generatedViews)
+      .where(and(eq(generatedViews.tenantId, tenantId), eq(generatedViews.key, "workforce.hire.review")))
+      .limit(1);
+
+    expect(hireResponse.command).toBe("hire.packet.prepare");
+    expect(hireResponse.worker.role).toBe("workforce_operations");
+    expect(hireResult.created).toBe(true);
+    expect(hireResult.workflowStepIds).toHaveLength(2);
+    expect(hireResult.externalExecution).toBe("blocked");
+    expect(hireOutput.externalExecution).toBe("blocked");
+    expect(objectValue(hireOutput.restrictedDocuments).rawContentStored).toBe(false);
+    expect(hireRun?.state).toBe("done");
+    expect(hireObject?.type).toBe("employment");
+    expect(hireApproval?.kind).toBe("workforce_hire_packet_approval");
+    expect(hireApproval?.state).toBe("pending");
+    expect(hirePacket?.kind).toBe("workforce_packet");
+    expect(hireDocument?.kind).toBe("new_hire_packet");
+    expect(hireView?.key).toBe("workforce.hire.review");
+
+    const hireReplay = await executeWorkerCommand({
+      command: "hire.packet.prepare",
+      target: {
+        role: "workforce_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: `ci-workforce-hire-${runId}`,
+      config: {
+        personId,
+        positionId: "field_operations_lead",
+        workLocationId: workLocationObjectId,
+        employmentId,
+        documents: [
+          { type: "identity_verification", state: "verified", sensitivity: "high" },
+          { type: "employment_eligibility", state: "verified", sensitivity: "high" },
+          { type: "tax_withholding", state: "provided", sensitivity: "high" },
+          { type: "direct_deposit", state: "provided", sensitivity: "high" },
+          { type: "policy_acknowledgement", state: "signed", sensitivity: "medium" },
+        ],
+      },
+    });
+    const hireReplayResult = hireReplay.result as Awaited<
+      ReturnType<typeof import("./workforce").prepareWorkforceHirePacket>
+    >;
+
+    expect(hireReplayResult.created).toBe(false);
+    expect(hireReplayResult.workerRunId).toBe(hireResult.workerRunId);
+    expect(hireReplayResult.packetId).toBe(hireResult.packetId);
+
+    const payrollResponse = await executeWorkerCommand({
+      command: "payroll_input.prepare",
+      target: {
+        role: "workforce_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: `ci-workforce-payroll-input-${runId}`,
+      config: {
+        employmentId,
+        payrollRunId,
+        period: "2026-05",
+        hours: 80,
+        earnings: [{ code: "regular_hours", amountCents: 336000, currency: "USD" }],
+        deductions: [],
+      },
+    });
+    const payrollResult = payrollResponse.result as Awaited<
+      ReturnType<typeof import("./workforce").prepareWorkforcePayrollInput>
+    >;
+    const payrollOutput = objectValue(payrollResult.output);
+    const [payrollObject] = await db
+      .select()
+      .from(objects)
+      .where(eq(objects.id, payrollResult.objectId ?? ""))
+      .limit(1);
+    const [payrollApproval] = await db
+      .select()
+      .from(approvalRequests)
+      .where(eq(approvalRequests.id, payrollResult.approvalRequestId ?? ""))
+      .limit(1);
+    const [payrollPacket] = await db
+      .select()
+      .from(evidencePackets)
+      .where(eq(evidencePackets.id, payrollResult.packetId ?? ""))
+      .limit(1);
+    const [payrollView] = await db
+      .select()
+      .from(generatedViews)
+      .where(and(eq(generatedViews.tenantId, tenantId), eq(generatedViews.key, "workforce.payroll_input.review")))
+      .limit(1);
+
+    expect(payrollResponse.command).toBe("payroll_input.prepare");
+    expect(payrollResponse.worker.role).toBe("workforce_operations");
+    expect(payrollResult.created).toBe(true);
+    expect(payrollResult.workflowStepIds).toHaveLength(2);
+    expect(payrollResult.externalExecution).toBe("dry_run");
+    expect(payrollOutput.payrollSubmission).toBe("blocked");
+    expect(payrollOutput.moneyMovement).toBe("blocked");
+    expect(payrollObject?.type).toBe("payroll_input");
+    expect(payrollApproval?.kind).toBe("workforce_payroll_input_approval");
+    expect(payrollPacket?.kind).toBe("workforce_packet");
+    expect(payrollView?.key).toBe("workforce.payroll_input.review");
+
+    const readiness = await executeWorkerView({
+      view: "readiness",
+      target: {
+        role: "workforce_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+    });
+    const readinessData = objectValue(readiness.data.readiness);
+
+    expect(readiness.error).toBeNull();
+    expect(Array.isArray(readinessData.documentBlockers)).toBe(true);
+    expect(Array.isArray(readinessData.payrollBlockers)).toBe(true);
   }, 120_000);
 
   it("promotes approved Revenue quote handoffs into Dispatch schedule proposals through /worker", async () => {

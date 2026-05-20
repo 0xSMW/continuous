@@ -41,6 +41,13 @@ import {
   prepareFinanceInvoice,
   prepareFinancePaymentDraft,
 } from "./finance";
+import {
+  getWorkforceReadiness,
+  getWorkforceWorkerSnapshotSafe,
+  prepareWorkforceHirePacket,
+  prepareWorkforcePayrollInput,
+  workforceWorkerRole,
+} from "./workforce";
 import { plannedWorkerContractForRole, workerApiRoute } from "./planned-workers";
 import { normalizeIdempotencyKey } from "./security";
 
@@ -625,6 +632,60 @@ const financePaymentDraftPrepareConfig: WorkerConfigSchema = {
   },
   additionalProperties: true,
 };
+const workforceHirePacketConfig: WorkerConfigSchema = {
+  type: "object",
+  required: ["personId", "positionId", "workLocationId"],
+  properties: {
+    personId: { type: "string" },
+    positionId: { type: "string" },
+    workLocationId: { type: "string" },
+    employmentId: { type: "string" },
+    employmentObjectId: { type: "string" },
+    startDate: { type: "string" },
+    sourceRefs: jsonObjectConfig,
+    policy: jsonObjectConfig,
+    documents: {
+      type: "array",
+    },
+    requiredDocuments: {
+      type: "array",
+      items: { type: "string" },
+    },
+    restrictedDocuments: {
+      type: "array",
+    },
+    blockers: {
+      type: "array",
+      items: { type: "string" },
+    },
+  },
+  additionalProperties: true,
+};
+const workforcePayrollInputConfig: WorkerConfigSchema = {
+  type: "object",
+  required: ["employmentId", "period"],
+  properties: {
+    employmentId: { type: "string" },
+    period: { type: "string" },
+    payrollRunId: { type: "string" },
+    hours: { type: "number", minimum: 0 },
+    earnings: {
+      type: "array",
+      items: jsonObjectConfig,
+    },
+    deductions: {
+      type: "array",
+      items: jsonObjectConfig,
+    },
+    blockers: {
+      type: "array",
+      items: { type: "string" },
+    },
+    sourceRefs: jsonObjectConfig,
+    policy: jsonObjectConfig,
+  },
+  additionalProperties: true,
+};
 
 const revenueDefinition: WorkerDefinition = {
   role: revenueWorkerRole,
@@ -1119,6 +1180,148 @@ const financeDefinition: WorkerDefinition = {
 const workerDefinitions: Record<string, WorkerDefinition> = {
   [revenueDefinition.role]: revenueDefinition,
   [financeDefinition.role]: financeDefinition,
+  [workforceWorkerRole]: {
+    role: workforceWorkerRole,
+    commands: {
+      "hire.packet.prepare": {
+        name: "hire.packet.prepare",
+        description: "Prepare a new-hire packet with document checklist, restricted-document proof, and payroll blockers.",
+        idempotency: "required",
+        sideEffects: "internal",
+        externalExecution: "blocked",
+        requiresTenant: true,
+        configSchema: workforceHirePacketConfig,
+        async handle(context) {
+          if (!context.idempotencyKey) {
+            throw new PlatformUnavailableError(
+              "invalid_idempotency_key",
+              "A string idempotency key is required.",
+              400,
+            );
+          }
+
+          return prepareWorkforceHirePacket({
+            idempotencyKey: context.idempotencyKey,
+            tenantSlug: context.target.tenantSlug,
+            workerId: context.target.workerId,
+            operatorEmail: context.operatorEmail,
+            config: context.config,
+          });
+        },
+      },
+      "payroll_input.prepare": {
+        name: "payroll_input.prepare",
+        description: "Prepare payroll input readiness with blockers; payroll submission and money movement stay blocked.",
+        idempotency: "required",
+        sideEffects: "dry_run",
+        externalExecution: "dry_run",
+        requiresTenant: true,
+        configSchema: workforcePayrollInputConfig,
+        async handle(context) {
+          if (!context.idempotencyKey) {
+            throw new PlatformUnavailableError(
+              "invalid_idempotency_key",
+              "A string idempotency key is required.",
+              400,
+            );
+          }
+
+          return prepareWorkforcePayrollInput({
+            idempotencyKey: context.idempotencyKey,
+            tenantSlug: context.target.tenantSlug,
+            workerId: context.target.workerId,
+            operatorEmail: context.operatorEmail,
+            config: context.config,
+          });
+        },
+      },
+      "approval.decide": {
+        name: "approval.decide",
+        description: "Decide a workforce approval request without executing external actions.",
+        idempotency: "none",
+        sideEffects: "internal",
+        externalExecution: "blocked",
+        requiresTenant: true,
+        configSchema: {
+          type: "object",
+          required: ["approvalId", "action"],
+          properties: {
+            approvalId: { type: "string" },
+            action: {
+              type: "string",
+              enum: ["approved", "rejected", "revision_requested"],
+            },
+            note: { type: "string" },
+          },
+          additionalProperties: true,
+        },
+        async handle(context) {
+          const approvalId = optionalString(context.config.approvalId);
+          const action = normalizeApprovalDecision(context.config.action);
+
+          if (!approvalId || !action) {
+            throw new PlatformUnavailableError(
+              "invalid_worker_command_config",
+              "config.approvalId and config.action are required for approval.decide.",
+              400,
+            );
+          }
+
+          return decideApproval({
+            approvalId,
+            operatorEmail: context.operatorEmail,
+            tenantSlug: context.target.tenantSlug,
+            action,
+            note: optionalString(context.config.note),
+            subject: "worker",
+          });
+        },
+      },
+    },
+    views: {
+      snapshot: {
+        name: "snapshot",
+        description: "Read the workforce worker runtime snapshot.",
+        async handle(context) {
+          const result = await getWorkforceWorkerSnapshotSafe({
+            tenantSlug: context.target.tenantSlug,
+            workerId: context.target.workerId,
+            role: context.target.role,
+          });
+
+          return {
+            status: result.ok ? 200 : 500,
+            data: {
+              worker: responseTarget(context.target),
+              view: "snapshot",
+              snapshot: result.snapshot,
+            },
+            error: result.error,
+          };
+        },
+      },
+      readiness: {
+        name: "readiness",
+        description: "Read workforce document, payroll, and approval blockers.",
+        async handle(context) {
+          const readiness = await getWorkforceReadiness({
+            tenantSlug: context.target.tenantSlug,
+            workerId: context.target.workerId,
+            role: context.target.role,
+          });
+
+          return {
+            data: {
+              worker: responseTarget(context.target, readiness.worker ? context.target.tenantSlug : null),
+              view: "readiness",
+              readiness,
+            },
+            error: null,
+          };
+        },
+      },
+    },
+  },
   [ownerWorkerRole]: {
     role: ownerWorkerRole,
     commands: {

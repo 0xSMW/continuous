@@ -179,7 +179,7 @@ policy-bound:
 
 | Surface | Behavior |
 |---|---|
-| `POST /core` | Canonical Core command surface for `task.create`, `task.transition`, `object.upsert`, `adapter.upsert`, `connection.upsert`, `connection.health.record`, `object.link`, `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`, `document.packet.prepare`, `decision.record`, `approval.request`, `adapter.intent.record`, `rule.change.record`, `external_action.record`, `capability.grant`, `budget.reserve`, `budget.charge`, `budget.release`, `ai.infer`, `view.publish`, `customer_signal.record`, `payroll.preview.record`, `payroll.preview.packet.prepare`, `control_plane.token_rotation.attest`, `control_plane.credential.upsert`, `control_plane.credential.revoke`, and `control_plane.session.review`; invalid credentials fail before body reads, command bodies are capped at 1 MiB, tenant selection and command fields live in structured `core` and `config` payloads, and no other top-level command fields are accepted |
+| `POST /core` | Canonical Core command surface for `task.create`, `task.transition`, `object.upsert`, `adapter.upsert`, `connection.upsert`, `connection.health.record`, `entity.setup.record`, `object.link`, `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`, `document.packet.prepare`, `decision.record`, `approval.request`, `adapter.intent.record`, `rule.change.record`, `external_action.record`, `capability.grant`, `budget.reserve`, `budget.charge`, `budget.release`, `ai.infer`, `view.publish`, `customer_signal.record`, `payroll.preview.record`, `payroll.preview.packet.prepare`, `control_plane.token_rotation.attest`, `control_plane.credential.upsert`, `control_plane.credential.revoke`, and `control_plane.session.review`; invalid credentials fail before body reads, command bodies are capped at 1 MiB, tenant selection and command fields live in structured `core` and `config` payloads, and no other top-level command fields are accepted |
 | `GET /core?tenantSlug=...` | Tenant-scoped Core summary for active tasks, recent events, approvals, workers, capabilities, graph counts, and ledger counts |
 | `/worker?view=snapshot&role=revenue_operations` | Operator-only snapshot of worker state, active tasks, controls, budget usage, and recent events |
 | `/worker?view=approvals&role=revenue_operations` | Operator-only approval queue for worker decisions |
@@ -228,7 +228,10 @@ object versions, links objects into a navigable business graph, ingests events,
 attaches evidence, creates document packets, records decisions, requests
 platform approvals, prepares durable evidence packets, grants scoped capabilities, moves AI budget through
 reserve/charge/release ledger states, and publishes renderer-neutral generated
-views. `adapter.upsert` and `connection.upsert` create or update connector
+views. `entity.setup.record` records legal entity facts, identifiers, work
+locations, masked bank-account references, blocked payment instructions, an
+entity setup workflow run, a setup packet, trace evidence, and audit proof
+through the same Core envelope. `adapter.upsert` and `connection.upsert` create or update connector
 catalog and tenant account rows through the Core envelope; `connection.health.record`
 stores connector readiness checks for state, source metadata, read scopes,
 polling, scheduler proof, managed credential refs, and blocked external

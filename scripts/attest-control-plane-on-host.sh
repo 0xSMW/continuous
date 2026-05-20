@@ -15,6 +15,7 @@ CONTROL_PLANE_ALLOWED_COMMANDS_JSON='[
   "core:adapter.upsert",
   "core:connection.upsert",
   "core:connection.health.record",
+  "core:entity.setup.record",
   "core:object.link",
   "core:event.ingest",
   "core:evidence.attach",

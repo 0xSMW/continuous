@@ -36,7 +36,7 @@ Then open `http://localhost:3000`.
 
 ## Core APIs
 
-- `/api/health` reports Postgres-backed readiness checks.
+- `/health` reports Postgres-backed readiness checks.
 - `/core` returns persisted core counts, active tasks, and recent events for tokened operators;
   `POST /core` accepts structured core commands: `task.create`,
   `task.transition`, `object.upsert`, `adapter.upsert`,

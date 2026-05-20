@@ -112,6 +112,15 @@ execution gates.
 
 ## Phase 5: Workforce Worker
 
+Status: first runtime slices are registered on `/worker` for
+`command=hire.packet.prepare` and `command=payroll_input.prepare`, plus
+`view=readiness`. The commands keep role, tenant, idempotency, and operation
+inputs in the generic worker envelope, write workforce packet, document,
+approval, workflow, budget, audit, and generated-view proof, and keep
+restricted documents redacted while payroll submission and money movement stay
+blocked. Remaining Workforce backlog: contractor packets, credential review,
+schedule readiness, and live HR/payroll credential gates.
+
 | Dependency | Implementation target |
 |---|---|
 | Core objects | Person, employment, contractor engagement, credential, compensation, document |

@@ -26,7 +26,7 @@ commands.
 
 `POST /core` is the operator-gated headless Core command surface. It
 supports `task.create`, `task.transition`, `object.upsert`, `object.link`,
-`adapter.upsert`, `connection.upsert`, `connection.health.record`,
+`adapter.upsert`, `connection.upsert`, `connection.health.record`, `entity.setup.record`,
 `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`, `document.packet.prepare`,
 `decision.record`, `approval.request`, `capability.grant`, `budget.reserve`,
 `budget.charge`, `budget.release`, `ai.infer`, `view.publish`, `adapter.intent.record`,
@@ -113,8 +113,8 @@ CI is separate and runs on pushes to `main`, pull requests, and manual dispatch.
 ## Post-Deploy Verification
 
 ```sh
-curl -fsS https://continuoushq.com/api/health
-curl -fsS https://getcontinuous.app/api/health
+curl -fsS https://continuoushq.com/health
+curl -fsS https://getcontinuous.app/health
 openssl s_client -connect 45.55.53.92:443 -servername continuoushq.com </dev/null 2>/dev/null | openssl x509 -noout -subject -issuer -dates
 ```
 
@@ -329,6 +329,7 @@ Control-plane token catalog entries have this shape when provided directly via
       "core:view.summary",
       "core:task.create",
       "core:object.upsert",
+      "core:entity.setup.record",
       "worker:view.snapshot",
       "worker:lead.read",
       "worker:run",
@@ -508,6 +509,7 @@ shape:
       "core:control_plane.credential.upsert",
       "core:control_plane.credential.revoke",
       "core:control_plane.session.review",
+      "core:entity.setup.record",
       "worker:view.snapshot",
       "worker:lead.read",
       "worker:run",
@@ -577,7 +579,7 @@ HOST=45.55.53.92 ./scripts/check-observability.sh
 ```
 
 The check runs on the droplet and verifies Docker Compose service state,
-SNI-routed HTTPS `/api/health` for every configured `SITE_HOSTS` hostname,
+SNI-routed HTTPS `/health` for every configured `SITE_HOSTS` hostname,
 certificate freshness, disk usage, and Caddy access-log creation. Backup
 freshness and failed systemd unit checks are opt-in so unrelated host units or
 not-yet-provisioned object storage do not block ordinary deploys:

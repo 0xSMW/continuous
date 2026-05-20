@@ -74,7 +74,7 @@ fi
 
 docker compose --profile scheduler up -d --no-build --no-deps app worker-scheduler
 for attempt in $(seq 1 30); do
-  if docker compose exec -T app node -e "fetch('http://127.0.0.1:3000/api/health').then((r)=>process.exit(r.ok ? 0 : 1)).catch(()=>process.exit(1))" </dev/null; then
+  if docker compose exec -T app node -e "fetch('http://127.0.0.1:3000/health').then((r)=>process.exit(r.ok ? 0 : 1)).catch(()=>process.exit(1))" </dev/null; then
     docker compose --profile scheduler ps app worker-scheduler
     exit 0
   fi

@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   recordCoreConnectionHealth: vi.fn(),
   recordCoreDecision: vi.fn(),
   recordCustomerSignal: vi.fn(),
+  recordEntitySetup: vi.fn(),
   recordExternalAction: vi.fn(),
   recordRuleChange: vi.fn(),
   reviewControlPlaneSessions: vi.fn(),
@@ -74,6 +75,10 @@ vi.mock("../../src/core/control-plane-auth", () => ({
   reviewControlPlaneSessions: mocks.reviewControlPlaneSessions,
   revokeControlPlaneCredential: mocks.revokeControlPlaneCredential,
   upsertControlPlaneCredential: mocks.upsertControlPlaneCredential,
+}));
+
+vi.mock("../../src/core/entity", () => ({
+  recordEntitySetup: mocks.recordEntitySetup,
 }));
 
 vi.mock("../../src/core/primitives", () => ({
@@ -2160,6 +2165,183 @@ describe("POST /core", () => {
       connectionId: "99999999-9999-4999-8999-000000000022",
       checks: ["state", "credential_ref", "scheduler"],
       observedAt: "2026-05-20T08:00:00.000Z",
+    });
+  });
+
+  it("dispatches entity.setup.record with setup facts in config", async () => {
+    mocks.recordEntitySetup.mockResolvedValue({
+      created: true,
+      legalEntityId: "55555555-5555-4555-8555-000000000001",
+      objectId: "33333333-3333-4333-8333-000000000101",
+      identifierIds: ["55555555-5555-4555-8555-000000000002"],
+      locationIds: ["55555555-5555-4555-8555-000000000019"],
+      bankAccountIds: ["55555555-5555-4555-8555-000000000012"],
+      paymentInstructionIds: ["55555555-5555-4555-8555-000000000013"],
+      workflowRunId: "77777777-7777-4777-8777-000000000001",
+      workflowStepId: "77777777-7777-4777-8777-000000000002",
+      documentId: "doc-1",
+      packetId: "packet-1",
+      eventId: "event-1",
+      evidenceId: "evidence-1",
+      auditEventId: "audit-1",
+      state: "review_ready",
+      completeness: 1,
+      externalExecution: "blocked",
+      moneyMovement: "blocked",
+    });
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "entity.setup.record",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "entity-setup-route-test-001",
+          config: {
+            legalEntity: {
+              legalName: "Continuous Demo LLC",
+              entityType: "llc",
+              jurisdiction: "DE",
+            },
+            identifiers: [
+              {
+                kind: "ein",
+                value: "XX-XXX6789",
+                issuer: "IRS",
+              },
+            ],
+            locations: [
+              {
+                kind: "work",
+                name: "Continuous Demo Headquarters",
+                jurisdiction: "NY",
+                country: "US",
+              },
+            ],
+            bankAccount: {
+              name: "Operating account",
+              purpose: "operating",
+              data: {
+                accountMask: "6789",
+              },
+            },
+            paymentInstruction: {
+              kind: "payroll_funding",
+              amountCents: 336000,
+              currency: "usd",
+            },
+            workflow: {
+              state: "review_ready",
+            },
+            packet: {
+              name: "Entity setup packet",
+            },
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.command).toBe("entity.setup.record");
+    expect(body.data.result.legalEntityId).toBe("55555555-5555-4555-8555-000000000001");
+    expect(mocks.recordEntitySetup).toHaveBeenCalledWith({
+      operatorEmail: "operator@example.com",
+      idempotencyKey: "entity-setup-route-test-001",
+      tenantSlug: "continuous-demo",
+      legalEntity: {
+        legalName: "Continuous Demo LLC",
+        entityType: "llc",
+        jurisdiction: "DE",
+      },
+      identifiers: [
+        {
+          kind: "ein",
+          value: "XX-XXX6789",
+          issuer: "IRS",
+        },
+      ],
+      locations: [
+        {
+          kind: "work",
+          name: "Continuous Demo Headquarters",
+          jurisdiction: "NY",
+          country: "US",
+        },
+      ],
+      bankAccount: {
+        name: "Operating account",
+        purpose: "operating",
+        data: {
+          accountMask: "6789",
+        },
+      },
+      bankAccounts: undefined,
+      paymentInstruction: {
+        kind: "payroll_funding",
+        amountCents: 336000,
+        currency: "usd",
+      },
+      paymentInstructions: undefined,
+      workflow: {
+        state: "review_ready",
+      },
+      packet: {
+        name: "Entity setup packet",
+      },
+    });
+  });
+
+  it("preserves structured entity.setup.record failures", async () => {
+    mocks.recordEntitySetup.mockRejectedValue({
+      status: 400,
+      code: "entity_setup_secret_material_rejected",
+      message:
+        "config.bankAccount.accountNumber must be stored as a managed credential reference or masked value, not raw secret material.",
+    });
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "entity.setup.record",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "entity-setup-route-error-test-001",
+          config: {
+            legalEntity: {
+              legalName: "Continuous Demo LLC",
+              entityType: "llc",
+              jurisdiction: "DE",
+            },
+            bankAccount: {
+              name: "Operating account",
+              accountNumber: "example-raw-account-material",
+            },
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toEqual({
+      code: "entity_setup_secret_material_rejected",
+      message:
+        "config.bankAccount.accountNumber must be stored as a managed credential reference or masked value, not raw secret material.",
     });
   });
 

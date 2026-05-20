@@ -148,7 +148,7 @@ docker compose --profile tools run --rm migrate bun run db:migrate </dev/null
 if [ "$START_APP_AFTER_RESTORE" = "true" ]; then
   docker compose up -d app caddy >/dev/null
   for attempt in $(seq 1 30); do
-    if docker compose exec -T app node -e "fetch('http://127.0.0.1:3000/api/health').then((r)=>process.exit(r.ok ? 0 : 1)).catch(()=>process.exit(1))" </dev/null; then
+    if docker compose exec -T app node -e "fetch('http://127.0.0.1:3000/health').then((r)=>process.exit(r.ok ? 0 : 1)).catch(()=>process.exit(1))" </dev/null; then
       break
     fi
 

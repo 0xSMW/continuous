@@ -959,6 +959,7 @@ const runtimeWorkerRoles = new Set([
   "owner_chief_of_staff",
   "dispatch_operations",
   "finance_operations",
+  "workforce_operations",
 ]);
 
 export const runtimeWorkerContracts = workerContracts.filter((contract) =>

@@ -64,8 +64,9 @@ describe("app-server worker tools", () => {
       "owner_chief_of_staff",
       "dispatch_operations",
       "finance_operations",
+      "workforce_operations",
     ]);
-    expect(plannedRoles).toEqual(["workforce_operations", "compliance_operations", "systems_operations"]);
+    expect(plannedRoles).toEqual(["compliance_operations", "systems_operations"]);
     expect(registry.plannedCommands).toEqual(registry.followUpCommands);
     expect(registry.plannedViews).toEqual(registry.followUpViews);
     expect(revenueFollowUpCommands.map((command) => command.name)).toEqual([
@@ -159,6 +160,23 @@ describe("app-server worker tools", () => {
           command.externalExecution === "blocked",
       ),
     ).toBe(true);
+    expect(
+      registry.commands.some(
+        (command) =>
+          command.role === "workforce_operations" &&
+          command.name === "hire.packet.prepare" &&
+          command.externalExecution === "blocked",
+      ),
+    ).toBe(true);
+    expect(
+      registry.commands.some(
+        (command) =>
+          command.role === "workforce_operations" &&
+          command.name === "payroll_input.prepare" &&
+          command.externalExecution === "dry_run",
+      ),
+    ).toBe(true);
+    expect(registry.views.some((view) => view.role === "workforce_operations" && view.name === "readiness")).toBe(true);
   });
 
   it("requires a clean canonical command envelope before dispatch", async () => {
@@ -240,7 +258,7 @@ describe("app-server worker tools", () => {
     );
   });
 
-  it("routes unavailable future workers through the shared registry guard", async () => {
+  it("applies registry schemas to workforce commands through the app-server envelope", async () => {
     await expect(
       executeAppServerWorkerTool("continuous.worker.command", {
         command: "hire.packet.prepare",
@@ -251,7 +269,21 @@ describe("app-server worker tools", () => {
         idempotencyKey: "app-server-planned-worker-test",
         config: {},
       }),
-    ).rejects.toThrow("planned but not available yet");
+    ).rejects.toThrow("config.personId is required for hire.packet.prepare.");
+
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.command", {
+        command: "payroll_input.prepare",
+        worker: {
+          role: "workforce_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "app-server-workforce-payroll-schema",
+        config: {
+          employmentId: "employment_uuid",
+        },
+      }),
+    ).rejects.toThrow("config.period is required for payroll_input.prepare.");
   });
 
   it("disables app-server worker mutations in production unless explicitly trusted", async () => {

@@ -955,6 +955,44 @@ export const entityIdentifiers = pgTable(
   ],
 );
 
+export const locations = pgTable(
+  "locations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    legalEntityId: uuid("legal_entity_id").references(() => legalEntities.id, {
+      onDelete: "set null",
+    }),
+    objectId: uuid("object_id").references(() => objects.id, {
+      onDelete: "set null",
+    }),
+    kind: varchar("kind", { length: 80 }).notNull(),
+    name: text("name").notNull(),
+    state: text("state").notNull().default("active"),
+    jurisdiction: text("jurisdiction"),
+    country: varchar("country", { length: 2 }).notNull().default("US"),
+    data: jsonb("data")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    effectiveAt: timestamp("effective_at", { withTimezone: true }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("locations_tenant_idx").on(table.tenantId),
+    index("locations_legal_entity_idx").on(table.legalEntityId),
+    uniqueIndex("locations_object_idx").on(table.objectId),
+  ],
+);
+
 export const people = pgTable(
   "people",
   {
@@ -2845,6 +2883,22 @@ export const objectsRelations = relations(objects, ({ one, many }) => ({
   evidence: many(evidence),
   evidencePackets: many(evidencePackets),
   customerSignals: many(customerSignals),
+  locations: many(locations),
+}));
+
+export const locationsRelations = relations(locations, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [locations.tenantId],
+    references: [tenants.id],
+  }),
+  legalEntity: one(legalEntities, {
+    fields: [locations.legalEntityId],
+    references: [legalEntities.id],
+  }),
+  object: one(objects, {
+    fields: [locations.objectId],
+    references: [objects.id],
+  }),
 }));
 
 export const customersRelations = relations(customers, ({ one, many }) => ({

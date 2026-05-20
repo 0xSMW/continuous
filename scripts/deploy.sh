@@ -105,7 +105,7 @@ if [ ! -f .env ]; then
     printf 'WORKER_RUN_TOKEN=%s\n' "$(openssl rand -hex 32)"
     printf 'WORKER_OPERATOR_EMAIL=%s\n' "$WORKER_OPERATOR_EMAIL"
     printf 'CONTROL_PLANE_ALLOWED_TENANTS=continuous-demo\n'
-    printf 'CONTROL_PLANE_ALLOWED_WORKER_ROLES=revenue_operations,owner_chief_of_staff,dispatch_operations,finance_operations\n'
+    printf 'CONTROL_PLANE_ALLOWED_WORKER_ROLES=revenue_operations,owner_chief_of_staff,dispatch_operations,finance_operations,workforce_operations\n'
     printf 'WORKER_SCHEDULER_ENABLED=true\n'
     printf 'WORKER_SCHEDULER_BASE_URL=http://app:3000\n'
     printf 'WORKER_SCHEDULER_TENANT_SLUG=continuous-demo\n'
@@ -136,9 +136,9 @@ set_env() {
 
 set_control_plane_token_catalog() {
   token_hash="$(printf '%s' "$worker_token" | sha256sum | awk '{print $1}')"
-  allowed_commands='"core:view.summary","core:task.create","core:task.transition","core:object.upsert","core:adapter.upsert","core:connection.upsert","core:connection.health.record","core:object.link","core:event.ingest","core:evidence.attach","core:document.create","core:packet.prepare","core:document.packet.prepare","core:decision.record","core:approval.request","core:adapter.intent.record","core:rule.change.record","core:external_action.record","core:capability.grant","core:budget.reserve","core:budget.charge","core:budget.release","core:ai.infer","core:view.publish","core:customer_signal.record","core:payroll.preview.record","core:payroll.preview.packet.prepare","core:control_plane.token_rotation.attest","core:control_plane.credential.upsert","core:control_plane.credential.revoke","core:control_plane.session.review","worker:view.snapshot","worker:view.approvals","worker:view.briefs","worker:view.decisions","worker:view.board","worker:view.exceptions","worker:run","worker:lead.read","worker:lead.classify","worker:response.draft","worker:schedule.propose","worker:customer_update.draft","worker:closeout.prepare","worker:exception.route","worker:invoice.prepare","worker:ar_followup.draft","worker:cash_forecast.generate","worker:payment_draft.prepare","worker:continue","worker:approval.decide","worker:adapters.reconcile","worker:adapters.retry","worker:brief.generate","worker:decision_queue.prepare","worker:anomaly.triage","workflow:view.overview","workflow:view.approvals","workflow:start","workflow:transition","workflow:steps.execute","workflow:approval.decide","approval:view.inbox","approval:approval.decide"'
+  allowed_commands='"core:view.summary","core:task.create","core:task.transition","core:object.upsert","core:adapter.upsert","core:connection.upsert","core:connection.health.record","core:entity.setup.record","core:object.link","core:event.ingest","core:evidence.attach","core:document.create","core:packet.prepare","core:document.packet.prepare","core:decision.record","core:approval.request","core:adapter.intent.record","core:rule.change.record","core:external_action.record","core:capability.grant","core:budget.reserve","core:budget.charge","core:budget.release","core:ai.infer","core:view.publish","core:customer_signal.record","core:payroll.preview.record","core:payroll.preview.packet.prepare","core:control_plane.token_rotation.attest","core:control_plane.credential.upsert","core:control_plane.credential.revoke","core:control_plane.session.review","worker:view.snapshot","worker:view.approvals","worker:view.briefs","worker:view.decisions","worker:view.board","worker:view.exceptions","worker:view.readiness","worker:run","worker:lead.read","worker:lead.classify","worker:response.draft","worker:schedule.propose","worker:customer_update.draft","worker:closeout.prepare","worker:exception.route","worker:invoice.prepare","worker:ar_followup.draft","worker:cash_forecast.generate","worker:payment_draft.prepare","worker:hire.packet.prepare","worker:payroll_input.prepare","worker:continue","worker:approval.decide","worker:adapters.reconcile","worker:adapters.retry","worker:brief.generate","worker:decision_queue.prepare","worker:anomaly.triage","workflow:view.overview","workflow:view.approvals","workflow:start","workflow:transition","workflow:steps.execute","workflow:approval.decide","approval:view.inbox","approval:approval.decide"'
   catalog_json="$(
-    printf '[{"id":"bootstrap-operator","tokenSha256":"%s","operatorEmail":"%s","allowedTenants":["continuous-demo"],"allowedWorkerRoles":["revenue_operations","owner_chief_of_staff","dispatch_operations","finance_operations"],"allowedRoutes":["core","worker","workflow","approval"],"allowedAccess":["read","write"],"allowedCommands":[%s]}]' \
+    printf '[{"id":"bootstrap-operator","tokenSha256":"%s","operatorEmail":"%s","allowedTenants":["continuous-demo"],"allowedWorkerRoles":["revenue_operations","owner_chief_of_staff","dispatch_operations","finance_operations","workforce_operations"],"allowedRoutes":["core","worker","workflow","approval"],"allowedAccess":["read","write"],"allowedCommands":[%s]}]' \
       "$token_hash" \
       "$WORKER_OPERATOR_EMAIL" \
       "$allowed_commands"
@@ -154,7 +154,7 @@ set_env SITE_HOSTS "$SITE_HOSTS"
 set_env ACME_EMAIL "$ACME_EMAIL"
 set_env WORKER_OPERATOR_EMAIL "$WORKER_OPERATOR_EMAIL"
 set_env CONTROL_PLANE_ALLOWED_TENANTS "continuous-demo"
-set_env CONTROL_PLANE_ALLOWED_WORKER_ROLES "revenue_operations,owner_chief_of_staff,dispatch_operations,finance_operations"
+set_env CONTROL_PLANE_ALLOWED_WORKER_ROLES "revenue_operations,owner_chief_of_staff,dispatch_operations,finance_operations,workforce_operations"
 set_env WORKER_SCHEDULER_ENABLED true
 set_env WORKER_SCHEDULER_BASE_URL "http://app:3000"
 set_env WORKER_SCHEDULER_TENANT_SLUG "continuous-demo"

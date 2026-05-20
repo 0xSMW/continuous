@@ -132,7 +132,7 @@ fi
 cert_check_seconds=$((CERT_MIN_DAYS * 86400))
 
 for host in "${normalized_hosts[@]}"; do
-  health_url="https://$host/api/health"
+  health_url="https://$host/health"
   health_response="$(curl -fsS --max-time 12 --resolve "$host:443:127.0.0.1" "$health_url" 2>/dev/null)"
 
   if printf '%s' "$health_response" | grep -q '"status":"ok"'; then

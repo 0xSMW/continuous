@@ -130,7 +130,7 @@ export default async function AdminPage() {
           </p>
         </div>
         <nav className="api-links" aria-label="API endpoints">
-          <a href="/api/health">Health</a>
+          <a href="/health">Health</a>
           <a href="/core">Core API</a>
           <a href="/approvals">Approvals</a>
           <a href="/worker?view=snapshot&role=revenue_operations">Worker</a>

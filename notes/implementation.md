@@ -49,7 +49,7 @@
 | Seeded the expanded operating workflow catalog | Open-state, compensation-change, location-change, payroll-run, off-cycle payroll, quarter-close, year-end, leave, incident, benefits-renewal, agency-notice, and filing-draft workflows now have persisted definitions, runs, and seed steps |
 | Added worker execution roadmap | `docs/worker-roadmap.md` turns the worker catalog into phase-by-phase implementation gates for workers 2+ |
 | Added future worker V1 contracts | Owner Chief-of-Staff, Dispatch, Finance, Workforce, Compliance, and Systems now have implementation-grade contracts covering API shape, Core objects, workflows, capabilities, adapters, evidence, views, evals, and security |
-| Added planned future-worker metadata | `worker:tool schema` and `continuous.worker.schema` now expose planned command/view metadata for future workers while keeping those roles non-executable until runtime handlers exist |
+| Added planned future-worker metadata | `worker:tool schema` and `continuous.worker.schema` expose planned command/view metadata for future workers and non-executable follow-up commands while keeping roles without runtime handlers unavailable |
 | Added Owner Chief-of-Staff runtime slice | `owner_chief_of_staff` is now a registered `/worker` role with read-only `brief.generate`, `decision_queue.prepare`, `anomaly.triage`, `snapshot`, `briefs`, and `decisions` surfaces, seeded capability/budget/workflow substrate, owner brief packets, generated views, and eval coverage |
 | Added Owner worker continuations | Owner brief generation now creates a shared `owner_brief_approval`, and `POST /worker` with `worker.role=owner_chief_of_staff`, `command=continue`, and `config.approvalId` publishes approved briefs, creates revision tasks, or marks rejected briefs stale without external execution |
 | Added Dispatch schedule proposal runtime | `dispatch_operations` is now a registered `/worker` role with `command=schedule.propose`; it consumes approved Revenue handoff refs from `config.sourceRefs`, writes appointment/workflow/evidence/approval/adapter dry-run records, publishes `dispatch.schedule.review`, and keeps external calendar writes dry-run only |
@@ -60,6 +60,7 @@
 | Added Finance AR follow-up runtime | `finance_operations` now registers `command=ar_followup.draft`; it consumes persisted invoice selectors from `config.invoiceId` or `config.sourceRefs`, writes a blocked AR follow-up draft, cash packet, approval request, generated review view, workflow/budget/audit proof, and keeps customer sends, payment links, and money movement blocked |
 | Added Finance cash forecast runtime | `finance_operations` now registers `command=cash_forecast.generate`; it consumes forecast windows, account refs, cash drivers, and policy from `config`, writes a cash forecast object, cash packet, approval request, generated review view, workflow/budget/audit proof, and keeps external execution and money movement blocked |
 | Added Finance payment draft runtime | `finance_operations` now registers `command=payment_draft.prepare`; it consumes bill or payment selectors from `config`/`config.sourceRefs`, writes a blocked payment object and payment instruction draft, cash packet, dual-control approval request, generated review view, workflow/budget/audit proof, and keeps ACH, payment links, bank writes, and money movement blocked |
+| Added Workforce packet runtime | `workforce_operations` now registers `command=hire.packet.prepare`, `command=payroll_input.prepare`, `view=snapshot`, and `view=readiness` on `/worker`; config stays in the generic worker envelope while the handlers write workforce packets, document/checklist proof, restricted-document redaction proof, payroll blockers, approvals, generated views, workflow/budget/audit records, and blocked/dry-run execution posture |
 | Tightened control-plane scopes | `/core`, `/worker`, `/workflow`, and `/approval` now fail closed when tenant or worker-role scope is required, even if a token catalog entry has an empty allowlist |
 | Scoped Core summaries by tenant | Authenticated `GET /core` now passes the requested tenant into Core summary counts, active tasks, and recent events instead of returning global platform rows |
 | Redacted public health | `/api/health` now reports service status and check states without leaking detailed record counts or operational internals |
@@ -82,13 +83,14 @@
 | Added Core external outcome recording | `POST /core` now supports `external_action.record`, recording receipt/outcome proof for payment instructions, payments, and filing drafts while updating the Core target state without executing external actions |
 | Added Core connector setup commands | `POST /core` now supports `adapter.upsert` and `connection.upsert`, so adapter catalog rows and tenant-scoped pollable connections can be managed headlessly with audit proof and managed credential refs instead of manual DB edits |
 | Added Core connection health proof | `POST /core` now supports `connection.health.record`, storing connector readiness checks for state, adapter status, blocked external execution, managed credential refs, source/provider metadata, read scopes, polling config, and scheduler cursor proof without exposing credential values |
+| Added entity setup recording | `POST /core` now supports `entity.setup.record`, recording legal entity facts, identifiers, work locations, masked bank account refs, blocked payment instructions, workflow run/step proof, an entity setup packet, trace evidence, and audit proof without adding entity-specific URLs |
 | Added Core authority and budget controls | `POST /core` now supports `capability.grant`, `budget.reserve`, `budget.charge`, and `budget.release`, so worker authority and AI budget movement are platform-owned commands with audit and evidence |
 | Hardened Core authority and budget replay | `approval.request`, `capability.grant`, `budget.reserve`, `budget.charge`, and `budget.release` now store replay fingerprints and reject idempotency-key reuse with changed command input |
 | Added durable evidence packets | `POST /core` now supports `packet.prepare` and `document.packet.prepare`, creating an `evidence_packets` record plus linked document, event, audit, and trace evidence for workflow review packets |
 | Added shared approval inbox | `/approval` and `/approvals` expose a token-gated, subject-neutral approval inbox and decision surface on top of the shared `approval_requests`, `audit_events`, and evidence records |
 | Expanded shared approval inbox detail | `/approval` now supports priority, risk, kind, state, and subject filters; approval records include evidence references and subject-aware continuation hints for worker, workflow, task, and Core decisions |
 | Guarded canonical worker API surface | Contract tests now fail if worker-family-specific or `/api/*` control-plane route files appear; worker families must extend `/worker` through registered commands, `worker` selectors, `idempotencyKey`, and `config` payloads |
-| Added planned-worker config schemas | `worker:tool schema` and `continuous.worker.schema` now expose non-executable `configSchema` metadata for Dispatch, Finance, Workforce, Compliance, and Systems commands before runtime handlers are added |
+| Added planned-worker config schemas | `worker:tool schema` and `continuous.worker.schema` now expose non-executable `configSchema` metadata for follow-up commands and future Compliance/Systems commands before runtime handlers are added |
 | Added customer-signal primitives | Satisfaction, feedback, complaint, testimonial, and review records persist as `CustomerSignal.type` rows, and `POST /core` `command=customer_signal.record` writes them with object links, note evidence, events, and audit proof |
 | Added payroll preview kernel | Pay statements, payroll lines, payroll liabilities, and payroll calculation traces now persist as first-class Core tables; `POST /core` `command=payroll.preview.record` records preview artifacts with event, audit, and trace evidence while external execution stays blocked |
 | Added payroll preview packet handoff | `POST /core` `command=payroll.preview.packet.prepare` gathers preview artifacts into variance reports, pay statement documents, approval packets, pending approval requests, and blocked payroll funding/tax draft records |
@@ -187,7 +189,8 @@ The DigitalOcean stack is running on `45.55.53.92`. `continuoushq.com` and
 certificates. Continuous Core now has
 persisted graph, task, capability, event, evidence, budget, adapter, authority,
 document, decision, workflow, and generated UI primitives plus worker run lifecycle
-records and `/`, `/api/health`, `/approval`, `/approvals`, `/core`, and `POST /core` task,
+records and `/`, `/health` (with `/api/health` kept as a compatibility alias),
+`/approval`, `/approvals`, `/core`, and `POST /core` task,
 task-transition, approval-request, capability-grant, budget-ledger, object,
 object-link, event, evidence, document, packet, payroll preview, payroll packet,
 decision, generated-view, AI inference, and control-plane credential/session
@@ -263,3 +266,7 @@ Production deploys also run the internal `worker-scheduler` sidecar. It calls
 envelope as operator calls. Each drain lane reports `succeeded` or `failed`;
 workflow, polling, revenue handoff, retry, and reconciliation failures no
 longer prevent the remaining lanes from running in that scheduler cycle.
+
+Public health checks now prefer `/health`; deploy, rollback, restore, dashboard,
+and observability references were moved to that route while `/api/health`
+continues to respond for older probes.

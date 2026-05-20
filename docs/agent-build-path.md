@@ -34,9 +34,9 @@ Useful app surfaces for worker development:
 | Surface | Purpose |
 |---|---|
 | `/` | Runtime dashboard with public core state and redacted worker readiness |
-| `/api/health` | Redacted machine health check |
+| `/health` | Redacted machine health check |
 | `/core` | Operator-gated, tenant-scoped persisted primitive summary |
-| `POST /core` | Canonical Core command surface with `command`, `core`, `config`, and `idempotencyKey` payload fields for tasks, task transitions, approvals, capability grants, budget ledger operations, objects, object links, events, evidence, documents, packets, decisions, generated views, adapter intents, rule changes, customer signals, and payroll preview artifacts |
+| `POST /core` | Canonical Core command surface with `command`, `core`, `config`, and `idempotencyKey` payload fields for tasks, task transitions, entity setup, approvals, capability grants, budget ledger operations, objects, object links, events, evidence, documents, packets, decisions, generated views, adapter intents, rule changes, customer signals, and payroll preview artifacts |
 | `/approval?view=inbox` | Shared operator-gated approval inbox across Core, workflow, and worker subjects |
 | `POST /approval` | Shared approval decision surface with `command`, explicit `approval.subject`, and `config` payload fields |
 | `/worker?view=snapshot&role=revenue_operations` | Canonical operator-gated worker snapshot |
@@ -151,7 +151,7 @@ The same surface owns the persisted Core primitives used by future workers:
 ```
 
 Other supported Core commands are `task.transition`, `object.link`,
-`adapter.upsert`, `connection.upsert`, `connection.health.record`,
+`adapter.upsert`, `connection.upsert`, `connection.health.record`, `entity.setup.record`,
 `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`, `document.packet.prepare`,
 `decision.record`, `approval.request`, `adapter.intent.record`,
 `rule.change.record`, `capability.grant`, `budget.reserve`, `budget.charge`,

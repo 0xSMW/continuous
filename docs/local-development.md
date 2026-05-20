@@ -43,7 +43,7 @@ UI contract.
 bun run dev
 ```
 
-Open `http://localhost:3000` and `/api/health`. `/core` and `/worker` are
+Open `http://localhost:3000` and `/health`. `/core` and `/worker` are
 operator-only control-plane routes. To test command-scoped credentials, set
 `CONTROL_PLANE_TOKENS_JSON` or `CONTROL_PLANE_TOKEN_CATALOG_B64` to a
 route-scoped token catalog. Use `WORKER_RUN_TOKEN` only long enough to
@@ -53,7 +53,7 @@ shell history, and logs never carry bearer values:
 ```sh
 read -rsp "Route-scoped operator token: " CONTROL_PLANE_OPERATOR_TOKEN
 CONTROL_PLANE_TOKEN_SHA256="$(printf '%s' "$CONTROL_PLANE_OPERATOR_TOKEN" | shasum -a 256 | awk '{print $1}')"
-export CONTROL_PLANE_TOKENS_JSON='[{"id":"local-operator","tokenSha256":"'"$CONTROL_PLANE_TOKEN_SHA256"'","operatorEmail":"owner@continuoushq.com","allowedTenants":["continuous-demo"],"allowedWorkerRoles":["revenue_operations"],"allowedRoutes":["core","worker","workflow","approval"],"allowedAccess":["read","write"],"allowedCommands":["core:view.summary","core:task.create","core:object.upsert","worker:view.snapshot","worker:view.approvals","worker:lead.read","worker:run","worker:adapters.reconcile","worker:adapters.retry","workflow:view.overview","approval:view.inbox","approval:approval.decide"]}]'
+export CONTROL_PLANE_TOKENS_JSON='[{"id":"local-operator","tokenSha256":"'"$CONTROL_PLANE_TOKEN_SHA256"'","operatorEmail":"owner@continuoushq.com","allowedTenants":["continuous-demo"],"allowedWorkerRoles":["revenue_operations"],"allowedRoutes":["core","worker","workflow","approval"],"allowedAccess":["read","write"],"allowedCommands":["core:view.summary","core:task.create","core:object.upsert","core:entity.setup.record","worker:view.snapshot","worker:view.approvals","worker:lead.read","worker:run","worker:adapters.reconcile","worker:adapters.retry","workflow:view.overview","approval:view.inbox","approval:approval.decide"]}]'
 ```
 
 Core side effects use a structured command payload. For local-only testing,
@@ -98,7 +98,7 @@ curl -X POST http://localhost:3000/core \
 ```
 
 The additional Core write commands are `task.transition`, `object.link`,
-`adapter.upsert`, `connection.upsert`, `connection.health.record`,
+`adapter.upsert`, `connection.upsert`, `connection.health.record`, `entity.setup.record`,
 `event.ingest`, `evidence.attach`, `document.create`, `decision.record`, `packet.prepare`,
 `document.packet.prepare`, `approval.request`, `adapter.intent.record`,
 `rule.change.record`, `external_action.record`, `capability.grant`, `budget.reserve`, `budget.charge`,

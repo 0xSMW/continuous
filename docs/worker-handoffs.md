@@ -55,7 +55,7 @@ launch blockers.
 | Owner Chief-of-Staff | `revenue.lead_to_owner_review` approval packet with Revenue source evidence |
 | Dispatch/Ops | implemented: `revenue.quote_to_dispatch` approved quote with blocked adapter receipt produces a dry-run schedule proposal, blocked customer update draft, blocked closeout packet, and blocked exception route task |
 | Finance | implemented: `dispatch.closeout_to_finance` closeout packet with billable line summary produces a dry-run invoice draft; persisted invoice refs produce a blocked AR follow-up draft; and forecast window/account refs produce a blocked cash forecast, cash packet, owner approval request, and blocked money-movement posture |
-| Workforce | seeded employment or contractor packet with payroll preview blockers |
+| Workforce | implemented: `hire.packet.prepare` produces a workforce packet with restricted-document proof and payroll blockers; `payroll_input.prepare` produces a dry-run payroll-input packet and readiness view while payroll submission and money movement stay blocked |
 | Compliance | `workforce.payroll_to_compliance` payroll preview with filing draft |
 | Systems | failing connection sync issue with dry-run repair and rollback plan |
 

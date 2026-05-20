@@ -458,6 +458,20 @@ describe("worker tool contract", () => {
           requiresTenant: true,
           externalExecution: "blocked",
         }),
+        expect.objectContaining({
+          role: "workforce_operations",
+          name: "hire.packet.prepare",
+          idempotency: "required",
+          requiresTenant: true,
+          externalExecution: "blocked",
+        }),
+        expect.objectContaining({
+          role: "workforce_operations",
+          name: "payroll_input.prepare",
+          idempotency: "required",
+          requiresTenant: true,
+          externalExecution: "dry_run",
+        }),
       ]),
     );
     expect(workerToolSchema.registry.commands).toEqual(
@@ -578,6 +592,33 @@ describe("worker tool contract", () => {
             }),
           }),
         }),
+        expect.objectContaining({
+          role: "workforce_operations",
+          name: "hire.packet.prepare",
+          configSchema: expect.objectContaining({
+            required: ["personId", "positionId", "workLocationId"],
+            properties: expect.objectContaining({
+              personId: expect.objectContaining({ type: "string" }),
+              positionId: expect.objectContaining({ type: "string" }),
+              workLocationId: expect.objectContaining({ type: "string" }),
+              sourceRefs: expect.objectContaining({ type: "object" }),
+              policy: expect.objectContaining({ type: "object" }),
+            }),
+          }),
+        }),
+        expect.objectContaining({
+          role: "workforce_operations",
+          name: "payroll_input.prepare",
+          configSchema: expect.objectContaining({
+            required: ["employmentId", "period"],
+            properties: expect.objectContaining({
+              employmentId: expect.objectContaining({ type: "string" }),
+              period: expect.objectContaining({ type: "string" }),
+              payrollRunId: expect.objectContaining({ type: "string" }),
+              policy: expect.objectContaining({ type: "object" }),
+            }),
+          }),
+        }),
       ]),
     );
     expect(workerToolSchema.registry.views).toEqual(
@@ -592,6 +633,8 @@ describe("worker tool contract", () => {
         expect.objectContaining({ role: "dispatch_operations", name: "exceptions" }),
         expect.objectContaining({ role: "finance_operations", name: "snapshot" }),
         expect.objectContaining({ role: "finance_operations", name: "approvals" }),
+        expect.objectContaining({ role: "workforce_operations", name: "snapshot" }),
+        expect.objectContaining({ role: "workforce_operations", name: "readiness" }),
       ]),
     );
     expect(workerToolSchema.$defs.workerTarget.properties.tenantSlug.type).toBe("string");
@@ -638,7 +681,6 @@ describe("worker tool contract", () => {
     }>;
 
     expect(workerToolSchema.registry.plannedContracts.map((contract) => contract.role)).toEqual([
-      "workforce_operations",
       "compliance_operations",
       "systems_operations",
     ]);
@@ -656,6 +698,7 @@ describe("worker tool contract", () => {
       "owner_chief_of_staff",
       "dispatch_operations",
       "finance_operations",
+      "workforce_operations",
     ]);
     expect(workerToolSchema.registry.plannedCommands).toEqual(
       expect.arrayContaining([
@@ -676,6 +719,12 @@ describe("worker tool contract", () => {
           name: "sync.repair.plan",
           apiRoute: "/worker",
           sideEffects: "dry_run",
+        }),
+        expect.objectContaining({
+          role: "workforce_operations",
+          name: "contractor.packet.prepare",
+          apiRoute: "/worker",
+          sideEffects: "internal",
         }),
       ]),
     );

@@ -35,6 +35,7 @@ import {
   jobs,
   legalEntities,
   leads,
+  locations,
   modelProviders,
   modelRoutes,
   objectLinks,
@@ -72,6 +73,7 @@ const ids = {
   ownerWorker: "aaaaaaaa-aaaa-4aaa-8aaa-000000000002",
   dispatchWorker: "aaaaaaaa-aaaa-4aaa-8aaa-000000000003",
   financeWorker: "aaaaaaaa-aaaa-4aaa-8aaa-000000000004",
+  workforceWorker: "aaaaaaaa-aaaa-4aaa-8aaa-000000000005",
   adapter: "56565656-5656-4565-8565-565656565656",
   dispatchAdapter: "56565656-5656-4565-8565-000000000002",
   financeAdapter: "56565656-5656-4565-8565-000000000003",
@@ -91,6 +93,8 @@ const ids = {
   dispatchBudgetAllocation: "bbbbbbbb-bbbb-4bbb-8bbb-000000000009",
   financeBudgetAccount: "bbbbbbbb-bbbb-4bbb-8bbb-000000000010",
   financeBudgetAllocation: "bbbbbbbb-bbbb-4bbb-8bbb-000000000011",
+  workforceBudgetAccount: "bbbbbbbb-bbbb-4bbb-8bbb-000000000012",
+  workforceBudgetAllocation: "bbbbbbbb-bbbb-4bbb-8bbb-000000000013",
   legalEntityObject: "33333333-3333-4333-8333-000000000101",
   workLocationObject: "33333333-3333-4333-8333-000000000102",
   personObject: "33333333-3333-4333-8333-000000000103",
@@ -140,6 +144,7 @@ const ids = {
   filingView: "34343434-3434-4343-8343-000000000002",
   legalEntity: "55555555-5555-4555-8555-000000000001",
   entityIdentifier: "55555555-5555-4555-8555-000000000002",
+  location: "55555555-5555-4555-8555-000000000019",
   person: "55555555-5555-4555-8555-000000000003",
   employment: "55555555-5555-4555-8555-000000000004",
   compensationAgreement: "55555555-5555-4555-8555-000000000005",
@@ -405,6 +410,38 @@ async function seed() {
           cash_forecasts_generated: 0,
           owner_review_packets: 0,
           cash_packets_prepared: 0,
+        },
+      },
+      {
+        id: ids.workforceWorker,
+        tenantId: ids.tenant,
+        managerUserId: ids.owner,
+        kind: "agent",
+        state: "training",
+        name: "Workforce Operations Worker",
+        role: "workforce_operations",
+        mission:
+          "Prepare hiring, document, credential, and payroll-readiness packets while keeping restricted data redacted and execution blocked.",
+        autonomyLevel: 2,
+        scope: {
+          flows: ["hire_packet", "payroll_input_readiness"],
+          systems: ["document_store", "hris", "payroll"],
+        },
+        memory: {
+          workforce_context: "tenant_scoped",
+          restricted_documents: "metadata_only",
+        },
+        policy: {
+          external_execution: "blocked",
+          payroll_submission: "blocked",
+          money_movement: "blocked",
+          restricted_data: "redacted_by_default",
+        },
+        kpis: {
+          hire_packets_prepared: 0,
+          payroll_inputs_prepared: 0,
+          document_blockers_found: 0,
+          approval_requests_created: 0,
         },
       },
     ])
@@ -690,6 +727,35 @@ async function seed() {
     .onConflictDoNothing();
 
   await db
+    .insert(capabilityGrants)
+    .values(
+      [
+        capIds.documentPacketPrepare,
+        capIds.payrollPreviewPrepare,
+        capIds.approvalRequest,
+        capIds.workerRead,
+      ].map((capabilityId) => ({
+        tenantId: ids.tenant,
+        capabilityId,
+        actorType: "worker" as const,
+        actorId: ids.workforceWorker,
+        scope: {
+          tenant_id: ids.tenant,
+          objects: ["person", "employment", "document", "credential", "payroll_input", "payroll_run"],
+        },
+        policy: {
+          mode: "dry_run",
+          autonomy_level: 2,
+          external_execution: "blocked",
+          payroll_submission: "blocked",
+          money_movement: "blocked",
+          restricted_data: "redacted_by_default",
+        },
+      })),
+    )
+    .onConflictDoNothing();
+
+  await db
     .insert(adapters)
     .values([
       {
@@ -865,6 +931,14 @@ async function seed() {
         target: "worker",
         targetId: ids.financeWorker,
       },
+      {
+        id: ids.workforceBudgetAccount,
+        tenantId: ids.tenant,
+        policyId: ids.budgetPolicy,
+        name: "Workforce Operations Worker monthly intelligence budget",
+        target: "worker",
+        targetId: ids.workforceWorker,
+      },
     ])
     .onConflictDoNothing();
 
@@ -903,6 +977,15 @@ async function seed() {
         tenantId: ids.tenant,
         poolId: ids.budgetPool,
         accountId: ids.financeBudgetAccount,
+        units: 1000000,
+        startsAt: now,
+        endsAt: nextMonth,
+      },
+      {
+        id: ids.workforceBudgetAllocation,
+        tenantId: ids.tenant,
+        poolId: ids.budgetPool,
+        accountId: ids.workforceBudgetAccount,
         units: 1000000,
         startsAt: now,
         endsAt: nextMonth,
@@ -1132,6 +1215,27 @@ async function seed() {
       value: "XX-XXX6789",
       issuer: "IRS",
       data: { masked: true },
+      effectiveAt: now,
+    })
+    .onConflictDoNothing();
+
+  await db
+    .insert(locations)
+    .values({
+      id: ids.location,
+      tenantId: ids.tenant,
+      legalEntityId: ids.legalEntity,
+      objectId: ids.workLocationObject,
+      kind: "work",
+      name: "Continuous Demo Headquarters",
+      state: "active",
+      jurisdiction: "NY",
+      country: "US",
+      data: {
+        remote_allowed: true,
+        establishment: "headquarters",
+        tax_nexus: "review_required",
+      },
       effectiveAt: now,
     })
     .onConflictDoNothing();
