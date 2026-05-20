@@ -59,9 +59,23 @@ export type ApprovalRecord = {
   reviewerUserId: string | null;
   requestedAction: JsonObject;
   evidence: JsonObject;
+  evidenceRefs: Array<{
+    type: string;
+    label: string;
+    id: string;
+  }>;
   policy: JsonObject;
   decision: JsonObject;
   data: JsonObject;
+  continuation: {
+    decisionSurface: "/approval";
+    decisionCommand: "approval.decide";
+    description: string;
+    postDecisionSurface: "/worker" | "/approval" | null;
+    postDecisionCommand: string | null;
+    config: JsonObject;
+    externalExecution: "blocked";
+  };
   createdAt: string;
   updatedAt: string;
   decidedAt: string | null;
@@ -115,6 +129,138 @@ function approvalSubject(row: typeof approvalRequests.$inferSelect): ApprovalRec
   return { type: "approval_request", id: row.id };
 }
 
+function appendApprovalRef(
+  refs: ApprovalRecord["evidenceRefs"],
+  seen: Set<string>,
+  type: string,
+  label: string,
+  value: unknown,
+) {
+  const id = stringValue(value);
+
+  if (!id || !uuidPattern.test(id)) {
+    return;
+  }
+
+  const key = `${type}:${id}`;
+
+  if (seen.has(key)) {
+    return;
+  }
+
+  seen.add(key);
+  refs.push({ type, label, id });
+}
+
+function approvalEvidenceRefs(row: typeof approvalRequests.$inferSelect): ApprovalRecord["evidenceRefs"] {
+  const refs: ApprovalRecord["evidenceRefs"] = [];
+  const seen = new Set<string>();
+  const action = objectValue(row.requestedAction);
+  const evidenceData = objectValue(row.evidence);
+  const rowData = objectValue(row.data);
+  const decision = objectValue(row.decision);
+  const continuation = objectValue(decision.continuation);
+
+  appendApprovalRef(refs, seen, "approval_request", "Approval request", row.id);
+  appendApprovalRef(refs, seen, "task", "Task", row.taskId);
+  appendApprovalRef(refs, seen, "worker_run", "Worker run", row.workerRunId);
+  appendApprovalRef(refs, seen, "workflow_run", "Workflow run", row.workflowRunId);
+  appendApprovalRef(refs, seen, "event", "Event", row.eventId ?? evidenceData.eventId);
+  appendApprovalRef(refs, seen, "object", "Object", row.objectId ?? evidenceData.objectId);
+  appendApprovalRef(refs, seen, "capability", "Capability", row.capabilityId ?? evidenceData.capabilityId);
+  appendApprovalRef(refs, seen, "evidence", "Request evidence", evidenceData.requestEvidenceId);
+  appendApprovalRef(refs, seen, "evidence", "Approval evidence", evidenceData.approvalEvidenceId);
+  appendApprovalRef(refs, seen, "evidence", "Source snapshot", evidenceData.sourceSnapshotEvidenceId);
+  appendApprovalRef(refs, seen, "evidence", "Adapter receipt", evidenceData.adapterReceiptEvidenceId);
+  appendApprovalRef(refs, seen, "audit_event", "Audit event", evidenceData.auditEventId);
+  appendApprovalRef(refs, seen, "adapter_run", "Adapter run", evidenceData.adapterRunId ?? rowData.adapterRunId);
+  appendApprovalRef(
+    refs,
+    seen,
+    "adapter_action",
+    "Adapter action",
+    action.adapterActionId ?? evidenceData.adapterActionId ?? rowData.adapterActionId,
+  );
+  appendApprovalRef(refs, seen, "evidence_packet", "Evidence packet", evidenceData.packetId ?? rowData.packetId);
+  appendApprovalRef(
+    refs,
+    seen,
+    "document",
+    "Packet document",
+    evidenceData.packetDocumentId ?? rowData.packetDocumentId,
+  );
+  appendApprovalRef(refs, seen, "payroll_run", "Payroll run", evidenceData.payrollRunId ?? rowData.payrollRunId);
+  appendApprovalRef(refs, seen, "filing_draft", "Filing draft", evidenceData.filingDraftId ?? rowData.filingDraftId);
+  appendApprovalRef(refs, seen, "workflow_step", "Workflow step", continuation.workflowStepId);
+
+  for (const paymentInstructionId of uuidList(evidenceData.paymentInstructionIds ?? rowData.paymentInstructionIds)) {
+    appendApprovalRef(refs, seen, "payment_instruction", "Payment instruction", paymentInstructionId);
+  }
+
+  return refs;
+}
+
+function approvalContinuation(row: typeof approvalRequests.$inferSelect): ApprovalRecord["continuation"] {
+  const subject = approvalSubject(row);
+  const base = {
+    decisionSurface: "/approval" as const,
+    decisionCommand: "approval.decide" as const,
+    externalExecution: "blocked" as const,
+  };
+
+  if (row.kind === "payroll_preview_approval") {
+    return {
+      ...base,
+      description:
+        "Deciding this payroll approval records the payroll handoff while funding, tax submission, and money movement remain blocked.",
+      postDecisionSurface: "/approval",
+      postDecisionCommand: "approval.decide",
+      config: { approvalId: row.id, subject: "all", kind: row.kind },
+    };
+  }
+
+  if (subject.type === "worker_run") {
+    return {
+      ...base,
+      description:
+        "Decide here first, then continue the worker through /worker with command=continue and config.approvalId.",
+      postDecisionSurface: "/worker",
+      postDecisionCommand: "continue",
+      config: { approvalId: row.id, workerRunId: subject.id },
+    };
+  }
+
+  if (subject.type === "workflow_run") {
+    return {
+      ...base,
+      description:
+        "Deciding this request records the workflow approval decision and advances the workflow only through allowed states.",
+      postDecisionSurface: "/approval",
+      postDecisionCommand: "approval.decide",
+      config: { approvalId: row.id, workflowRunId: subject.id },
+    };
+  }
+
+  if (subject.type === "task") {
+    return {
+      ...base,
+      description:
+        "Deciding this request updates the linked task outcome and keeps external execution blocked.",
+      postDecisionSurface: "/approval",
+      postDecisionCommand: "approval.decide",
+      config: { approvalId: row.id, taskId: subject.id },
+    };
+  }
+
+  return {
+    ...base,
+    description: "Deciding this request records shared approval evidence and audit proof.",
+    postDecisionSurface: "/approval",
+    postDecisionCommand: "approval.decide",
+    config: { approvalId: row.id, kind: row.kind },
+  };
+}
+
 function approvalRecord(row: typeof approvalRequests.$inferSelect): ApprovalRecord {
   return {
     id: row.id,
@@ -134,9 +280,11 @@ function approvalRecord(row: typeof approvalRequests.$inferSelect): ApprovalReco
     reviewerUserId: row.reviewerUserId,
     requestedAction: row.requestedAction,
     evidence: row.evidence,
+    evidenceRefs: approvalEvidenceRefs(row),
     policy: row.policy,
     decision: row.decision,
     data: row.data,
+    continuation: approvalContinuation(row),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     decidedAt: row.decidedAt?.toISOString() ?? null,
@@ -325,6 +473,9 @@ export async function listApprovals(input: {
   tenantSlug?: string;
   state?: string;
   subject?: ApprovalSubject;
+  priority?: string;
+  risk?: string;
+  kind?: string;
   db?: Database;
 }) {
   const db = input.db ?? defaultDb;
@@ -334,11 +485,26 @@ export async function listApprovals(input: {
     tenantSlug: input.tenantSlug,
   });
   const subject = input.subject ?? "all";
+  const priority = input.priority ? parsePriority(input.priority, "normal") : undefined;
+  const risk = input.risk ? parseRisk(input.risk) : undefined;
+  const kind = cleanString(input.kind);
   const conditions = [eq(approvalRequests.tenantId, operator.tenantId)];
   const scopedCondition = subjectCondition(subject);
 
   if (input.state) {
     conditions.push(eq(approvalRequests.state, input.state));
+  }
+
+  if (priority) {
+    conditions.push(eq(approvalRequests.priority, priority));
+  }
+
+  if (risk) {
+    conditions.push(eq(approvalRequests.risk, risk));
+  }
+
+  if (kind) {
+    conditions.push(eq(approvalRequests.kind, kind));
   }
 
   if (scopedCondition) {
@@ -361,6 +527,12 @@ export async function listApprovals(input: {
       name: operator.name,
     },
     subject,
+    filters: {
+      state: input.state ?? "all",
+      priority: priority ?? "all",
+      risk: risk ?? "all",
+      kind: kind ?? "all",
+    },
     approvals: rows.map(approvalRecord),
   };
 }

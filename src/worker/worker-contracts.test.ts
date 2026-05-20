@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -57,7 +57,26 @@ function read(path: string) {
   return readFileSync(join(root, path), "utf8");
 }
 
+function listFiles(path: string): string[] {
+  return readdirSync(join(root, path), { withFileTypes: true }).flatMap((entry) => {
+    const childPath = `${path}/${entry.name}`;
+
+    return entry.isDirectory() ? listFiles(childPath) : [childPath];
+  });
+}
+
 describe("future worker contracts", () => {
+  it("does not expose worker-family-specific HTTP route files", () => {
+    const routeFiles = listFiles("app").filter((path) => path.endsWith("/route.ts"));
+    const workerFamilyRoutePattern =
+      /^app\/(?:api\/)?(?:revenue|dispatch|finance|workforce|compliance|systems|owner)[^/]*worker\//;
+
+    expect(routeFiles).toContain("app/worker/route.ts");
+    expect(routeFiles).toContain("app/core/route.ts");
+    expect(routeFiles).toContain("app/workflow/route.ts");
+    expect(routeFiles.filter((path) => workerFamilyRoutePattern.test(path))).toEqual([]);
+  });
+
   it("keeps the current revenue contract on the generic worker API", () => {
     const source = read("docs/revenue-operations-worker-v1-contract.md");
 

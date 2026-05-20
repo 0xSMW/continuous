@@ -55,6 +55,12 @@ function parseSubject(value: unknown): ApprovalSubject | null {
   return approvalSubjects.has(subject as ApprovalSubject) ? (subject as ApprovalSubject) : null;
 }
 
+function optionalFilter(value: string | null) {
+  const filter = optionalString(value);
+
+  return filter && filter !== "all" ? filter : undefined;
+}
+
 function errorResponse(error: { code: string; message: string }, status: number) {
   return Response.json(
     {
@@ -159,8 +165,11 @@ export async function GET(request: Request) {
     const approvals = await listApprovals({
       operatorEmail: auth.operatorEmail,
       tenantSlug,
-      state: optionalString(url.searchParams.get("state")),
+      state: optionalFilter(url.searchParams.get("state")),
       subject,
+      priority: optionalFilter(url.searchParams.get("priority")),
+      risk: optionalFilter(url.searchParams.get("risk")),
+      kind: optionalFilter(url.searchParams.get("kind")),
     });
 
     return Response.json(

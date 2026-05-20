@@ -92,6 +92,49 @@ describe("/approval route", () => {
       tenantSlug: "continuous-demo",
       state: "pending",
       subject: "worker",
+      priority: undefined,
+      risk: undefined,
+      kind: undefined,
+    });
+  });
+
+  it("passes shared approval inbox filters without widening the route surface", async () => {
+    mocks.env.CONTROL_PLANE_ALLOWED_TENANTS = "continuous-demo";
+    mocks.listApprovals.mockResolvedValue({
+      operator: {
+        tenantSlug: "continuous-demo",
+      },
+      subject: "workflow",
+      filters: {
+        state: "all",
+        priority: "urgent",
+        risk: "high",
+        kind: "payroll_preview_approval",
+      },
+      approvals: [],
+    });
+
+    const { GET } = await import("./route");
+    const response = await GET(
+      new Request(
+        "http://localhost/approval?tenantSlug=continuous-demo&state=all&subject=workflow&priority=urgent&risk=high&kind=payroll_preview_approval",
+        {
+          headers: {
+            authorization: "Bearer test-token",
+          },
+        },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.listApprovals).toHaveBeenCalledWith({
+      operatorEmail: "operator@example.com",
+      tenantSlug: "continuous-demo",
+      state: undefined,
+      subject: "workflow",
+      priority: "urgent",
+      risk: "high",
+      kind: "payroll_preview_approval",
     });
   });
 

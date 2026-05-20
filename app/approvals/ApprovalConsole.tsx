@@ -25,6 +25,20 @@ type ApprovalRecord = {
   objectId: string | null;
   requestedAction: Record<string, unknown>;
   evidence: Record<string, unknown>;
+  evidenceRefs: Array<{
+    type: string;
+    label: string;
+    id: string;
+  }>;
+  continuation: {
+    decisionSurface: "/approval";
+    decisionCommand: "approval.decide";
+    description: string;
+    postDecisionSurface: "/worker" | "/approval" | null;
+    postDecisionCommand: string | null;
+    config: Record<string, unknown>;
+    externalExecution: "blocked";
+  };
   createdAt: string;
 };
 
@@ -34,6 +48,12 @@ type ApprovalInboxResponse = {
     approvals: {
       approvals: ApprovalRecord[];
       subject: ApprovalSubject;
+      filters: {
+        state: string;
+        priority: string;
+        risk: string;
+        kind: string;
+      };
     };
   } | null;
   error: {
@@ -68,7 +88,21 @@ function approvalRefs(approval: ApprovalRecord) {
     ["Workflow run", approval.workflowRunId],
     ["Object", approval.objectId],
     ["Event", approval.eventId],
-  ].filter(([, value]) => typeof value === "string" && value.length > 0);
+  ].flatMap(([label, value]) =>
+    typeof label === "string" && typeof value === "string" && value.length > 0
+      ? [{ label, value }]
+      : [],
+  );
+}
+
+function evidenceRefs(approval: ApprovalRecord) {
+  return approval.evidenceRefs.length > 0
+    ? approval.evidenceRefs
+    : approvalRefs(approval).map(({ label, value }) => ({
+        type: label.toLowerCase().replaceAll(" ", "_"),
+        label,
+        id: value,
+      }));
 }
 
 export function ApprovalConsole() {
@@ -76,6 +110,9 @@ export function ApprovalConsole() {
   const [tenantSlug, setTenantSlug] = useState("continuous-demo");
   const [subject, setSubject] = useState<ApprovalSubject>("all");
   const [state, setState] = useState("pending");
+  const [priority, setPriority] = useState("all");
+  const [risk, setRisk] = useState("all");
+  const [kind, setKind] = useState("");
   const [note, setNote] = useState("");
   const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
   const [message, setMessage] = useState("No approvals loaded.");
@@ -95,7 +132,15 @@ export function ApprovalConsole() {
       tenantSlug,
       state,
       subject,
+      priority,
+      risk,
     });
+    const trimmedKind = kind.trim();
+
+    if (trimmedKind) {
+      params.set("kind", trimmedKind);
+    }
+
     const response = await fetch(`/approval?${params.toString()}`, {
       headers: {
         authorization: `Bearer ${token}`,
@@ -188,11 +233,36 @@ export function ApprovalConsole() {
         <label>
           <span>State</span>
           <select value={state} onChange={(event) => setState(event.target.value)}>
+            <option value="all">All</option>
             <option value="pending">Pending</option>
             <option value="approved">Approved</option>
             <option value="revision_requested">Revision</option>
             <option value="rejected">Rejected</option>
           </select>
+        </label>
+        <label>
+          <span>Priority</span>
+          <select value={priority} onChange={(event) => setPriority(event.target.value)}>
+            <option value="all">All</option>
+            <option value="urgent">Urgent</option>
+            <option value="high">High</option>
+            <option value="normal">Normal</option>
+            <option value="low">Low</option>
+          </select>
+        </label>
+        <label>
+          <span>Risk</span>
+          <select value={risk} onChange={(event) => setRisk(event.target.value)}>
+            <option value="all">All</option>
+            <option value="critical">Critical</option>
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+          </select>
+        </label>
+        <label>
+          <span>Kind</span>
+          <input value={kind} onChange={(event) => setKind(event.target.value)} placeholder="Any" />
         </label>
         <button type="button" onClick={refresh} disabled={isPending}>
           <RefreshCw aria-hidden="true" size={16} />
@@ -235,11 +305,15 @@ export function ApprovalConsole() {
                   <dt>Evidence</dt>
                   <dd>{compactJson(approval.evidence)}</dd>
                 </div>
+                <div>
+                  <dt>Continuation</dt>
+                  <dd>{approval.continuation.description}</dd>
+                </div>
               </dl>
               <div className="approval-refs">
-                {approvalRefs(approval).map(([label, value]) => (
-                  <span key={`${label}:${value}`}>
-                    {label}: {value}
+                {evidenceRefs(approval).map((ref) => (
+                  <span key={`${ref.type}:${ref.id}`}>
+                    {ref.label}: {ref.id}
                   </span>
                 ))}
               </div>
