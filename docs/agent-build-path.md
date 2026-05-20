@@ -77,6 +77,7 @@ HTTP mutation. Read the lead source records into Core first, then run the worker
 from the returned source selector:
 
 ```sh
+export WORKER_OPERATOR_EMAIL=owner@continuoushq.com
 bun run worker:tool worker.command <<'JSON'
 {"command":"lead.read","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-lead-read-001","config":{"source":"website_form","records":[{"sourceEventId":"form-001","customerName":"Acme Roof Repair","customerIntent":"roof leak inspection","serviceArea":"roofing","urgency":"high"}]}}
 JSON
@@ -90,8 +91,9 @@ When the HTTP snapshot, approval, or run path is required, use a route-scoped
 token from `CONTROL_PLANE_TOKENS_JSON` or `CONTROL_PLANE_TOKEN_CATALOG_B64`.
 Keep `WORKER_RUN_TOKEN` only as a bootstrap secret for first deploys and host
 recovery.
-`WORKER_OPERATOR_EMAIL` must match an active seeded user, defaulting to
-`owner@continuoushq.com`. Production also sets
+`WORKER_OPERATOR_EMAIL` must be set by the local app-server or operator
+transport and must match an active seeded user; worker tool payloads must not
+carry operator identity. Production also sets
 `CONTROL_PLANE_ALLOWED_TENANTS` and `CONTROL_PLANE_ALLOWED_WORKER_ROLES`, so
 operator routes must carry an allowed `tenantSlug` and `/worker` calls must
 carry an allowed `worker.role`. Deploys also write a hashed
@@ -197,6 +199,7 @@ live-credential readiness and rollback proof:
 The worker toolbox uses the same payload shape:
 
 ```sh
+export WORKER_OPERATOR_EMAIL=owner@continuoushq.com
 bun run worker:tool schema
 
 bun run worker:tool worker.view <<'JSON'

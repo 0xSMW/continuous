@@ -892,6 +892,45 @@ describe("/worker route", () => {
     expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
   });
 
+  it("rejects malformed optional worker selectors before registry dispatch", async () => {
+    const { POST } = await import("./route");
+
+    for (const [field, value, message] of [
+      ["id", 42, "worker.id must be a non-empty string when supplied."],
+      ["tenantSlug", null, "worker.tenantSlug must be a non-empty string when supplied."],
+      ["tenantSlug", "", "worker.tenantSlug must be a non-empty string when supplied."],
+    ] as const) {
+      const response = await POST(
+        new Request("http://localhost/worker", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer test-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            command: "run",
+            worker: {
+              role: "revenue_operations",
+              tenantSlug: "continuous-demo",
+              [field]: value,
+            },
+            idempotencyKey: `malformed-worker-selector-${field}`,
+            config: {},
+          }),
+        }),
+      );
+      const body = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(body.error).toEqual({
+        code: "invalid_worker_target",
+        message,
+      });
+    }
+
+    expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
+  });
+
   it("rejects non-object command config before registry dispatch", async () => {
     const { POST } = await import("./route");
     const response = await POST(

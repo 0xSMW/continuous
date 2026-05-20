@@ -102,6 +102,7 @@ import {
 
 const runIntegration = Boolean(process.env.CI && process.env.DATABASE_URL);
 const maybeDescribe = runIntegration ? describe : describe.skip;
+const originalWorkerOperatorEmail = process.env.WORKER_OPERATOR_EMAIL;
 
 function objectValue(value: unknown): JsonObject {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonObject) : {};
@@ -119,6 +120,8 @@ function stringValue(value: unknown) {
 
 maybeDescribe("Revenue Worker integration eval", () => {
   beforeAll(() => {
+    process.env.WORKER_OPERATOR_EMAIL = originalWorkerOperatorEmail ?? "owner@continuoushq.com";
+
     execFileSync("bun", ["run", "db:migrate"], {
       cwd: process.cwd(),
       env: process.env,
@@ -132,6 +135,12 @@ maybeDescribe("Revenue Worker integration eval", () => {
   }, 120_000);
 
   afterAll(async () => {
+    if (originalWorkerOperatorEmail === undefined) {
+      delete process.env.WORKER_OPERATOR_EMAIL;
+    } else {
+      process.env.WORKER_OPERATOR_EMAIL = originalWorkerOperatorEmail;
+    }
+
     await pool.end();
   });
 

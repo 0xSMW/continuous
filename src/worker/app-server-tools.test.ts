@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   appServerWorkerToolManifest,
@@ -7,6 +7,11 @@ import {
 
 const originalAppEnv = process.env.APP_ENV;
 const originalTrustedLocalWorkerTools = process.env.CONTINUOUS_TRUSTED_LOCAL_WORKER_TOOLS;
+const originalWorkerOperatorEmail = process.env.WORKER_OPERATOR_EMAIL;
+
+beforeEach(() => {
+  process.env.WORKER_OPERATOR_EMAIL = "owner@continuoushq.com";
+});
 
 afterEach(() => {
   if (originalAppEnv === undefined) {
@@ -19,6 +24,12 @@ afterEach(() => {
     delete process.env.CONTINUOUS_TRUSTED_LOCAL_WORKER_TOOLS;
   } else {
     process.env.CONTINUOUS_TRUSTED_LOCAL_WORKER_TOOLS = originalTrustedLocalWorkerTools;
+  }
+
+  if (originalWorkerOperatorEmail === undefined) {
+    delete process.env.WORKER_OPERATOR_EMAIL;
+  } else {
+    process.env.WORKER_OPERATOR_EMAIL = originalWorkerOperatorEmail;
   }
 });
 
@@ -321,6 +332,63 @@ describe("app-server worker tools", () => {
       }),
     ).rejects.toThrow(
       "worker target fields must be role, id, and tenantSlug. Move operation inputs into config. Unexpected fields: approvalId.",
+    );
+  });
+
+  it("rejects malformed optional worker selectors on app-server tools", async () => {
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.command", {
+        command: "run",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+          id: 42,
+        },
+        idempotencyKey: "app-server-malformed-worker-id",
+        config: {},
+      }),
+    ).rejects.toThrow("worker.id must be a non-empty string when supplied.");
+
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.view", {
+        view: "snapshot",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: null,
+        },
+        config: {},
+      }),
+    ).rejects.toThrow("worker.tenantSlug must be a non-empty string when supplied.");
+  });
+
+  it("requires operator identity from the app-server transport environment", async () => {
+    delete process.env.WORKER_OPERATOR_EMAIL;
+
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.command", {
+        command: "missing.command",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "app-server-missing-operator-command",
+        config: {},
+      }),
+    ).rejects.toThrow(
+      "continuous.worker.command requires WORKER_OPERATOR_EMAIL from the trusted local transport environment.",
+    );
+
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.view", {
+        view: "snapshot",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        config: {},
+      }),
+    ).rejects.toThrow(
+      "continuous.worker.view requires WORKER_OPERATOR_EMAIL from the trusted local transport environment.",
     );
   });
 

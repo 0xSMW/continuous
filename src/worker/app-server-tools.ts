@@ -3,6 +3,7 @@ import { executeWorkerCommand, executeWorkerView, type WorkerTargetInput } from 
 import {
   assertTrustedLocalWorkerMutation,
   assertTrustedLocalWorkerRead,
+  requiredLocalWorkerOperatorEmail,
   workerToolSchema,
 } from "./tools";
 import {
@@ -113,7 +114,7 @@ export const appServerWorkerToolManifest = {
     readTools: "continuous.worker.view",
     mutationTools: "continuous.worker.command",
     runtimeControl:
-      "App-server worker reads and commands delegate to the same registry used by /worker and bun run worker:tool. Caller supplies view or command, worker target, idempotencyKey when needed, and config; operator identity is resolved from the trusted local environment and no production token is loaded.",
+      "App-server worker reads and commands delegate to the same registry used by /worker and bun run worker:tool. Caller supplies view or command, worker target, idempotencyKey when needed, and config; operator identity must be supplied by the trusted local transport environment and no production token is loaded.",
   },
   tools: appServerWorkerTools,
 } as const;
@@ -202,13 +203,13 @@ export async function executeAppServerWorkerTool(name: string, args: JsonObject 
     assertAppServerWorkerCommandEnvelope(args);
 
     const command = stringValue(args.command);
-    const operatorEmail = process.env.WORKER_OPERATOR_EMAIL ?? "owner@continuoushq.com";
 
     if (!command) {
       throw new Error("continuous.worker.command requires command.");
     }
 
     assertTrustedLocalWorkerMutation("continuous.worker.command");
+    const operatorEmail = requiredLocalWorkerOperatorEmail("continuous.worker.command");
 
     return executeWorkerCommand({
       command,
@@ -223,10 +224,10 @@ export async function executeAppServerWorkerTool(name: string, args: JsonObject 
     assertAppServerWorkerViewEnvelope(args);
 
     const view = stringValue(args.view) ?? "snapshot";
-    const operatorEmail = process.env.WORKER_OPERATOR_EMAIL ?? "owner@continuoushq.com";
     const config = objectValue(args.config);
 
     assertTrustedLocalWorkerRead("continuous.worker.view");
+    const operatorEmail = requiredLocalWorkerOperatorEmail("continuous.worker.view");
 
     const result = await executeWorkerView({
       view,

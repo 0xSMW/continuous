@@ -72,6 +72,18 @@ export function validateWorkerTargetEnvelope(value: unknown):
     };
   }
 
+  for (const field of ["id", "tenantSlug"]) {
+    if (
+      Object.prototype.hasOwnProperty.call(target, field) &&
+      (typeof target[field] !== "string" || !target[field].trim())
+    ) {
+      return {
+        ok: false,
+        message: `worker.${field} must be a non-empty string when supplied.`,
+      };
+    }
+  }
+
   return { ok: true };
 }
 

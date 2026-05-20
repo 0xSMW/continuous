@@ -42,14 +42,16 @@ same bearer token used by worker and workflow commands.
 
 ```sh
 ./scripts/create-droplet.sh
-HOST=45.55.53.92 ./scripts/deploy.sh
+WORKER_OPERATOR_EMAIL=owner@continuoushq.com HOST=45.55.53.92 ./scripts/deploy.sh
 ```
 
 The deploy script waits for cloud-init, syncs the repo to `/opt/continuous`,
 creates a remote `.env` with a random Postgres credential, runs migrations, seeds
 bootstrap records, builds the app image, and starts the stack. After DNS is
 pointed, the default hosts are `continuoushq.com, getcontinuous.app` and the
-default app URL is `https://continuoushq.com`.
+default app URL is `https://continuoushq.com`. `WORKER_OPERATOR_EMAIL` must be a
+seeded active operator; it becomes the explicit local/deploy transport identity
+for bootstrap smoke and generated catalog credentials.
 
 ## Domain State
 
@@ -77,6 +79,7 @@ The `Deploy` workflow is manual-only and uses these repository secrets:
 - `DEPLOY_KEY`
 - `DEPLOY_PATH`
 - `ACME_EMAIL`
+- `WORKER_OPERATOR_EMAIL`
 - `DO_API_TOKEN`
 
 The workflow uses `DO_API_TOKEN` to add the current GitHub runner IP as a
@@ -121,9 +124,10 @@ openssl s_client -connect 45.55.53.92:443 -servername continuoushq.com </dev/nul
 ```
 
 The deploy path enables the generic worker command surface with a generated
-bearer token in `/opt/continuous/.env`. `WORKER_OPERATOR_EMAIL` defaults to the
-seeded owner user and must match an active user before approval records or
-operator decisions can be written. The deploy path also writes a hashed
+bearer token in `/opt/continuous/.env`. `WORKER_OPERATOR_EMAIL` is written into
+the deploy environment and must match an active user before approval records or
+operator decisions can be written; Compose containers fail fast if it is not
+provided. The deploy path also writes a hashed
 control-plane token catalog and scopes that credential to
 `CONTROL_PLANE_ALLOWED_TENANTS=continuous-demo` and
 `CONTROL_PLANE_ALLOWED_WORKER_ROLES=revenue_operations,owner_chief_of_staff,dispatch_operations,finance_operations`;

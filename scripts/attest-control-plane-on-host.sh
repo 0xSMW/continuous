@@ -88,7 +88,11 @@ env_value() {
 
 WORKER_TOKEN="$(env_value WORKER_RUN_TOKEN)"
 WORKER_OPERATOR_EMAIL="$(env_value WORKER_OPERATOR_EMAIL)"
-WORKER_OPERATOR_EMAIL="${WORKER_OPERATOR_EMAIL:-owner@continuoushq.com}"
+
+if [ -z "$WORKER_OPERATOR_EMAIL" ]; then
+  echo "WORKER_OPERATOR_EMAIL is required in $APP_DIR/.env for control-plane attestation." >&2
+  exit 1
+fi
 
 if [ -z "$WORKER_TOKEN" ]; then
   echo "Missing bootstrap token for catalog seeding in $APP_DIR/.env." >&2

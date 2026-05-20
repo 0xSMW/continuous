@@ -163,8 +163,9 @@ curl -X POST http://localhost:3000/worker \
   }'
 ```
 
-Runs are bound to `WORKER_OPERATOR_EMAIL`, which defaults to the seeded
-`owner@continuoushq.com` user. A successful run records an approval request and
+Runs are bound to `WORKER_OPERATOR_EMAIL`, which must be set by the local
+operator shell or app-server bridge and must match a seeded user such as
+`owner@continuoushq.com`. A successful run records an approval request and
 audit trail while keeping external send and money movement blocked. Use
 `worker.command` with `command=lead.read` to persist source lead records before
 `worker.command` with `command=run`;
@@ -191,6 +192,7 @@ Agent-facing local automation can use the repo-owned worker toolbox:
 
 ```sh
 bun run worker:tool schema
+export WORKER_OPERATOR_EMAIL=owner@continuoushq.com
 bun run worker:tool worker.view --payload='{"view":"snapshot","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{}}'
 bun run worker:tool worker.command --payload='{"command":"lead.read","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-lead-read-002","config":{"source":"website_form","records":[{"sourceEventId":"form-local-002","customerName":"Acme Roof Repair"}]}}'
 bun run worker:tool worker.command --payload='{"command":"adapters.reconcile","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-adapters-reconcile-001","config":{"limit":25}}'
@@ -227,6 +229,7 @@ The app-server worker tools use the same read and command envelopes as the
 worker registry:
 
 ```sh
+export WORKER_OPERATOR_EMAIL=owner@continuoushq.com
 bun run app-server:worker-tools continuous.worker.view --payload='{"view":"snapshot","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{}}'
 ```
 

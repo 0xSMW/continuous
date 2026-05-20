@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
@@ -21,6 +21,11 @@ import {
 
 const originalAppEnv = process.env.APP_ENV;
 const originalTrustedLocalWorkerTools = process.env.CONTINUOUS_TRUSTED_LOCAL_WORKER_TOOLS;
+const originalWorkerOperatorEmail = process.env.WORKER_OPERATOR_EMAIL;
+
+beforeEach(() => {
+  process.env.WORKER_OPERATOR_EMAIL = "owner@continuoushq.com";
+});
 
 afterEach(() => {
   if (originalAppEnv === undefined) {
@@ -33,6 +38,12 @@ afterEach(() => {
     delete process.env.CONTINUOUS_TRUSTED_LOCAL_WORKER_TOOLS;
   } else {
     process.env.CONTINUOUS_TRUSTED_LOCAL_WORKER_TOOLS = originalTrustedLocalWorkerTools;
+  }
+
+  if (originalWorkerOperatorEmail === undefined) {
+    delete process.env.WORKER_OPERATOR_EMAIL;
+  } else {
+    process.env.WORKER_OPERATOR_EMAIL = originalWorkerOperatorEmail;
   }
 });
 
@@ -114,6 +125,37 @@ describe("worker tool contract", () => {
     }
   });
 
+  it("requires operator identity from the local worker transport environment", async () => {
+    delete process.env.WORKER_OPERATOR_EMAIL;
+
+    await expect(
+      executeWorkerTool("worker.command", {
+        command: "missing.command",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "local-missing-operator-command",
+        config: {},
+      }),
+    ).rejects.toThrow(
+      "worker.command requires WORKER_OPERATOR_EMAIL from the trusted local transport environment.",
+    );
+
+    await expect(
+      executeWorkerTool("worker.view", {
+        view: "snapshot",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        config: {},
+      }),
+    ).rejects.toThrow(
+      "worker.view requires WORKER_OPERATOR_EMAIL from the trusted local transport environment.",
+    );
+  });
+
   it("keeps command tool inputs inside the worker command envelope", () => {
     for (const tool of workerTools) {
       if (tool.registry.surface !== "command") {
@@ -141,6 +183,55 @@ describe("worker tool contract", () => {
       }
     }
     expect(workerToolSchema.$defs.workerTarget.additionalProperties).toBe(false);
+  });
+
+  it("keeps local and app-server worker envelopes in parity", () => {
+    const localCommand = workerTools.find((tool) => tool.name === "worker.command");
+    const localView = workerTools.find((tool) => tool.name === "worker.view");
+    const appServerCommand = appServerWorkerTools.find(
+      (tool) => tool.name === "continuous.worker.command",
+    );
+    const appServerView = appServerWorkerTools.find((tool) => tool.name === "continuous.worker.view");
+
+    if (!localCommand || !localView || !appServerCommand || !appServerView) {
+      throw new Error("Expected local and app-server worker tool specs.");
+    }
+
+    expect(Object.keys(localCommand.inputSchema.properties)).toEqual([
+      "command",
+      "worker",
+      "idempotencyKey",
+      "config",
+    ]);
+    expect(Object.keys(appServerCommand.inputSchema.properties)).toEqual([
+      "command",
+      "worker",
+      "idempotencyKey",
+      "config",
+    ]);
+    expect(localCommand.inputSchema.required).toEqual(["command", "worker", "config"]);
+    expect(appServerCommand.inputSchema.required).toEqual(["command", "worker", "config"]);
+    expect(localCommand.inputSchema.additionalProperties).toBe(false);
+    expect(appServerCommand.inputSchema.additionalProperties).toBe(false);
+
+    expect(Object.keys(localView.inputSchema.properties)).toEqual(["view", "worker", "config"]);
+    expect(Object.keys(appServerView.inputSchema.properties)).toEqual(["view", "worker", "config"]);
+    expect(localView.inputSchema.required).toEqual(["worker"]);
+    expect(appServerView.inputSchema.required).toEqual(["worker"]);
+    expect(localView.inputSchema.additionalProperties).toBe(false);
+    expect(appServerView.inputSchema.additionalProperties).toBe(false);
+
+    const appServerCommandDefs = appServerCommand.inputSchema.$defs;
+    const appServerViewDefs = appServerView.inputSchema.$defs;
+
+    expect(appServerCommandDefs.workerTarget.properties).toEqual(
+      workerToolSchema.$defs.workerTarget.properties,
+    );
+    expect(appServerViewDefs.workerTarget.properties).toEqual(
+      workerToolSchema.$defs.workerTarget.properties,
+    );
+    expect(appServerCommandDefs.workerTarget.additionalProperties).toBe(false);
+    expect(appServerViewDefs.workerTarget.additionalProperties).toBe(false);
   });
 
   it("rejects local worker tool payloads with top-level operation fields", async () => {
@@ -239,6 +330,32 @@ describe("worker tool contract", () => {
     ).rejects.toThrow(
       "worker target fields must be role, id, and tenantSlug. Move operation inputs into config. Unexpected fields: leadPacket.",
     );
+  });
+
+  it("rejects malformed optional worker selectors on local tools", async () => {
+    await expect(
+      executeWorkerTool("worker.command", {
+        command: "run",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+          id: 42,
+        },
+        idempotencyKey: "local-malformed-worker-id",
+        config: {},
+      }),
+    ).rejects.toThrow("worker.id must be a non-empty string when supplied.");
+
+    await expect(
+      executeWorkerTool("worker.view", {
+        view: "snapshot",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "",
+        },
+        config: {},
+      }),
+    ).rejects.toThrow("worker.tenantSlug must be a non-empty string when supplied.");
   });
 
   it("disables local worker mutations in production unless explicitly trusted", async () => {

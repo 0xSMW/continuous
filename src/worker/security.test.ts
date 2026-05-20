@@ -55,6 +55,22 @@ describe("authorizeWorkerRun", () => {
       }),
     ).toEqual({ ok: true, operatorEmail });
   });
+
+  it("requires an explicit operator for matching run tokens", () => {
+    expect(
+      authorizeWorkerRun({
+        enabled: true,
+        appEnv: "production",
+        expectedToken: acceptedCredential,
+        authorization: `Bearer ${acceptedCredential}`,
+      }),
+    ).toEqual({
+      ok: false,
+      status: 403,
+      code: "worker_operator_missing",
+      message: "Worker runs require WORKER_OPERATOR_EMAIL.",
+    });
+  });
 });
 
 describe("normalizeIdempotencyKey", () => {
@@ -127,6 +143,21 @@ describe("authorizeWorkerRead", () => {
         authorization: `Bearer ${acceptedCredential}`,
       }),
     ).toEqual({ ok: true, operatorEmail });
+  });
+
+  it("requires an explicit operator for matching read tokens", () => {
+    expect(
+      authorizeWorkerRead({
+        appEnv: "production",
+        expectedToken: acceptedCredential,
+        authorization: `Bearer ${acceptedCredential}`,
+      }),
+    ).toEqual({
+      ok: false,
+      status: 403,
+      code: "worker_operator_missing",
+      message: "Worker reads require WORKER_OPERATOR_EMAIL.",
+    });
   });
 });
 
@@ -433,7 +464,6 @@ describe("authorizeControlPlaneAccess", () => {
         tokenCatalogB64: Buffer.from(
           JSON.stringify([{ id: "missing-operator", token: acceptedCredential }]),
         ).toString("base64"),
-        operatorEmail: "",
       },
     ];
 
@@ -442,7 +472,7 @@ describe("authorizeControlPlaneAccess", () => {
         authorizeControlPlaneAccess({
           enabled: true,
           appEnv: "production",
-          operatorEmail: testCase.operatorEmail ?? operatorEmail,
+          operatorEmail,
           authorization: `Bearer ${acceptedCredential}`,
           tokenCatalogJson: testCase.tokenCatalogJson,
           tokenCatalogB64: testCase.tokenCatalogB64,
@@ -456,6 +486,36 @@ describe("authorizeControlPlaneAccess", () => {
         code: "control_plane_token_catalog_invalid",
       });
     }
+  });
+
+  it("does not use the legacy operator env as a catalog credential fallback", () => {
+    const tokenCatalogJson = JSON.stringify([
+      {
+        id: "missing-operator",
+        token: acceptedCredential,
+        allowedRoutes: ["worker"],
+        allowedAccess: ["write"],
+        allowedCommands: ["worker:run"],
+      },
+    ]);
+
+    expect(
+      authorizeControlPlaneAccess({
+        enabled: true,
+        appEnv: "production",
+        operatorEmail: "fallback@example.com",
+        authorization: `Bearer ${acceptedCredential}`,
+        tokenCatalogJson,
+        route: "worker",
+        access: "write",
+        command: "run",
+      }),
+    ).toEqual({
+      ok: false,
+      status: 403,
+      code: "control_plane_token_catalog_invalid",
+      message: "Control-plane token catalog entry 1 is missing operatorEmail.",
+    });
   });
 
   it("fails closed when catalog route, access, or command scopes are omitted", () => {
@@ -652,5 +712,24 @@ describe("authorizeControlPlaneAccess", () => {
         message: "This operator token is not allowed to access the requested control-plane route.",
       });
     }
+  });
+
+  it("requires explicit operator identity for the legacy bootstrap token", () => {
+    expect(
+      authorizeControlPlaneAccess({
+        enabled: true,
+        appEnv: "production",
+        expectedToken: acceptedCredential,
+        authorization: `Bearer ${acceptedCredential}`,
+        route: "worker",
+        access: "write",
+        command: "run",
+      }),
+    ).toEqual({
+      ok: false,
+      status: 403,
+      code: "control_plane_operator_missing",
+      message: "Legacy WORKER_RUN_TOKEN access requires WORKER_OPERATOR_EMAIL.",
+    });
   });
 });

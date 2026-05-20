@@ -3,6 +3,7 @@
 ## User
 
 - Decide whether `www.continuoushq.com` and `www.getcontinuous.app` should serve the app; if yes, add those hostnames to `SITE_HOSTS` and rerun the domain deploy.
+- Confirm the production GitHub environment has `WORKER_OPERATOR_EMAIL` set to a seeded active operator such as `owner@continuoushq.com`; deploy now fails closed when that secret is missing.
 
 ## Agent
 
@@ -34,6 +35,5 @@
 - Remove the compatibility `/api/health` alias only after old probes and external monitors have moved to `/health`; decide whether the `/approvals` UI route should stay as a human console while `/approval` remains the API surface.
 - Add production-grade app-server worker transport that derives operator identity from authenticated control-plane request state instead of `WORKER_OPERATOR_EMAIL` and trusted-local toggles.
 - Make normal DigitalOcean deploys non-root by default, then make the production-readiness gate mandatory for customer-data deploys; strict workflow runs now fail before sync if `DEPLOY_USER` resolves to root, but bootstrap provisioning for backup, observability, and non-root readiness still needs a first-class host setup path.
-- Remove the app-server worker operator fallback and require explicit transport-provided operator identity before local command/view execution.
 - Start the Systems Operations runtime slice next: activate `sync.repair.plan` and `permission.review` with `snapshot` and `repairs` views before Compliance runtime.
 - Build the DigitalOcean release gate gaps: deploy CI-built image digests, add Postgres 17 parity smoke, reuse a parameterized host smoke script, and make non-root deploys the normal default.

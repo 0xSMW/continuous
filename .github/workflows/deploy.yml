@@ -47,7 +47,7 @@ jobs:
       APP_TAG_INPUT: ${{ inputs.app_tag }}
       ROLLBACK_APP_TAG: ${{ inputs.rollback_app_tag }}
       REQUIRE_PRODUCTION_READINESS: ${{ inputs.require_production_readiness }}
-      WORKER_OPERATOR_EMAIL: ${{ secrets.WORKER_OPERATOR_EMAIL || 'owner@continuoushq.com' }}
+      WORKER_OPERATOR_EMAIL: ${{ secrets.WORKER_OPERATOR_EMAIL }}
       DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
       DO_API_TOKEN: ${{ secrets.DO_API_TOKEN }}
       DO_FIREWALL_NAME: continuous-fw
@@ -70,6 +70,10 @@ jobs:
           fi
           if [[ -z "${DO_API_TOKEN:-}" ]]; then
             echo "::error::Missing DO_API_TOKEN secret."
+            exit 1
+          fi
+          if [[ -z "${WORKER_OPERATOR_EMAIL:-}" ]]; then
+            echo "::error::Missing WORKER_OPERATOR_EMAIL secret."
             exit 1
           fi
 

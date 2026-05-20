@@ -12,9 +12,10 @@ const envSchema = z.object({
     (value) => (value === "" ? undefined : value),
     z.string().min(1).optional(),
   ),
-  WORKER_OPERATOR_EMAIL: z
-    .preprocess((value) => (value === "" ? undefined : value), z.string().email().optional())
-    .default("owner@continuoushq.com"),
+  WORKER_OPERATOR_EMAIL: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.string().email().optional(),
+  ),
   CONTROL_PLANE_ALLOWED_TENANTS: z
     .preprocess((value) => (value === "" ? undefined : value), z.string().optional())
     .optional(),

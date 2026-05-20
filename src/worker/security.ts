@@ -5,7 +5,7 @@ export type RunAuthInput = {
   enabled: boolean;
   appEnv: string;
   expectedToken?: string;
-  operatorEmail: string;
+  operatorEmail?: string | null;
   authorization?: string | null;
   headerToken?: string | null;
 };
@@ -185,7 +185,6 @@ function parseTokenCatalog(input: {
 function normalizeTokenCatalog(input: {
   tokenCatalogJson?: string | null;
   tokenCatalogB64?: string | null;
-  operatorEmail: string;
   allowedTenants?: string | null;
   allowedWorkerRoles?: string | null;
 }) {
@@ -197,7 +196,7 @@ function normalizeTokenCatalog(input: {
   return parseTokenCatalog(input).map((definition, index): ControlPlaneCredential => {
     const token = stringValue(definition.token);
     const tokenSha256 = stringValue(definition.tokenSha256);
-    const operatorEmail = stringValue(definition.operatorEmail) ?? input.operatorEmail;
+    const operatorEmail = stringValue(definition.operatorEmail);
 
     if (!token && !tokenSha256) {
       throw new Error(`Control-plane token catalog entry ${index + 1} is missing token or tokenSha256.`);
@@ -349,7 +348,7 @@ export function authorizeControlPlaneAccess(input: {
   enabled?: boolean;
   appEnv: string;
   expectedToken?: string;
-  operatorEmail: string;
+  operatorEmail?: string | null;
   authorization?: string | null;
   headerToken?: string | null;
   allowedTenants?: string | null;
@@ -407,14 +406,29 @@ export function authorizeControlPlaneAccess(input: {
   let credentials: ControlPlaneCredential[];
 
   try {
-    credentials = hasCatalog
-      ? normalizeTokenCatalog(input)
-      : [legacyCredential({
+    if (hasCatalog) {
+      credentials = normalizeTokenCatalog(input);
+    } else {
+      const legacyOperatorEmail = stringValue(input.operatorEmail);
+
+      if (!legacyOperatorEmail) {
+        return {
+          ok: false,
+          status: 403,
+          code: "control_plane_operator_missing",
+          message: "Legacy WORKER_RUN_TOKEN access requires WORKER_OPERATOR_EMAIL.",
+        };
+      }
+
+      credentials = [
+        legacyCredential({
           expectedToken: input.expectedToken!,
-          operatorEmail: input.operatorEmail,
+          operatorEmail: legacyOperatorEmail,
           allowedTenants: input.allowedTenants,
           allowedWorkerRoles: input.allowedWorkerRoles,
-        })];
+        }),
+      ];
+    }
   } catch (error) {
     return {
       ok: false,
@@ -528,7 +542,18 @@ export function authorizeWorkerRun(input: RunAuthInput): RunAuthResult {
     };
   }
 
-  return { ok: true, operatorEmail: input.operatorEmail };
+  const operatorEmail = stringValue(input.operatorEmail);
+
+  if (!operatorEmail) {
+    return {
+      ok: false,
+      status: 403,
+      code: "worker_operator_missing",
+      message: "Worker runs require WORKER_OPERATOR_EMAIL.",
+    };
+  }
+
+  return { ok: true, operatorEmail };
 }
 
 export function authorizeWorkerRead(input: Omit<RunAuthInput, "enabled">): RunAuthResult {
@@ -552,7 +577,18 @@ export function authorizeWorkerRead(input: Omit<RunAuthInput, "enabled">): RunAu
     };
   }
 
-  return { ok: true, operatorEmail: input.operatorEmail };
+  const operatorEmail = stringValue(input.operatorEmail);
+
+  if (!operatorEmail) {
+    return {
+      ok: false,
+      status: 403,
+      code: "worker_operator_missing",
+      message: "Worker reads require WORKER_OPERATOR_EMAIL.",
+    };
+  }
+
+  return { ok: true, operatorEmail };
 }
 
 export type IdempotencyResult =

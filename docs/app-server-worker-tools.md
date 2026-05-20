@@ -61,6 +61,7 @@ approvals, generated review views, workflow/budget/audit proof, and a
 money movement remain blocked or dry-run.
 
 ```sh
+export WORKER_OPERATOR_EMAIL=owner@continuoushq.com
 bun run app-server:worker-tools
 bun run app-server:worker-tools continuous.worker.schema
 bun run app-server:worker-tools continuous.worker.view --payload='{"view":"snapshot","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{}}'
@@ -92,9 +93,9 @@ The app-server worker tools are intentionally narrow:
 - Planned worker roles expose config schemas but remain non-executable until
   handlers are registered; promoted roles move into the registered command list.
 - Caller supplies `command`, `worker`, `idempotencyKey`, and `config`.
-- Operator identity comes from the trusted local `WORKER_OPERATOR_EMAIL`
-  environment, matching the authenticated identity that `/worker` derives from
-  its bearer credential.
+- Operator identity must be supplied by the trusted local transport through
+  `WORKER_OPERATOR_EMAIL`; there is no fallback operator and identity is never
+  accepted in the payload.
 - No external execution is available.
 - No production token is loaded.
 - Local read and mutation tools are trusted-local by default; in
@@ -105,6 +106,7 @@ The generic local worker tool remains available for explicit operator-gated
 commands:
 
 ```sh
+export WORKER_OPERATOR_EMAIL=owner@continuoushq.com
 bun run worker:tool worker.command --payload='{"command":"lead.read","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-lead-read-001","config":{"source":"website_form","records":[{"sourceEventId":"form-001","customerName":"Acme Roof Repair","customerIntent":"roof leak inspection","serviceArea":"roofing","urgency":"high"}]}}'
 ```
 

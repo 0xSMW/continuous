@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   executeWorkerCommand: vi.fn(),
@@ -6,6 +6,8 @@ const mocks = vi.hoisted(() => ({
   registeredWorkerCommands: vi.fn(() => []),
   registeredWorkerViews: vi.fn(() => []),
 }));
+
+const originalWorkerOperatorEmail = process.env.WORKER_OPERATOR_EMAIL;
 
 vi.mock("./registry", () => ({
   executeWorkerCommand: mocks.executeWorkerCommand,
@@ -17,6 +19,15 @@ vi.mock("./registry", () => ({
 describe("worker tool envelope forwarding", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    process.env.WORKER_OPERATOR_EMAIL = "owner@continuoushq.com";
+  });
+
+  afterEach(() => {
+    if (originalWorkerOperatorEmail === undefined) {
+      delete process.env.WORKER_OPERATOR_EMAIL;
+    } else {
+      process.env.WORKER_OPERATOR_EMAIL = originalWorkerOperatorEmail;
+    }
   });
 
   it("keeps worker view filters under config", async () => {

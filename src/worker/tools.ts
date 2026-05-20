@@ -303,6 +303,18 @@ export function assertTrustedLocalWorkerRead(surface: string) {
   }
 }
 
+export function requiredLocalWorkerOperatorEmail(surface: string) {
+  const operatorEmail = stringValue(process.env.WORKER_OPERATOR_EMAIL);
+
+  if (!operatorEmail) {
+    throw new Error(
+      `${surface} requires WORKER_OPERATOR_EMAIL from the trusted local transport environment.`,
+    );
+  }
+
+  return operatorEmail;
+}
+
 function workerToolEnvelope(name: string) {
   if (name === "worker.command") {
     return {
@@ -356,11 +368,11 @@ export async function executeWorkerTool(name: string, payload: JsonObject = {}) 
   const target = targetFrom(payload);
   const config = payload.config;
   const viewConfig = objectValue(payload.config);
-  const operatorEmail = process.env.WORKER_OPERATOR_EMAIL ?? "owner@continuoushq.com";
 
   if (name === "worker.view") {
     const view = stringValue(payload.view) ?? "snapshot";
     assertTrustedLocalWorkerRead("worker.view");
+    const operatorEmail = requiredLocalWorkerOperatorEmail("worker.view");
 
     const result = await executeWorkerView({
       view,
@@ -383,6 +395,7 @@ export async function executeWorkerTool(name: string, payload: JsonObject = {}) 
     }
 
     assertTrustedLocalWorkerMutation("worker.command");
+    const operatorEmail = requiredLocalWorkerOperatorEmail("worker.command");
 
     return executeWorkerCommand({
       command,

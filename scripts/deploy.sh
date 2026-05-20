@@ -10,7 +10,7 @@ APP_DIR="${APP_DIR:-/opt/continuous}"
 SITE_HOSTS="${SITE_HOSTS:-continuoushq.com, getcontinuous.app}"
 ACME_EMAIL="${ACME_EMAIL:-admin@continuoushq.com}"
 APP_URL="${APP_URL:-}"
-WORKER_OPERATOR_EMAIL="${WORKER_OPERATOR_EMAIL:-owner@continuoushq.com}"
+WORKER_OPERATOR_EMAIL="${WORKER_OPERATOR_EMAIL:-}"
 POSTGRES_DB="${POSTGRES_DB:-continuous}"
 POSTGRES_USER="${POSTGRES_USER:-continuous}"
 APP_IMAGE="${APP_IMAGE:-continuous-app}"
@@ -20,6 +20,12 @@ REMOTE="$SSH_USER@$HOST"
 if [ -z "$HOST" ]; then
   echo "Set HOST to the droplet IP or hostname." >&2
   echo "Example: HOST=203.0.113.10 ./scripts/deploy.sh" >&2
+  exit 1
+fi
+
+if [ -z "$WORKER_OPERATOR_EMAIL" ]; then
+  echo "Set WORKER_OPERATOR_EMAIL to a seeded active operator email." >&2
+  echo "Example: WORKER_OPERATOR_EMAIL=owner@continuoushq.com HOST=203.0.113.10 ./scripts/deploy.sh" >&2
   exit 1
 fi
 
