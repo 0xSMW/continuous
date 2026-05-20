@@ -1,6 +1,6 @@
 import { pathToFileURL } from "node:url";
 
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 
 import { db as defaultDb } from "../db/client";
 import { connections, tenants, type JsonObject } from "../db/schema";
@@ -57,6 +57,7 @@ export type ScheduledCommandResult = {
 };
 
 export type ScheduledRevenueRunResult = {
+  connectionId: string;
   source: string;
   sourceEventId: string;
   idempotencyKey: string;
@@ -282,7 +283,6 @@ function leadReadSelectors(result: unknown) {
 function revenueRunInput(selectorValue: unknown): {
   source: string;
   sourceEventId: string;
-  idempotencyKey: string;
   intake: unknown;
 } | null {
   const selector = objectValue(selectorValue);
@@ -296,7 +296,6 @@ function revenueRunInput(selectorValue: unknown): {
   return {
     source,
     sourceEventId,
-    idempotencyKey: `scheduler-revenue-run:${source}:${sourceEventId}`,
     intake: selector.intake || { source, sourceEventId },
   };
 }
@@ -405,7 +404,7 @@ export async function listLeadPollCommands(input: {
     .from(connections)
     .innerJoin(tenants, eq(connections.tenantId, tenants.id))
     .where(and(eq(tenants.slug, input.tenantSlug), eq(connections.state, "active")))
-    .orderBy(connections.updatedAt);
+    .orderBy(desc(connections.updatedAt));
 
   return rows
     .map((row) => leadPollCommandFromConnection({ connection: row.connection, now }))
@@ -459,6 +458,7 @@ async function runLeadPollCommands(input: {
           result.revenueRuns.attempted += 1;
           result.revenueRuns.failed += 1;
           revenueRuns.push({
+            connectionId: command.connectionId,
             source: "",
             sourceEventId: "",
             idempotencyKey: "",
@@ -472,6 +472,9 @@ async function runLeadPollCommands(input: {
 
         result.revenueRuns.attempted += 1;
 
+        const idempotencyKey =
+          `scheduler-revenue-run:${command.connectionId}:${runInput.source}:${runInput.sourceEventId}`;
+
         try {
           const runResponse = await input.postCommand({
             baseUrl: input.config.baseUrl,
@@ -483,7 +486,7 @@ async function runLeadPollCommands(input: {
                 role: revenueWorkerRole,
                 tenantSlug: input.config.tenantSlug,
               },
-              idempotencyKey: runInput.idempotencyKey,
+              idempotencyKey,
               config: {
                 intake: runInput.intake,
               },
@@ -492,18 +495,20 @@ async function runLeadPollCommands(input: {
 
           result.revenueRuns.succeeded += 1;
           revenueRuns.push({
+            connectionId: command.connectionId,
             source: runInput.source,
             sourceEventId: runInput.sourceEventId,
-            idempotencyKey: runInput.idempotencyKey,
+            idempotencyKey,
             status: "succeeded",
             result: runResponse.result,
           });
         } catch (error) {
           result.revenueRuns.failed += 1;
           revenueRuns.push({
+            connectionId: command.connectionId,
             source: runInput.source,
             sourceEventId: runInput.sourceEventId,
-            idempotencyKey: runInput.idempotencyKey,
+            idempotencyKey,
             status: "failed",
             error: {
               message: error instanceof Error ? error.message : "Unknown revenue run failure.",

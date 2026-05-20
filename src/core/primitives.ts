@@ -648,6 +648,17 @@ function pollConfigForConnection(config: JsonObject) {
   return jsonObject(config.polling ?? config.liveRead ?? config.apiRead);
 }
 
+function connectionUsesBufferedPolling(config: JsonObject) {
+  const polling = pollConfigForConnection(config);
+  const mode = firstStringValue(
+    polling.mode,
+    polling.sourceMode,
+    polling.strategy,
+  )?.toLowerCase();
+
+  return mode === "buffer" || mode === "buffered" || mode === "connection_buffer";
+}
+
 function credentialRefForConnection(config: JsonObject) {
   const polling = pollConfigForConnection(config);
   const auth = jsonObject(config.auth);
@@ -739,7 +750,10 @@ function assertConnectionSafety(input: {
 
   const credentialRef = credentialRefForConnection(input.config);
 
-  if (!credentialRef || !credentialRef.toLowerCase().startsWith("env:")) {
+  if (
+    !connectionUsesBufferedPolling(input.config) &&
+    (!credentialRef || !credentialRef.toLowerCase().startsWith("env:"))
+  ) {
     throw new PlatformUnavailableError(
       "core_connection_polling_credential_required",
       "Active pollable connections require an environment-backed credential reference such as config.config.polling.credentialRef=env:NAME.",
@@ -855,6 +869,7 @@ function buildConnectionHealthReport(input: {
   const credentialRef = credentialRefForConnection(config);
   const credentialKind = credentialRefKind(credentialRef);
   const envConfigured = envCredentialResolved(credentialRef, input.env);
+  const bufferedPolling = connectionUsesBufferedPolling(config);
   const readScopeValues = readScopes(scopes);
   const source = configuredSource(config);
   const provider = configuredProvider(config);
@@ -908,6 +923,20 @@ function buildConnectionHealthReport(input: {
     }
 
     if (check === "credential_ref") {
+      if (bufferedPolling) {
+        return connectionHealthCheck(
+          "credential_ref",
+          "not_applicable",
+          "Buffered scheduler polling does not require a runtime credential.",
+          {
+            credentialRefState: credentialRef ? "managed_ref_present" : "not_required",
+            credentialRefKind: credentialKind,
+            envConfigured: null,
+            pollingMode: "connection_buffer",
+          },
+        );
+      }
+
       if (!credentialRef) {
         return connectionHealthCheck(
           "credential_ref",
@@ -984,6 +1013,7 @@ function buildConnectionHealthReport(input: {
           : "Polling is enabled but the connection is not active.",
         {
           pollingEnabled: true,
+          mode: bufferedPolling ? "connection_buffer" : cleanString(polling.mode) ?? null,
           intervalMs: typeof polling.intervalMs === "number" ? polling.intervalMs : null,
           maxResults: typeof polling.maxResults === "number" ? polling.maxResults : null,
         },

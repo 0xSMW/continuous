@@ -234,4 +234,26 @@ describe("lead source connectors", () => {
       status: 400,
     });
   });
+
+  it("lets scheduler-enabled buffered connections read stored records without live credentials", async () => {
+    await expect(
+      pollLeadSourceConnection({
+        connectionId: "connection-buffered",
+        connectionConfig: {
+          polling: {
+            enabled: true,
+            mode: "connection_buffer",
+            provider: "google_workspace",
+          },
+        },
+        sourceReader: {
+          kind: "inbox",
+          source: "google_workspace_inbox",
+          provider: "google_workspace",
+          cursor: null,
+        },
+        env: {},
+      }),
+    ).resolves.toBeNull();
+  });
 });

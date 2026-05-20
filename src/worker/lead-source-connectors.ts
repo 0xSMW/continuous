@@ -81,6 +81,16 @@ function sourcePollingConfig(connectionConfig: JsonObject) {
   return objectValue(connectionConfig.polling ?? connectionConfig.liveRead ?? connectionConfig.apiRead);
 }
 
+function usesBufferedPolling(pollingConfig: JsonObject) {
+  const mode = firstStringValue(
+    pollingConfig.mode,
+    pollingConfig.sourceMode,
+    pollingConfig.strategy,
+  ).toLowerCase();
+
+  return mode === "buffer" || mode === "buffered" || mode === "connection_buffer";
+}
+
 function credentialRefFor(connectionConfig: JsonObject, pollingConfig: JsonObject) {
   const auth = objectValue(connectionConfig.auth);
 
@@ -431,6 +441,10 @@ export async function pollLeadSourceConnection(input: PollInput): Promise<LeadSo
   const pollingConfig = sourcePollingConfig(input.connectionConfig);
 
   if (pollingConfig.enabled !== true) {
+    return null;
+  }
+
+  if (usesBufferedPolling(pollingConfig)) {
     return null;
   }
 

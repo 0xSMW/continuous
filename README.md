@@ -78,9 +78,11 @@ Then open `http://localhost:3000`.
   execution can now prepare durable Core packets from packet-backed step kinds
   without adding packet-specific business-process routes.
 - `worker-scheduler` is the internal production drain for queued platform work.
-  It posts the same `/workflow` `steps.execute` envelope and `/worker`
-  `adapters.retry` / `adapters.reconcile` envelopes on a cadence; it does not
-  introduce worker-family URLs or enable external execution.
+  It posts the same `/workflow` `steps.execute` envelope, polls active lead
+  source connections with `/worker command=lead.read`, hands returned selectors
+  to `/worker command=run`, then drains `/worker` adapter retry/reconcile
+  envelopes on a cadence; it does not introduce worker-family URLs or enable
+  external execution.
 Worker-specific HTTP routes and local mutation shortcuts are intentionally
 absent; new worker families extend `/worker` and `worker:tool` by registering
 commands and structured payload fields. The HTTP, app-server, and local worker

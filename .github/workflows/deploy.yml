@@ -645,120 +645,158 @@ jobs:
           from worker_runs where id = '$LEAD_READ_WORKER_RUN_ID'::uuid;
           SQL
 
-          CONNECTION_ID="$(
-            psql_db -At <<'SQL'
-          with tenant_row as (
-            select id as tenant_id from tenants where slug = 'continuous-demo' limit 1
-          ),
-          adapter_row as (
-            insert into adapters (key, name, kind, auth, capabilities)
-            values (
-              'google_workspace',
-              'Google Workspace',
-              'inbox',
-              'oauth',
-              '{"read":["lead.read"],"sources":["google_workspace_inbox"],"providers":["google_workspace"],"readerKinds":["inbox"]}'::jsonb
-            )
-            on conflict (key) do update
-              set name = excluded.name,
-                  kind = excluded.kind,
-                  capabilities = excluded.capabilities,
-                  updated_at = now()
-            returning id
-          ),
-          connection_row as (
-            insert into connections (
-              tenant_id, adapter_id, name, state, external_account_id, scopes, config
-            )
-            select tenant_row.tenant_id,
-                   adapter_row.id,
-                   'Deploy Google Workspace buffer',
-                   'active',
-                   'deploy-google-workspace-buffer',
-                   '{"reads":["lead"]}'::jsonb,
-                   '{"executable":false,"sources":["google_workspace_inbox"],"providers":["google_workspace"],"readerKinds":["inbox"]}'::jsonb
-            from tenant_row, adapter_row
-            on conflict (tenant_id, adapter_id, external_account_id) do update
-              set state = 'active',
-                  config = connections.config || excluded.config,
-                  updated_at = now()
-            returning id
-          )
-          select id from connection_row;
-          SQL
-          )"
-          if [ -z "$CONNECTION_ID" ]; then
-            echo "No compatible tenant connection is available for the connection-backed lead.read smoke." >&2
-            exit 1
-          fi
-
           CONNECTION_LEAD_READ_SOURCE_EVENT_ID="deploy-connection-lead-read:$RUN_ID"
-          psql_db \
-            -v connection_id="$CONNECTION_ID" \
-            -v source_event_id="$CONNECTION_LEAD_READ_SOURCE_EVENT_ID" <<'SQL'
-          update connections
-          set config = jsonb_set(
-                coalesce(config, '{}'::jsonb),
-                '{inbox}',
-                jsonb_build_object(
-                  'messages',
-                  jsonb_build_array(
-                    jsonb_build_object(
-                      'messageId', :'source_event_id',
-                      'threadId', 'deploy-connection-thread',
-                      'from', 'Connection Smoke Buyer <buyer@example.com>',
-                      'subject', 'Need roof leak inspection',
-                      'snippet', 'Water is coming through the ceiling after the last storm.',
-                      'receivedAt', '2026-05-19T04:00:00.000Z'
-                    )
-                  )
-                ),
-                true
-              ),
-              updated_at = now()
-          where id = :'connection_id'::uuid;
-          SQL
-
-          CONNECTION_LEAD_READ_KEY="deploy-connection-lead-read-$RUN_ID"
-          CONNECTION_LEAD_READ_PAYLOAD="$(
-            /usr/bin/jq -nc \
-              --arg key "$CONNECTION_LEAD_READ_KEY" \
-              --arg credentialRef "connection:$CONNECTION_ID" '{
-              command: "lead.read",
-              worker: {role: "revenue_operations", tenantSlug: "continuous-demo"},
+          CONNECTION_ADAPTER_KEY="deploy_smoke_buffered_inbox"
+          CONNECTION_ADAPTER_PAYLOAD="$(
+            /usr/bin/jq -nc --arg key "deploy-buffered-adapter-$RUN_ID" --arg adapterKey "$CONNECTION_ADAPTER_KEY" '{
+              command: "adapter.upsert",
+              core: {tenantSlug: "continuous-demo"},
               idempotencyKey: $key,
               config: {
-                source: "google_workspace_inbox",
-                reader: {
-                  kind: "inbox",
-                  provider: "google_workspace",
-                  credentialRef: $credentialRef,
-                  mode: "read_only"
+                key: $adapterKey,
+                name: "Deploy buffered inbox",
+                kind: "inbox",
+                auth: "managed_ref",
+                capabilities: {
+                  read: ["lead.read"],
+                  sources: ["google_workspace_inbox"],
+                  providers: ["google_workspace"],
+                  readerKinds: ["inbox"]
                 }
               }
             }'
           )"
-          CONNECTION_LEAD_READ_RESPONSE="$(
+          CONNECTION_ADAPTER_RESPONSE="$(
             curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
-              -X POST https://continuoushq.com/worker \
+              -X POST https://continuoushq.com/core \
               -H "authorization: Bearer $WORKER_TOKEN" \
               -H "content-type: application/json" \
-              -d "$CONNECTION_LEAD_READ_PAYLOAD"
+              -d "$CONNECTION_ADAPTER_PAYLOAD"
           )"
 
-          echo "$CONNECTION_LEAD_READ_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,workerRunId:.data.result.workerRunId,readCount:.data.result.readCount,connectionId:.data.result.output.connectionId,cursor:.data.result.output.cursor,sourceMode:.data.result.output.sourceReader.sourceMode}}'
-          echo "$CONNECTION_LEAD_READ_RESPONSE" | /usr/bin/jq -e \
-            --arg connectionId "$CONNECTION_ID" \
-            --arg sourceEventId "$CONNECTION_LEAD_READ_SOURCE_EVENT_ID" \
-            '.error == null and .data.command == "lead.read" and .data.result.created == true and (.data.result.workerRunId | length > 0) and .data.result.readCount == 1 and (.data.result.selectors | length) == 1 and .data.result.output.connectionId == $connectionId and .data.result.output.cursor == $sourceEventId and .data.result.output.sourceReader.sourceMode == "connection_buffer" and .data.result.output.externalSend == false and .data.result.selectors[0].source == "google_workspace_inbox" and .data.result.selectors[0].sourceEventId == $sourceEventId and (.data.result.selectors[0].objectId | length > 0) and (.data.result.selectors[0].eventId | length > 0) and (.data.result.selectors[0].evidenceId | length > 0)' \
+          echo "$CONNECTION_ADAPTER_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,adapterId:.data.result.adapterId,key:.data.result.adapter.key}}'
+          echo "$CONNECTION_ADAPTER_RESPONSE" | /usr/bin/jq -e \
+            --arg adapterKey "$CONNECTION_ADAPTER_KEY" \
+            '.error == null and .data.command == "adapter.upsert" and (.data.result.adapterId | length > 0) and .data.result.adapter.key == $adapterKey' \
             >/dev/null
 
-          CONNECTION_LEAD_READ_WORKER_RUN_ID="$(echo "$CONNECTION_LEAD_READ_RESPONSE" | /usr/bin/jq -r '.data.result.workerRunId')"
+          CONNECTION_UPSERT_PAYLOAD="$(
+            /usr/bin/jq -nc \
+              --arg key "deploy-buffered-connection-$RUN_ID" \
+              --arg adapterKey "$CONNECTION_ADAPTER_KEY" \
+              --arg externalAccountId "deploy-buffered-inbox" \
+              --arg sourceEventId "$CONNECTION_LEAD_READ_SOURCE_EVENT_ID" '{
+                command: "connection.upsert",
+                core: {tenantSlug: "continuous-demo"},
+                idempotencyKey: $key,
+                config: {
+                  adapterKey: $adapterKey,
+                  name: "Deploy buffered inbox connection",
+                  state: "active",
+                  externalAccountId: $externalAccountId,
+                  scopes: {reads: ["lead.read"]},
+                  config: {
+                    sources: ["google_workspace_inbox"],
+                    providers: ["google_workspace"],
+                    readerKinds: ["inbox"],
+                    polling: {
+                      enabled: true,
+                      mode: "connection_buffer",
+                      source: "google_workspace_inbox",
+                      provider: "google_workspace",
+                      intervalMs: 5000
+                    },
+                    inbox: {
+                      messages: [
+                        {
+                          messageId: $sourceEventId,
+                          threadId: "deploy-connection-thread",
+                          from: "Connection Smoke Buyer <buyer@example.com>",
+                          subject: "Need roof leak inspection",
+                          snippet: "Water is coming through the ceiling after the last storm.",
+                          receivedAt: "2026-05-19T04:00:00.000Z"
+                        }
+                      ]
+                    },
+                    externalExecution: "blocked"
+                  }
+                }
+              }'
+          )"
+          CONNECTION_UPSERT_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/core \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$CONNECTION_UPSERT_PAYLOAD"
+          )"
+
+          echo "$CONNECTION_UPSERT_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,connectionId:.data.result.connectionId,state:.data.result.connection.state,pollingEnabled:.data.result.pollingEnabled,externalExecution:.data.result.externalExecution}}'
+          echo "$CONNECTION_UPSERT_RESPONSE" | /usr/bin/jq -e \
+            '.error == null and .data.command == "connection.upsert" and (.data.result.connectionId | length > 0) and .data.result.connection.state == "active" and .data.result.pollingEnabled == true and .data.result.externalExecution == "blocked"' \
+            >/dev/null
+
+          CONNECTION_ID="$(echo "$CONNECTION_UPSERT_RESPONSE" | /usr/bin/jq -r '.data.result.connectionId')"
+          CONNECTION_PRE_HEALTH_PAYLOAD="$(
+            /usr/bin/jq -nc --arg key "deploy-buffered-connection-health-pre-$RUN_ID" --arg connectionId "$CONNECTION_ID" '{
+              command: "connection.health.record",
+              core: {tenantSlug: "continuous-demo"},
+              idempotencyKey: $key,
+              config: {connectionId: $connectionId}
+            }'
+          )"
+          CONNECTION_PRE_HEALTH_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/core \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$CONNECTION_PRE_HEALTH_PAYLOAD"
+          )"
+          echo "$CONNECTION_PRE_HEALTH_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,connectionId:.data.result.connectionId,status:.data.result.status}}'
+          echo "$CONNECTION_PRE_HEALTH_RESPONSE" | /usr/bin/jq -e \
+            --arg connectionId "$CONNECTION_ID" \
+            '.error == null and .data.command == "connection.health.record" and .data.result.connectionId == $connectionId and (.data.result.status == "needs_configuration" or .data.result.status == "ready")' \
+            >/dev/null
+
+          SCHEDULER_SMOKE_OUTPUT="$(
+            docker compose --profile scheduler run --rm \
+              -e WORKER_SCHEDULER_ENABLED=true \
+              -e WORKER_SCHEDULER_LEAD_POLL_LIMIT=50 \
+              -e WORKER_SCHEDULER_INTERVAL_MS=5000 \
+              worker-scheduler bun src/worker/scheduler.ts --once 2>&1
+          )"
+          printf '%s\n' "$SCHEDULER_SMOKE_OUTPUT"
+          SCHEDULER_COMPLETED_JSON="$(
+            printf '%s\n' "$SCHEDULER_SMOKE_OUTPUT" \
+              | awk '/^\{/{print}' \
+              | /usr/bin/jq -c 'select(.event == "scheduler_cycle_completed")' \
+              | tail -n 1
+          )"
+          if [ -z "$SCHEDULER_COMPLETED_JSON" ]; then
+            echo "Scheduler smoke did not emit scheduler_cycle_completed." >&2
+            exit 1
+          fi
+
+          CONNECTION_LEAD_READ_WORKER_RUN_ID=""
+          for _ in 1 2 3 4 5 6; do
+            CONNECTION_LEAD_READ_WORKER_RUN_ID="$(
+              psql_db -Atc "select id from worker_runs where source = 'continuous.revenue_worker' and idempotency_key like 'scheduler-lead-read:$CONNECTION_ID:%' and data->'input'->>'command' = 'lead.read' order by created_at desc limit 1;"
+            )"
+            if [ -n "$CONNECTION_LEAD_READ_WORKER_RUN_ID" ]; then
+              break
+            fi
+            sleep 5
+          done
+          if [ -z "$CONNECTION_LEAD_READ_WORKER_RUN_ID" ]; then
+            echo "Scheduler did not create a lead.read worker run for the Core-created buffered connection." >&2
+            exit 1
+          fi
+
           CONNECTION_LEAD_READ_ROW="$(
             psql_db -Atc "select coalesce(data->'output'->>'connectionId','') || '|' || coalesce(data->'output'->>'cursor','') || '|' || coalesce(data->'output'->'sourceReader'->>'sourceMode','') from worker_runs where id = '$CONNECTION_LEAD_READ_WORKER_RUN_ID'::uuid;"
           )"
           if [ "$CONNECTION_LEAD_READ_ROW" != "$CONNECTION_ID|$CONNECTION_LEAD_READ_SOURCE_EVENT_ID|connection_buffer" ]; then
-            echo "Unexpected connection-backed lead.read worker run row: $CONNECTION_LEAD_READ_ROW" >&2
+            echo "Unexpected scheduler connection-backed lead.read worker run row: $CONNECTION_LEAD_READ_ROW" >&2
             exit 1
           fi
 
@@ -766,9 +804,55 @@ jobs:
             psql_db -Atc "select coalesce(config->'lastLeadRead'->>'cursor','') || '|' || coalesce(config->'lastLeadRead'->>'workerRunId','') || '|' || coalesce(config->'lastLeadRead'->>'externalExecution','') || '|' || (last_sync_at is not null)::text from connections where id = '$CONNECTION_ID'::uuid;"
           )"
           if [ "$CONNECTION_CURSOR_ROW" != "$CONNECTION_LEAD_READ_SOURCE_EVENT_ID|$CONNECTION_LEAD_READ_WORKER_RUN_ID|blocked|true" ]; then
-            echo "Unexpected connection cursor proof row: $CONNECTION_CURSOR_ROW" >&2
+            echo "Unexpected scheduler connection cursor proof row: $CONNECTION_CURSOR_ROW" >&2
             exit 1
           fi
+
+          SCHEDULER_WORKER_RUN_ID="$(
+            psql_db -Atc "select id from worker_runs where source = 'continuous.revenue_worker' and idempotency_key = 'scheduler-revenue-run:$CONNECTION_ID:google_workspace_inbox:$CONNECTION_LEAD_READ_SOURCE_EVENT_ID' order by created_at desc limit 1;"
+          )"
+          if [ -z "$SCHEDULER_WORKER_RUN_ID" ]; then
+            echo "Scheduler did not hand the buffered lead selector to the Revenue Worker run command." >&2
+            exit 1
+          fi
+
+          SCHEDULER_RUN_ROW="$(
+            psql_db -Atc "select state || '|' || coalesce(data->'output'->>'sourceEventId','') || '|' || coalesce(data->'output'->>'externalSend','') || '|' || coalesce(data->'output'->>'workflowRunId','') from worker_runs where id = '$SCHEDULER_WORKER_RUN_ID'::uuid;"
+          )"
+          SCHEDULER_WORKFLOW_RUN_ID="${SCHEDULER_RUN_ROW##*|}"
+          if [ "$SCHEDULER_RUN_ROW" != "done|$CONNECTION_LEAD_READ_SOURCE_EVENT_ID|false|$SCHEDULER_WORKFLOW_RUN_ID" ] || [ -z "$SCHEDULER_WORKFLOW_RUN_ID" ]; then
+            echo "Unexpected scheduler Revenue Worker run row: $SCHEDULER_RUN_ROW" >&2
+            exit 1
+          fi
+
+          SCHEDULER_WORKFLOW_ROW="$(
+            psql_db -Atc "select state || '|' || coalesce(data->>'workerRunId','') || '|' || coalesce(data->>'approvalRequestId','') from workflow_runs where id = '$SCHEDULER_WORKFLOW_RUN_ID'::uuid;"
+          )"
+          if ! printf '%s\n' "$SCHEDULER_WORKFLOW_ROW" | grep -q "^approval_requested|$SCHEDULER_WORKER_RUN_ID|"; then
+            echo "Unexpected scheduler Revenue workflow row: $SCHEDULER_WORKFLOW_ROW" >&2
+            exit 1
+          fi
+
+          CONNECTION_POST_HEALTH_PAYLOAD="$(
+            /usr/bin/jq -nc --arg key "deploy-buffered-connection-health-post-$RUN_ID" --arg connectionId "$CONNECTION_ID" '{
+              command: "connection.health.record",
+              core: {tenantSlug: "continuous-demo"},
+              idempotencyKey: $key,
+              config: {connectionId: $connectionId}
+            }'
+          )"
+          CONNECTION_POST_HEALTH_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/core \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$CONNECTION_POST_HEALTH_PAYLOAD"
+          )"
+          echo "$CONNECTION_POST_HEALTH_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,connectionId:.data.result.connectionId,status:.data.result.status}}'
+          echo "$CONNECTION_POST_HEALTH_RESPONSE" | /usr/bin/jq -e \
+            --arg connectionId "$CONNECTION_ID" \
+            '.error == null and .data.command == "connection.health.record" and .data.result.connectionId == $connectionId and .data.result.status == "ready"' \
+            >/dev/null
 
           LEAD_CLASSIFY_KEY="deploy-lead-classify-$RUN_ID"
           LEAD_CLASSIFY_PAYLOAD="$(

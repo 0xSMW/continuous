@@ -135,8 +135,9 @@ The deploy path also starts the `worker-scheduler` profile. The scheduler uses
 tenant `continuous-demo` to call the same production APIs an operator would
 call: `/workflow` with `command=steps.execute`, `/worker` with
 `command=lead.read` for active connections whose `config.polling.enabled` is
-true, then `/worker` with `command=adapters.retry` and
-`command=adapters.reconcile`. Lead source, reader kind, provider, and
+true, `/worker` with `command=run` once for each returned intake selector, then
+`/worker` with `command=adapters.retry` and `command=adapters.reconcile`.
+Lead source, reader kind, provider, and
 connection credential references live under the `config` payload, not in the
 route name. `WORKER_SCHEDULER_LEAD_POLL_LIMIT` caps poll attempts per cycle and
 defaults to `5`. The scheduler does not execute external sends or money
@@ -288,12 +289,13 @@ Workflow handlers that already hold Core UUIDs can pass those ids under
 snapshots and approval review. Worker-specific HTTP paths are intentionally
 absent; expand the worker control plane through registered `/worker` commands
 and payload fields.
-The deploy workflow smokes `lead.read`, the source-selector `run` path, adapter
-reconciliation, continuation, and `/core` task creation, task transition,
-approval request, capability grant, budget reserve/charge/release, object,
-object-link, event, evidence, document, packet, decision, generated-view,
-connector setup, connection health, shared approval inbox route, payroll
-preview packet handoff, and payroll
+The deploy workflow smokes `lead.read`, the source-selector `run` path, a
+Core-created active buffered connection, one-shot scheduler `lead.read -> run`
+handoff proof, adapter reconciliation, continuation, and `/core` task creation,
+task transition, approval request, capability grant, budget
+reserve/charge/release, object, object-link, event, evidence, document, packet,
+decision, generated-view, connector setup, connection health, shared approval
+inbox route, payroll preview packet handoff, and payroll
 approval handoff after each production rollout. It also runs the host
 observability check so production rollout fails if app/db/Caddy service state,
 public health, TLS freshness, disk usage, or Caddy access logging are broken.

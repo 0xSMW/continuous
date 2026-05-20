@@ -1037,6 +1037,71 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(healthReplay.created).toBe(false);
     expect(healthReplay.status).toBe("ready");
 
+    const bufferedConnectionResult = await upsertCoreConnection({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-core-buffered-connection-upsert-${runId}`,
+      adapterKey,
+      name: "Buffered scheduler inbox CI",
+      state: "active",
+      externalAccountId: `buffered-leads-${runId}`,
+      scopes: {
+        reads: ["lead.read"],
+      },
+      config: {
+        sources: ["google_workspace_inbox"],
+        providers: ["google_workspace"],
+        readerKinds: ["inbox"],
+        polling: {
+          enabled: true,
+          mode: "connection_buffer",
+          source: "google_workspace_inbox",
+          provider: "google_workspace",
+        },
+        inbox: {
+          messages: [
+            {
+              messageId: `buffered-message-${runId}`,
+              subject: "Need roof leak inspection",
+            },
+          ],
+        },
+        externalExecution: "blocked",
+      },
+      db,
+    });
+    const bufferedHealthResult = await recordCoreConnectionHealth({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-core-buffered-connection-health-${runId}`,
+      connectionId: bufferedConnectionResult.connectionId,
+      checks: [
+        "state",
+        "adapter",
+        "external_execution",
+        "credential_ref",
+        "source_metadata",
+        "scopes",
+        "polling",
+      ],
+      env: {},
+      db,
+    });
+    const bufferedCredentialCheck = bufferedHealthResult.checks.find(
+      (check) => objectValue(check).key === "credential_ref",
+    );
+
+    expect(bufferedConnectionResult.created).toBe(true);
+    expect(bufferedConnectionResult.pollingEnabled).toBe(true);
+    expect(bufferedHealthResult.status).toBe("ready");
+    expect(objectValue(bufferedCredentialCheck).status).toBe("not_applicable");
+    expect(objectValue(bufferedCredentialCheck).data).toMatchObject({
+      credentialRefState: "not_required",
+      credentialRefKind: null,
+      envConfigured: null,
+      pollingMode: "connection_buffer",
+    });
+
     await expect(
       upsertCoreConnection({
         operatorEmail: "owner@continuoushq.com",
