@@ -459,9 +459,7 @@ export async function POST(request: Request) {
   });
 
   if (command === "control_plane.token_rotation.attest") {
-    const idempotency = normalizeIdempotencyKey(
-      request.headers.get("idempotency-key") ?? body.idempotencyKey,
-    );
+    const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
     const forbiddenFields = unexpectedTokenRotationFields(config);
 
     if (!idempotency.ok) {
@@ -523,9 +521,7 @@ export async function POST(request: Request) {
   }
 
   if (command === "control_plane.credential.upsert") {
-    const idempotency = normalizeIdempotencyKey(
-      request.headers.get("idempotency-key") ?? body.idempotencyKey,
-    );
+    const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
     const forbiddenFields = unexpectedControlPlaneCredentialFields(config);
 
     if (!idempotency.ok) {
@@ -591,9 +587,7 @@ export async function POST(request: Request) {
   }
 
   if (command === "control_plane.credential.revoke") {
-    const idempotency = normalizeIdempotencyKey(
-      request.headers.get("idempotency-key") ?? body.idempotencyKey,
-    );
+    const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
     const forbiddenFields = unexpectedControlPlaneCredentialFields(config);
 
     if (!idempotency.ok) {
@@ -650,9 +644,7 @@ export async function POST(request: Request) {
   }
 
   if (command === "control_plane.session.review") {
-    const idempotency = normalizeIdempotencyKey(
-      request.headers.get("idempotency-key") ?? body.idempotencyKey,
-    );
+    const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
 
     if (!idempotency.ok) {
       return errorResponse(
@@ -699,9 +691,7 @@ export async function POST(request: Request) {
   }
 
   if (command === "task.create") {
-    const idempotency = normalizeIdempotencyKey(
-      request.headers.get("idempotency-key") ?? body.idempotencyKey,
-    );
+    const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
 
     if (!idempotency.ok) {
       return errorResponse(
@@ -758,9 +748,7 @@ export async function POST(request: Request) {
   }
 
   if (command === "task.transition") {
-    const idempotency = normalizeIdempotencyKey(
-      request.headers.get("idempotency-key") ?? body.idempotencyKey,
-    );
+    const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
 
     if (!idempotency.ok) {
       return errorResponse(
@@ -810,9 +798,7 @@ export async function POST(request: Request) {
   }
 
   if (command === "object.upsert") {
-    const idempotency = normalizeIdempotencyKey(
-      request.headers.get("idempotency-key") ?? body.idempotencyKey,
-    );
+    const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
 
     if (!idempotency.ok) {
       return errorResponse(
@@ -875,9 +861,7 @@ export async function POST(request: Request) {
   }
 
   if (command === "adapter.upsert") {
-    const idempotency = normalizeIdempotencyKey(
-      request.headers.get("idempotency-key") ?? body.idempotencyKey,
-    );
+    const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
 
     if (!idempotency.ok) {
       return errorResponse(
@@ -929,9 +913,7 @@ export async function POST(request: Request) {
   }
 
   if (command === "connection.upsert") {
-    const idempotency = normalizeIdempotencyKey(
-      request.headers.get("idempotency-key") ?? body.idempotencyKey,
-    );
+    const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
 
     if (!idempotency.ok) {
       return errorResponse(
@@ -983,9 +965,7 @@ export async function POST(request: Request) {
   }
 
   if (command === "connection.health.record") {
-    const idempotency = normalizeIdempotencyKey(
-      request.headers.get("idempotency-key") ?? body.idempotencyKey,
-    );
+    const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
 
     if (!idempotency.ok) {
       return errorResponse(
@@ -1031,9 +1011,7 @@ export async function POST(request: Request) {
   }
 
   if (command === "event.ingest") {
-    const idempotency = normalizeIdempotencyKey(
-      request.headers.get("idempotency-key") ?? body.idempotencyKey,
-    );
+    const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
 
     if (!idempotency.ok) {
       return errorResponse(
@@ -1086,9 +1064,7 @@ export async function POST(request: Request) {
   }
 
   if (command === "evidence.attach") {
-    const idempotency = normalizeIdempotencyKey(
-      request.headers.get("idempotency-key") ?? body.idempotencyKey,
-    );
+    const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
 
     if (!idempotency.ok) {
       return errorResponse(
@@ -1143,9 +1119,7 @@ export async function POST(request: Request) {
   }
 
   if (command === "document.create") {
-    const idempotency = normalizeIdempotencyKey(
-      request.headers.get("idempotency-key") ?? body.idempotencyKey,
-    );
+    const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
 
     if (!idempotency.ok) {
       return errorResponse(
@@ -1197,9 +1171,7 @@ export async function POST(request: Request) {
   }
 
   if (command === "packet.prepare" || command === "document.packet.prepare") {
-    const idempotency = normalizeIdempotencyKey(
-      request.headers.get("idempotency-key") ?? body.idempotencyKey,
-    );
+    const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
 
     if (!idempotency.ok) {
       return errorResponse(
@@ -1257,9 +1229,7 @@ export async function POST(request: Request) {
   }
 
   if (command === "decision.record") {
-    const idempotency = normalizeIdempotencyKey(
-      request.headers.get("idempotency-key") ?? body.idempotencyKey,
-    );
+    const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
 
     if (!idempotency.ok) {
       return errorResponse(
@@ -1312,9 +1282,7 @@ export async function POST(request: Request) {
   }
 
   if (command === "approval.request") {
-    const idempotency = normalizeIdempotencyKey(
-      request.headers.get("idempotency-key") ?? body.idempotencyKey,
-    );
+    const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
 
     if (!idempotency.ok) {
       return errorResponse(
@@ -1372,9 +1340,7 @@ export async function POST(request: Request) {
   }
 
   if (command === "adapter.intent.record") {
-    const idempotency = normalizeIdempotencyKey(
-      request.headers.get("idempotency-key") ?? body.idempotencyKey,
-    );
+    const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
 
     if (!idempotency.ok) {
       return errorResponse(
@@ -1426,9 +1392,7 @@ export async function POST(request: Request) {
   }
 
   if (command === "rule.change.record") {
-    const idempotency = normalizeIdempotencyKey(
-      request.headers.get("idempotency-key") ?? body.idempotencyKey,
-    );
+    const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
 
     if (!idempotency.ok) {
       return errorResponse(
@@ -1488,9 +1452,7 @@ export async function POST(request: Request) {
   }
 
   if (command === "capability.grant") {
-    const idempotency = normalizeIdempotencyKey(
-      request.headers.get("idempotency-key") ?? body.idempotencyKey,
-    );
+    const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
 
     if (!idempotency.ok) {
       return errorResponse(
@@ -1544,9 +1506,7 @@ export async function POST(request: Request) {
   }
 
   if (command === "budget.reserve") {
-    const idempotency = normalizeIdempotencyKey(
-      request.headers.get("idempotency-key") ?? body.idempotencyKey,
-    );
+    const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
 
     if (!idempotency.ok) {
       return errorResponse(
@@ -1596,9 +1556,7 @@ export async function POST(request: Request) {
   }
 
   if (command === "budget.charge") {
-    const idempotency = normalizeIdempotencyKey(
-      request.headers.get("idempotency-key") ?? body.idempotencyKey,
-    );
+    const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
 
     if (!idempotency.ok) {
       return errorResponse(
@@ -1650,9 +1608,7 @@ export async function POST(request: Request) {
   }
 
   if (command === "budget.release") {
-    const idempotency = normalizeIdempotencyKey(
-      request.headers.get("idempotency-key") ?? body.idempotencyKey,
-    );
+    const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
 
     if (!idempotency.ok) {
       return errorResponse(
@@ -1698,9 +1654,7 @@ export async function POST(request: Request) {
   }
 
   if (command === "ai.infer") {
-    const idempotency = normalizeIdempotencyKey(
-      request.headers.get("idempotency-key") ?? body.idempotencyKey,
-    );
+    const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
 
     if (!idempotency.ok) {
       return errorResponse(
@@ -1755,9 +1709,7 @@ export async function POST(request: Request) {
   }
 
   if (command === "object.link") {
-    const idempotency = normalizeIdempotencyKey(
-      request.headers.get("idempotency-key") ?? body.idempotencyKey,
-    );
+    const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
 
     if (!idempotency.ok) {
       return errorResponse(
@@ -1806,9 +1758,7 @@ export async function POST(request: Request) {
   }
 
   if (command === "view.publish") {
-    const idempotency = normalizeIdempotencyKey(
-      request.headers.get("idempotency-key") ?? body.idempotencyKey,
-    );
+    const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
 
     if (!idempotency.ok) {
       return errorResponse(
@@ -1864,9 +1814,7 @@ export async function POST(request: Request) {
   }
 
   if (command === "customer_signal.record") {
-    const idempotency = normalizeIdempotencyKey(
-      request.headers.get("idempotency-key") ?? body.idempotencyKey,
-    );
+    const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
 
     if (!idempotency.ok) {
       return errorResponse(
@@ -1920,9 +1868,7 @@ export async function POST(request: Request) {
   }
 
   if (command === "payroll.preview.record") {
-    const idempotency = normalizeIdempotencyKey(
-      request.headers.get("idempotency-key") ?? body.idempotencyKey,
-    );
+    const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
 
     if (!idempotency.ok) {
       return errorResponse(
@@ -1970,9 +1916,7 @@ export async function POST(request: Request) {
   }
 
   if (command === "payroll.preview.packet.prepare") {
-    const idempotency = normalizeIdempotencyKey(
-      request.headers.get("idempotency-key") ?? body.idempotencyKey,
-    );
+    const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
 
     if (!idempotency.ok) {
       return errorResponse(
@@ -2021,9 +1965,7 @@ export async function POST(request: Request) {
   }
 
   if (command === "external_action.record") {
-    const idempotency = normalizeIdempotencyKey(
-      request.headers.get("idempotency-key") ?? body.idempotencyKey,
-    );
+    const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
 
     if (!idempotency.ok) {
       return errorResponse(

@@ -452,9 +452,7 @@ export async function POST(request: Request) {
 
   if (command === "start") {
     const workflowKey = optionalString(workflow.key);
-    const idempotency = normalizeIdempotencyKey(
-      request.headers.get("idempotency-key") ?? body.idempotencyKey,
-    );
+    const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
 
     if (!workflowKey || !idempotency.ok) {
       return errorResponse(
@@ -511,9 +509,7 @@ export async function POST(request: Request) {
   if (command === "transition") {
     const runId = optionalString(workflow.runId);
     const toState = optionalString(config.toState);
-    const idempotency = normalizeIdempotencyKey(
-      request.headers.get("idempotency-key") ?? body.idempotencyKey,
-    );
+    const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
 
     if (!runId || !toState || !idempotency.ok) {
       return errorResponse(
@@ -626,9 +622,7 @@ export async function POST(request: Request) {
   if (command === "approval.decide") {
     const approvalId = optionalString(config.approvalId);
     const action = normalizeApprovalDecision(config.action);
-    const idempotency = normalizeIdempotencyKey(
-      request.headers.get("idempotency-key") ?? body.idempotencyKey,
-    );
+    const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
 
     if (!approvalId || !action) {
       return errorResponse(

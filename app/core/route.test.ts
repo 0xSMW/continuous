@@ -2462,6 +2462,37 @@ describe("POST /core", () => {
     expect(mocks.recordPayrollPreview).not.toHaveBeenCalled();
   });
 
+  it("does not treat idempotency-key as a Core payload fallback", async () => {
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+          "idempotency-key": "header-core-key-001",
+        },
+        body: JSON.stringify({
+          command: "task.create",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          config: {
+            title: "Header keys do not count",
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toEqual({
+      code: "invalid_idempotency_key",
+      message: "A string idempotency key is required.",
+    });
+    expect(mocks.createCoreTask).not.toHaveBeenCalled();
+  });
+
   it("rejects ad hoc top-level command fields", async () => {
     const { POST } = await import("./route");
     const response = await POST(

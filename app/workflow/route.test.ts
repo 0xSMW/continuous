@@ -483,6 +483,40 @@ describe("/workflow route scope", () => {
     expect(mocks.transitionWorkflowRun).not.toHaveBeenCalled();
   });
 
+  it("does not treat idempotency-key as a workflow payload fallback", async () => {
+    mocks.env.CONTROL_PLANE_ALLOWED_TENANTS = "continuous-demo";
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/workflow", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+          "idempotency-key": "header-workflow-key-001",
+        },
+        body: JSON.stringify({
+          command: "transition",
+          workflow: {
+            runId: "workflow-run-1",
+            tenantSlug: "continuous-demo",
+          },
+          config: {
+            toState: "awaiting_approval",
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toEqual({
+      code: "invalid_workflow_transition",
+      message: "A string idempotency key is required.",
+    });
+    expect(mocks.transitionWorkflowRun).not.toHaveBeenCalled();
+  });
+
   it("rejects workflow approval decisions without an idempotency key before dispatch", async () => {
     mocks.env.CONTROL_PLANE_ALLOWED_TENANTS = "continuous-demo";
 

@@ -26,6 +26,7 @@
 | Pinned worker route metadata | Worker contract, command, and view metadata now carry `apiRoute: "/worker"`, so future worker roles inherit the generic control-plane route from registry data instead of inventing role-specific URLs |
 | Hardened the worker API contract | Route-level tests now assert the generic `/worker` payload envelope, body `idempotencyKey` precedence, GET selector mapping, and malformed command config rejection |
 | Removed worker idempotency header fallback | `POST /worker` now treats the payload `idempotencyKey` as the only command idempotency source; `idempotency-key` headers no longer bypass the canonical command envelope |
+| Removed Core and workflow idempotency header fallback | `POST /core` and `POST /workflow` now treat the payload `idempotencyKey` as the only command idempotency source, keeping command identity inside the canonical envelope |
 | Reasserted generic worker URL shape | Contract tests now generically classify any worker-family URL shape as non-canonical; worker families must use `/worker` with structured command/read envelopes instead of adding family-specific routes |
 | Shared the worker envelope guard | `/worker`, `worker.command`, `worker.view`, and `continuous.worker.command` now share envelope helpers so future worker families cannot drift into route-specific or tool-specific payload shapes |
 | Removed worker-specific local shortcuts | `worker:tool` is the only local mutation entrypoint; Revenue Operations runs now use the same `worker`, `command`, `idempotencyKey`, and `config` envelope as `/worker` |
