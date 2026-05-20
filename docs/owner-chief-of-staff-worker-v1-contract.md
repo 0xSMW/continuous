@@ -36,6 +36,22 @@ All commands use `POST /worker`; no owner-specific route is added.
 }
 ```
 
+Approval continuations use the same payload shape:
+
+```json
+{
+  "command": "continue",
+  "worker": {
+    "role": "owner_chief_of_staff",
+    "tenantSlug": "continuous-demo"
+  },
+  "idempotencyKey": "owner-brief-2026-05-19-continue",
+  "config": {
+    "approvalId": "approval-request-id"
+  }
+}
+```
+
 ## Registry Entries
 
 | Command or view | Tool alias | Required config | Idempotency | Side effects | External execution |
@@ -46,6 +62,7 @@ All commands use `POST /worker`; no owner-specific route is added.
 | `decision_queue.prepare` | `worker.owner.decision_queue.prepare` | `window`, optional `priorityFloor` | Required | Internal task and decision proposals | Blocked |
 | `anomaly.triage` | `worker.owner.anomaly.triage` | `window`, `metricKeys[]` | Required | Internal anomaly evidence and tasks | Blocked |
 | `approval.decide` | `worker.approvals.decide` | `approvalId`, `action`, optional `note` | None | Approval/task/workflow evidence only | Blocked |
+| `continue` | `worker.continue` | `approvalId` | Required | Publish, revise, or stale an owner brief from a decided approval | Blocked |
 
 ## Core Object Map
 

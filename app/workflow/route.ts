@@ -33,6 +33,24 @@ function bodyObject(value: unknown) {
     : {};
 }
 
+function configObject(value: unknown) {
+  if (value === undefined || value === null) {
+    return { ok: true as const, value: {} as Record<string, unknown> };
+  }
+
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return { ok: true as const, value: value as Record<string, unknown> };
+  }
+
+  return {
+    ok: false as const,
+    error: {
+      code: "invalid_workflow_command_config",
+      message: "config must be an object when provided.",
+    },
+  };
+}
+
 function jsonObject(value: unknown): JsonObject {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonObject) : {};
 }
@@ -225,7 +243,8 @@ export async function POST(request: Request) {
   const body = await readBody(request);
   const unexpectedFields = unexpectedWorkflowPayloadFields(body);
   const workflow = bodyObject(body.workflow);
-  const config = bodyObject(body.config);
+  const configResult = configObject(body.config);
+  const config = configResult.ok ? configResult.value : {};
   const command = optionalString(body.command);
   const tenantSlug = optionalString(workflow.tenantSlug);
   const auth = authorizeControlPlaneAccess({
@@ -256,6 +275,10 @@ export async function POST(request: Request) {
       },
       400,
     );
+  }
+
+  if (!configResult.ok) {
+    return errorResponse(configResult.error, 400);
   }
 
   const scope = authorizeControlPlaneScope({

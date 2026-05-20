@@ -171,6 +171,13 @@ describe("worker tool contract", () => {
           idempotency: "required",
           requiresTenant: true,
         }),
+        expect.objectContaining({
+          role: "owner_chief_of_staff",
+          name: "continue",
+          idempotency: "required",
+          requiresTenant: true,
+          externalExecution: "blocked",
+        }),
       ]),
     );
     expect(workerToolSchema.registry.commands).toEqual(

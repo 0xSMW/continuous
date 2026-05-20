@@ -546,6 +546,7 @@ const ownerRequiredIds: Array<keyof OwnerBriefRunResult> = [
   "evidenceId",
   "documentId",
   "packetId",
+  "approvalRequestId",
   "auditEventId",
   "reservationId",
   "usageEventId",

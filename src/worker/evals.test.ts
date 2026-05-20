@@ -161,6 +161,7 @@ const completeOwnerResult: OwnerBriefRunResult = {
   evidenceId: "owner_evidence_1",
   documentId: "owner_document_1",
   packetId: "owner_packet_1",
+  approvalRequestId: "owner_approval_1",
   auditEventId: "owner_audit_1",
   reservationId: "owner_reservation_1",
   usageEventId: "owner_usage_1",

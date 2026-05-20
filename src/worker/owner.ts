@@ -38,6 +38,8 @@ const ownerSource = "continuous.owner_worker";
 const dailyBriefWorkflowKey = "daily_owner_brief";
 const ownerRunUnits = 4000;
 const defaultBriefScopes = ["tasks", "approvals", "cash", "capacity", "obligations", "workers"];
+const uuidPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export type OwnerWorkerSelector = {
   tenantSlug?: string;
@@ -115,6 +117,7 @@ export type OwnerBriefRunResult = {
   evidenceId: string | null;
   documentId: string | null;
   packetId: string | null;
+  approvalRequestId: string | null;
   auditEventId: string | null;
   reservationId: string | null;
   usageEventId: string | null;
@@ -122,6 +125,25 @@ export type OwnerBriefRunResult = {
   workflowStepIds: string[];
   decisionIds: string[];
   viewIds: string[];
+  output: JsonObject;
+  snapshot: OwnerWorkerSnapshot;
+};
+
+export type OwnerWorkerContinuationResult = {
+  created: boolean;
+  idempotencyKey: string;
+  workerRunId: string | null;
+  originalWorkerRunId: string | null;
+  eventId: string | null;
+  approvalRequestId: string | null;
+  auditEventId: string | null;
+  evidenceId: string | null;
+  objectId: string | null;
+  documentId: string | null;
+  packetId: string | null;
+  workflowRunId: string | null;
+  workflowStepId: string | null;
+  taskId: string | null;
   output: JsonObject;
   snapshot: OwnerWorkerSnapshot;
 };
@@ -246,6 +268,12 @@ function objectValue(value: unknown): JsonObject {
 
 function stringValue(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function uuidValue(value: unknown) {
+  const valueString = stringValue(value);
+
+  return valueString && uuidPattern.test(valueString) ? valueString : undefined;
 }
 
 function numberValue(value: unknown) {
@@ -776,6 +804,7 @@ function replayedBriefResult(
     evidenceId: stringValue(data.evidenceId) ?? null,
     documentId: stringValue(data.documentId) ?? null,
     packetId: stringValue(data.packetId) ?? null,
+    approvalRequestId: stringValue(data.approvalRequestId) ?? null,
     auditEventId: stringValue(data.auditEventId) ?? null,
     reservationId: stringValue(data.reservationId) ?? null,
     usageEventId: stringValue(data.usageEventId) ?? null,
@@ -784,6 +813,32 @@ function replayedBriefResult(
     decisionIds: stringList(data.decisionIds),
     viewIds: stringList(data.viewIds),
     output,
+    snapshot,
+  };
+}
+
+function replayedContinuationResult(
+  run: typeof workerRuns.$inferSelect,
+  snapshot: OwnerWorkerSnapshot,
+): OwnerWorkerContinuationResult {
+  const data = objectValue(run.data);
+
+  return {
+    created: false,
+    idempotencyKey: run.idempotencyKey,
+    workerRunId: run.id,
+    originalWorkerRunId: stringValue(data.originalWorkerRunId) ?? null,
+    eventId: run.eventId ?? stringValue(data.eventId) ?? null,
+    approvalRequestId: stringValue(data.approvalRequestId) ?? null,
+    auditEventId: stringValue(data.auditEventId) ?? null,
+    evidenceId: stringValue(data.evidenceId) ?? null,
+    objectId: stringValue(data.objectId) ?? null,
+    documentId: stringValue(data.documentId) ?? null,
+    packetId: stringValue(data.packetId) ?? null,
+    workflowRunId: stringValue(data.workflowRunId) ?? null,
+    workflowStepId: stringValue(data.workflowStepId) ?? null,
+    taskId: run.taskId ?? stringValue(data.taskId) ?? null,
+    output: objectValue(data.output),
     snapshot,
   };
 }
@@ -1462,6 +1517,136 @@ export async function generateOwnerBrief(input: {
         updatedAt: now,
       })
       .returning({ id: evidencePackets.id });
+    const [approval] = await tx
+      .insert(approvalRequests)
+      .values({
+        tenantId: context.worker.tenantId,
+        workerRunId: run.id,
+        workflowRunId: workflowRun.id,
+        eventId: event.id,
+        objectId: briefObject.id,
+        requesterType: "worker",
+        requesterId: context.worker.id,
+        requesterRef: `worker:${context.worker.id}`,
+        reviewerUserId: context.operator.userId,
+        kind: "owner_brief_approval",
+        state: "pending",
+        priority: brief.riskFlags.length > 0 ? "high" : "normal",
+        risk: brief.riskFlags.length > 0 ? "medium" : "low",
+        title: "Review daily owner brief",
+        summary:
+          brief.riskFlags.length > 0
+            ? `Owner Chief-of-Staff prepared a brief with risk flags: ${brief.riskFlags.join(", ")}.`
+            : "Owner Chief-of-Staff prepared a review-ready daily brief.",
+        requestedAction: {
+          action: "publish_owner_brief",
+          objectId: briefObject.id,
+          documentId: document.id,
+          packetId: packet.id,
+          riskFlags: brief.riskFlags,
+          externalExecution: "blocked",
+          externalSend: false,
+        },
+        evidence: {
+          eventId: event.id,
+          objectId: briefObject.id,
+          sourceSnapshotEvidenceId: sourceSnapshot.id,
+          documentId: document.id,
+          packetId: packet.id,
+          workflowRunId: workflowRun.id,
+        },
+        policy: {
+          approvalRequiredFor: ["publish_owner_brief", "route_owner_task", "sensitive_reveal"],
+          externalExecution: "blocked",
+          sensitiveDataReveal: "blocked",
+        },
+        data: {
+          workerRunId: run.id,
+          workflowRunId: workflowRun.id,
+          objectId: briefObject.id,
+          documentId: document.id,
+          packetId: packet.id,
+          sourceSnapshotEvidenceId: sourceSnapshot.id,
+          sourceCounts: readModel.counts,
+          riskFlags: brief.riskFlags,
+          externalExecution: "blocked",
+          externalSend: false,
+        },
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: approvalRequests.id });
+    const [approvalAudit] = await tx
+      .insert(auditEvents)
+      .values({
+        tenantId: context.worker.tenantId,
+        type: "owner_brief.approval_requested",
+        source: ownerSource,
+        actorType: "worker",
+        actorId: context.worker.id,
+        actorRef: `worker:${context.worker.id}`,
+        targetType: "approval_request",
+        targetId: approval.id,
+        workerRunId: run.id,
+        approvalRequestId: approval.id,
+        eventId: event.id,
+        objectId: briefObject.id,
+        risk: brief.riskFlags.length > 0 ? "medium" : "low",
+        idempotencyKey: `${input.idempotencyKey}:owner_brief_approval_requested`,
+        data: {
+          reviewerUserId: context.operator.userId,
+          documentId: document.id,
+          packetId: packet.id,
+          sourceSnapshotEvidenceId: sourceSnapshot.id,
+          workflowRunId: workflowRun.id,
+          externalExecution: "blocked",
+        },
+        createdAt: now,
+      })
+      .returning({ id: auditEvents.id });
+    const [approvalEvidence] = await tx
+      .insert(evidence)
+      .values({
+        tenantId: context.worker.tenantId,
+        kind: "approval",
+        name: "Owner brief approval requested",
+        objectId: briefObject.id,
+        eventId: event.id,
+        actorType: "worker",
+        actorId: context.worker.id,
+        hash: hashJson({ approvalRequestId: approval.id, packetId: packet.id, action: "publish_owner_brief" }),
+        data: {
+          approvalRequestId: approval.id,
+          auditEventId: approvalAudit.id,
+          objectId: briefObject.id,
+          documentId: document.id,
+          packetId: packet.id,
+          sourceSnapshotEvidenceId: sourceSnapshot.id,
+          workflowRunId: workflowRun.id,
+          externalExecution: "blocked",
+          externalSend: false,
+        },
+        redaction: objectValue(brief.redaction),
+        createdAt: now,
+      })
+      .returning({ id: evidence.id });
+
+    await tx
+      .update(approvalRequests)
+      .set({
+        evidence: {
+          eventId: event.id,
+          objectId: briefObject.id,
+          sourceSnapshotEvidenceId: sourceSnapshot.id,
+          requestEvidenceId: approvalEvidence.id,
+          auditEventId: approvalAudit.id,
+          documentId: document.id,
+          packetId: packet.id,
+          workflowRunId: workflowRun.id,
+        },
+        updatedAt: now,
+      })
+      .where(eq(approvalRequests.id, approval.id));
     const decisionValues = [
       {
         decision: brief.riskFlags.length > 0 ? "owner_review_required" : "brief_ready_for_review",
@@ -1510,7 +1695,11 @@ export async function generateOwnerBrief(input: {
           emptyStates: ["no_sources", "source_partial", "stale"],
         },
         actions: {
-          valid: ["approve_brief", "route_task", "request_revision"],
+          decisionSurface: "/approval",
+          decisionCommand: "approval.decide",
+          valid: ["approved", "revision_requested", "rejected"],
+          postDecisionSurface: "/worker",
+          postDecisionCommand: "continue",
           externalExecution: "blocked",
         },
         data,
@@ -1544,6 +1733,7 @@ export async function generateOwnerBrief(input: {
     };
     const viewIds = [
       await publishView("owner.brief.review", "Owner brief review", "Review owner brief sources and risk flags.", {
+        approvalRequestId: approval.id,
         objectId: briefObject.id,
         packetId: packet.id,
         documentId: document.id,
@@ -1577,6 +1767,9 @@ export async function generateOwnerBrief(input: {
           packetId: packet.id,
           documentId: document.id,
           evidenceId: sourceSnapshot.id,
+          approvalRequestId: approval.id,
+          approvalEvidenceId: approvalEvidence.id,
+          approvalAuditEventId: approvalAudit.id,
           decisionIds: decisionRows.map((decision) => decision.id),
           viewIds,
           externalExecution: "blocked",
@@ -1592,6 +1785,7 @@ export async function generateOwnerBrief(input: {
       evidenceId: sourceSnapshot.id,
       documentId: document.id,
       packetId: packet.id,
+      approvalRequestId: approval.id,
       auditEventId: audit.id,
       reservationId: reservation.id,
       usageEventId: usage.id,
@@ -1613,6 +1807,9 @@ export async function generateOwnerBrief(input: {
           evidenceId: sourceSnapshot.id,
           documentId: document.id,
           packetId: packet.id,
+          approvalRequestId: approval.id,
+          approvalEvidenceId: approvalEvidence.id,
+          approvalAuditEventId: approvalAudit.id,
           auditEventId: audit.id,
           reservationId: reservation.id,
           usageEventId: usage.id,
@@ -1633,6 +1830,7 @@ export async function generateOwnerBrief(input: {
       evidenceId: sourceSnapshot.id,
       documentId: document.id,
       packetId: packet.id,
+      approvalRequestId: approval.id,
       auditEventId: audit.id,
       reservationId: reservation.id,
       usageEventId: usage.id,
@@ -1654,6 +1852,7 @@ export async function generateOwnerBrief(input: {
     evidenceId: result.evidenceId,
     documentId: result.documentId,
     packetId: result.packetId,
+    approvalRequestId: result.approvalRequestId,
     auditEventId: result.auditEventId,
     reservationId: result.reservationId,
     usageEventId: result.usageEventId,
@@ -1667,6 +1866,599 @@ export async function generateOwnerBrief(input: {
       tenantSlug: context.worker.tenantSlug,
       workerId: context.worker.id,
     }),
+  };
+}
+
+export async function continueOwnerWorker(input: {
+  approvalId: string;
+  idempotencyKey: string;
+  operatorEmail: string;
+  tenantSlug?: string;
+  workerId?: string;
+  db?: Database;
+}): Promise<OwnerWorkerContinuationResult> {
+  const db = input.db ?? defaultDb;
+  const approvalId = uuidValue(input.approvalId);
+
+  if (!approvalId) {
+    throw new PlatformUnavailableError(
+      "invalid_worker_continuation_config",
+      "config.approvalId must be a valid approval id.",
+      400,
+    );
+  }
+
+  const context = await loadOwnerContext({
+    db,
+    selector: { role: ownerWorkerRole, tenantSlug: input.tenantSlug, workerId: input.workerId },
+    operatorEmail: input.operatorEmail,
+  });
+  const now = new Date();
+
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${ownerSource}:continue:${input.idempotencyKey}`}))`,
+    );
+
+    const [existingRun] = await tx
+      .select()
+      .from(workerRuns)
+      .where(
+        and(
+          eq(workerRuns.tenantId, context.worker.tenantId),
+          eq(workerRuns.workerId, context.worker.id),
+          eq(workerRuns.source, ownerSource),
+          eq(workerRuns.idempotencyKey, input.idempotencyKey),
+        ),
+      )
+      .limit(1);
+
+    if (existingRun) {
+      const existingData = objectValue(existingRun.data);
+
+      if (existingRun.mode !== "continuation" || stringValue(existingData.approvalRequestId) !== approvalId) {
+        throw new PlatformUnavailableError(
+          "worker_continuation_idempotency_conflict",
+          "Idempotency key already belongs to a different owner worker operation.",
+          409,
+        );
+      }
+
+      return {
+        replayed: true as const,
+        run: existingRun,
+      };
+    }
+
+    const [approval] = await tx
+      .select()
+      .from(approvalRequests)
+      .where(and(eq(approvalRequests.tenantId, context.worker.tenantId), eq(approvalRequests.id, approvalId)))
+      .limit(1);
+
+    if (!approval) {
+      throw new PlatformUnavailableError(
+        "worker_continuation_approval_not_found",
+        "No owner worker approval request matches this id.",
+        404,
+      );
+    }
+
+    if (approval.kind !== "owner_brief_approval") {
+      throw new PlatformUnavailableError(
+        "worker_continuation_unsupported_approval",
+        "Owner Chief-of-Staff continuation currently supports owner_brief_approval only.",
+        400,
+      );
+    }
+
+    if (!["approved", "revision_requested", "rejected"].includes(approval.state)) {
+      throw new PlatformUnavailableError(
+        "worker_continuation_unsupported_state",
+        "Owner Chief-of-Staff continuation supports approved, revision_requested, and rejected approvals.",
+        409,
+      );
+    }
+
+    if (!approval.workerRunId || !approval.workflowRunId || !approval.objectId) {
+      throw new PlatformUnavailableError(
+        "worker_continuation_missing_links",
+        "Owner brief continuation requires linked worker, workflow, and object records.",
+        409,
+      );
+    }
+
+    const [originalRun] = await tx
+      .select()
+      .from(workerRuns)
+      .where(
+        and(
+          eq(workerRuns.tenantId, context.worker.tenantId),
+          eq(workerRuns.id, approval.workerRunId),
+        ),
+      )
+      .limit(1);
+
+    if (!originalRun) {
+      throw new PlatformUnavailableError(
+        "worker_continuation_run_not_found",
+        "The approval's original owner worker run is not available.",
+        404,
+      );
+    }
+
+    if (originalRun.workerId !== context.worker.id) {
+      throw new PlatformUnavailableError(
+        "worker_continuation_worker_mismatch",
+        "The selected owner worker does not own this approval continuation.",
+        403,
+      );
+    }
+
+    const [workflow] = await tx
+      .select({
+        run: workflowRuns,
+        definition: workflowDefinitions,
+      })
+      .from(workflowRuns)
+      .innerJoin(workflowDefinitions, eq(workflowRuns.definitionId, workflowDefinitions.id))
+      .where(
+        and(
+          eq(workflowRuns.tenantId, context.worker.tenantId),
+          eq(workflowRuns.id, approval.workflowRunId),
+        ),
+      )
+      .limit(1);
+
+    if (!workflow || workflow.definition.key !== dailyBriefWorkflowKey) {
+      throw new PlatformUnavailableError(
+        "worker_continuation_workflow_not_found",
+        "The approval's owner brief workflow run is not available.",
+        404,
+      );
+    }
+
+    const approvalDecision = objectValue(approval.decision);
+    const approvalEvidence = objectValue(approval.evidence);
+    const approvalData = objectValue(approval.data);
+    const requestedAction = objectValue(approval.requestedAction);
+    const documentId = uuidValue(requestedAction.documentId ?? approvalEvidence.documentId ?? approvalData.documentId);
+    const packetId = uuidValue(requestedAction.packetId ?? approvalEvidence.packetId ?? approvalData.packetId);
+    const action = approval.state as "approved" | "revision_requested" | "rejected";
+    const status =
+      action === "approved"
+        ? "owner_brief_published"
+        : action === "revision_requested"
+          ? "owner_brief_revision_requested"
+          : "owner_brief_rejected";
+    const objectState = action === "approved" ? "published" : action === "revision_requested" ? "draft" : "stale";
+    const documentState =
+      action === "approved" ? "published" : action === "revision_requested" ? "revision_requested" : "stale";
+    const workflowState = action === "approved" ? "published" : workflow.run.state;
+    const blockers: JsonObject =
+      action === "approved"
+        ? { open: [] }
+        : {
+            open: [action],
+            approvalRequestId: approval.id,
+          };
+
+    const [workerRun] = await tx
+      .insert(workerRuns)
+      .values({
+        tenantId: context.worker.tenantId,
+        workerId: context.worker.id,
+        budgetAccountId: context.budgetAccount.id,
+        source: ownerSource,
+        idempotencyKey: input.idempotencyKey,
+        state: "running",
+        mode: "continuation",
+        data: {
+          input: {
+            approvalRequestId: approval.id,
+            originalWorkerRunId: originalRun.id,
+            workflowRunId: workflow.run.id,
+            action,
+            note: stringValue(approvalDecision.note) ?? "",
+            operator: {
+              userId: context.operator.userId,
+              email: context.operator.email,
+            },
+          },
+          output: {},
+        },
+        startedAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: workerRuns.id });
+    const [event] = await tx
+      .insert(events)
+      .values({
+        tenantId: context.worker.tenantId,
+        type: "owner_worker.brief.continued",
+        source: ownerSource,
+        actorType: "worker",
+        actorId: context.worker.id,
+        actorRef: `worker:${context.worker.id}`,
+        objectId: approval.objectId,
+        idempotencyKey: `${input.idempotencyKey}:owner_brief_continued`,
+        data: {
+          status,
+          action,
+          approvalRequestId: approval.id,
+          originalWorkerRunId: originalRun.id,
+          workerRunId: workerRun.id,
+          workflowRunId: workflow.run.id,
+          objectId: approval.objectId,
+          documentId: documentId ?? null,
+          packetId: packetId ?? null,
+          externalExecution: "blocked",
+          externalSend: false,
+        },
+        occurredAt: now,
+        createdAt: now,
+      })
+      .returning({ id: events.id });
+
+    const [taskRow] =
+      action === "revision_requested"
+        ? await tx
+            .insert(tasks)
+            .values({
+              tenantId: context.worker.tenantId,
+              title: "Revise owner brief",
+              state: "active",
+              priority: approval.priority,
+              ownerType: "worker",
+              ownerId: context.worker.id,
+              ownerRef: `worker:${context.worker.id}`,
+              triggerEventId: event.id,
+              evidence: {
+                required: ["owner_brief_revision_note", "source_refs"],
+              },
+              outcome: {
+                status,
+                approvalRequestId: approval.id,
+                originalWorkerRunId: originalRun.id,
+                workflowRunId: workflow.run.id,
+                externalExecution: "blocked",
+              },
+              createdAt: now,
+              updatedAt: now,
+            })
+            .returning({ id: tasks.id })
+        : [null];
+
+    const [proof] = await tx
+      .insert(evidence)
+      .values({
+        tenantId: context.worker.tenantId,
+        kind: "approval",
+        name: "Owner brief continuation",
+        objectId: approval.objectId,
+        taskId: taskRow?.id,
+        eventId: event.id,
+        actorType: "worker",
+        actorId: context.worker.id,
+        hash: hashJson({
+          approvalRequestId: approval.id,
+          action,
+          originalWorkerRunId: originalRun.id,
+          workerRunId: workerRun.id,
+        }),
+        data: {
+          status,
+          action,
+          approvalRequestId: approval.id,
+          originalWorkerRunId: originalRun.id,
+          workerRunId: workerRun.id,
+          workflowRunId: workflow.run.id,
+          objectId: approval.objectId,
+          documentId: documentId ?? null,
+          packetId: packetId ?? null,
+          taskId: taskRow?.id ?? null,
+          approvalDecision,
+          externalExecution: "blocked",
+          externalSend: false,
+        },
+        redaction: {
+          sensitiveFields: "redacted_by_default",
+        },
+        createdAt: now,
+      })
+      .returning({ id: evidence.id });
+    const [workflowStep] = await tx
+      .insert(workflowSteps)
+      .values({
+        tenantId: context.worker.tenantId,
+        definitionId: workflow.definition.id,
+        workflowRunId: workflow.run.id,
+        eventId: event.id,
+        approvalRequestId: approval.id,
+        taskId: taskRow?.id,
+        objectId: approval.objectId,
+        workerId: context.worker.id,
+        kind: "approval_continuation",
+        name: `${workflow.definition.key}:continue:${action}`,
+        state: "done",
+        priority: approval.priority,
+        risk: approval.risk,
+        fromState: workflow.run.state,
+        toState: workflowState,
+        attempt: 1,
+        maxAttempts: 1,
+        leaseOwner: `worker:${context.worker.id}`,
+        leasedUntil: now,
+        idempotencyKey: `${input.idempotencyKey}:workflow_step`,
+        input: {
+          approvalRequestId: approval.id,
+          action,
+          originalWorkerRunId: originalRun.id,
+        },
+        output: {
+          status,
+          evidenceId: proof.id,
+          taskId: taskRow?.id ?? null,
+          externalExecution: "blocked",
+        },
+        startedAt: now,
+        completedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: workflowSteps.id });
+    const [audit] = await tx
+      .insert(auditEvents)
+      .values({
+        tenantId: context.worker.tenantId,
+        type: "owner_brief.continued",
+        source: ownerSource,
+        actorType: "worker",
+        actorId: context.worker.id,
+        actorRef: `worker:${context.worker.id}`,
+        targetType: "owner_brief",
+        targetId: approval.objectId,
+        taskId: taskRow?.id,
+        workerRunId: workerRun.id,
+        approvalRequestId: approval.id,
+        eventId: event.id,
+        objectId: approval.objectId,
+        risk: approval.risk,
+        idempotencyKey: `${input.idempotencyKey}:owner_brief_continued`,
+        data: {
+          status,
+          action,
+          originalWorkerRunId: originalRun.id,
+          evidenceId: proof.id,
+          workflowRunId: workflow.run.id,
+          workflowStepId: workflowStep.id,
+          taskId: taskRow?.id ?? null,
+          documentId: documentId ?? null,
+          packetId: packetId ?? null,
+          externalExecution: "blocked",
+          externalSend: false,
+        },
+        createdAt: now,
+      })
+      .returning({ id: auditEvents.id });
+
+    const [briefObjectRef] = await tx
+      .select({ data: objects.data })
+      .from(objects)
+      .where(and(eq(objects.tenantId, context.worker.tenantId), eq(objects.id, approval.objectId)))
+      .limit(1);
+
+    await tx
+      .update(objects)
+      .set({
+        state: objectState,
+        data: {
+          ...objectValue(briefObjectRef?.data),
+          lastContinuation: {
+            status,
+            action,
+            approvalRequestId: approval.id,
+            workerRunId: workerRun.id,
+            evidenceId: proof.id,
+            auditEventId: audit.id,
+          },
+        },
+        updatedAt: now,
+      })
+      .where(eq(objects.id, approval.objectId));
+
+    if (documentId) {
+      const [documentRef] = await tx
+        .select({ data: documents.data })
+        .from(documents)
+        .where(and(eq(documents.tenantId, context.worker.tenantId), eq(documents.id, documentId)))
+        .limit(1);
+
+      await tx
+        .update(documents)
+        .set({
+          state: documentState,
+          data: {
+            ...objectValue(documentRef?.data),
+            lastContinuation: {
+              status,
+              action,
+              approvalRequestId: approval.id,
+              workerRunId: workerRun.id,
+              evidenceId: proof.id,
+            },
+          },
+          updatedAt: now,
+        })
+        .where(and(eq(documents.tenantId, context.worker.tenantId), eq(documents.id, documentId)));
+    }
+
+    if (packetId) {
+      const [packetRef] = await tx
+        .select({ data: evidencePackets.data })
+        .from(evidencePackets)
+        .where(and(eq(evidencePackets.tenantId, context.worker.tenantId), eq(evidencePackets.id, packetId)))
+        .limit(1);
+
+      await tx
+        .update(evidencePackets)
+        .set({
+          state: documentState,
+          data: {
+            ...objectValue(packetRef?.data),
+            lastContinuation: {
+              status,
+              action,
+              approvalRequestId: approval.id,
+              workerRunId: workerRun.id,
+              evidenceId: proof.id,
+            },
+          },
+          updatedAt: now,
+        })
+        .where(and(eq(evidencePackets.tenantId, context.worker.tenantId), eq(evidencePackets.id, packetId)));
+    }
+
+    await tx
+      .update(workflowRuns)
+      .set({
+        state: workflowState,
+        blockers,
+        data: {
+          ...workflow.run.data,
+          lastOwnerContinuation: {
+            status,
+            action,
+            approvalRequestId: approval.id,
+            workerRunId: workerRun.id,
+            evidenceId: proof.id,
+            auditEventId: audit.id,
+            workflowStepId: workflowStep.id,
+            taskId: taskRow?.id ?? null,
+          },
+        },
+        updatedAt: now,
+        completedAt: action === "approved" ? now : workflow.run.completedAt,
+      })
+      .where(eq(workflowRuns.id, workflow.run.id));
+
+    if (action === "approved") {
+      await tx
+        .update(decisions)
+        .set({
+          state: "approved",
+        })
+        .where(and(eq(decisions.tenantId, context.worker.tenantId), eq(decisions.workflowRunId, workflow.run.id)));
+    }
+
+    const output = {
+      status,
+      action,
+      approvalRequestId: approval.id,
+      originalWorkerRunId: originalRun.id,
+      objectId: approval.objectId,
+      documentId: documentId ?? null,
+      packetId: packetId ?? null,
+      eventId: event.id,
+      evidenceId: proof.id,
+      auditEventId: audit.id,
+      workflowRunId: workflow.run.id,
+      workflowStepId: workflowStep.id,
+      taskId: taskRow?.id ?? null,
+      externalExecution: "blocked",
+      externalSend: false,
+    };
+
+    await tx
+      .update(workerRuns)
+      .set({
+        state: "done",
+        eventId: event.id,
+        taskId: taskRow?.id,
+        data: {
+          command: "continue",
+          approvalRequestId: approval.id,
+          originalWorkerRunId: originalRun.id,
+          eventId: event.id,
+          evidenceId: proof.id,
+          auditEventId: audit.id,
+          objectId: approval.objectId,
+          documentId: documentId ?? null,
+          packetId: packetId ?? null,
+          workflowRunId: workflow.run.id,
+          workflowStepId: workflowStep.id,
+          taskId: taskRow?.id ?? null,
+          output,
+          externalExecution: "blocked",
+        },
+        endedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(workerRuns.id, workerRun.id));
+
+    const originalRunData = objectValue(originalRun.data);
+    await tx
+      .update(workerRuns)
+      .set({
+        data: {
+          ...originalRunData,
+          output: {
+            ...objectValue(originalRunData.output),
+            lastOwnerContinuation: output,
+            externalExecution: "blocked",
+            externalSend: false,
+          },
+          lastOwnerContinuation: output,
+        },
+        updatedAt: now,
+      })
+      .where(eq(workerRuns.id, originalRun.id));
+
+    return {
+      replayed: false as const,
+      workerRunId: workerRun.id,
+      originalWorkerRunId: originalRun.id,
+      eventId: event.id,
+      approvalRequestId: approval.id,
+      auditEventId: audit.id,
+      evidenceId: proof.id,
+      objectId: approval.objectId,
+      documentId: documentId ?? null,
+      packetId: packetId ?? null,
+      workflowRunId: workflow.run.id,
+      workflowStepId: workflowStep.id,
+      taskId: taskRow?.id ?? null,
+      output,
+    };
+  });
+
+  const snapshot = await getOwnerWorkerSnapshot(db, {
+    role: ownerWorkerRole,
+    tenantSlug: context.worker.tenantSlug,
+    workerId: context.worker.id,
+  });
+
+  if (result.replayed) {
+    return replayedContinuationResult(result.run, snapshot);
+  }
+
+  return {
+    created: true,
+    idempotencyKey: input.idempotencyKey,
+    workerRunId: result.workerRunId,
+    originalWorkerRunId: result.originalWorkerRunId,
+    eventId: result.eventId,
+    approvalRequestId: result.approvalRequestId,
+    auditEventId: result.auditEventId,
+    evidenceId: result.evidenceId,
+    objectId: result.objectId,
+    documentId: result.documentId,
+    packetId: result.packetId,
+    workflowRunId: result.workflowRunId,
+    workflowStepId: result.workflowStepId,
+    taskId: result.taskId,
+    output: result.output,
+    snapshot,
   };
 }
 

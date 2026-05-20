@@ -577,6 +577,35 @@ describe("POST /core", () => {
     expect(mocks.createCoreTask).not.toHaveBeenCalled();
   });
 
+  it("rejects malformed command config before dispatch", async () => {
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "task.create",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "core-config-test-001",
+          config: "task title",
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toEqual({
+      code: "invalid_core_command_config",
+      message: "config must be an object when provided.",
+    });
+    expect(mocks.createCoreTask).not.toHaveBeenCalled();
+  });
+
   it("requires a tenant for scoped Core summary reads", async () => {
     vi.stubEnv("CONTROL_PLANE_ALLOWED_TENANTS", "continuous-demo");
 

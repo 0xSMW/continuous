@@ -40,6 +40,7 @@
 | Added future worker V1 contracts | Owner Chief-of-Staff, Dispatch, Finance, Workforce, Compliance, and Systems now have implementation-grade contracts covering API shape, Core objects, workflows, capabilities, adapters, evidence, views, evals, and security |
 | Added planned future-worker metadata | `worker:tool schema` and `continuous.worker.schema` now expose planned command/view metadata for future workers while keeping those roles non-executable until runtime handlers exist |
 | Added Owner Chief-of-Staff runtime slice | `owner_chief_of_staff` is now a registered `/worker` role with read-only `brief.generate`, `decision_queue.prepare`, `anomaly.triage`, `snapshot`, `briefs`, and `decisions` surfaces, seeded capability/budget/workflow substrate, owner brief packets, generated views, and eval coverage |
+| Added Owner worker continuations | Owner brief generation now creates a shared `owner_brief_approval`, and `POST /worker` with `worker.role=owner_chief_of_staff`, `command=continue`, and `config.approvalId` publishes approved briefs, creates revision tasks, or marks rejected briefs stale without external execution |
 | Added first Revenue Worker eval gate | `bun run test` now includes a CI-backed Postgres integration eval that runs the seeded worker, verifies persisted output/evaluation records, and checks idempotent replay |
 | Expanded Revenue Worker eval coverage | Revenue eval cases now cover direct lead packets, Core row intake refs, source-selector intake, a normal-urgency third service area, missing-fact owner review, pricing override behavior, and policy-risk external-send rejection before widening autonomy |
 | Added persistence-only adapter reconciliation | `worker.adapters.reconcile` scans pending dry-run adapter runs/actions, writes matched/retry/review state, records audit/evidence, and creates blocked retry/review system tasks without external execution |
@@ -85,6 +86,7 @@
 | Added scoped control-plane token catalog | `/core`, `/worker`, `/workflow`, and `/approval` now authorize against route/read-write/command-scoped token catalog entries when present; deploy writes a hashed catalog entry derived from the generated worker token so future rotation does not require new API shapes |
 | Added recovery drill harness | `scripts/recovery-drill.sh` composes tag-based app rollback and confirmation-gated database restore into one measured disposable-host drill, refuses known production hosts by default, and writes a local timing/compatibility report |
 | Added production observability checks | Caddy now writes retained JSON access logs, deploy creates log directories, and `scripts/check-observability-on-host.sh` verifies Compose service state, public health, TLS freshness, disk usage, Caddy logs, and optional backup/systemd checks with webhook failure alerts |
+| Tightened control-plane config envelopes | `/core`, `/workflow`, and `/approval` now reject non-object `config` values instead of silently normalizing them to `{}`, matching the stricter `/worker` command-envelope behavior |
 
 ### Tradeoffs
 

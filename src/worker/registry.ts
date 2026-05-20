@@ -14,6 +14,7 @@ import {
   runRevenueWorker,
 } from "./revenue";
 import {
+  continueOwnerWorker,
   generateOwnerBrief,
   getOwnerWorkerSnapshotSafe,
   listOwnerBriefs,
@@ -743,6 +744,49 @@ const workerDefinitions: Record<string, WorkerDefinition> = {
             action,
             note: optionalString(context.config.note),
             subject: "worker",
+          });
+        },
+      },
+      continue: {
+        name: "continue",
+        description: "Continue an owner worker approval outcome without executing external actions.",
+        idempotency: "required",
+        sideEffects: "internal",
+        externalExecution: "blocked",
+        requiresTenant: true,
+        configSchema: {
+          type: "object",
+          required: ["approvalId"],
+          properties: {
+            approvalId: { type: "string" },
+          },
+          additionalProperties: true,
+        },
+        async handle(context) {
+          const approvalId = optionalString(context.config.approvalId);
+
+          if (!context.idempotencyKey) {
+            throw new PlatformUnavailableError(
+              "invalid_idempotency_key",
+              "A string idempotency key is required.",
+              400,
+            );
+          }
+
+          if (!approvalId) {
+            throw new PlatformUnavailableError(
+              "invalid_worker_command_config",
+              "config.approvalId is required for continue.",
+              400,
+            );
+          }
+
+          return continueOwnerWorker({
+            approvalId,
+            idempotencyKey: context.idempotencyKey,
+            tenantSlug: context.target.tenantSlug,
+            workerId: context.target.workerId,
+            operatorEmail: context.operatorEmail,
           });
         },
       },

@@ -212,4 +212,34 @@ describe("/workflow route scope", () => {
     });
     expect(mocks.executeWorkflowSteps).not.toHaveBeenCalled();
   });
+
+  it("rejects malformed workflow command config before dispatch", async () => {
+    mocks.env.CONTROL_PLANE_ALLOWED_TENANTS = "continuous-demo";
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/workflow", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "steps.execute",
+          workflow: {
+            tenantSlug: "continuous-demo",
+          },
+          config: "run steps",
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toEqual({
+      code: "invalid_workflow_command_config",
+      message: "config must be an object when provided.",
+    });
+    expect(mocks.executeWorkflowSteps).not.toHaveBeenCalled();
+  });
 });

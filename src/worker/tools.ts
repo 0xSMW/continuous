@@ -153,7 +153,7 @@ export const workerTools = [
     name: "worker.continue",
     description: "Continue a worker-owned approval outcome with structured config.",
     registry: {
-      role: "revenue_operations",
+      role: "*",
       surface: "command",
       command: "continue",
       idempotency: "required",

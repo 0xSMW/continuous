@@ -235,6 +235,35 @@ describe("/approval route", () => {
     expect(mocks.decideApproval).not.toHaveBeenCalled();
   });
 
+  it("rejects malformed approval command config before dispatch", async () => {
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/approval", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "approval.decide",
+          approval: {
+            id: "77777777-7777-4777-8777-000000000001",
+            tenantSlug: "continuous-demo",
+          },
+          config: "approved",
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toEqual({
+      code: "invalid_approval_command_config",
+      message: "config must be an object when provided.",
+    });
+    expect(mocks.decideApproval).not.toHaveBeenCalled();
+  });
+
   it("rejects invalid approval decisions before dispatch", async () => {
     const { POST } = await import("./route");
     const response = await POST(

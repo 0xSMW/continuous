@@ -4650,6 +4650,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(ownerResult.evidenceId).toBeTruthy();
     expect(ownerResult.documentId).toBeTruthy();
     expect(ownerResult.packetId).toBeTruthy();
+    expect(ownerResult.approvalRequestId).toBeTruthy();
     expect(ownerResult.workflowRunId).toBeTruthy();
     expect(ownerResult.workflowStepIds).toHaveLength(3);
     expect(ownerResult.decisionIds.length).toBeGreaterThanOrEqual(1);
@@ -4666,6 +4667,11 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .select()
       .from(evidencePackets)
       .where(eq(evidencePackets.id, ownerResult.packetId ?? ""))
+      .limit(1);
+    const [approval] = await db
+      .select()
+      .from(approvalRequests)
+      .where(eq(approvalRequests.id, ownerResult.approvalRequestId ?? ""))
       .limit(1);
     const [run] = await db
       .select()
@@ -4700,11 +4706,205 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(version?.objectId).toBe(ownerResult.objectId);
     expect(packet?.kind).toBe("owner_brief_packet");
     expect(objectValue(packet?.data).externalExecution).toBe("blocked");
+    expect(approval?.kind).toBe("owner_brief_approval");
+    expect(approval?.state).toBe("pending");
+    expect(approval?.workerRunId).toBe(ownerResult.workerRunId);
+    expect(objectValue(approval?.requestedAction).externalExecution).toBe("blocked");
     expect(run?.mode).toBe("read_only");
     expect(run?.workerId).toBe(ownerWorker?.id);
     expect(objectValue(ownerResult.output).externalExecution).toBe("blocked");
     expect(objectValue(ownerResult.output).externalSend).toBe(false);
     expect(replayResult.created).toBe(false);
     expect(replayResult.workerRunId).toBe(ownerResult.workerRunId);
+  }, 120_000);
+
+  it("continues Owner Chief-of-Staff approval outcomes through the worker command spine", async () => {
+    const approvedRunId = randomUUID();
+    const approvedBrief = await executeWorkerCommand({
+      command: "brief.generate",
+      target: {
+        role: "owner_chief_of_staff",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: `ci-owner-approved-brief-${approvedRunId}`,
+      config: {
+        window: {
+          from: "2026-05-19T00:00:00.000Z",
+          to: "2026-05-20T00:00:00.000Z",
+        },
+        scopes: ["tasks", "approvals", "cash", "capacity", "obligations", "workers"],
+      },
+    });
+    const approvedBriefResult = approvedBrief.result as Awaited<
+      ReturnType<typeof import("./owner").generateOwnerBrief>
+    >;
+
+    await decideApproval({
+      approvalId: approvedBriefResult.approvalRequestId ?? "",
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      action: "approved",
+      note: "Publish this owner brief.",
+      subject: "worker",
+    });
+
+    const approvedContinuation = await executeWorkerCommand({
+      command: "continue",
+      target: {
+        role: "owner_chief_of_staff",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: `ci-owner-approved-continue-${approvedRunId}`,
+      config: {
+        approvalId: approvedBriefResult.approvalRequestId,
+      },
+    });
+    const approvedResult = approvedContinuation.result as Awaited<
+      ReturnType<typeof import("./owner").continueOwnerWorker>
+    >;
+    const approvedOutput = objectValue(approvedResult.output);
+
+    expect(approvedContinuation.worker.role).toBe("owner_chief_of_staff");
+    expect(approvedContinuation.command).toBe("continue");
+    expect(approvedResult.created).toBe(true);
+    expect(approvedOutput.status).toBe("owner_brief_published");
+    expect(approvedOutput.externalExecution).toBe("blocked");
+    expect(approvedOutput.externalSend).toBe(false);
+    expect(approvedResult.workflowStepId).toBeTruthy();
+
+    const [publishedObject] = await db
+      .select()
+      .from(objects)
+      .where(eq(objects.id, approvedBriefResult.objectId ?? ""))
+      .limit(1);
+    const [publishedDocument] = await db
+      .select()
+      .from(documents)
+      .where(eq(documents.id, approvedBriefResult.documentId ?? ""))
+      .limit(1);
+    const [publishedPacket] = await db
+      .select()
+      .from(evidencePackets)
+      .where(eq(evidencePackets.id, approvedBriefResult.packetId ?? ""))
+      .limit(1);
+    const [publishedWorkflow] = await db
+      .select()
+      .from(workflowRuns)
+      .where(eq(workflowRuns.id, approvedBriefResult.workflowRunId ?? ""))
+      .limit(1);
+    const [publishedStep] = await db
+      .select()
+      .from(workflowSteps)
+      .where(eq(workflowSteps.id, approvedResult.workflowStepId ?? ""))
+      .limit(1);
+    const [continuedOriginalRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(eq(workerRuns.id, approvedBriefResult.workerRunId ?? ""))
+      .limit(1);
+    const approvedReplay = await executeWorkerCommand({
+      command: "continue",
+      target: {
+        role: "owner_chief_of_staff",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: `ci-owner-approved-continue-${approvedRunId}`,
+      config: {
+        approvalId: approvedBriefResult.approvalRequestId,
+      },
+    });
+    const approvedReplayResult = approvedReplay.result as Awaited<
+      ReturnType<typeof import("./owner").continueOwnerWorker>
+    >;
+
+    expect(publishedObject?.state).toBe("published");
+    expect(publishedDocument?.state).toBe("published");
+    expect(publishedPacket?.state).toBe("published");
+    expect(publishedWorkflow?.state).toBe("published");
+    expect(publishedStep?.kind).toBe("approval_continuation");
+    expect(publishedStep?.approvalRequestId).toBe(approvedBriefResult.approvalRequestId);
+    expect(objectValue(objectValue(continuedOriginalRun?.data).output).lastOwnerContinuation).toEqual(
+      expect.objectContaining({
+        status: "owner_brief_published",
+        approvalRequestId: approvedBriefResult.approvalRequestId,
+      }),
+    );
+    expect(approvedReplayResult.created).toBe(false);
+    expect(approvedReplayResult.workerRunId).toBe(approvedResult.workerRunId);
+
+    const revisionRunId = randomUUID();
+    const revisionBrief = await executeWorkerCommand({
+      command: "brief.generate",
+      target: {
+        role: "owner_chief_of_staff",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: `ci-owner-revision-brief-${revisionRunId}`,
+      config: {
+        window: {
+          from: "2026-05-19T00:00:00.000Z",
+          to: "2026-05-20T00:00:00.000Z",
+        },
+        scopes: ["tasks", "approvals", "cash", "capacity", "obligations", "workers"],
+      },
+    });
+    const revisionBriefResult = revisionBrief.result as Awaited<
+      ReturnType<typeof import("./owner").generateOwnerBrief>
+    >;
+
+    await decideApproval({
+      approvalId: revisionBriefResult.approvalRequestId ?? "",
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      action: "revision_requested",
+      note: "Call out the stale source before publishing.",
+      subject: "worker",
+    });
+
+    const revisionContinuation = await executeWorkerCommand({
+      command: "continue",
+      target: {
+        role: "owner_chief_of_staff",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: `ci-owner-revision-continue-${revisionRunId}`,
+      config: {
+        approvalId: revisionBriefResult.approvalRequestId,
+      },
+    });
+    const revisionResult = revisionContinuation.result as Awaited<
+      ReturnType<typeof import("./owner").continueOwnerWorker>
+    >;
+    const revisionOutput = objectValue(revisionResult.output);
+    const [revisionObject] = await db
+      .select()
+      .from(objects)
+      .where(eq(objects.id, revisionBriefResult.objectId ?? ""))
+      .limit(1);
+    const [revisionTask] = await db
+      .select()
+      .from(tasks)
+      .where(eq(tasks.id, revisionResult.taskId ?? ""))
+      .limit(1);
+    const [revisionWorkflow] = await db
+      .select()
+      .from(workflowRuns)
+      .where(eq(workflowRuns.id, revisionBriefResult.workflowRunId ?? ""))
+      .limit(1);
+    const revisionBlockers = objectValue(revisionWorkflow?.blockers);
+
+    expect(revisionOutput.status).toBe("owner_brief_revision_requested");
+    expect(revisionOutput.externalExecution).toBe("blocked");
+    expect(revisionObject?.state).toBe("draft");
+    expect(revisionTask?.state).toBe("active");
+    expect(objectValue(revisionTask?.outcome).approvalRequestId).toBe(
+      revisionBriefResult.approvalRequestId,
+    );
+    expect(stringList(revisionBlockers.open)).toContain("revision_requested");
   }, 120_000);
 });

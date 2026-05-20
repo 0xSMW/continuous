@@ -36,8 +36,10 @@ adapters, generated UI, evidence, and evals.
 
 Status: first read-only runtime slice is registered on `/worker` for
 `brief.generate`, `decision_queue.prepare`, `anomaly.triage`, `snapshot`,
-`briefs`, and `decisions`. Remaining work is deeper stale-source handling,
-approval/revision continuations, and broader factuality evals before promotion.
+`briefs`, and `decisions`. Owner brief approvals now continue through the same
+`command=continue` worker spine for publish, revision, and stale outcomes.
+Remaining work is deeper stale-source handling and broader factuality evals
+before promotion.
 
 | Dependency | Implementation target |
 |---|---|
