@@ -480,6 +480,70 @@ describe("/worker route", () => {
     expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
   });
 
+  it("rejects missing or blank worker commands before managed credential dispatch", async () => {
+    mocks.env.CONTROL_PLANE_TOKENS_JSON = JSON.stringify([
+      {
+        id: "worker-runner",
+        token: "test-token",
+        operatorEmail: "operator@example.com",
+        allowedTenants: ["continuous-demo"],
+        allowedWorkerRoles: ["revenue_operations"],
+        allowedRoutes: ["worker"],
+        allowedAccess: ["write"],
+        allowedCommands: ["worker:run"],
+      },
+    ]);
+
+    const { POST } = await import("./route");
+    const missingCommand = await POST(
+      new Request("http://localhost/worker", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          worker: {
+            role: "revenue_operations",
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "missing-command-001",
+          config: {},
+        }),
+      }),
+    );
+    const blankCommand = await POST(
+      new Request("http://localhost/worker", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: " ",
+          worker: {
+            role: "revenue_operations",
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "blank-command-001",
+          config: {},
+        }),
+      }),
+    );
+
+    for (const response of [missingCommand, blankCommand]) {
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        error: {
+          code: "invalid_worker_command_envelope",
+          message: "Worker command payload requires a non-empty command string.",
+        },
+      });
+    }
+    expect(mocks.authorizeManagedControlPlaneCredential).not.toHaveBeenCalled();
+    expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
+  });
+
   it("does not treat idempotency-key as a worker payload fallback", async () => {
     mocks.executeWorkerCommand.mockResolvedValue({
       worker: {
@@ -769,7 +833,36 @@ describe("/worker route", () => {
     expect(response.status).toBe(400);
     expect(body.error).toEqual({
       code: "invalid_worker_command_config",
-      message: "config must be an object when provided.",
+      message: "config is required and must be an object.",
+    });
+    expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
+  });
+
+  it("requires command config before registry dispatch", async () => {
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/worker", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "run",
+          worker: {
+            role: "revenue_operations",
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "missing-config-001",
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toEqual({
+      code: "invalid_worker_command_config",
+      message: "config is required and must be an object.",
     });
     expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
   });
@@ -889,6 +982,30 @@ describe("/worker route", () => {
       code: "worker_view_unavailable",
       message: "Worker view is unavailable.",
     });
+  });
+
+  it("rejects worker-family-specific GET query fields", async () => {
+    const { GET } = await import("./route");
+    const response = await GET(
+      new Request(
+        "http://localhost/worker?view=snapshot&role=revenue_operations&tenantSlug=continuous-demo&extra=true",
+        {
+          headers: {
+            authorization: "Bearer test-token",
+          },
+        },
+      ),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toEqual({
+      code: "invalid_worker_view_query",
+      message:
+        "Worker view query fields must be view, role, id, tenantSlug, and state. Move read filters into config-backed worker tool surfaces. Unexpected fields: extra.",
+    });
+    expect(mocks.authorizeManagedControlPlaneCredential).not.toHaveBeenCalled();
+    expect(mocks.executeWorkerView).not.toHaveBeenCalled();
   });
 
   it("rejects GET views that omit tenant under scoped access", async () => {

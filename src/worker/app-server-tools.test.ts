@@ -212,6 +212,17 @@ describe("app-server worker tools", () => {
           role: "revenue_operations",
           tenantSlug: "continuous-demo",
         },
+        idempotencyKey: "app-server-missing-config-test-001",
+      }),
+    ).rejects.toThrow("config is required and must be an object.");
+
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.command", {
+        command: "run",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
         idempotencyKey: "app-server-envelope-test-001",
         approvalId: "approval-1",
         limit: 25,

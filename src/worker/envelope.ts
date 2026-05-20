@@ -74,3 +74,16 @@ export function validateWorkerTargetEnvelope(value: unknown):
 
   return { ok: true };
 }
+
+export function validateWorkerConfigEnvelope(value: unknown):
+  | { ok: true; value: Record<string, unknown> }
+  | { ok: false; message: string } {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return { ok: true, value: value as Record<string, unknown> };
+  }
+
+  return {
+    ok: false,
+    message: "config is required and must be an object.",
+  };
+}

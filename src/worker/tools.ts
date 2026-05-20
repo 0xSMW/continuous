@@ -17,6 +17,7 @@ import {
 } from "./planned-workers";
 import {
   unexpectedEnvelopeFields,
+  validateWorkerConfigEnvelope,
   validateWorkerTargetEnvelope,
   workerCommandEnvelopeDescription,
   workerCommandEnvelopeFieldSet,
@@ -81,7 +82,7 @@ export const workerTools = [
           additionalProperties: true,
         },
       },
-      required: ["command", "worker"],
+      required: ["command", "worker", "config"],
       additionalProperties: false,
     },
   },
@@ -338,6 +339,14 @@ function assertWorkerToolEnvelope(name: string, payload: JsonObject) {
 
   if (!targetResult.ok) {
     throw new Error(targetResult.message);
+  }
+
+  if (name === "worker.command") {
+    const configResult = validateWorkerConfigEnvelope(payload.config);
+
+    if (!configResult.ok) {
+      throw new Error(configResult.message);
+    }
   }
 }
 

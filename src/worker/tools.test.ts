@@ -53,7 +53,7 @@ function workerFamilyApiEntries(dir: string): string[] {
     const path = join(dir, entry.name);
     const nested = entry.isDirectory() ? workerFamilyApiEntries(path) : [];
 
-    return /(?:^|\/)[a-z0-9-]+-worker(?:\/|$)/.test(path) ? [path, ...nested] : nested;
+    return /(?:^|\/)[a-z0-9_-]+[-_]worker(?:\/|$)/.test(path) ? [path, ...nested] : nested;
   });
 }
 
@@ -68,7 +68,7 @@ describe("worker tool contract", () => {
 
     expect(existsSync(routePath)).toBe(true);
     expect(workerFamilyApiPaths).toEqual([]);
-    expect(routeList).not.toMatch(/\/app\/(?:api\/)?[a-z0-9-]+-worker\/route\.ts/);
+    expect(routeList).not.toMatch(/\/app\/(?:api\/)?[a-z0-9_-]+[-_]worker\/route\.ts/);
     expect(routeSource).toContain("executeWorkerCommand");
     expect(routeSource).toContain("executeWorkerView");
     expect(routeSource).not.toContain("runRevenueWorker");
@@ -82,9 +82,14 @@ describe("worker tool contract", () => {
     };
 
     expect(pkg.scripts["worker:tool"]).toBe("bun src/worker/run-tool.ts");
+    expect(Object.keys(pkg.scripts).filter((scriptName) => scriptName.startsWith("worker:"))).toEqual([
+      "worker:tool",
+    ]);
 
     for (const scriptName of Object.keys(pkg.scripts)) {
-      expect(scriptName).not.toMatch(/^worker:[a-z0-9-]+-(?:worker|operations)$/);
+      if (scriptName !== "worker:tool") {
+        expect(scriptName).not.toMatch(/^worker:/);
+      }
       expect(pkg.scripts[scriptName]).not.toContain("run-revenue");
     }
   });
@@ -155,6 +160,17 @@ describe("worker tool contract", () => {
         config: {},
       }),
     ).rejects.toThrow("worker.role is required.");
+
+    await expect(
+      executeWorkerTool("worker.command", {
+        command: "run",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "local-missing-config-test-001",
+      }),
+    ).rejects.toThrow("config is required and must be an object.");
 
     await expect(
       executeWorkerTool("worker.command", {
@@ -808,6 +824,26 @@ describe("worker tool contract", () => {
     ).toBe(true);
   });
 
+  it("keeps registry command and view names role-neutral", () => {
+    const roleNamedOperationPattern =
+      /^(?:revenue|dispatch|finance|workforce|owner|compliance|systems)[._-]|(?:[-_](?:worker|operations)|_worker)/;
+    const operations = [
+      ...registeredWorkerCommands().map((command) => `${command.role}:${command.name}`),
+      ...registeredWorkerViews().map((view) => `${view.role}:view.${view.name}`),
+      ...workerToolSchema.registry.plannedCommands.map(
+        (command) => `${command.role}:${command.name}`,
+      ),
+      ...workerToolSchema.registry.plannedViews.map((view) => `${view.role}:view.${view.name}`),
+    ];
+    const offenders = operations.filter((operation) => {
+      const name = operation.split(":").at(1) ?? "";
+
+      return roleNamedOperationPattern.test(name);
+    });
+
+    expect(offenders).toEqual([]);
+  });
+
   it("validates worker run idempotency before invoking the worker", async () => {
     await expect(
       executeWorkerTool("worker.command", {
@@ -1322,7 +1358,7 @@ describe("worker tool contract", () => {
         },
         config: "approval-id",
       }),
-    ).rejects.toThrow("config must be an object when provided.");
+    ).rejects.toThrow("config is required and must be an object.");
   });
 
   it("uses registry validation for adapter reconciliation limits", async () => {

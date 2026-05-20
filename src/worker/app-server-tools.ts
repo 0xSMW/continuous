@@ -7,6 +7,7 @@ import {
 } from "./tools";
 import {
   unexpectedEnvelopeFields,
+  validateWorkerConfigEnvelope,
   validateWorkerTargetEnvelope,
   workerCommandEnvelopeDescription,
   workerCommandEnvelopeFieldSet,
@@ -47,7 +48,7 @@ export const appServerWorkerTools = [
           additionalProperties: true,
         },
       },
-      required: ["command", "worker"],
+      required: ["command", "worker", "config"],
       additionalProperties: false,
       $defs: {
         workerTarget: {
@@ -154,6 +155,12 @@ function assertAppServerWorkerCommandEnvelope(args: JsonObject) {
 
   if (!targetResult.ok) {
     throw new Error(targetResult.message);
+  }
+
+  const configResult = validateWorkerConfigEnvelope(args.config);
+
+  if (!configResult.ok) {
+    throw new Error(configResult.message);
   }
 }
 

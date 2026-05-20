@@ -17,6 +17,7 @@ import {
 import { defaultMaxJsonBodyBytes, readJsonObjectBody } from "../../src/http/body";
 import {
   unexpectedEnvelopeFields,
+  validateWorkerConfigEnvelope,
   validateWorkerTargetEnvelope,
   workerCommandEnvelopeDescription,
   workerCommandEnvelopeFieldSet,
@@ -38,19 +39,17 @@ function bodyObject(value: unknown) {
 function configObject(value: unknown):
   | { ok: true; value: Record<string, unknown> }
   | { ok: false; error: { code: string; message: string } } {
-  if (value === undefined || value === null) {
-    return { ok: true, value: {} };
-  }
+  const result = validateWorkerConfigEnvelope(value);
 
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    return { ok: true, value: value as Record<string, unknown> };
+  if (result.ok) {
+    return result;
   }
 
   return {
     ok: false,
     error: {
       code: "invalid_worker_command_config",
-      message: "config must be an object when provided.",
+      message: result.message,
     },
   };
 }
@@ -117,6 +116,17 @@ function unexpectedWorkerPayloadFields(body: Record<string, unknown>) {
   return unexpectedEnvelopeFields(body, workerCommandEnvelopeFieldSet);
 }
 
+const workerViewQueryFieldSet = new Set(["view", "role", "id", "tenantSlug", "state"]);
+const workerViewQueryDescription = "view, role, id, tenantSlug, and state";
+
+function unexpectedWorkerViewQueryFields(url: URL) {
+  return Array.from(
+    new Set(
+      Array.from(url.searchParams.keys()).filter((field) => !workerViewQueryFieldSet.has(field)),
+    ),
+  );
+}
+
 function targetFromUrl(request: Request): WorkerTargetInput {
   const url = new URL(request.url);
   return {
@@ -166,6 +176,7 @@ function guardErrorResponse(error: { code: string; message: string; status: numb
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
+  const unexpectedQueryFields = unexpectedWorkerViewQueryFields(url);
   const target = targetFromUrl(request);
   const view = optionalString(url.searchParams.get("view")) ?? "snapshot";
   const auth = authorizeControlPlaneAccess({
@@ -194,6 +205,16 @@ export async function GET(request: Request) {
       auth,
     });
     return guardErrorResponse(auth);
+  }
+
+  if (unexpectedQueryFields.length > 0) {
+    return errorResponse(
+      {
+        code: "invalid_worker_view_query",
+        message: `Worker view query fields must be ${workerViewQueryDescription}. Move read filters into config-backed worker tool surfaces. Unexpected fields: ${unexpectedQueryFields.join(", ")}.`,
+      },
+      400,
+    );
   }
 
   const scope = authorizeControlPlaneScope({
@@ -321,38 +342,11 @@ export async function POST(request: Request) {
 
   const body = bodyResult.value;
   const unexpectedFields = unexpectedWorkerPayloadFields(body);
+  const command = optionalString(body.command);
   const configResult = configObject(body.config);
   const config = configResult.ok ? configResult.value : {};
   const target = targetFrom(body.worker);
   const targetResult = validateWorkerTarget(body.worker);
-  const auth = authorizeControlPlaneAccess({
-    enabled: env.WORKER_RUN_ENABLED,
-    appEnv: env.APP_ENV,
-    expectedToken: env.WORKER_RUN_TOKEN,
-    operatorEmail: env.WORKER_OPERATOR_EMAIL,
-    authorization: request.headers.get("authorization"),
-    headerToken: request.headers.get("x-worker-run-token"),
-    allowedTenants: env.CONTROL_PLANE_ALLOWED_TENANTS,
-    allowedWorkerRoles: env.CONTROL_PLANE_ALLOWED_WORKER_ROLES,
-    tokenCatalogJson: env.CONTROL_PLANE_TOKENS_JSON,
-    tokenCatalogB64: env.CONTROL_PLANE_TOKEN_CATALOG_B64,
-    route: "worker",
-    access: "write",
-    command: optionalString(body.command),
-  });
-
-  if (!auth.ok) {
-    await recordControlPlaneAuthAttempt({
-      request,
-      route: "worker",
-      access: "write",
-      command: optionalString(body.command),
-      tenantSlug: target.tenantSlug,
-      workerRole: target.role,
-      auth,
-    });
-    return guardErrorResponse(auth);
-  }
 
   if (unexpectedFields.length > 0) {
     return errorResponse(
@@ -366,6 +360,45 @@ export async function POST(request: Request) {
       },
       400,
     );
+  }
+
+  if (!command) {
+    return errorResponse(
+      {
+        code: "invalid_worker_command_envelope",
+        message: "Worker command payload requires a non-empty command string.",
+      },
+      400,
+    );
+  }
+
+  const auth = authorizeControlPlaneAccess({
+    enabled: env.WORKER_RUN_ENABLED,
+    appEnv: env.APP_ENV,
+    expectedToken: env.WORKER_RUN_TOKEN,
+    operatorEmail: env.WORKER_OPERATOR_EMAIL,
+    authorization: request.headers.get("authorization"),
+    headerToken: request.headers.get("x-worker-run-token"),
+    allowedTenants: env.CONTROL_PLANE_ALLOWED_TENANTS,
+    allowedWorkerRoles: env.CONTROL_PLANE_ALLOWED_WORKER_ROLES,
+    tokenCatalogJson: env.CONTROL_PLANE_TOKENS_JSON,
+    tokenCatalogB64: env.CONTROL_PLANE_TOKEN_CATALOG_B64,
+    route: "worker",
+    access: "write",
+    command,
+  });
+
+  if (!auth.ok) {
+    await recordControlPlaneAuthAttempt({
+      request,
+      route: "worker",
+      access: "write",
+      command,
+      tenantSlug: target.tenantSlug,
+      workerRole: target.role,
+      auth,
+    });
+    return guardErrorResponse(auth);
   }
 
   if (!targetResult.ok) {
@@ -389,7 +422,7 @@ export async function POST(request: Request) {
       request,
       route: "worker",
       access: "write",
-      command: optionalString(body.command),
+      command,
       tenantSlug: target.tenantSlug,
       workerRole: target.role,
       auth,
@@ -402,7 +435,7 @@ export async function POST(request: Request) {
     request,
     route: "worker",
     access: "write",
-    command: optionalString(body.command),
+    command,
     tenantSlug: target.tenantSlug,
     workerRole: target.role,
     auth,
@@ -414,7 +447,7 @@ export async function POST(request: Request) {
       request,
       route: "worker",
       access: "write",
-      command: optionalString(body.command),
+      command,
       tenantSlug: target.tenantSlug,
       workerRole: target.role,
       auth,
@@ -428,7 +461,7 @@ export async function POST(request: Request) {
     request,
     route: "worker",
     access: "write",
-    command: optionalString(body.command),
+    command,
     tenantSlug: target.tenantSlug,
     workerRole: target.role,
     auth,
@@ -437,7 +470,7 @@ export async function POST(request: Request) {
 
   try {
     const result = await executeWorkerCommand({
-      command: optionalString(body.command),
+      command,
       target,
       config,
       idempotencyKey: idempotencyKeyFrom(body),
