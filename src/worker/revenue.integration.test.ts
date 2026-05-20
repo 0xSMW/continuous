@@ -1872,6 +1872,125 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(reclaimedStep?.attempt).toBe(2);
     expect(reclaimedStep?.leaseOwner).toBeNull();
 
+    const [revenueWorker] = await db
+      .select({ id: workers.id })
+      .from(workers)
+      .where(eq(workers.role, "revenue_operations"))
+      .limit(1);
+    const [quoteCapability] = await db
+      .select({ id: capabilities.id, key: capabilities.key })
+      .from(capabilities)
+      .where(eq(capabilities.key, "quote.prepare"))
+      .limit(1);
+
+    expect(revenueWorker?.id).toBeTruthy();
+    expect(quoteCapability?.id).toBeTruthy();
+
+    const revenueWorkerId = revenueWorker?.id ?? "";
+    const quoteCapabilityId = quoteCapability?.id ?? "";
+    const quoteCapabilityKey = quoteCapability?.key ?? "";
+    const capabilityTask = await createCoreTask({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-workflow-capability-task-${runId}`,
+      title: "Execute capability workflow step",
+      capabilityId: quoteCapabilityId,
+      owner: {
+        type: "worker",
+        id: revenueWorkerId,
+        ref: `worker:${revenueWorkerId}`,
+      },
+      db,
+    });
+    const capabilityStart = await startWorkflowRun({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      workflowKey: "run_payroll",
+      idempotencyKey: `ci-workflow-capability-run-${runId}`,
+      initialState: "draft",
+      db,
+    });
+    const [capabilityRun] = await db
+      .select()
+      .from(workflowRuns)
+      .where(eq(workflowRuns.id, capabilityStart.run.id))
+      .limit(1);
+    const [capabilityStep] = await db
+      .insert(workflowSteps)
+      .values({
+        tenantId: capabilityRun?.tenantId ?? "",
+        definitionId: capabilityRun?.definitionId ?? "",
+        workflowRunId: capabilityStart.run.id,
+        taskId: capabilityTask.taskId,
+        workerId: revenueWorkerId,
+        capabilityId: quoteCapabilityId,
+        kind: "capability_execution",
+        name: "CI execute quote capability through workflow",
+        state: "queued",
+        priority: "urgent",
+        risk: "medium",
+        fromState: "draft",
+        toState: "source_data_locked",
+        attempt: 1,
+        maxAttempts: 2,
+        idempotencyKey: `ci-workflow-capability-step-${runId}`,
+        input: {
+          source: "workflow_capability_ci",
+          capabilityKey: quoteCapabilityKey,
+        },
+      })
+      .returning();
+
+    const capabilityExecution = await executeWorkflowSteps({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      limit: 1,
+      leaseOwner: `ci-workflow-capability:${runId}`,
+      db,
+    });
+    const [capabilityResult] = capabilityExecution.results;
+    const [executedCapabilityStep] = await db
+      .select()
+      .from(workflowSteps)
+      .where(eq(workflowSteps.id, capabilityStep.id))
+      .limit(1);
+    const [capabilityEvent] = await db
+      .select()
+      .from(events)
+      .where(eq(events.id, capabilityResult?.eventId ?? ""))
+      .limit(1);
+    const [capabilityAudit] = await db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.id, capabilityResult?.auditEventId ?? ""))
+      .limit(1);
+    const [capabilityTaskRow] = await db
+      .select()
+      .from(tasks)
+      .where(eq(tasks.id, capabilityTask.taskId))
+      .limit(1);
+    const capabilityOutput = objectValue(executedCapabilityStep?.output);
+    const capabilityProof = objectValue(capabilityOutput.capabilityExecution);
+    const taskCapabilityOutcome = objectValue(
+      objectValue(capabilityTaskRow?.outcome).lastCapabilityExecution,
+    );
+
+    expect(capabilityExecution.processed).toBe(1);
+    expect(capabilityExecution.completed).toBe(1);
+    expect(capabilityResult?.stepId).toBe(capabilityStep.id);
+    expect(executedCapabilityStep?.state).toBe("done");
+    expect(capabilityProof.capabilityId).toBe(quoteCapabilityId);
+    expect(capabilityProof.capabilityKey).toBe("quote.prepare");
+    expect(capabilityProof.capabilityGrantId).toBeTruthy();
+    expect(objectValue(capabilityProof.actor).id).toBe(revenueWorkerId);
+    expect(capabilityOutput.externalExecution).toBe("blocked");
+    expect(capabilityEvent?.actorType).toBe("worker");
+    expect(capabilityEvent?.actorId).toBe(revenueWorkerId);
+    expect(capabilityEvent?.capabilityId).toBe(quoteCapabilityId);
+    expect(capabilityAudit?.capabilityId).toBe(quoteCapabilityId);
+    expect(taskCapabilityOutcome.workflowStepId).toBe(capabilityStep.id);
+    expect(taskCapabilityOutcome.evidenceId).toBe(capabilityResult?.evidenceId);
+
     const retryStart = await startWorkflowRun({
       operatorEmail: "owner@continuoushq.com",
       tenantSlug: "continuous-demo",

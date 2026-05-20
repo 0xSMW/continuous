@@ -4,8 +4,11 @@ import { db as defaultDb } from "../db/client";
 import {
   approvalRequests,
   auditEvents,
+  capabilities,
+  capabilityGrants,
   events,
   evidence,
+  tasks,
   workflowDefinitions,
   workflowRuns,
   workflowSteps,
@@ -291,6 +294,7 @@ const executableWorkflowStepKinds = new Set([
   "transition",
   "workflow_transition",
   "worker_transition",
+  "capability_execution",
   "seed_state",
 ]);
 
@@ -458,6 +462,117 @@ async function completeWorkflowStep(input: {
     }
 
     const definitionView = definitionRecord(definition);
+    let executionActor: {
+      type: "user" | "worker";
+      id: string;
+      ref: string;
+    } = {
+      type: "user",
+      id: input.operator.userId,
+      ref: input.operator.actorRef,
+    };
+    let capabilityExecution: JsonObject | null = null;
+    let task: typeof tasks.$inferSelect | null = null;
+
+    if (step.kind === "capability_execution") {
+      if (step.taskId) {
+        const [taskRow] = await tx
+          .select()
+          .from(tasks)
+          .where(and(eq(tasks.tenantId, input.operator.tenantId), eq(tasks.id, step.taskId)))
+          .limit(1)
+          .for("update", { of: tasks });
+
+        if (!taskRow) {
+          throw new RevenueWorkerUnavailableError(
+            "workflow_step_task_not_found",
+            "Workflow step task does not exist in this tenant.",
+            404,
+          );
+        }
+
+        task = taskRow;
+      }
+
+      if (step.workerId) {
+        executionActor = {
+          type: "worker",
+          id: step.workerId,
+          ref: `worker:${step.workerId}`,
+        };
+      } else if (
+        task?.ownerId &&
+        (task.ownerType === "user" || task.ownerType === "worker")
+      ) {
+        executionActor = {
+          type: task.ownerType,
+          id: task.ownerId,
+          ref: task.ownerRef,
+        };
+      }
+
+      if (!step.capabilityId) {
+        throw new RevenueWorkerUnavailableError(
+          "workflow_step_capability_required",
+          "Capability execution steps require capabilityId.",
+          400,
+        );
+      }
+
+      const [capability] = await tx
+        .select()
+        .from(capabilities)
+        .where(and(eq(capabilities.id, step.capabilityId), eq(capabilities.active, true)))
+        .limit(1);
+
+      if (!capability) {
+        throw new RevenueWorkerUnavailableError(
+          "workflow_step_capability_not_found",
+          "Workflow step capability does not match an active capability.",
+          404,
+        );
+      }
+
+      const [grant] = await tx
+        .select()
+        .from(capabilityGrants)
+        .where(
+          and(
+            eq(capabilityGrants.tenantId, input.operator.tenantId),
+            eq(capabilityGrants.capabilityId, capability.id),
+            eq(capabilityGrants.actorType, executionActor.type),
+            eq(capabilityGrants.actorId, executionActor.id),
+            eq(capabilityGrants.active, true),
+            sql`(${capabilityGrants.startsAt} is null or ${capabilityGrants.startsAt} <= ${input.now})`,
+            sql`(${capabilityGrants.endsAt} is null or ${capabilityGrants.endsAt} > ${input.now})`,
+          ),
+        )
+        .limit(1);
+
+      if (!grant) {
+        throw new RevenueWorkerUnavailableError(
+          "workflow_step_capability_grant_missing",
+          `No active grant allows ${executionActor.ref} to use ${capability.key}.`,
+          403,
+        );
+      }
+
+      capabilityExecution = {
+        capabilityId: capability.id,
+        capabilityKey: capability.key,
+        capabilityVersion: capability.version,
+        capabilityClass: capability.class,
+        capabilityRisk: capability.risk,
+        sideEffect: capability.sideEffect,
+        capabilityGrantId: grant.id,
+        actor: executionActor,
+        scope: grant.scope,
+        policy: grant.policy,
+        taskId: task?.id ?? null,
+        externalExecution: "blocked",
+      };
+    }
+
     const currentFromState = run.state;
 
     if (currentFromState !== step.toState) {
@@ -489,8 +604,10 @@ async function completeWorkflowStep(input: {
               name: step.name,
               fromState: currentFromState,
               toState: step.toState,
-              executedBy: input.operator.actorRef,
+              executedBy: executionActor.ref,
+              triggeredBy: input.operator.actorRef,
               executedAt: input.now.toISOString(),
+              ...(capabilityExecution ? { capabilityExecution } : {}),
             },
           },
           updatedAt: input.now,
@@ -507,6 +624,9 @@ async function completeWorkflowStep(input: {
       fromState: currentFromState,
       toState: step.toState,
       attempt: step.attempt,
+      triggeredBy: input.operator.actorRef,
+      actor: executionActor,
+      ...(capabilityExecution ? { capabilityExecution } : {}),
       externalExecution: "blocked",
     };
     const [event] = await tx
@@ -515,11 +635,12 @@ async function completeWorkflowStep(input: {
         tenantId: input.operator.tenantId,
         type: "workflow.step.executed",
         source,
-        actorType: "user",
-        actorId: input.operator.userId,
-        actorRef: input.operator.actorRef,
+        actorType: executionActor.type,
+        actorId: executionActor.id,
+        actorRef: executionActor.ref,
         taskId: step.taskId,
         objectId: step.objectId ?? run.objectId,
+        capabilityId: step.capabilityId,
         idempotencyKey: `${step.id}:executed:${step.attempt}`,
         data: executionData,
         occurredAt: input.now,
@@ -531,9 +652,9 @@ async function completeWorkflowStep(input: {
         tenantId: input.operator.tenantId,
         type: "workflow.step.executed",
         source,
-        actorType: "user",
-        actorId: input.operator.userId,
-        actorRef: input.operator.actorRef,
+        actorType: executionActor.type,
+        actorId: executionActor.id,
+        actorRef: executionActor.ref,
         targetType: "workflow_step",
         targetId: step.id,
         eventId: event.id,
@@ -555,8 +676,8 @@ async function completeWorkflowStep(input: {
         objectId: step.objectId ?? run.objectId,
         eventId: event.id,
         capabilityId: step.capabilityId,
-        actorType: "user",
-        actorId: input.operator.userId,
+        actorType: executionActor.type,
+        actorId: executionActor.id,
         hash: `${source}:${step.id}:executed:${step.attempt}:${input.now.toISOString()}`,
         data: {
           ...executionData,
@@ -572,6 +693,28 @@ async function completeWorkflowStep(input: {
       auditEventId: audit.id,
       evidenceId: proof.id,
     };
+
+    if (capabilityExecution && task) {
+      await tx
+        .update(tasks)
+        .set({
+          outcome: {
+            ...task.outcome,
+            lastCapabilityExecution: {
+              ...capabilityExecution,
+              workflowRunId: run.id,
+              workflowStepId: step.id,
+              eventId: event.id,
+              auditEventId: audit.id,
+              evidenceId: proof.id,
+              executedAt: input.now.toISOString(),
+            },
+          },
+          updatedAt: input.now,
+        })
+        .where(and(eq(tasks.tenantId, input.operator.tenantId), eq(tasks.id, task.id)));
+    }
+
     const [updatedStep] = await tx
       .update(workflowSteps)
       .set({

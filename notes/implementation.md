@@ -27,6 +27,7 @@
 | Removed worker-specific HTTP wrappers | The greenfield API does not expose worker-family routes; new workers must extend `/worker` through registered commands rather than adding route names |
 | Added workflow step ledger | Workflow starts and transitions now write durable step records with lease, retry, input, output, state-transition, event, evidence, and approval links |
 | Added workflow step execution | `/workflow` now supports `command=steps.execute`, claiming queued or retryable steps, running generic transition handlers, and writing completion or retry state without workflow-specific URLs |
+| Added capability-backed workflow execution | `capability_execution` workflow steps now require an active capability and actor grant, record worker/task capability proof, and keep external execution blocked |
 | Added shared approval service | Worker and workflow approvals now use a neutral approval service over `approval_requests`, with subject-scoped listing and decisions |
 | Seeded the first open-workflow set | Entity setup, hire employee, contractor engagement, termination, payroll preview, AI budget cycle, and synthetic-worker lifecycle now all have persisted definitions, runs, and steps |
 | Seeded the expanded operating workflow catalog | Open-state, compensation-change, location-change, payroll-run, off-cycle payroll, quarter-close, year-end, leave, incident, benefits-renewal, agency-notice, and filing-draft workflows now have persisted definitions, runs, and seed steps |
@@ -148,6 +149,9 @@ their JSON transition maps before updating `workflow_runs` and writing durable
 `workflow_steps`, replayable event, audit, evidence, and approval records. The
 same route can execute queued workflow steps with `command=steps.execute`; step
 claims, leases, attempts, completion proof, and retry failures stay on the
-shared workflow step ledger.
+shared workflow step ledger. Capability-backed steps now validate active
+capability grants for the worker or task owner actor before completion and
+write the grant, actor, task, and blocked external-execution posture into
+workflow output and task outcome.
 Workflow approvals are listed with `GET /workflow?view=approvals` and decided
 with `POST /workflow` using `command=approval.decide`.
