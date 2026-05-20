@@ -154,6 +154,9 @@ jobs:
             --exclude ".next" \
             --exclude ".env" \
             --exclude ".env.*" \
+            --exclude "/backups/" \
+            --exclude "/logs/" \
+            --exclude "/reports/recovery-drills/" \
             ./ "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
 
       - name: Deploy Compose stack
@@ -468,6 +471,8 @@ jobs:
           echo "$SCHEMA" | /usr/bin/jq -e '
             (.registry.commands | map(.name) | index("run")) != null and
             (.registry.commands | any(.role == "revenue_operations" and .name == "lead.read" and .idempotency == "required" and .requiresTenant == true)) and
+            (.registry.commands | any(.role == "revenue_operations" and .name == "lead.classify" and .idempotency == "required" and .requiresTenant == true and .externalExecution == "blocked")) and
+            (.registry.commands | any(.role == "revenue_operations" and .name == "response.draft" and .idempotency == "required" and .requiresTenant == true and .externalExecution == "blocked")) and
             (.registry.commands | map(.name) | index("continue")) != null and
             (.registry.commands | map(.name) | index("approval.decide")) != null and
             (.registry.commands | map(.name) | index("adapters.reconcile")) != null and
@@ -486,6 +491,8 @@ jobs:
             (.registry.commands | any(.name == "adapters.reconcile" and .requiresTenant == true)) and
             (.tools | map(.name) | index("worker.run")) != null and
             (.tools | map(.name) | index("worker.lead.read")) != null and
+            (.tools | map(.name) | index("worker.lead.classify")) != null and
+            (.tools | map(.name) | index("worker.response.draft")) != null and
             (.tools | map(.name) | index("worker.continue")) != null and
             (.tools | map(.name) | index("worker.adapters.reconcile")) != null and
             (.tools | map(.name) | index("worker.owner.brief.generate")) != null
@@ -634,6 +641,98 @@ jobs:
           psql_db -At <<SQL
           select 'lead_read_worker_run' as kind, state, mode, data->'output'->>'readCount', data->'output'->>'externalSend'
           from worker_runs where id = '$LEAD_READ_WORKER_RUN_ID'::uuid;
+          SQL
+
+          LEAD_CLASSIFY_KEY="deploy-lead-classify-$RUN_ID"
+          LEAD_CLASSIFY_PAYLOAD="$(
+            /usr/bin/jq -nc --arg key "$LEAD_CLASSIFY_KEY" --arg sourceEventId "$LEAD_READ_SOURCE_EVENT_ID" '{
+              command: "lead.classify",
+              worker: {role: "revenue_operations", tenantSlug: "continuous-demo"},
+              idempotencyKey: $key,
+              config: {
+                intake: {
+                  source: "deploy_smoke",
+                  sourceEventId: $sourceEventId
+                }
+              }
+            }'
+          )"
+          LEAD_CLASSIFY_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/worker \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$LEAD_CLASSIFY_PAYLOAD"
+          )"
+
+          echo "$LEAD_CLASSIFY_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,workerRunId:.data.result.workerRunId,eventId:.data.result.eventId,evidenceId:.data.result.evidenceId,auditEventId:.data.result.auditEventId,usageEventId:.data.result.usageEventId,classification:.data.result.output.classification,sourceEventId:.data.result.output.sourceEventId,externalExecution:.data.result.output.externalExecution,externalSend:.data.result.output.externalSend}}'
+          echo "$LEAD_CLASSIFY_RESPONSE" | /usr/bin/jq -e \
+            --arg sourceEventId "$LEAD_READ_SOURCE_EVENT_ID" \
+            '.error == null and .data.command == "lead.classify" and .data.result.created == true and (.data.result.workerRunId | length > 0) and (.data.result.eventId | length > 0) and (.data.result.evidenceId | length > 0) and (.data.result.auditEventId | length > 0) and (.data.result.usageEventId | length > 0) and .data.result.output.source == "deploy_smoke" and .data.result.output.sourceEventId == $sourceEventId and .data.result.output.classification == "quote_ready_for_owner_approval" and .data.result.output.externalExecution == "blocked" and .data.result.output.externalSend == false' \
+            >/dev/null
+
+          LEAD_CLASSIFY_WORKER_RUN_ID="$(echo "$LEAD_CLASSIFY_RESPONSE" | /usr/bin/jq -r '.data.result.workerRunId')"
+          LEAD_CLASSIFY_EVENT_ID="$(echo "$LEAD_CLASSIFY_RESPONSE" | /usr/bin/jq -r '.data.result.eventId')"
+          LEAD_CLASSIFY_EVIDENCE_ID="$(echo "$LEAD_CLASSIFY_RESPONSE" | /usr/bin/jq -r '.data.result.evidenceId')"
+          LEAD_CLASSIFY_AUDIT_ID="$(echo "$LEAD_CLASSIFY_RESPONSE" | /usr/bin/jq -r '.data.result.auditEventId')"
+          LEAD_CLASSIFY_USAGE_ID="$(echo "$LEAD_CLASSIFY_RESPONSE" | /usr/bin/jq -r '.data.result.usageEventId')"
+          psql_db -At <<SQL
+          select 'lead_classify_worker_run' as kind, state, mode, data->'input'->>'command', data->'output'->>'externalExecution'
+          from worker_runs where id = '$LEAD_CLASSIFY_WORKER_RUN_ID'::uuid;
+          select 'lead_classify_event' as kind, type, source
+          from events where id = '$LEAD_CLASSIFY_EVENT_ID'::uuid;
+          select 'lead_classify_evidence' as kind, kind, data->>'command', data->>'externalSend'
+          from evidence where id = '$LEAD_CLASSIFY_EVIDENCE_ID'::uuid;
+          select 'lead_classify_audit' as kind, type, data->>'command', data->>'externalSend'
+          from audit_events where id = '$LEAD_CLASSIFY_AUDIT_ID'::uuid;
+          select 'lead_classify_usage' as kind, units::text, data->>'command', data->>'externalExecution'
+          from usage_events where id = '$LEAD_CLASSIFY_USAGE_ID'::uuid;
+          SQL
+
+          RESPONSE_DRAFT_KEY="deploy-response-draft-$RUN_ID"
+          RESPONSE_DRAFT_PAYLOAD="$(
+            /usr/bin/jq -nc --arg key "$RESPONSE_DRAFT_KEY" --arg sourceEventId "$LEAD_READ_SOURCE_EVENT_ID" '{
+              command: "response.draft",
+              worker: {role: "revenue_operations", tenantSlug: "continuous-demo"},
+              idempotencyKey: $key,
+              config: {
+                intake: {
+                  source: "deploy_smoke",
+                  sourceEventId: $sourceEventId
+                }
+              }
+            }'
+          )"
+          RESPONSE_DRAFT_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/worker \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$RESPONSE_DRAFT_PAYLOAD"
+          )"
+
+          echo "$RESPONSE_DRAFT_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,workerRunId:.data.result.workerRunId,eventId:.data.result.eventId,evidenceId:.data.result.evidenceId,auditEventId:.data.result.auditEventId,usageEventId:.data.result.usageEventId,sourceEventId:.data.result.output.sourceEventId,quoteTotalCents:.data.result.output.quote.totalCents,approvalRequired:.data.result.output.quote.policy.approvalRequired,externalExecution:.data.result.output.externalExecution,externalSend:.data.result.output.externalSend}}'
+          echo "$RESPONSE_DRAFT_RESPONSE" | /usr/bin/jq -e \
+            --arg sourceEventId "$LEAD_READ_SOURCE_EVENT_ID" \
+            '.error == null and .data.command == "response.draft" and .data.result.created == true and (.data.result.workerRunId | length > 0) and (.data.result.eventId | length > 0) and (.data.result.evidenceId | length > 0) and (.data.result.auditEventId | length > 0) and (.data.result.usageEventId | length > 0) and .data.result.output.source == "deploy_smoke" and .data.result.output.sourceEventId == $sourceEventId and (.data.result.output.draftResponse | length > 0) and .data.result.output.quote.policy.approvalRequired == true and .data.result.output.quote.policy.externalSend == false and .data.result.output.quote.policy.moneyMovement == "blocked" and .data.result.output.externalExecution == "blocked" and .data.result.output.externalSend == false' \
+            >/dev/null
+
+          RESPONSE_DRAFT_WORKER_RUN_ID="$(echo "$RESPONSE_DRAFT_RESPONSE" | /usr/bin/jq -r '.data.result.workerRunId')"
+          RESPONSE_DRAFT_EVENT_ID="$(echo "$RESPONSE_DRAFT_RESPONSE" | /usr/bin/jq -r '.data.result.eventId')"
+          RESPONSE_DRAFT_EVIDENCE_ID="$(echo "$RESPONSE_DRAFT_RESPONSE" | /usr/bin/jq -r '.data.result.evidenceId')"
+          RESPONSE_DRAFT_AUDIT_ID="$(echo "$RESPONSE_DRAFT_RESPONSE" | /usr/bin/jq -r '.data.result.auditEventId')"
+          RESPONSE_DRAFT_USAGE_ID="$(echo "$RESPONSE_DRAFT_RESPONSE" | /usr/bin/jq -r '.data.result.usageEventId')"
+          psql_db -At <<SQL
+          select 'response_draft_worker_run' as kind, state, mode, data->'input'->>'command', data->'output'->>'externalExecution'
+          from worker_runs where id = '$RESPONSE_DRAFT_WORKER_RUN_ID'::uuid;
+          select 'response_draft_event' as kind, type, source
+          from events where id = '$RESPONSE_DRAFT_EVENT_ID'::uuid;
+          select 'response_draft_evidence' as kind, kind, data->>'command', data->>'externalSend'
+          from evidence where id = '$RESPONSE_DRAFT_EVIDENCE_ID'::uuid;
+          select 'response_draft_audit' as kind, type, data->>'command', data->>'externalSend'
+          from audit_events where id = '$RESPONSE_DRAFT_AUDIT_ID'::uuid;
+          select 'response_draft_usage' as kind, units::text, data->>'command', data->>'externalExecution'
+          from usage_events where id = '$RESPONSE_DRAFT_USAGE_ID'::uuid;
           SQL
 
           LEAD_OBJECT_KEY="deploy-lead-object-$RUN_ID"

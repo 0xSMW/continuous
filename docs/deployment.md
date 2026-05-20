@@ -87,6 +87,9 @@ while app containers receive a hashed `CONTROL_PLANE_TOKEN_CATALOG_B64` entry
 with explicit route, command, tenant, worker-role, and read/write scope. Future
 tokens can be added with `CONTROL_PLANE_TOKENS_JSON` or the base64 catalog
 without changing `/core`, `/worker`, `/workflow`, or `/approval`.
+Deploy syncs still use `rsync --delete` to remove stale source files, but they
+protect `backups/`, `logs/`, and `reports/recovery-drills/` so database dumps,
+Caddy/observability logs, and recovery evidence survive releases.
 
 To roll back only the app and scheduler containers to an existing image tag,
 dispatch `Deploy` with `rollback_app_tag` set. The rollback path does not run

@@ -71,6 +71,9 @@ rsync -az --delete \
   --exclude ".next" \
   --exclude ".env" \
   --exclude ".env.*" \
+  --exclude "/backups/" \
+  --exclude "/logs/" \
+  --exclude "/reports/recovery-drills/" \
   ./ "$REMOTE:$APP_DIR/"
 
 ssh "$REMOTE" \

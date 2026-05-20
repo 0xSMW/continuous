@@ -21,7 +21,7 @@
 - Extend the hashed control-plane token catalog into first-class operator auth with explicit rotation workflows and session-level audit trails before broad customer use.
 - Provision scoped adapter credentials, tested rollback playbooks, and a first controlled send only after retry readiness evidence stays green.
 - Provision actual inbox and CRM connector polling behind the persisted `lead.read` source-reader shape.
-- Extend Revenue `lead.classify` and `response.draft` evals and production smoke now that they are explicit persisted command surfaces.
+- Extend Revenue `lead.classify` and `response.draft` eval scoring now that they are explicit persisted command surfaces.
 - Use `docs/revenue-operations-worker-expansion.md` as the expansion gate list for the next worker iteration.
 - Use `docs/revenue-operations-worker-v1-contract.md` as the machine-actionable contract for run and approval effects.
 - Keep Core HTTP controls on `/core` with registered `command`, `core`, `idempotencyKey`, and `config` fields; do not add `/api/*` command paths or command-specific URLs.
