@@ -31,6 +31,7 @@
 | Reasserted generic worker URL shape | Contract tests now generically classify any worker-family URL shape as non-canonical; worker families must use `/worker` with structured command/read envelopes instead of adding family-specific routes |
 | Closed worker URL naming escape hatches | Contract tests now reject both hyphenated and underscored worker-family API names, keeping role naming in payload selectors instead of route names |
 | Shared the worker envelope guard | `/worker`, `worker.command`, `worker.view`, and `continuous.worker.command` now share envelope helpers so future worker families cannot drift into route-specific or tool-specific payload shapes |
+| Required explicit worker command envelopes | `/worker`, `worker.command`, and `continuous.worker.command` now reject missing command names and missing/non-object command `config` before registry dispatch, so auth and runtime always see a clear command plus operation payload boundary |
 | Removed worker-specific local shortcuts | `worker:tool` is the only local mutation entrypoint; Revenue Operations runs now use the same `worker`, `command`, `idempotencyKey`, and `config` envelope as `/worker` |
 | Collapsed local worker aliases | `worker:tool` now exposes only `worker.command` and `worker.view`; command/view names live on the payload, and docs/tests reject worker-family-specific local tool names |
 | Added canonical workflow API | `/workflow` validates definition-backed `start` and `transition` commands and records workflow events, audit events, and evidence |
