@@ -352,6 +352,34 @@ describe("authorizeControlPlaneAccess", () => {
     });
   });
 
+  it("fails closed when catalog route, access, or command scopes are omitted", () => {
+    const tokenCatalogJson = JSON.stringify([
+      {
+        id: "unscoped-runner",
+        token: acceptedCredential,
+        operatorEmail,
+      },
+    ]);
+
+    expect(
+      authorizeControlPlaneAccess({
+        enabled: true,
+        appEnv: "production",
+        operatorEmail,
+        authorization: `Bearer ${acceptedCredential}`,
+        tokenCatalogJson,
+        route: "worker",
+        access: "write",
+        command: "run",
+      }),
+    ).toEqual({
+      ok: false,
+      status: 403,
+      code: "control_plane_route_forbidden",
+      message: "This operator token is not allowed to access the requested control-plane route.",
+    });
+  });
+
   it("rejects catalog tokens outside their route scope", () => {
     const tokenCatalogJson = JSON.stringify([
       {

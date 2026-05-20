@@ -201,9 +201,9 @@ function normalizeTokenCatalog(input: {
       definition.allowedWorkerRoles ?? definition.workerRoles,
       fallbackScope.workerRoles,
     );
-    const routes = valueOrDefault(definition.allowedRoutes ?? definition.routes, ["*"]);
-    const access = valueOrDefault(definition.allowedAccess ?? definition.access, ["read", "write"]);
-    const commands = valueOrDefault(definition.allowedCommands ?? definition.commands, ["*"]);
+    const routes = coerceList(definition.allowedRoutes ?? definition.routes);
+    const access = coerceList(definition.allowedAccess ?? definition.access);
+    const commands = coerceList(definition.allowedCommands ?? definition.commands);
     const id =
       stringValue(definition.id) ??
       stringValue(definition.name) ??
