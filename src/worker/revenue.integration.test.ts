@@ -1515,11 +1515,17 @@ maybeDescribe("Revenue Worker integration eval", () => {
       db,
     });
     const [adapter] = await db.select().from(adapters).where(eq(adapters.id, adapterResult.adapterId)).limit(1);
-    const [adapterEvent] = await db.select().from(events).where(eq(events.id, adapterResult.eventId)).limit(1);
+    const adapterEventId = stringValue(adapterResult.eventId);
+    const adapterAuditEventId = stringValue(adapterResult.auditEventId);
+
+    if (!adapterEventId || !adapterAuditEventId) {
+      throw new Error("Expected adapter upsert to record an event.");
+    }
+    const [adapterEvent] = await db.select().from(events).where(eq(events.id, adapterEventId)).limit(1);
     const [adapterAudit] = await db
       .select()
       .from(auditEvents)
-      .where(eq(auditEvents.id, adapterResult.auditEventId))
+      .where(eq(auditEvents.id, adapterAuditEventId))
       .limit(1);
     const [connection] = await db
       .select()
