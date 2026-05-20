@@ -76,6 +76,7 @@ After backup scheduling, alerting, recovery-drill evidence, token rotation, and
 non-root access are in place, run the strict production readiness gate:
 
 ```sh
+HOST=your-droplet-ip ./scripts/install-non-root-access.sh
 HOST=your-droplet-ip ./scripts/check-production-readiness.sh
 ```
 

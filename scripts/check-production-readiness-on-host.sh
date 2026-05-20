@@ -248,6 +248,31 @@ fi
 
 if bool_enabled "$REQUIRE_NON_ROOT_ACCESS_ATTESTATION"; then
   require_env_value "$READINESS_ENV_FILE" NON_ROOT_ACCESS_ATTESTED_AT
+  require_env_value "$READINESS_ENV_FILE" NON_ROOT_ACCESS_USER
+  require_env_value "$READINESS_ENV_FILE" NON_ROOT_ACCESS_UID
+  require_env_value "$READINESS_ENV_FILE" NON_ROOT_ACCESS_APP_DIR
+  deploy_user="$(env_value "$READINESS_ENV_FILE" NON_ROOT_ACCESS_USER)"
+
+  if [ -n "$deploy_user" ] && [ -x "$APP_DIR/scripts/attest-non-root-access-on-host.sh" ]; then
+    output="$(
+      APP_DIR="$APP_DIR" \
+        READINESS_ENV_FILE="$READINESS_ENV_FILE" \
+        DEPLOY_USER_NAME="$deploy_user" \
+        WRITE_READINESS_ENV=false \
+        "$APP_DIR/scripts/attest-non-root-access-on-host.sh" 2>&1
+    )"
+    status="$?"
+
+    if [ "$status" -eq 0 ]; then
+      record_ok "non_root_access_live_check"
+      printf '%s\n' "$output"
+    else
+      record_failure "non_root_access_live_check_failed"
+      printf '%s\n' "$output" >&2
+    fi
+  else
+    record_failure "non_root_access_attestation_script_missing_or_user_unset"
+  fi
 else
   record_ok "non_root_access_attestation_skipped"
 fi

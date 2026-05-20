@@ -358,6 +358,38 @@ The gate runs on the droplet and requires:
   drill, token rotation, managed credential inventory, credential revocation,
   operator session review, control-plane auth audit, and non-root access work.
 
+Install and attest the dedicated deploy user before switching GitHub or local
+deploys away from root:
+
+```sh
+HOST=45.55.53.92 ./scripts/install-non-root-access.sh
+```
+
+By default this creates `continuous-deploy`, copies the root authorized keys
+when `DEPLOY_PUBLIC_KEY` is not supplied, adds the user to the `docker` group,
+transfers ownership of `/opt/continuous`, verifies Docker Compose and app-dir
+write access as that user, and writes non-secret non-root evidence into
+`/etc/continuous/production-readiness.env`. To provide a dedicated key instead:
+
+```sh
+HOST=45.55.53.92 \
+  DEPLOY_USER_NAME=continuous-deploy \
+  DEPLOY_PUBLIC_KEY="$(cat ~/.ssh/continuous_deploy.pub)" \
+  ./scripts/install-non-root-access.sh
+```
+
+After that, normal deploy commands can use the same app path with the non-root
+SSH account:
+
+```sh
+HOST=45.55.53.92 SSH_USER=continuous-deploy ./scripts/deploy.sh
+```
+
+For GitHub Actions, set the production `DEPLOY_USER` secret to
+`continuous-deploy` after confirming the workflow deploy succeeds once with
+that account. The strict readiness gate re-runs a live non-root check using the
+attested user; it no longer accepts a timestamp-only assertion.
+
 The readiness attestation file is deliberately operator-owned. It should be
 created only after the underlying work is done and should not contain secrets.
 For token rotation and operator access review, the timestamp is only the
@@ -395,6 +427,11 @@ CONTROL_PLANE_CREDENTIAL_REVOCATION_AUDIT_ID=00000000-0000-0000-0000-00000000000
 CONTROL_PLANE_SESSION_REVIEW_ATTESTED_AT=2026-05-20T00:00:00Z
 CONTROL_PLANE_SESSION_REVIEW_VIEW_ID=00000000-0000-0000-0000-000000000000
 NON_ROOT_ACCESS_ATTESTED_AT=2026-05-20T00:00:00Z
+NON_ROOT_ACCESS_USER=continuous-deploy
+NON_ROOT_ACCESS_UID=1001
+NON_ROOT_ACCESS_GROUPS=continuous-deploy,docker
+NON_ROOT_ACCESS_APP_DIR=/opt/continuous
+NON_ROOT_ACCESS_DOCKER_COMPOSE_VERSION=v2.40.3
 ENV
 chmod 0600 /etc/continuous/production-readiness.env
 ```
@@ -663,6 +700,9 @@ compatible with the chosen app tag because migrations are forward-only.
 - Install `scripts/install-observability-timer.sh` with `ALERT_WEBHOOK_URL`
   after choosing an alert destination; deploy smoke already verifies the same
   host checks without requiring a webhook.
+- Run `scripts/install-non-root-access.sh`, verify one deploy with
+  `SSH_USER=continuous-deploy`, then set the GitHub production `DEPLOY_USER`
+  secret to the dedicated account.
 - Run `scripts/check-production-readiness.sh` successfully, or dispatch the
   deploy workflow with `require_production_readiness=true`, before treating the
   droplet as customer-data ready.
@@ -673,5 +713,4 @@ compatible with the chosen app tag because migrations are forward-only.
   auth session ids in `/etc/continuous/production-readiness.env`, and keep
   the revocation path tested before adding multiple real operators or customer
   data.
-- Replace root SSH deployment with a dedicated deploy user and least-privilege
-  sudo policy.
+- Keep root SSH only for break-glass host bootstrap and systemd timer setup.

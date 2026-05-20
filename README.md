@@ -144,6 +144,7 @@ readiness gate after backup scheduling, alerting, recovery-drill evidence,
 token rotation, and non-root host access are in place:
 
 ```sh
+HOST=45.55.53.92 bun run ops:non-root-access
 HOST=45.55.53.92 bun run ops:production-readiness-check
 ```
 
