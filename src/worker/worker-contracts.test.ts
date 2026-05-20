@@ -70,6 +70,7 @@ const forbiddenWorkerUrlPattern = new RegExp(
 const forbiddenWorkerNamespacePattern = new RegExp(
   "continuous\\.[a-z0-9_]+_worker|[a-z0-9_]+_worker\\.",
 );
+const forbiddenWorkerQueryPattern = new RegExp("/worker\\?");
 
 function read(path: string) {
   return readFileSync(join(root, path), "utf8");
@@ -125,13 +126,18 @@ describe("future worker contracts", () => {
       "STRATEGY.md",
       "package.json",
     ]);
-    const offenders = files.filter((path) => forbiddenWorkerUrlPattern.test(read(path)));
+    const offenders = files.filter((path) => {
+      const source = read(path);
+
+      return forbiddenWorkerUrlPattern.test(source) || forbiddenWorkerQueryPattern.test(source);
+    });
 
     expect(offenders).toEqual([]);
   });
 
   it("treats worker-family URL shapes as non-canonical", () => {
     const path = (...segments: string[]) => `/${segments.join("/")}`;
+    const workerQuery = (query: string) => `/worker${"?"}${query}`;
     const nonCanonical = [
       path("api", "revenue-worker"),
       path("api", "revenue-worker", "run"),
@@ -145,6 +151,8 @@ describe("future worker contracts", () => {
       path("api", "worker", "revenue"),
       path("api", "workers", "finance"),
       path("worker", "revenue"),
+      workerQuery("view=snapshot"),
+      workerQuery("view=approvals&role=revenue_operations"),
       path("worker", "marketing-operations"),
       path("workers", "finance"),
       path("dispatch-worker"),
@@ -154,11 +162,13 @@ describe("future worker contracts", () => {
     ];
 
     for (const url of nonCanonical) {
-      expect(forbiddenWorkerUrlPattern.test(` ${url} `)).toBe(true);
+      const sample = ` ${url} `;
+
+      expect(forbiddenWorkerUrlPattern.test(sample) || forbiddenWorkerQueryPattern.test(sample)).toBe(true);
     }
 
     expect(forbiddenWorkerUrlPattern.test(" /worker ")).toBe(false);
-    expect(forbiddenWorkerUrlPattern.test(" /worker?view=snapshot ")).toBe(false);
+    expect(forbiddenWorkerQueryPattern.test(` ${workerQuery("view=snapshot")} `)).toBe(true);
     expect(forbiddenWorkerUrlPattern.test(" /core ")).toBe(false);
     expect(forbiddenWorkerUrlPattern.test(" /workflow ")).toBe(false);
   });

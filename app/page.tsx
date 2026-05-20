@@ -133,7 +133,7 @@ export default async function AdminPage() {
           <a href="/health">Health</a>
           <a href="/core">Core API</a>
           <a href="/approvals">Approvals</a>
-          <a href="/worker?view=snapshot&role=revenue_operations">Worker</a>
+          <a href="/worker">Worker API</a>
         </nav>
       </header>
 

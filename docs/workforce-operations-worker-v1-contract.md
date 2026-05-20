@@ -38,7 +38,7 @@ All commands use `POST /worker`; no workforce-specific route is added.
 
 | Command or view | Tool surface | Required config | Idempotency | Side effects | External execution |
 |---|---|---|---|---|---|
-| `GET view=snapshot` | `worker.view` | `worker.role` | None | Read-only | Blocked |
+| `POST view=snapshot` | `worker.view` | `worker.role` | None | Read-only | Blocked |
 | `hire.packet.prepare` | `worker.command` | `config.personId`, `config.positionId`, `config.workLocationId` | Required | Packet, document checklist, approval request | Blocked |
 | `contractor.packet.prepare` | `worker.command` | `config.personId`, `config.engagementId` | Required | Classification packet and blocker task | Blocked |
 | `credential.review` | `worker.command` | `config.personId` or `config.credentialId` | Required | Credential renewal task and evidence | Blocked |

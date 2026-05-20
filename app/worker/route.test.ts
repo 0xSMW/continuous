@@ -169,7 +169,7 @@ describe("/worker route", () => {
     expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
   });
 
-  it("rejects invalid worker command bodies before registry dispatch", async () => {
+  it("rejects invalid worker payload bodies before registry dispatch", async () => {
     const { POST } = await import("./route");
 
     const missingContentType = await POST(
@@ -230,32 +230,32 @@ describe("/worker route", () => {
 
     await expect(missingContentType.json()).resolves.toMatchObject({
       error: {
-        code: "invalid_worker_command_body",
+        code: "invalid_worker_payload_body",
         message: "POST /worker requires an application/json request body.",
       },
     });
     await expect(invalidContentType.json()).resolves.toMatchObject({
       error: {
-        code: "invalid_worker_command_body",
+        code: "invalid_worker_payload_body",
         message: "POST /worker requires an application/json request body.",
       },
     });
     await expect(jsonpContentType.json()).resolves.toMatchObject({
       error: {
-        code: "invalid_worker_command_body",
+        code: "invalid_worker_payload_body",
         message: "POST /worker requires an application/json request body.",
       },
     });
     await expect(malformedJson.json()).resolves.toMatchObject({
       error: {
-        code: "invalid_worker_command_body",
-        message: "Worker command body must be valid JSON.",
+        code: "invalid_worker_payload_body",
+        message: "Worker payload body must be valid JSON.",
       },
     });
     await expect(arrayBody.json()).resolves.toMatchObject({
       error: {
-        code: "invalid_worker_command_body",
-        message: "Worker command body must be a JSON object.",
+        code: "invalid_worker_payload_body",
+        message: "Worker payload body must be a JSON object.",
       },
     });
     expect(missingContentType.status).toBe(415);
@@ -266,7 +266,7 @@ describe("/worker route", () => {
     expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
   });
 
-  it("rejects oversized worker command bodies before JSON parsing", async () => {
+  it("rejects oversized worker payload bodies before JSON parsing", async () => {
     const { POST } = await import("./route");
     const response = await POST(
       new Request("http://localhost/worker", {
@@ -291,13 +291,13 @@ describe("/worker route", () => {
 
     expect(response.status).toBe(413);
     expect(body.error).toEqual({
-      code: "worker_command_body_too_large",
-      message: "Worker command body must be at most 1048576 bytes.",
+      code: "worker_payload_body_too_large",
+      message: "Worker payload body must be at most 1048576 bytes.",
     });
     expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
   });
 
-  it("rejects oversized streamed worker command bodies without trusting content-length", async () => {
+  it("rejects oversized streamed worker payload bodies without trusting content-length", async () => {
     const { POST } = await import("./route");
     const response = await POST(
       new Request("http://localhost/worker", {
@@ -313,8 +313,8 @@ describe("/worker route", () => {
 
     expect(response.status).toBe(413);
     expect(body.error).toEqual({
-      code: "worker_command_body_too_large",
-      message: "Worker command body must be at most 1048576 bytes.",
+      code: "worker_payload_body_too_large",
+      message: "Worker payload body must be at most 1048576 bytes.",
     });
     expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
   });
@@ -480,6 +480,85 @@ describe("/worker route", () => {
     expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
   });
 
+  it("allows read-scoped worker payloads without granting command access", async () => {
+    mocks.env.CONTROL_PLANE_TOKENS_JSON = JSON.stringify([
+      {
+        id: "worker-reader",
+        token: "test-token",
+        operatorEmail: "operator@example.com",
+        allowedTenants: ["continuous-demo"],
+        allowedWorkerRoles: ["revenue_operations"],
+        allowedRoutes: ["worker"],
+        allowedAccess: ["read"],
+        allowedCommands: ["worker:view.snapshot"],
+      },
+    ]);
+    mocks.executeWorkerView.mockResolvedValue({
+      data: {
+        worker: {
+          role: "revenue_operations",
+          id: null,
+          tenantSlug: "continuous-demo",
+        },
+        view: "snapshot",
+      },
+      error: null,
+    });
+
+    const { POST } = await import("./route");
+    const viewResponse = await POST(
+      new Request("http://localhost/worker", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          view: "snapshot",
+          worker: {
+            role: "revenue_operations",
+            tenantSlug: "continuous-demo",
+          },
+          config: {},
+        }),
+      }),
+    );
+    const commandResponse = await POST(
+      new Request("http://localhost/worker", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "run",
+          worker: {
+            role: "revenue_operations",
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "read-token-command-denied-001",
+          config: {},
+        }),
+      }),
+    );
+
+    expect(viewResponse.status).toBe(200);
+    await expect(viewResponse.json()).resolves.toMatchObject({
+      data: {
+        view: "snapshot",
+      },
+      error: null,
+    });
+    expect(commandResponse.status).toBe(403);
+    await expect(commandResponse.json()).resolves.toMatchObject({
+      error: {
+        code: "control_plane_access_forbidden",
+        message: "This operator token is not allowed to perform the requested control-plane access.",
+      },
+    });
+    expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
+  });
+
   it("rejects missing or blank worker commands before managed credential dispatch", async () => {
     mocks.env.CONTROL_PLANE_TOKENS_JSON = JSON.stringify([
       {
@@ -531,15 +610,20 @@ describe("/worker route", () => {
       }),
     );
 
-    for (const response of [missingCommand, blankCommand]) {
-      expect(response.status).toBe(400);
-      await expect(response.json()).resolves.toMatchObject({
-        error: {
-          code: "invalid_worker_command_envelope",
-          message: "Worker command payload requires a non-empty command string.",
-        },
-      });
-    }
+    expect(missingCommand.status).toBe(400);
+    await expect(missingCommand.json()).resolves.toMatchObject({
+      error: {
+        code: "invalid_worker_payload_envelope",
+        message: "Worker payload requires a non-empty command or view string.",
+      },
+    });
+    expect(blankCommand.status).toBe(400);
+    await expect(blankCommand.json()).resolves.toMatchObject({
+      error: {
+        code: "invalid_worker_command_envelope",
+        message: "Worker command payload requires a non-empty command string.",
+      },
+    });
     expect(mocks.authorizeManagedControlPlaneCredential).not.toHaveBeenCalled();
     expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
   });
@@ -903,7 +987,7 @@ describe("/worker route", () => {
     });
   });
 
-  it("routes GET views through role-scoped worker selectors", async () => {
+  it("routes read views through the generic worker payload shape", async () => {
     const viewResult = {
       data: {
         worker: {
@@ -918,16 +1002,26 @@ describe("/worker route", () => {
     };
     mocks.executeWorkerView.mockResolvedValue(viewResult);
 
-    const { GET } = await import("./route");
-    const response = await GET(
-      new Request(
-        "http://localhost/worker?view=briefs&role=owner_chief_of_staff&id=worker-1&tenantSlug=continuous-demo&state=review_ready",
-        {
-          headers: {
-            authorization: "Bearer test-token",
-          },
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/worker", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
         },
-      ),
+        body: JSON.stringify({
+          view: "briefs",
+          worker: {
+            role: "owner_chief_of_staff",
+            id: "worker-1",
+            tenantSlug: "continuous-demo",
+          },
+          config: {
+            state: "review_ready",
+          },
+        }),
+      }),
     );
     const body = await response.json();
 
@@ -967,12 +1061,22 @@ describe("/worker route", () => {
       }),
     );
 
-    const { GET } = await import("./route");
-    const response = await GET(
-      new Request("http://localhost/worker?view=briefs&role=owner_chief_of_staff&tenantSlug=continuous-demo", {
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/worker", {
+        method: "POST",
         headers: {
           authorization: "Bearer test-token",
+          "content-type": "application/json",
         },
+        body: JSON.stringify({
+          view: "briefs",
+          worker: {
+            role: "owner_chief_of_staff",
+            tenantSlug: "continuous-demo",
+          },
+          config: {},
+        }),
       }),
     );
     const body = await response.json();
@@ -984,50 +1088,75 @@ describe("/worker route", () => {
     });
   });
 
-  it("rejects worker-family-specific GET query fields", async () => {
+  it("rejects GET worker reads because reads require a payload envelope", async () => {
     const { GET } = await import("./route");
-    const forbiddenFields = [
-      "extra",
-      "workerRole",
-      "revenueWorker",
-      "dispatchWorker",
-      "leadSource",
-    ];
+    const response = await GET();
+    const body = await response.json();
+
+    expect(response.status).toBe(405);
+    expect(body.error).toEqual({
+      code: "worker_view_payload_required",
+      message:
+        "Worker reads use POST /worker with a JSON payload containing view, worker, and config. Put read filters under config.",
+    });
+    expect(mocks.executeWorkerView).not.toHaveBeenCalled();
+  });
+
+  it("rejects top-level worker view filters outside the view envelope", async () => {
+    const { POST } = await import("./route");
+    const forbiddenFields = ["role", "tenantSlug", "state", "workerRole", "leadSource"];
 
     for (const field of forbiddenFields) {
-      const response = await GET(
-        new Request(
-          `http://localhost/worker?view=snapshot&role=revenue_operations&tenantSlug=continuous-demo&${field}=true`,
-          {
-            headers: {
-              authorization: "Bearer test-token",
-            },
+      const response = await POST(
+        new Request("http://localhost/worker", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer test-token",
+            "content-type": "application/json",
           },
-        ),
+          body: JSON.stringify({
+            view: "snapshot",
+            worker: {
+              role: "revenue_operations",
+              tenantSlug: "continuous-demo",
+            },
+            config: {},
+            [field]: true,
+          }),
+        }),
       );
       const body = await response.json();
 
       expect(response.status).toBe(400);
       expect(body.error).toEqual({
-        code: "invalid_worker_view_query",
+        code: "invalid_worker_view_envelope",
         message:
-          `Worker view query fields must be view, role, id, tenantSlug, and state. Move read filters into config-backed worker tool surfaces. Unexpected fields: ${field}.`,
+          `Worker view payload fields must be view, worker, and config. Move operation inputs into config. Unexpected fields: ${field}.`,
       });
     }
     expect(mocks.authorizeManagedControlPlaneCredential).not.toHaveBeenCalled();
     expect(mocks.executeWorkerView).not.toHaveBeenCalled();
   });
 
-  it("rejects GET views that omit tenant under scoped access", async () => {
+  it("rejects view payloads that omit tenant under scoped access", async () => {
     mocks.env.CONTROL_PLANE_ALLOWED_TENANTS = "continuous-demo";
     mocks.env.CONTROL_PLANE_ALLOWED_WORKER_ROLES = "revenue_operations";
 
-    const { GET } = await import("./route");
-    const response = await GET(
-      new Request("http://localhost/worker?view=snapshot&role=revenue_operations", {
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/worker", {
+        method: "POST",
         headers: {
           authorization: "Bearer test-token",
+          "content-type": "application/json",
         },
+        body: JSON.stringify({
+          view: "snapshot",
+          worker: {
+            role: "revenue_operations",
+          },
+          config: {},
+        }),
       }),
     );
     const body = await response.json();
@@ -1037,6 +1166,38 @@ describe("/worker route", () => {
       code: "control_plane_tenant_required",
       message: "tenantSlug is required for scoped control-plane access.",
     });
+    expect(mocks.executeWorkerView).not.toHaveBeenCalled();
+  });
+
+  it("rejects ambiguous worker payloads that mix command and view", async () => {
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/worker", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "run",
+          view: "snapshot",
+          worker: {
+            role: "revenue_operations",
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "ambiguous-worker-payload-001",
+          config: {},
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toEqual({
+      code: "invalid_worker_payload_envelope",
+      message: "Worker payload must contain either command or view, not both.",
+    });
+    expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
     expect(mocks.executeWorkerView).not.toHaveBeenCalled();
   });
 });

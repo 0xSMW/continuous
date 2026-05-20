@@ -37,7 +37,7 @@ All commands use `POST /worker`; no systems-specific route is added.
 
 | Command or view | Tool surface | Required config | Idempotency | Side effects | External execution |
 |---|---|---|---|---|---|
-| `GET view=snapshot` | `worker.view` | `worker.role` | None | Read-only | Blocked |
+| `POST view=snapshot` | `worker.view` | `worker.role` | None | Read-only | Blocked |
 | `connector.health.scan` | `worker.command` | `config.checks[]` | Required | Health evidence and tasks | Blocked |
 | `sync.repair.plan` | `worker.command` | `config.connectionId`, `config.issueId` | Required | Repair plan, dry-run adapter actions | Dry-run |
 | `data_quality.remediate` | `worker.command` | `config.issueId`, `config.policy` | Required | Proposed object updates and evidence | Dry-run |

@@ -50,7 +50,7 @@ inside `config` and use the shared `/worker` command envelope.
 
 | Command or view | Tool surface | Required config | Idempotency | Side effects | External execution |
 |---|---|---|---|---|---|
-| `GET view=snapshot` | `worker.view` | `worker.role` | None | Read-only | Blocked |
+| `POST view=snapshot` | `worker.view` | `worker.role` | None | Read-only | Blocked |
 | `schedule.propose` | `worker.command` | `config.jobId` or `config.sourceRefs`, plus `config.constraints` | Required | Appointment draft, adapter dry-run, approval request | Dry-run |
 | `customer_update.draft` | `worker.command` | `config.jobId`, `config.updateKind` | Required | Draft message, evidence packet, approval request | Blocked |
 | `closeout.prepare` | `worker.command` | `config.workOrderId`, optional keyed `config.sourceRefs` | Required | Closeout document, QA checklist, evidence packet, approval request, Finance handoff refs | Blocked |
@@ -114,7 +114,7 @@ unless the operator has reveal approval.
 | `dispatch.schedule.review` | `appointment` | `approve_schedule`, `request_revision`, `route_exception` | `no_slots`, `calendar_unavailable`, `crew_missing` |
 | `dispatch.customer_update.review` | `customer_update` | `approve_send`, `edit_message`, `request_revision` | `missing_customer_contact`, `source_partial` |
 | `dispatch.closeout.review` | `closeout` | `accept_closeout`, `request_rework`, `prepare_invoice` | `missing_photos`, `qa_incomplete`, `customer_signoff_missing` |
-| `GET /worker?view=exceptions` | blocker task projection | `review_exception`, `route_work` | `no_open_exceptions`, `missing_exception_evidence` |
+| `POST /worker` with `view=exceptions` | blocker task projection | `review_exception`, `route_work` | `no_open_exceptions`, `missing_exception_evidence` |
 
 ## Evals
 

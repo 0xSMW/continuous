@@ -22,6 +22,8 @@ import {
   workerCommandEnvelopeDescription,
   workerCommandEnvelopeFieldSet,
   workerEnvelopeFieldError,
+  workerViewEnvelopeDescription,
+  workerViewEnvelopeFieldSet,
 } from "../../src/worker/envelope";
 
 export const dynamic = "force-dynamic";
@@ -36,7 +38,7 @@ function bodyObject(value: unknown) {
     : {};
 }
 
-function configObject(value: unknown):
+function configObject(value: unknown, errorCode: string):
   | { ok: true; value: Record<string, unknown> }
   | { ok: false; error: { code: string; message: string } } {
   const result = validateWorkerConfigEnvelope(value);
@@ -48,7 +50,7 @@ function configObject(value: unknown):
   return {
     ok: false,
     error: {
-      code: "invalid_worker_command_config",
+      code: errorCode,
       message: result.message,
     },
   };
@@ -62,20 +64,20 @@ async function readBody(
 > {
   return readJsonObjectBody(request, {
     invalidContentType: {
-        code: "invalid_worker_command_body",
-        message: "POST /worker requires an application/json request body.",
+      code: "invalid_worker_payload_body",
+      message: "POST /worker requires an application/json request body.",
     },
     invalidJson: {
-        code: "invalid_worker_command_body",
-        message: "Worker command body must be valid JSON.",
+      code: "invalid_worker_payload_body",
+      message: "Worker payload body must be valid JSON.",
     },
     invalidObject: {
-      code: "invalid_worker_command_body",
-      message: "Worker command body must be a JSON object.",
+      code: "invalid_worker_payload_body",
+      message: "Worker payload body must be a JSON object.",
     },
     tooLarge: (maxBytes) => ({
-      code: "worker_command_body_too_large",
-      message: `Worker command body must be at most ${maxBytes} bytes.`,
+      code: "worker_payload_body_too_large",
+      message: `Worker payload body must be at most ${maxBytes} bytes.`,
     }),
     maxBytes: defaultMaxJsonBodyBytes,
   });
@@ -116,24 +118,31 @@ function unexpectedWorkerPayloadFields(body: Record<string, unknown>) {
   return unexpectedEnvelopeFields(body, workerCommandEnvelopeFieldSet);
 }
 
-const workerViewQueryFieldSet = new Set(["view", "role", "id", "tenantSlug", "state"]);
-const workerViewQueryDescription = "view, role, id, tenantSlug, and state";
-
-function unexpectedWorkerViewQueryFields(url: URL) {
-  return Array.from(
-    new Set(
-      Array.from(url.searchParams.keys()).filter((field) => !workerViewQueryFieldSet.has(field)),
-    ),
-  );
+function unexpectedWorkerViewPayloadFields(body: Record<string, unknown>) {
+  return unexpectedEnvelopeFields(body, workerViewEnvelopeFieldSet);
 }
 
-function targetFromUrl(request: Request): WorkerTargetInput {
-  const url = new URL(request.url);
-  return {
-    role: optionalString(url.searchParams.get("role")),
-    id: optionalString(url.searchParams.get("id")),
-    tenantSlug: optionalString(url.searchParams.get("tenantSlug")),
-  };
+function hasOwnField(body: Record<string, unknown>, field: string) {
+  return Object.prototype.hasOwnProperty.call(body, field);
+}
+
+function workerPayloadKind(body: Record<string, unknown>) {
+  const hasCommand = hasOwnField(body, "command");
+  const hasView = hasOwnField(body, "view");
+
+  if (hasCommand && hasView) {
+    return "mixed";
+  }
+
+  if (hasCommand) {
+    return "command";
+  }
+
+  if (hasView) {
+    return "view";
+  }
+
+  return "missing";
 }
 
 function errorResponse(error: { code: string; message: string }, status: number) {
@@ -174,136 +183,19 @@ function guardErrorResponse(error: { code: string; message: string; status: numb
   );
 }
 
-export async function GET(request: Request) {
-  const url = new URL(request.url);
-  const unexpectedQueryFields = unexpectedWorkerViewQueryFields(url);
-  const target = targetFromUrl(request);
-  const view = optionalString(url.searchParams.get("view")) ?? "snapshot";
-  const auth = authorizeControlPlaneAccess({
-    appEnv: env.APP_ENV,
-    expectedToken: env.WORKER_RUN_TOKEN,
-    operatorEmail: env.WORKER_OPERATOR_EMAIL,
-    authorization: request.headers.get("authorization"),
-    headerToken: request.headers.get("x-worker-run-token"),
-    allowedTenants: env.CONTROL_PLANE_ALLOWED_TENANTS,
-    allowedWorkerRoles: env.CONTROL_PLANE_ALLOWED_WORKER_ROLES,
-    tokenCatalogJson: env.CONTROL_PLANE_TOKENS_JSON,
-    tokenCatalogB64: env.CONTROL_PLANE_TOKEN_CATALOG_B64,
-    route: "worker",
-    access: "read",
-    command: `view.${view}`,
-  });
-
-  if (!auth.ok) {
-    await recordControlPlaneAuthAttempt({
-      request,
-      route: "worker",
-      access: "read",
-      command: `view.${view}`,
-      tenantSlug: target.tenantSlug,
-      workerRole: target.role,
-      auth,
-    });
-    return guardErrorResponse(auth);
-  }
-
-  if (unexpectedQueryFields.length > 0) {
-    return errorResponse(
-      {
-        code: "invalid_worker_view_query",
-        message: `Worker view query fields must be ${workerViewQueryDescription}. Move read filters into config-backed worker tool surfaces. Unexpected fields: ${unexpectedQueryFields.join(", ")}.`,
-      },
-      400,
-    );
-  }
-
-  const scope = authorizeControlPlaneScope({
-    scope: auth.scope,
-    tenantSlug: target.tenantSlug,
-    workerRole: target.role,
-    requireTenant: true,
-    requireWorkerRole: true,
-  });
-
-  if (!scope.ok) {
-    await recordControlPlaneAuthAttempt({
-      request,
-      route: "worker",
-      access: "read",
-      command: `view.${view}`,
-      tenantSlug: target.tenantSlug,
-      workerRole: target.role,
-      auth,
-      scope,
-    });
-    return guardErrorResponse(scope);
-  }
-
-  const managedCredential = await authorizeManagedControlPlaneCredential({
-    request,
-    route: "worker",
-    access: "read",
-    command: `view.${view}`,
-    tenantSlug: target.tenantSlug,
-    workerRole: target.role,
-    auth,
-    requireManagedCredential: true,
-  });
-
-  if (!managedCredential.ok) {
-    await recordControlPlaneAuthAttempt({
-      request,
-      route: "worker",
-      access: "read",
-      command: `view.${view}`,
-      tenantSlug: target.tenantSlug,
-      workerRole: target.role,
-      auth,
-      scope,
-      guard: managedCredential,
-    });
-    return guardErrorResponse(managedCredential);
-  }
-
-  await recordControlPlaneAuthAttempt({
-    request,
-    route: "worker",
-    access: "read",
-    command: `view.${view}`,
-    tenantSlug: target.tenantSlug,
-    workerRole: target.role,
-    auth,
-    scope,
-  });
-
-  try {
-    const result = await executeWorkerView({
-      operatorEmail: auth.operatorEmail,
-      target,
-      view,
-      state: optionalString(url.searchParams.get("state")),
-    });
-
-    return Response.json(
-      {
-        api: workerApiVersion,
-        data: result.data,
-        error: result.error,
-      },
-      {
-        status: result.status ?? 200,
-        headers: {
-          "Cache-Control": "no-store",
-        },
-      },
-    );
-  } catch (error) {
-    return workerErrorResponse(error, "worker_view_failed");
-  }
+export async function GET() {
+  return errorResponse(
+    {
+      code: "worker_view_payload_required",
+      message:
+        "Worker reads use POST /worker with a JSON payload containing view, worker, and config. Put read filters under config.",
+    },
+    405,
+  );
 }
 
 export async function POST(request: Request) {
-  const preAuth = authorizeControlPlaneAccess({
+  const writePreAuth = authorizeControlPlaneAccess({
     enabled: env.WORKER_RUN_ENABLED,
     appEnv: env.APP_ENV,
     expectedToken: env.WORKER_RUN_TOKEN,
@@ -317,15 +209,30 @@ export async function POST(request: Request) {
     route: "worker",
     access: "write",
   });
+  const readPreAuth = writePreAuth.ok
+    ? writePreAuth
+    : authorizeControlPlaneAccess({
+        appEnv: env.APP_ENV,
+        expectedToken: env.WORKER_RUN_TOKEN,
+        operatorEmail: env.WORKER_OPERATOR_EMAIL,
+        authorization: request.headers.get("authorization"),
+        headerToken: request.headers.get("x-worker-run-token"),
+        allowedTenants: env.CONTROL_PLANE_ALLOWED_TENANTS,
+        allowedWorkerRoles: env.CONTROL_PLANE_ALLOWED_WORKER_ROLES,
+        tokenCatalogJson: env.CONTROL_PLANE_TOKENS_JSON,
+        tokenCatalogB64: env.CONTROL_PLANE_TOKEN_CATALOG_B64,
+        route: "worker",
+        access: "read",
+      });
 
-  if (!preAuth.ok) {
+  if (!writePreAuth.ok && !readPreAuth.ok) {
     await recordControlPlaneAuthAttempt({
       request,
       route: "worker",
       access: "write",
-      auth: preAuth,
+      auth: writePreAuth,
     });
-    return guardErrorResponse(preAuth);
+    return guardErrorResponse(writePreAuth);
   }
 
   const bodyResult = await readBody(request);
@@ -335,15 +242,45 @@ export async function POST(request: Request) {
       request,
       route: "worker",
       access: "write",
-      auth: preAuth,
+      auth: writePreAuth.ok ? writePreAuth : readPreAuth,
     });
     return errorResponse(bodyResult.error, bodyResult.status);
   }
 
   const body = bodyResult.value;
+  const payloadKind = workerPayloadKind(body);
+
+  if (payloadKind === "mixed") {
+    return errorResponse(
+      {
+        code: "invalid_worker_payload_envelope",
+        message: "Worker payload must contain either command or view, not both.",
+      },
+      400,
+    );
+  }
+
+  if (payloadKind === "missing") {
+    return errorResponse(
+      {
+        code: "invalid_worker_payload_envelope",
+        message: "Worker payload requires a non-empty command or view string.",
+      },
+      400,
+    );
+  }
+
+  if (payloadKind === "view") {
+    return handleWorkerView(request, body);
+  }
+
+  return handleWorkerCommand(request, body);
+}
+
+async function handleWorkerCommand(request: Request, body: Record<string, unknown>) {
   const unexpectedFields = unexpectedWorkerPayloadFields(body);
   const command = optionalString(body.command);
-  const configResult = configObject(body.config);
+  const configResult = configObject(body.config, "invalid_worker_command_config");
   const config = configResult.ok ? configResult.value : {};
   const target = targetFrom(body.worker);
   const targetResult = validateWorkerTarget(body.worker);
@@ -491,5 +428,158 @@ export async function POST(request: Request) {
     );
   } catch (error) {
     return workerErrorResponse(error, "worker_command_failed");
+  }
+}
+
+async function handleWorkerView(request: Request, body: Record<string, unknown>) {
+  const unexpectedFields = unexpectedWorkerViewPayloadFields(body);
+  const view = optionalString(body.view);
+  const configResult = configObject(body.config, "invalid_worker_view_config");
+  const config = configResult.ok ? configResult.value : {};
+  const target = targetFrom(body.worker);
+  const targetResult = validateWorkerTarget(body.worker);
+
+  if (unexpectedFields.length > 0) {
+    return errorResponse(
+      {
+        code: "invalid_worker_view_envelope",
+        message: workerEnvelopeFieldError(
+          "Worker view payload",
+          workerViewEnvelopeDescription,
+          unexpectedFields,
+        ),
+      },
+      400,
+    );
+  }
+
+  if (!view) {
+    return errorResponse(
+      {
+        code: "invalid_worker_view_envelope",
+        message: "Worker view payload requires a non-empty view string.",
+      },
+      400,
+    );
+  }
+
+  const auth = authorizeControlPlaneAccess({
+    appEnv: env.APP_ENV,
+    expectedToken: env.WORKER_RUN_TOKEN,
+    operatorEmail: env.WORKER_OPERATOR_EMAIL,
+    authorization: request.headers.get("authorization"),
+    headerToken: request.headers.get("x-worker-run-token"),
+    allowedTenants: env.CONTROL_PLANE_ALLOWED_TENANTS,
+    allowedWorkerRoles: env.CONTROL_PLANE_ALLOWED_WORKER_ROLES,
+    tokenCatalogJson: env.CONTROL_PLANE_TOKENS_JSON,
+    tokenCatalogB64: env.CONTROL_PLANE_TOKEN_CATALOG_B64,
+    route: "worker",
+    access: "read",
+    command: `view.${view}`,
+  });
+
+  if (!auth.ok) {
+    await recordControlPlaneAuthAttempt({
+      request,
+      route: "worker",
+      access: "read",
+      command: `view.${view}`,
+      tenantSlug: target.tenantSlug,
+      workerRole: target.role,
+      auth,
+    });
+    return guardErrorResponse(auth);
+  }
+
+  if (!targetResult.ok) {
+    return errorResponse(targetResult.error, 400);
+  }
+
+  if (!configResult.ok) {
+    return errorResponse(configResult.error, 400);
+  }
+
+  const scope = authorizeControlPlaneScope({
+    scope: auth.scope,
+    tenantSlug: target.tenantSlug,
+    workerRole: target.role,
+    requireTenant: true,
+    requireWorkerRole: true,
+  });
+
+  if (!scope.ok) {
+    await recordControlPlaneAuthAttempt({
+      request,
+      route: "worker",
+      access: "read",
+      command: `view.${view}`,
+      tenantSlug: target.tenantSlug,
+      workerRole: target.role,
+      auth,
+      scope,
+    });
+    return guardErrorResponse(scope);
+  }
+
+  const managedCredential = await authorizeManagedControlPlaneCredential({
+    request,
+    route: "worker",
+    access: "read",
+    command: `view.${view}`,
+    tenantSlug: target.tenantSlug,
+    workerRole: target.role,
+    auth,
+    requireManagedCredential: true,
+  });
+
+  if (!managedCredential.ok) {
+    await recordControlPlaneAuthAttempt({
+      request,
+      route: "worker",
+      access: "read",
+      command: `view.${view}`,
+      tenantSlug: target.tenantSlug,
+      workerRole: target.role,
+      auth,
+      scope,
+      guard: managedCredential,
+    });
+    return guardErrorResponse(managedCredential);
+  }
+
+  await recordControlPlaneAuthAttempt({
+    request,
+    route: "worker",
+    access: "read",
+    command: `view.${view}`,
+    tenantSlug: target.tenantSlug,
+    workerRole: target.role,
+    auth,
+    scope,
+  });
+
+  try {
+    const result = await executeWorkerView({
+      operatorEmail: auth.operatorEmail,
+      target,
+      view,
+      state: optionalString(config.state),
+    });
+
+    return Response.json(
+      {
+        api: workerApiVersion,
+        data: result.data,
+        error: result.error,
+      },
+      {
+        status: result.status ?? 200,
+        headers: {
+          "Cache-Control": "no-store",
+        },
+      },
+    );
+  } catch (error) {
+    return workerErrorResponse(error, "worker_view_failed");
   }
 }

@@ -379,6 +379,9 @@ jobs:
             worker_status="$(
               curl -sS --resolve continuoushq.com:443:127.0.0.1 \
                 -o /tmp/rollback-worker.out -w '%{http_code}' \
+                -X POST \
+                -H 'content-type: application/json' \
+                --data '{"view":"snapshot","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{}}' \
                 https://continuoushq.com/worker
             )"
             if [ "$worker_status" != "401" ]; then
@@ -636,9 +639,10 @@ jobs:
 
           WORKFORCE_READINESS_RESPONSE="$(
             curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
-              "https://continuoushq.com/worker?view=readiness&role=workforce_operations&tenantSlug=continuous-demo" \
+              -X POST https://continuoushq.com/worker \
               -H "authorization: Bearer $WORKER_TOKEN" \
-              -H "content-type: application/json"
+              -H "content-type: application/json" \
+              --data '{"view":"readiness","worker":{"role":"workforce_operations","tenantSlug":"continuous-demo"},"config":{}}'
           )"
           echo "$WORKFORCE_READINESS_RESPONSE" | /usr/bin/jq -c '{api,error,view:.data.view,documentBlockers:(.data.readiness.documentBlockers|length),payrollBlockers:(.data.readiness.payrollBlockers|length)}'
           echo "$WORKFORCE_READINESS_RESPONSE" | /usr/bin/jq -e \

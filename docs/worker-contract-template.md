@@ -17,8 +17,9 @@ routes.
 ## API Shape
 
 `/worker` is the only worker control-plane route. Use `POST /worker` for
-commands and `GET /worker` for read views; do not add worker-family URLs such
-as `/api/<role>-worker`, `/worker/<role>`, or `<role>-worker`.
+commands and `POST /worker` for read views; do not add worker-family URLs such
+as family-specific API paths, nested worker-role paths, or role-named worker
+routes.
 
 ```json
 {
@@ -45,13 +46,7 @@ The `worker` object is only a selector and must not contain operation fields;
 accepted worker selector fields are `role`, `id`, and `tenantSlug`.
 
 Read views use the same worker selector and keep read filters under `config`.
-HTTP callers use query parameters for cacheable operator reads:
-
-```txt
-GET /worker?view=snapshot&role=<role>&tenantSlug=continuous-demo
-```
-
-Local/tool callers use the read envelope:
+HTTP, local, and app-server callers use the same read envelope:
 
 ```json
 {

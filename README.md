@@ -59,14 +59,13 @@ Then open `http://localhost:3000`.
   `POST /approval` with `command=approval.decide`, structured `approval`, and
   `config` fields. Approval mutation requests accept only `command`,
   `approval`, `idempotencyKey`, and `config` as top-level fields.
-- `/worker` is the canonical worker control-plane API. Use
-  `GET /worker?view=snapshot&role=revenue_operations` or
-  `GET /worker?view=approvals&role=revenue_operations`; use `POST /worker` with
-  explicit `worker.role`, `command`, `idempotencyKey` when required, and
-  `config` payloads for side-effecting worker commands. Worker mutation
-  requests accept only `command`, `worker`, `idempotencyKey`, and `config` as
-  top-level command fields; `worker` is limited to role, id, and tenant
-  selectors, and every operation-specific input lives under `config`. Revenue
+- `/worker` is the canonical worker control-plane API. Use `POST /worker` with
+  `view`, `worker`, and `config` for read views; use `POST /worker` with
+  `command`, `worker`, `idempotencyKey` when required, and `config` for
+  side-effecting worker commands. Worker requests accept only the read or
+  command envelope fields as top-level fields; `worker` is limited to role, id,
+  and tenant selectors, and every operation-specific input lives under
+  `config`. Revenue
   operations runs can first call
   `command=lead.read` with `config.source` and
   `config.records[]` to persist Core lead source snapshots, then call

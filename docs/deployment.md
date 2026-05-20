@@ -294,12 +294,12 @@ pollable, scheduler-observed, and backed by a managed credential ref.
 ```
 
 Workflow handlers that already hold Core UUIDs can pass those ids under
-`config.intake`. `GET /core`,
-`GET /worker?view=snapshot&role=revenue_operations`, and
-`GET /worker?view=approvals&role=revenue_operations` use the same bearer token for operator-only
-snapshots and approval review. Worker-specific HTTP paths are intentionally
-absent; expand the worker control plane through registered `/worker` commands
-and payload fields.
+`config.intake`. `GET /core` and `POST /worker` view payloads use the same
+bearer token for operator-only snapshots and approval review. Worker read
+payloads carry `view`, `worker`, and `config`; worker command payloads carry
+`command`, `worker`, `idempotencyKey`, and `config`. Worker-specific HTTP paths
+are intentionally absent; expand the worker control plane through registered
+`/worker` commands and payload fields.
 The deploy workflow smokes `lead.read`, the source-selector `run` path, a
 registered `quote.prepare` packet, a
 Core-created active buffered connection, one-shot scheduler `lead.read -> run`
@@ -349,7 +349,7 @@ Control-plane token catalog entries have this shape when provided directly via
 ```
 
 `allowedCommands` should use exact route-qualified keys such as `worker:run`.
-GET views are authorized as `<route>:view.<view>`, for example
+Read views are authorized as `<route>:view.<view>`, for example
 `worker:view.snapshot`. Production deploys generate the full current exact
 command catalog in `.github/workflows/deploy.yml` and `scripts/deploy.sh`.
 Treat the legacy single `WORKER_RUN_TOKEN` path as bootstrap-only. New

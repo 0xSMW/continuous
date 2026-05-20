@@ -40,9 +40,8 @@ Useful app surfaces for worker development:
 | `POST /core` | Canonical Core command surface with `command`, `core`, `config`, and `idempotencyKey` payload fields for tasks, task transitions, entity setup, approvals, capability grants, budget ledger operations, objects, object links, events, evidence, documents, packets, decisions, generated views, adapter intents, rule changes, customer signals, and payroll preview artifacts |
 | `/approval?view=inbox` | Shared operator-gated approval inbox across Core, workflow, and worker subjects |
 | `POST /approval` | Shared approval decision surface with `command`, explicit `approval.subject`, and `config` payload fields |
-| `/worker?view=snapshot&role=revenue_operations` | Canonical operator-gated worker snapshot |
-| `/worker?view=approvals&role=revenue_operations` | Canonical operator-gated worker approval queue |
-| `POST /worker` | Canonical command surface with `command`, `worker`, `config`, and `idempotencyKey` payload fields |
+| `POST /worker` with `view`, `worker`, and `config` | Canonical operator-gated worker read surface |
+| `POST /worker` with `command`, `worker`, `config`, and `idempotencyKey` | Canonical worker command surface |
 | `/workflow?view=approvals` | Canonical operator-gated workflow approval queue |
 | `POST /workflow` | Canonical workflow command surface for starts, transitions, queued step execution, and workflow approval decisions |
 | `bun run worker:tool` | Repo-owned JSON worker toolbox for agents and local automation |

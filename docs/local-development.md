@@ -130,8 +130,14 @@ route-scoped operator token from the catalog:
 
 ```sh
 bun run dev
-curl "http://localhost:3000/worker?view=snapshot&role=revenue_operations" \
-  -H "authorization: Bearer $CONTROL_PLANE_OPERATOR_TOKEN"
+curl -X POST http://localhost:3000/worker \
+  -H "authorization: Bearer $CONTROL_PLANE_OPERATOR_TOKEN" \
+  -H "content-type: application/json" \
+  -d '{
+    "view": "snapshot",
+    "worker": {"role": "revenue_operations", "tenantSlug": "continuous-demo"},
+    "config": {}
+  }'
 ```
 
 The run command is a guarded side-effecting `POST /worker` call and is disabled
@@ -260,8 +266,14 @@ curl -X POST http://localhost:3000/worker \
 List and decide approvals with the same route-scoped operator token:
 
 ```sh
-curl "http://localhost:3000/worker?view=approvals&role=revenue_operations" \
-  -H "authorization: Bearer $CONTROL_PLANE_OPERATOR_TOKEN"
+curl -X POST http://localhost:3000/worker \
+  -H "authorization: Bearer $CONTROL_PLANE_OPERATOR_TOKEN" \
+  -H "content-type: application/json" \
+  -d '{
+    "view": "approvals",
+    "worker": {"role": "revenue_operations", "tenantSlug": "continuous-demo"},
+    "config": {}
+  }'
 
 curl -X POST http://localhost:3000/worker \
   -H "authorization: Bearer $CONTROL_PLANE_OPERATOR_TOKEN" \

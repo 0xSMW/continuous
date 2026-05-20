@@ -6,7 +6,7 @@ discovery plus registry-backed read and command execution:
 | Tool | Mode | Purpose |
 |---|---|---|
 | `continuous.worker.schema` | Read-only | Returns worker contracts, runtime roles, registered commands, follow-up commands, planned future-worker metadata, worker tool schema, and integration boundary |
-| `continuous.worker.view` | Registry-backed read | Reads registered worker views with the same `view`, `worker`, and `config` envelope used by local worker tooling and `/worker` query selectors |
+| `continuous.worker.view` | Registry-backed read | Reads registered worker views with the same `view`, `worker`, and `config` envelope used by local worker tooling and `POST /worker` read payloads |
 | `continuous.worker.command` | Registry-backed command | Invokes an existing worker command with the same `command`, `worker`, `idempotencyKey`, and `config` envelope used by `/worker` |
 
 The generated Codex app-server protocol defines a dynamic tool as `name`,
@@ -79,8 +79,8 @@ registry without loading production tokens or executing external reads.
 The app-server worker tools are intentionally narrow:
 
 - Commands are resolved by the same registry as `/worker` and `worker:tool`.
-- Reads are resolved by the same view registry as `/worker?view=...` and
-  `worker.view`.
+- Reads are resolved by the same view registry as `POST /worker` view payloads
+  and `worker.view`.
 - Read envelopes are strict. `continuous.worker.view` accepts only `view`,
   `worker`, and `config`; read filters such as `state` belong under `config`.
 - Mutation envelopes are strict. `continuous.worker.command` accepts only

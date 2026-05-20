@@ -126,7 +126,7 @@ payment links, refunds, settlements, or bank writes:
 
 | Command or view | Tool surface | Required config | Idempotency | Side effects | External execution |
 |---|---|---|---|---|---|
-| `GET view=snapshot` | `worker.view` | `worker.role` | None | Read-only | Blocked |
+| `POST view=snapshot` | `worker.view` | `worker.role` | None | Read-only | Blocked |
 | `invoice.prepare` | `worker.command` | `config.jobId`, `config.closeoutId`, or `config.sourceRefs` | Required | Invoice draft, cash packet, approval request, accounting dry-run receipt | Dry-run |
 | `ar_followup.draft` | `worker.command` | `config.invoiceId`, `config.tonePolicy` | Required | AR follow-up draft, cash packet, approval request, generated review view | Blocked |
 | `cash_forecast.generate` | `worker.command` | `config.window`, `config.accounts[]` | Required | Forecast object, cash packet, approval request, generated review view | Blocked |

@@ -12,8 +12,8 @@ state, workflow state, and object versioning without external sends or money mov
 |---|---|
 | Worker identity | `Revenue Operations Worker`, autonomy level 2, owner-managed |
 | Core loop | One operator run creates workflow run/steps, worker run, source snapshot evidence, budget, inference, usage, event, adapter run/action, approval packet, task update, and object version records |
-| Operator read view | `GET /worker?view=snapshot&role=revenue_operations`, bearer-token required |
-| Approval controls | `GET /worker?view=approvals&role=revenue_operations` and `POST /worker` with `command=approval.decide`, bearer-token required |
+| Operator read view | `POST /worker` with `view=snapshot`, `worker.role=revenue_operations`, and read filters under `config`, bearer-token required |
+| Approval controls | `POST /worker` with `view=approvals` for reads and `POST /worker` with `command=approval.decide` for decisions, bearer-token required |
 | Source read command | `POST /worker` with `command=lead.read`, `idempotencyKey`, `config.source`, optional `config.reader`, and direct `config.records[]` or an active connection reference; persists website-form, inbox, CRM, buffered connection, or read-only API-polled source records as Core lead object/event/evidence rows, updates connection cursor proof when connection-backed, and returns `config.intake` selectors |
 | Split classify/draft commands | `POST /worker` with `command=lead.classify` or `command=response.draft`; both accept `config.intake` selectors or direct fallback `config.leadPacket`, write worker run/event/evidence/audit/budget records, and keep external sends blocked |
 | Quote prepare command | `POST /worker` with `command=quote.prepare`; accepts the same `config.intake` selectors or direct fallback `config.leadPacket`, writes quote packet, approval, generated view, event/evidence/audit/budget records, and keeps external sends blocked |

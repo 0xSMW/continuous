@@ -188,7 +188,8 @@
 | Command body boundary | `/core`, `/worker`, `/workflow`, and `/approval` reject invalid credentials before body reads, cap command bodies at 1 MiB, and reject non-JSON, malformed JSON, and non-object command bodies after authentication instead of collapsing them into empty envelopes |
 | Local mutation trust boundary | `worker.command` and `continuous.worker.command` are disabled under `APP_ENV=production` unless `CONTINUOUS_TRUSTED_LOCAL_WORKER_TOOLS=true`; their payloads mirror `/worker`, and production automation should prefer the authenticated `/worker` route |
 | Worker ledger namespace boundary | Role-specific worker behavior is carried by `worker.role`, event type suffixes, command names, and persisted payloads; sources stay generic as `continuous.worker` so new worker families do not require new source namespaces |
-| Hardened command-scoped control-plane auth | Catalog-backed control-plane credentials now reject explicit blank commands when command scopes exist, managed credential command lists fail closed on missing command names, malformed catalog payloads have regression coverage, and `/worker` read queries reject worker-family-specific selector drift |
+| Hardened command-scoped control-plane auth | Catalog-backed control-plane credentials now reject explicit blank commands when command scopes exist, managed credential command lists fail closed on missing command names, malformed catalog payloads have regression coverage, and `/worker` read payloads reject worker-family-specific selector drift |
+| Unified worker HTTP envelopes | `/worker` now uses `POST` for both command and read controls: commands carry `command`, `worker`, `idempotencyKey`, and `config`, while reads carry `view`, `worker`, and `config`, with query-shaped worker reads rejected |
 | Hardened Core/workflow failure coverage | `/core external_action.record` now has route-level invalid-idempotency, adapter mismatch, and replay-conflict coverage plus integration coverage for changed-input replay and adapter/connection mismatch; `/workflow` now preserves structured route failures across overview, approvals, start, transition, step execution, and approval decisions |
 
 ### Current State
@@ -234,14 +235,14 @@ evidence, marks the quote task as `approval_required`, and leaves external
 execution disabled until live credential scopes, rollback paths, and approval UI
 are in place.
 
-The canonical HTTP shape is now `/worker` with explicit worker roles:
-`GET /worker?view=snapshot&role=revenue_operations` for state,
-`GET /worker?view=approvals&role=revenue_operations` for approval queues, and
-`POST /worker` with `command`, `worker`, `idempotencyKey`, and `config` for
-side-effecting operations. The route accepts only the canonical command fields,
-and rejects operation fields nested under `worker`; role, id, and tenant selectors live
-under `worker`, while source records, approval ids, retry limits, and direct
-fallback payloads live under `config`. Adapter
+The canonical HTTP shape is `/worker` with explicit worker roles in payloads:
+`POST /worker` with `view`, `worker`, and `config` for state and approval
+queue reads, and `POST /worker` with `command`, `worker`, `idempotencyKey`, and
+`config` for side-effecting operations. The route accepts only canonical worker
+envelope fields, and rejects operation fields nested under `worker`; role, id,
+and tenant selectors live under `worker`, while source records, approval ids,
+retry limits, read filters, and direct fallback payloads live under `config`.
+Adapter
 reconciliation and retry execution use the same route with
 `command=adapters.reconcile` or `command=adapters.retry`, a tenant-scoped
 `worker` target, and `config.limit`; approval continuations use
