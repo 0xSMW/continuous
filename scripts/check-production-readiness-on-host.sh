@@ -144,9 +144,26 @@ run_object_storage_check() {
 
   output="$(
     cd "$APP_DIR" && set -a && source "$BACKUP_ENV_FILE" && set +a && \
-      BACKUP_S3_MAX_AGE_HOURS="${BACKUP_S3_MAX_AGE_HOURS:-$BACKUP_MAX_AGE_HOURS}" \
-      docker compose --profile tools run --rm -T migrate \
-        bun scripts/s3-backup-object.ts --check-latest 2>&1
+      s3_env_args=() && \
+      for name in \
+        BACKUP_S3_ENDPOINT \
+        BACKUP_S3_BUCKET \
+        BACKUP_S3_REGION \
+        BACKUP_S3_PREFIX \
+        BACKUP_S3_ACCESS_KEY_ID \
+        BACKUP_S3_SECRET_ACCESS_KEY \
+        AWS_ENDPOINT_URL_S3 \
+        AWS_REGION \
+        AWS_ACCESS_KEY_ID \
+        AWS_SECRET_ACCESS_KEY; do
+        if [ -n "${!name:-}" ]; then
+          s3_env_args+=(-e "$name=${!name}")
+        fi
+      done && \
+      docker compose --profile tools run --rm -T \
+        "${s3_env_args[@]}" \
+        -e "BACKUP_S3_MAX_AGE_HOURS=${BACKUP_S3_MAX_AGE_HOURS:-$BACKUP_MAX_AGE_HOURS}" \
+        migrate bun scripts/s3-backup-object.ts --check-latest 2>&1
   )"
   status="$?"
 
