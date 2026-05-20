@@ -59,13 +59,13 @@ const runtimeRoles = new Set<string>(
   contracts.filter((contract) => contract.runtime).map((contract) => contract.role),
 );
 const workerFamilyRoutePattern = new RegExp(
-  "^app/(?:[a-z0-9_-]+-worker/|worker/[^/]+/|workers/[^/]+/|api/(?:[a-z0-9_-]+-worker|worker|workers)(?:/|$))",
+  "^app/(?:[a-z0-9_-]+[-_]worker/|worker/[^/]+/|workers/[^/]+/|api/(?:[a-z0-9_-]+[-_]worker|worker|workers)(?:/|$))",
 );
 const apiCommandRoutePattern = new RegExp(
   "^app/api/(?:worker|workers)(?:/|-|$)",
 );
 const forbiddenWorkerUrlPattern = new RegExp(
-  '(?:^|["\'`\\s(])/(?:(?:api/)?[a-z0-9_-]+-worker(?:/[a-z0-9_-]+)?|api/workers?(?:/[a-z0-9_-]+)?|workers?/[a-z0-9_-]+)(?:/|["\'`\\s),.;?]|$)',
+  '(?:^|["\'`\\s(])/(?:(?:api/)?[a-z0-9_-]+[-_]worker(?:/[a-z0-9_-]+)?|api/workers?(?:/[a-z0-9_-]+)?|workers?/[a-z0-9_-]+)(?:/|["\'`\\s),.;?]|$)',
 );
 const forbiddenWorkerNamespacePattern = new RegExp(
   "continuous\\.[a-z0-9_]+_worker|[a-z0-9_]+_worker\\.",
@@ -135,8 +135,12 @@ describe("future worker contracts", () => {
     const nonCanonical = [
       path("api", "revenue-worker"),
       path("api", "revenue-worker", "run"),
+      path("api", "revenue_worker"),
+      path("api", "revenue_worker", "run"),
       path("api", "marketing-operations-worker"),
+      path("api", "marketing_operations_worker"),
       path("api", "field_robotics-worker", "run"),
+      path("api", "field_robotics_worker", "run"),
       path("api", "worker"),
       path("api", "worker", "revenue"),
       path("api", "workers", "finance"),
@@ -144,7 +148,9 @@ describe("future worker contracts", () => {
       path("worker", "marketing-operations"),
       path("workers", "finance"),
       path("dispatch-worker"),
+      path("dispatch_worker"),
       path("field_robotics-worker"),
+      path("field_robotics_worker"),
     ];
 
     for (const url of nonCanonical) {
@@ -194,7 +200,7 @@ describe("future worker contracts", () => {
       "Only `command`, `worker`, `idempotencyKey`, and `config` are accepted as",
     );
     expect(source).toContain("HTTP and CLI callers both go through the registered `/worker` command");
-    expect(source).not.toMatch(/\/api\/[a-z0-9-]+-worker/);
+    expect(source).not.toMatch(/\/api\/[a-z0-9_-]+[-_]worker/);
   });
 
   it("publishes worker contracts and follow-up commands without route-specific API names", () => {
@@ -308,7 +314,7 @@ describe("future worker contracts", () => {
         expect(source).toContain(contract.evidencePacket);
       }
       expect(source).toMatch(/External execution \| `(blocked|dry_run|approved_only)`/);
-      expect(source).not.toMatch(/\/api\/[a-z0-9-]+-worker/);
+      expect(source).not.toMatch(/\/api\/[a-z0-9_-]+[-_]worker/);
 
       for (const section of requiredSections) {
         expect(source).toContain(section);
@@ -327,7 +333,7 @@ describe("future worker contracts", () => {
     expect(source).toContain("closeout packet");
     expect(source).toContain("`exception.route`");
     expect(source).toContain("exception task");
-    expect(source).not.toMatch(/\/api\/[a-z0-9-]+-worker/);
+    expect(source).not.toMatch(/\/api\/[a-z0-9_-]+[-_]worker/);
   });
 
   it("keeps the Finance runtime contract on generic worker commands", () => {
@@ -350,7 +356,7 @@ describe("future worker contracts", () => {
     expect(source).toContain("finance.payment.review");
     expect(source).toContain("Dual-control is required");
     expect(source).toContain("accounting dry-run");
-    expect(source).not.toMatch(/\/api\/[a-z0-9-]+-worker/);
+    expect(source).not.toMatch(/\/api\/[a-z0-9_-]+[-_]worker/);
   });
 
   it("links the future contracts from the worker expansion map", () => {
