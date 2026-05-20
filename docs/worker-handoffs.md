@@ -35,17 +35,20 @@ Every handoff must define:
 Before a planned worker becomes executable, add at least one fixture for its
 incoming handoff. Dispatch/Ops now has executable fixtures through
 `/worker command=schedule.propose`, blocked
-`/worker command=customer_update.draft`, and blocked
+`/worker command=customer_update.draft`, blocked
 `/worker command=closeout.prepare`, and blocked
-`/worker command=exception.route`; live calendar/customer-send credentials
-remain the Dispatch launch blocker, and remaining rows are still launch
-blockers for their target workers.
+`/worker command=exception.route`. Finance now consumes
+`dispatch.closeout_to_finance` through `/worker command=invoice.prepare` and
+produces a cash packet, invoice draft, accounting dry-run receipt, and
+`finance.invoice_to_owner_review` approval handoff. Live calendar,
+customer-send, accounting, payment, and bank credentials remain launch
+blockers.
 
 | Worker | Required first fixture |
 |---|---|
 | Owner Chief-of-Staff | `revenue.lead_to_owner_review` approval packet with Revenue source evidence |
 | Dispatch/Ops | implemented: `revenue.quote_to_dispatch` approved quote with blocked adapter receipt produces a dry-run schedule proposal, blocked customer update draft, blocked closeout packet, and blocked exception route task |
-| Finance | `dispatch.closeout_to_finance` closeout packet with billable line summary |
+| Finance | implemented: `dispatch.closeout_to_finance` closeout packet with billable line summary produces a dry-run invoice draft, cash packet, owner approval request, and blocked money-movement posture |
 | Workforce | seeded employment or contractor packet with payroll preview blockers |
 | Compliance | `workforce.payroll_to_compliance` payroll preview with filing draft |
 | Systems | failing connection sync issue with dry-run repair and rollback plan |

@@ -3,6 +3,9 @@
 This contract defines the finance worker for invoice drafts, AR follow-up,
 expense coding, cash forecast, and payment draft preparation. V1 never moves
 money and never sends external payment communications without approval.
+The first executable slice is `invoice.prepare`; the remaining Finance commands
+stay contract-defined until their runtime handlers are promoted through the same
+generic worker registry.
 
 ## Header
 
@@ -26,8 +29,11 @@ All commands use `POST /worker`; no finance-specific route is added.
   },
   "idempotencyKey": "finance-invoice-job-001",
   "config": {
-    "jobId": "job_object_uuid",
-    "closeoutId": "closeout_object_uuid",
+    "sourceRefs": {
+      "jobObjectId": "job_object_uuid",
+      "closeoutObjectId": "closeout_object_uuid",
+      "customerObjectId": "customer_object_uuid"
+    },
     "policy": {
       "requireOwnerApproval": true
     }
@@ -40,7 +46,7 @@ All commands use `POST /worker`; no finance-specific route is added.
 | Command or view | Tool alias | Required config | Idempotency | Side effects | External execution |
 |---|---|---|---|---|---|
 | `GET view=snapshot` | `worker.snapshot` | `worker.role` | None | Read-only | Blocked |
-| `invoice.prepare` | `worker.finance.invoice.prepare` | `jobId` or `closeoutId` | Required | Invoice draft, packet, approval request | Dry-run |
+| `invoice.prepare` | `worker.finance.invoice.prepare` | `jobId`, `closeoutId`, or `sourceRefs` | Required | Invoice draft, cash packet, approval request, accounting dry-run receipt | Dry-run |
 | `ar_followup.draft` | `worker.finance.ar_followup.draft` | `invoiceId`, `tonePolicy` | Required | Draft message and approval request | Blocked |
 | `expense_code.propose` | `worker.finance.expense_code.propose` | `receiptId` or `expenseId` | Required | Coding proposal and evidence | Blocked |
 | `cash_forecast.generate` | `worker.finance.cash_forecast.generate` | `window`, `accounts[]` | Required | Forecast object and packet | Blocked |

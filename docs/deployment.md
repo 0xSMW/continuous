@@ -120,7 +120,7 @@ seeded owner user and must match an active user before approval records or
 operator decisions can be written. The deploy path also writes a hashed
 control-plane token catalog and scopes that credential to
 `CONTROL_PLANE_ALLOWED_TENANTS=continuous-demo` and
-`CONTROL_PLANE_ALLOWED_WORKER_ROLES=revenue_operations,owner_chief_of_staff,dispatch_operations`;
+`CONTROL_PLANE_ALLOWED_WORKER_ROLES=revenue_operations,owner_chief_of_staff,dispatch_operations,finance_operations`;
 requests to `/worker`, `/core`, or `/workflow` must carry an allowed
 `tenantSlug`, and worker requests must carry an allowed `worker.role`. Use the
 CLI path over SSH for direct operator-controlled smoke runs:

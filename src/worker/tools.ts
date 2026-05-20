@@ -386,6 +386,69 @@ export const workerTools = [
     },
   },
   {
+    name: "worker.finance.invoice.prepare",
+    description: "Prepare an invoice draft from Core job or closeout refs with accounting dry-run evidence.",
+    registry: {
+      role: "finance_operations",
+      surface: "command",
+      command: "invoice.prepare",
+      idempotency: "required",
+      externalExecution: "dry_run",
+      requiresTenant: true,
+    },
+    inputSchema: {
+      type: "object",
+      properties: {
+        worker: { $ref: "#/$defs/workerTarget" },
+        idempotencyKey: { type: "string" },
+        config: {
+          type: "object",
+          description:
+            "Finance invoice config. Put Core handoff selectors under sourceRefs and operation details such as billableLines, tax, due date, and approval policy under config.",
+          properties: {
+            jobId: { type: "string" },
+            jobObjectId: { type: "string" },
+            closeoutId: { type: "string" },
+            closeoutObjectId: { type: "string" },
+            customerObjectId: { type: "string" },
+            sourceRefs: { $ref: "#/$defs/sourceRefs" },
+            billableLines: {
+              type: "array",
+              items: {
+                type: "object",
+                additionalProperties: true,
+              },
+            },
+            lines: {
+              type: "array",
+              items: {
+                type: "object",
+                additionalProperties: true,
+              },
+            },
+            currency: { type: "string" },
+            taxCents: { type: "number", minimum: 0 },
+            dueAt: { type: "string" },
+            policy: {
+              type: "object",
+              additionalProperties: true,
+            },
+            evidenceIds: {
+              type: "array",
+              items: { type: "string" },
+            },
+            sourceEvidenceIds: {
+              type: "array",
+              items: { type: "string" },
+            },
+          },
+          additionalProperties: true,
+        },
+      },
+      required: ["worker", "idempotencyKey", "config"],
+    },
+  },
+  {
     name: "worker.continue",
     description: "Continue a worker-owned approval outcome with structured config.",
     registry: {
@@ -892,6 +955,16 @@ export async function executeWorkerTool(name: string, payload: JsonObject = {}) 
   if (name === "worker.dispatch.exception.route") {
     return executeWorkerCommand({
       command: "exception.route",
+      target,
+      operatorEmail,
+      config,
+      idempotencyKey: payload.idempotencyKey,
+    });
+  }
+
+  if (name === "worker.finance.invoice.prepare") {
+    return executeWorkerCommand({
+      command: "invoice.prepare",
       target,
       operatorEmail,
       config,

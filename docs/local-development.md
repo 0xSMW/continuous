@@ -32,9 +32,10 @@ bun run db:seed
 ```
 
 `db:seed` is idempotent and loads a bootstrap service-SMB lead-to-cash slice:
-tenant, owner, Revenue Operations Worker, customer, lead, quote, job, invoice,
-payment, capabilities, task, event, evidence, budget records, adapter record,
-approval request, audit event, and generated UI contract.
+tenant, owner, Revenue, Owner, Dispatch, and Finance worker records, customer,
+lead, quote, job, invoice, payment, capabilities, task, event, evidence, budget
+records, dry-run adapter records, approval request, audit event, and generated
+UI contract.
 
 ## Run
 

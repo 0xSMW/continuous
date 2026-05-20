@@ -5,7 +5,7 @@ discovery and registry-backed command execution:
 
 | Tool | Mode | Purpose |
 |---|---|---|
-| `continuous.worker.schema` | Read-only | Returns the registered Revenue, Owner, and Dispatch runtime commands, planned future-worker metadata, worker tool schema, and integration boundary |
+| `continuous.worker.schema` | Read-only | Returns the registered Revenue, Owner, Dispatch, and Finance runtime commands, planned future-worker metadata, worker tool schema, and integration boundary |
 | `continuous.worker.command` | Registry-backed command | Invokes an existing worker command with the same `command`, `worker`, `idempotencyKey`, and `config` envelope used by `/worker` |
 
 The generated Codex app-server protocol defines a dynamic tool as `name`,
@@ -24,6 +24,10 @@ Dispatch `customer_update.draft`, `closeout.prepare`, and `exception.route`
 are also schema-discoverable through the same registry-backed command list and
 keep customer-send, QA, Finance handoff, exception reason, severity, and
 related Core refs under `config`.
+Finance `invoice.prepare` uses the same envelope with job, closeout, customer,
+and evidence selectors under `config.sourceRefs`, prepares an invoice draft,
+cash packet, owner approval request, and accounting dry-run receipt, and keeps
+external sends and money movement blocked.
 
 ```sh
 bun run app-server:worker-tools
@@ -69,6 +73,10 @@ bun run worker:tool worker.run --payload='{"worker":{"role":"revenue_operations"
 
 ```sh
 bun run worker:tool worker.owner.brief.generate --payload='{"worker":{"role":"owner_chief_of_staff","tenantSlug":"continuous-demo"},"idempotencyKey":"local-owner-brief-001","config":{"window":{"from":"2026-05-19T00:00:00.000Z","to":"2026-05-20T00:00:00.000Z"},"scopes":["tasks","approvals","cash","capacity","obligations","workers"],"includeEvidence":true}}'
+```
+
+```sh
+bun run worker:tool worker.finance.invoice.prepare --payload='{"worker":{"role":"finance_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-finance-invoice-001","config":{"sourceRefs":{"jobObjectId":"33333333-3333-4333-8333-000000000005","closeoutObjectId":"closeout_object_uuid","customerObjectId":"33333333-3333-4333-8333-000000000001"},"policy":{"requireOwnerApproval":true}}}'
 ```
 
 ```http

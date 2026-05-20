@@ -121,6 +121,7 @@ describe("worker tool contract", () => {
       "worker.dispatch.customer_update.draft",
       "worker.dispatch.closeout.prepare",
       "worker.dispatch.exception.route",
+      "worker.finance.invoice.prepare",
       "worker.continue",
       "worker.approvals.list",
       "worker.approvals.decide",
@@ -245,6 +246,13 @@ describe("worker tool contract", () => {
           requiresTenant: true,
           externalExecution: "blocked",
         }),
+        expect.objectContaining({
+          role: "finance_operations",
+          name: "invoice.prepare",
+          idempotency: "required",
+          requiresTenant: true,
+          externalExecution: "dry_run",
+        }),
       ]),
     );
     expect(workerToolSchema.registry.commands).toEqual(
@@ -315,6 +323,18 @@ describe("worker tool contract", () => {
             }),
           }),
         }),
+        expect.objectContaining({
+          role: "finance_operations",
+          name: "invoice.prepare",
+          configSchema: expect.objectContaining({
+            oneRequired: ["jobId", "closeoutId", "sourceRefs"],
+            properties: expect.objectContaining({
+              sourceRefs: expect.objectContaining({ type: "object" }),
+              billableLines: expect.objectContaining({ type: "array" }),
+              policy: expect.objectContaining({ type: "object" }),
+            }),
+          }),
+        }),
       ]),
     );
     expect(workerToolSchema.registry.views).toEqual(
@@ -327,6 +347,8 @@ describe("worker tool contract", () => {
         expect.objectContaining({ role: "dispatch_operations", name: "snapshot" }),
         expect.objectContaining({ role: "dispatch_operations", name: "board" }),
         expect.objectContaining({ role: "dispatch_operations", name: "exceptions" }),
+        expect.objectContaining({ role: "finance_operations", name: "snapshot" }),
+        expect.objectContaining({ role: "finance_operations", name: "approvals" }),
       ]),
     );
     expect(workerToolSchema.$defs.workerTarget.properties.tenantSlug.type).toBe("string");
@@ -371,18 +393,12 @@ describe("worker tool contract", () => {
     }>;
 
     expect(workerToolSchema.registry.plannedContracts.map((contract) => contract.role)).toEqual([
-      "finance_operations",
       "workforce_operations",
       "compliance_operations",
       "systems_operations",
     ]);
     expect(workerToolSchema.registry.plannedCommands).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({
-          role: "finance_operations",
-          name: "payment_draft.prepare",
-          externalExecution: "blocked",
-        }),
         expect.objectContaining({
           role: "systems_operations",
           name: "sync.repair.plan",
@@ -410,16 +426,6 @@ describe("worker tool contract", () => {
     ).toBe("array");
     expect(
       plannedCommands.find(
-        (command) => command.role === "finance_operations" && command.name === "cash_forecast.generate",
-      )?.configSchema.properties?.accounts?.minItems,
-    ).toBe(1);
-    expect(
-      plannedCommands.find(
-        (command) => command.role === "finance_operations" && command.name === "invoice.prepare",
-      )?.configSchema.oneRequired,
-    ).toEqual(["jobId", "closeoutId"]);
-    expect(
-      plannedCommands.find(
         (command) => command.role === "systems_operations" && command.name === "permission.review",
       )?.configSchema.oneRequired,
     ).toEqual(["connectionId", "grantId"]);
@@ -432,6 +438,10 @@ describe("worker tool contract", () => {
         expect.objectContaining({
           role: "dispatch_operations",
           name: "schedule.propose",
+        }),
+        expect.objectContaining({
+          role: "finance_operations",
+          name: "invoice.prepare",
         }),
       ]),
     );
@@ -686,6 +696,36 @@ describe("worker tool contract", () => {
         },
       }),
     ).rejects.toThrow("config.severity is required for exception.route.");
+  });
+
+  it("validates finance invoice prepare envelopes before invoking the worker", async () => {
+    await expect(
+      executeWorkerTool("worker.finance.invoice.prepare", {
+        worker: {
+          role: "finance_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "bad key!",
+        config: {
+          sourceRefs: {
+            closeoutObjectId: "closeout_object_uuid",
+          },
+        },
+      }),
+    ).rejects.toThrow(
+      "Idempotency key may only contain letters, numbers, dot, underscore, colon, or dash.",
+    );
+
+    await expect(
+      executeWorkerTool("worker.finance.invoice.prepare", {
+        worker: {
+          role: "finance_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "finance-invoice-schema-001",
+        config: {},
+      }),
+    ).rejects.toThrow("config.jobId, closeoutId or sourceRefs is required for invoice.prepare.");
   });
 
   it("requires tenant scope for adapter reconciliation", async () => {

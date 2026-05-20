@@ -44,6 +44,14 @@ describe("app-server worker tools", () => {
           command.externalExecution === "blocked",
       ),
     ).toBe(true);
+    expect(
+      schema.registry.commands.some(
+        (command) =>
+          command.role === "finance_operations" &&
+          command.name === "invoice.prepare" &&
+          command.externalExecution === "dry_run",
+      ),
+    ).toBe(true);
   });
 
   it("requires a clean canonical command envelope before dispatch", async () => {
@@ -89,10 +97,10 @@ describe("app-server worker tools", () => {
   it("routes unavailable future workers through the shared registry guard", async () => {
     await expect(
       executeAppServerWorkerTool("continuous.worker.command", {
-        command: "run",
+        command: "hire.packet.prepare",
         operatorEmail: "owner@continuoushq.com",
         worker: {
-          role: "finance_operations",
+          role: "workforce_operations",
           tenantSlug: "continuous-demo",
         },
         idempotencyKey: "app-server-planned-worker-test",
@@ -177,5 +185,18 @@ describe("app-server worker tools", () => {
         },
       }),
     ).rejects.toThrow("config.severity is required for exception.route.");
+
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.command", {
+        command: "invoice.prepare",
+        operatorEmail: "owner@continuoushq.com",
+        worker: {
+          role: "finance_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "app-server-finance-invoice-schema",
+        config: {},
+      }),
+    ).rejects.toThrow("config.jobId, closeoutId or sourceRefs is required for invoice.prepare.");
   });
 });

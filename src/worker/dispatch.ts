@@ -3599,7 +3599,7 @@ export async function prepareDispatchCloseout(input: {
         },
         policy: {
           closeoutAcceptance: "approval_required",
-          invoicePreparation: "blocked_until_finance_worker",
+          invoicePreparation: "available_via_worker_invoice_prepare",
           externalExecution: "blocked",
         },
         data: {

@@ -27,7 +27,7 @@ const contracts = [
     path: "docs/finance-operations-worker-v1-contract.md",
     role: "finance_operations",
     evidencePacket: "cash_packet",
-    runtime: false,
+    runtime: true,
   },
   {
     path: "docs/workforce-operations-worker-v1-contract.md",
@@ -136,6 +136,17 @@ describe("future worker contracts", () => {
     expect(source).toContain("`exception.route`");
     expect(source).toContain("`worker.dispatch.exception.route`");
     expect(source).toContain("exception task");
+    expect(source).not.toMatch(/\/api\/[a-z0-9-]+-worker/);
+  });
+
+  it("keeps the Finance runtime contract on generic worker commands", () => {
+    const source = read("docs/finance-operations-worker-v1-contract.md");
+
+    expect(source).toContain("All commands use `POST /worker`");
+    expect(source).toContain("`invoice.prepare`");
+    expect(source).toContain("`worker.finance.invoice.prepare`");
+    expect(source).toContain("cash packet");
+    expect(source).toContain("accounting dry-run");
     expect(source).not.toMatch(/\/api\/[a-z0-9-]+-worker/);
   });
 

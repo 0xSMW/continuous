@@ -33,6 +33,11 @@ import {
   proposeDispatchSchedule,
   routeDispatchException,
 } from "./dispatch";
+import {
+  financeWorkerRole,
+  getFinanceWorkerSnapshotSafe,
+  prepareFinanceInvoice,
+} from "./finance";
 import { plannedWorkerContractForRole } from "./planned-workers";
 import { normalizeIdempotencyKey } from "./security";
 
@@ -479,6 +484,39 @@ const dispatchExceptionRouteConfig: WorkerConfigSchema = {
   },
   additionalProperties: true,
 };
+const financeInvoicePrepareConfig: WorkerConfigSchema = {
+  type: "object",
+  oneRequired: ["jobId", "closeoutId", "sourceRefs"],
+  properties: {
+    jobId: { type: "string" },
+    jobObjectId: { type: "string" },
+    closeoutId: { type: "string" },
+    closeoutObjectId: { type: "string" },
+    customerObjectId: { type: "string" },
+    sourceRefs: jsonObjectConfig,
+    billableLines: {
+      type: "array",
+      items: jsonObjectConfig,
+    },
+    lines: {
+      type: "array",
+      items: jsonObjectConfig,
+    },
+    currency: { type: "string" },
+    taxCents: { type: "number", minimum: 0 },
+    dueAt: { type: "string" },
+    policy: jsonObjectConfig,
+    evidenceIds: {
+      type: "array",
+      items: { type: "string" },
+    },
+    sourceEvidenceIds: {
+      type: "array",
+      items: { type: "string" },
+    },
+  },
+  additionalProperties: true,
+};
 
 const revenueDefinition: WorkerDefinition = {
   role: revenueWorkerRole,
@@ -771,8 +809,127 @@ const revenueDefinition: WorkerDefinition = {
   },
 };
 
+const financeDefinition: WorkerDefinition = {
+  role: financeWorkerRole,
+  commands: {
+    "invoice.prepare": {
+      name: "invoice.prepare",
+      description: "Prepare an invoice draft from Core job or closeout refs with accounting dry-run evidence.",
+      idempotency: "required",
+      sideEffects: "dry_run",
+      externalExecution: "dry_run",
+      requiresTenant: true,
+      configSchema: financeInvoicePrepareConfig,
+      async handle(context) {
+        if (!context.idempotencyKey) {
+          throw new PlatformUnavailableError(
+            "invalid_idempotency_key",
+            "A string idempotency key is required.",
+            400,
+          );
+        }
+
+        return prepareFinanceInvoice({
+          idempotencyKey: context.idempotencyKey,
+          tenantSlug: context.target.tenantSlug,
+          workerId: context.target.workerId,
+          operatorEmail: context.operatorEmail,
+          config: context.config,
+        });
+      },
+    },
+    "approval.decide": {
+      name: "approval.decide",
+      description: "Decide a finance approval request without executing external sends or money movement.",
+      idempotency: "none",
+      sideEffects: "internal",
+      externalExecution: "blocked",
+      requiresTenant: true,
+      configSchema: {
+        type: "object",
+        required: ["approvalId", "action"],
+        properties: {
+          approvalId: { type: "string" },
+          action: {
+            type: "string",
+            enum: ["approved", "rejected", "revision_requested"],
+          },
+          note: { type: "string" },
+        },
+        additionalProperties: true,
+      },
+      async handle(context) {
+        const approvalId = optionalString(context.config.approvalId);
+        const action = normalizeApprovalDecision(context.config.action);
+
+        if (!approvalId || !action) {
+          throw new PlatformUnavailableError(
+            "invalid_worker_command_config",
+            "config.approvalId and config.action are required for approval.decide.",
+            400,
+          );
+        }
+
+        return decideApproval({
+          approvalId,
+          operatorEmail: context.operatorEmail,
+          tenantSlug: context.target.tenantSlug,
+          action,
+          note: optionalString(context.config.note),
+          subject: "worker",
+        });
+      },
+    },
+  },
+  views: {
+    snapshot: {
+      name: "snapshot",
+      description: "Read the finance worker runtime snapshot.",
+      async handle(context) {
+        const result = await getFinanceWorkerSnapshotSafe({
+          tenantSlug: context.target.tenantSlug,
+          workerId: context.target.workerId,
+          role: context.target.role,
+        });
+
+        return {
+          status: result.ok ? 200 : 500,
+          data: {
+            worker: responseTarget(context.target),
+            view: "snapshot",
+            snapshot: result.snapshot,
+          },
+          error: result.error,
+        };
+      },
+    },
+    approvals: {
+      name: "approvals",
+      description: "List finance approval requests.",
+      async handle(context) {
+        const approvals = await listApprovals({
+          operatorEmail: context.operatorEmail,
+          tenantSlug: context.target.tenantSlug,
+          state: context.state,
+          subject: "worker",
+        });
+
+        return {
+          data: {
+            worker: responseTarget(context.target, approvals.operator.tenantSlug),
+            view: "approvals",
+            approvals,
+          },
+          error: null,
+        };
+      },
+    },
+  },
+};
+
 const workerDefinitions: Record<string, WorkerDefinition> = {
   [revenueDefinition.role]: revenueDefinition,
+  [financeDefinition.role]: financeDefinition,
   [ownerWorkerRole]: {
     role: ownerWorkerRole,
     commands: {

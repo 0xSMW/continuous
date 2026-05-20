@@ -61,6 +61,7 @@ import {
   rulePacks,
   tasks,
   generatedViews,
+  invoices,
   usageEvents,
   workflowRuns,
   workflowSteps,
@@ -6183,6 +6184,135 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(closeoutReplayResult.created).toBe(false);
     expect(closeoutReplayResult.workerRunId).toBe(closeoutResult.workerRunId);
     expect(closeoutReplayResult.closeoutObjectId).toBe(closeoutResult.closeoutObjectId);
+
+    const financeResponse = await executeWorkerCommand({
+      command: "invoice.prepare",
+      target: {
+        role: "finance_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: `ci-finance-invoice-${runId}`,
+      config: {
+        sourceRefs: {
+          jobObjectId,
+          customerObjectId,
+          closeoutObjectId: closeoutResult.closeoutObjectId,
+          evidenceIds: [completionEvidenceId],
+        },
+        policy: {
+          requireOwnerApproval: true,
+        },
+      },
+    });
+    const financeResult = financeResponse.result as Awaited<
+      ReturnType<typeof import("./finance").prepareFinanceInvoice>
+    >;
+    const financeOutput = objectValue(financeResult.output);
+    const [financeRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(eq(workerRuns.id, financeResult.workerRunId))
+      .limit(1);
+    const [financeInvoiceObject] = await db
+      .select()
+      .from(objects)
+      .where(eq(objects.id, financeResult.invoiceObjectId ?? ""))
+      .limit(1);
+    const [financeInvoiceRow] = await db
+      .select()
+      .from(invoices)
+      .where(eq(invoices.id, financeResult.invoiceId ?? ""))
+      .limit(1);
+    const [financeApproval] = await db
+      .select()
+      .from(approvalRequests)
+      .where(eq(approvalRequests.id, financeResult.approvalRequestId ?? ""))
+      .limit(1);
+    const [financeAdapterRun] = await db
+      .select()
+      .from(adapterRuns)
+      .where(eq(adapterRuns.id, financeResult.adapterRunId ?? ""))
+      .limit(1);
+    const [financeAdapterAction] = await db
+      .select()
+      .from(adapterActions)
+      .where(eq(adapterActions.id, financeResult.adapterActionId ?? ""))
+      .limit(1);
+    const [financePacket] = await db
+      .select()
+      .from(evidencePackets)
+      .where(eq(evidencePackets.id, financeResult.packetId ?? ""))
+      .limit(1);
+    const [financeDocument] = await db
+      .select()
+      .from(documents)
+      .where(eq(documents.id, financeResult.documentId ?? ""))
+      .limit(1);
+    const [financeView] = await db
+      .select()
+      .from(generatedViews)
+      .where(and(eq(generatedViews.tenantId, tenantId), eq(generatedViews.key, "finance.invoice.review")))
+      .limit(1);
+
+    expect(financeResponse.command).toBe("invoice.prepare");
+    expect(financeResponse.worker.role).toBe("finance_operations");
+    expect(financeResult.created).toBe(true);
+    expect(financeResult.workflowStepIds).toHaveLength(3);
+    expect(financeOutput.externalExecution).toBe("dry_run");
+    expect(financeOutput.externalMutation).toBe(false);
+    expect(financeOutput.externalSend).toBe(false);
+    expect(financeOutput.moneyMovement).toBe("blocked");
+    expect(financeOutput.requiresApproval).toBe(true);
+    expect(financeOutput.totalCents).toBe(24900);
+    expect(financeOutput.closeoutObjectId).toBe(closeoutResult.closeoutObjectId);
+    expect(objectValue(financeOutput.financeHandoff).name).toBe("finance.invoice_to_owner_review");
+    expect(financeRun?.source).toBe("continuous.finance_worker");
+    expect(financeRun?.state).toBe("done");
+    expect(financeInvoiceObject?.type).toBe("invoice");
+    expect(financeInvoiceObject?.state).toBe("approval_required");
+    expect(financeInvoiceRow?.state).toBe("approval_required");
+    expect(financeApproval?.state).toBe("pending");
+    expect(financeApproval?.kind).toBe("finance_invoice_approval");
+    expect(financeAdapterRun?.mode).toBe("dry_run");
+    expect(financeAdapterAction?.mode).toBe("dry_run");
+    expect(objectValue(financeAdapterAction?.receipt).externalMutation).toBe(false);
+    expect(objectValue(financeAdapterAction?.receipt).moneyMovement).toBe("blocked");
+    expect(financePacket?.kind).toBe("cash_packet");
+    expect(financeDocument?.kind).toBe("finance_invoice_draft");
+    expect(financeView?.key).toBe("finance.invoice.review");
+    expect(financeResult.snapshot.controls.externalExecution).toBe("dry_run");
+    expect(financeResult.snapshot.invoices.some((invoice) => invoice.id === financeResult.invoiceObjectId)).toBe(
+      true,
+    );
+
+    const financeReplay = await executeWorkerCommand({
+      command: "invoice.prepare",
+      target: {
+        role: "finance_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: `ci-finance-invoice-${runId}`,
+      config: {
+        sourceRefs: {
+          jobObjectId,
+          customerObjectId,
+          closeoutObjectId: closeoutResult.closeoutObjectId,
+          evidenceIds: [completionEvidenceId],
+        },
+        policy: {
+          requireOwnerApproval: true,
+        },
+      },
+    });
+    const financeReplayResult = financeReplay.result as Awaited<
+      ReturnType<typeof import("./finance").prepareFinanceInvoice>
+    >;
+
+    expect(financeReplayResult.created).toBe(false);
+    expect(financeReplayResult.workerRunId).toBe(financeResult.workerRunId);
+    expect(financeReplayResult.invoiceObjectId).toBe(financeResult.invoiceObjectId);
 
     const exceptionResponse = await executeWorkerCommand({
       command: "exception.route",

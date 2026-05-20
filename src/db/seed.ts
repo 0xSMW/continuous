@@ -71,10 +71,13 @@ const ids = {
   worker: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   ownerWorker: "aaaaaaaa-aaaa-4aaa-8aaa-000000000002",
   dispatchWorker: "aaaaaaaa-aaaa-4aaa-8aaa-000000000003",
+  financeWorker: "aaaaaaaa-aaaa-4aaa-8aaa-000000000004",
   adapter: "56565656-5656-4565-8565-565656565656",
   dispatchAdapter: "56565656-5656-4565-8565-000000000002",
+  financeAdapter: "56565656-5656-4565-8565-000000000003",
   connection: "78787878-7878-4787-8787-787878787878",
   dispatchConnection: "78787878-7878-4787-8787-000000000002",
+  financeConnection: "78787878-7878-4787-8787-000000000003",
   provider: "91919191-9191-4919-8919-919191919191",
   route: "92929292-9292-4929-8929-929292929292",
   budgetPolicy: "bbbbbbbb-bbbb-4bbb-8bbb-000000000001",
@@ -86,6 +89,8 @@ const ids = {
   ownerBudgetAllocation: "bbbbbbbb-bbbb-4bbb-8bbb-000000000007",
   dispatchBudgetAccount: "bbbbbbbb-bbbb-4bbb-8bbb-000000000008",
   dispatchBudgetAllocation: "bbbbbbbb-bbbb-4bbb-8bbb-000000000009",
+  financeBudgetAccount: "bbbbbbbb-bbbb-4bbb-8bbb-000000000010",
+  financeBudgetAllocation: "bbbbbbbb-bbbb-4bbb-8bbb-000000000011",
   legalEntityObject: "33333333-3333-4333-8333-000000000101",
   workLocationObject: "33333333-3333-4333-8333-000000000102",
   personObject: "33333333-3333-4333-8333-000000000103",
@@ -161,6 +166,7 @@ const ids = {
   workflowLeadToCash: "66666666-6666-4666-8666-000000000008",
   workflowDailyOwnerBrief: "66666666-6666-4666-8666-000000000021",
   workflowPromiseToDelivery: "66666666-6666-4666-8666-000000000022",
+  workflowInvoiceDraft: "66666666-6666-4666-8666-000000000023",
   workflowOpenNewState: "66666666-6666-4666-8666-000000000009",
   workflowCompensationChange: "66666666-6666-4666-8666-000000000010",
   workflowLocationChange: "66666666-6666-4666-8666-000000000011",
@@ -366,6 +372,33 @@ async function seed() {
           exceptions_routed: 0,
           approval_requests_created: 0,
           conflicts_found: 0,
+        },
+      },
+      {
+        id: ids.financeWorker,
+        tenantId: ids.tenant,
+        managerUserId: ids.owner,
+        kind: "agent",
+        state: "training",
+        name: "Finance Operations Worker",
+        role: "finance_operations",
+        mission:
+          "Turn closeout and job evidence into invoice drafts, cash packets, AR follow-ups, cash forecasts, and payment drafts without unapproved money movement.",
+        autonomyLevel: 2,
+        scope: {
+          flows: ["invoice_draft", "ar_followup", "cash_forecast", "payment_draft"],
+          systems: ["accounting", "payments", "bank_feeds"],
+        },
+        memory: { finance_context: "tenant_scoped", payment_fields: "blocked" },
+        policy: {
+          external_execution: "dry_run",
+          external_send: "approval_required",
+          money_movement: "blocked",
+        },
+        kpis: {
+          invoices_prepared: 0,
+          owner_review_packets: 0,
+          cash_packets_prepared: 0,
         },
       },
     ])
@@ -610,6 +643,35 @@ async function seed() {
     .onConflictDoNothing();
 
   await db
+    .insert(capabilityGrants)
+    .values(
+      [
+        capIds.invoicePrepare,
+        capIds.paymentLinkPrepare,
+        capIds.achDraftPrepare,
+        capIds.approvalRequest,
+        capIds.documentPacketPrepare,
+      ].map((capabilityId) => ({
+        tenantId: ids.tenant,
+        capabilityId,
+        actorType: "worker" as const,
+        actorId: ids.financeWorker,
+        scope: {
+          tenant_id: ids.tenant,
+          objects: ["job", "closeout", "invoice", "payment", "cash_forecast"],
+        },
+        policy: {
+          mode: "dry_run",
+          autonomy_level: 2,
+          external_send: "approval_required",
+          money_movement: "blocked",
+          dual_control: true,
+        },
+      })),
+    )
+    .onConflictDoNothing();
+
+  await db
     .insert(adapters)
     .values([
       {
@@ -627,6 +689,14 @@ async function seed() {
         kind: "calendar",
         auth: "none",
         capabilities: { dry_run: ["schedule.propose"], write: [] },
+      },
+      {
+        id: ids.financeAdapter,
+        key: "accounting_dry_run",
+        name: "Accounting dry-run",
+        kind: "accounting",
+        auth: "none",
+        capabilities: { dry_run: ["invoice.prepare"], write: [], moneyMovement: [] },
       },
     ])
     .onConflictDoNothing();
@@ -655,6 +725,22 @@ async function seed() {
         createdByUserId: ids.owner,
         scopes: { dryRun: ["calendar_hold"], writes: [] },
         config: { executable: false, mode: "dry_run", reason: "schedule proposals only" },
+      },
+      {
+        id: ids.financeConnection,
+        tenantId: ids.tenant,
+        adapterId: ids.financeAdapter,
+        name: "Finance accounting dry-run",
+        state: "active",
+        externalAccountId: "continuous-accounting",
+        createdByUserId: ids.owner,
+        scopes: { dryRun: ["invoice_draft"], writes: [], moneyMovement: [] },
+        config: {
+          executable: false,
+          mode: "dry_run",
+          reason: "invoice draft preparation only",
+          moneyMovement: "blocked",
+        },
       },
     ])
     .onConflictDoNothing();
@@ -753,6 +839,14 @@ async function seed() {
         target: "worker",
         targetId: ids.dispatchWorker,
       },
+      {
+        id: ids.financeBudgetAccount,
+        tenantId: ids.tenant,
+        policyId: ids.budgetPolicy,
+        name: "Finance Operations Worker monthly intelligence budget",
+        target: "worker",
+        targetId: ids.financeWorker,
+      },
     ])
     .onConflictDoNothing();
 
@@ -782,6 +876,15 @@ async function seed() {
         tenantId: ids.tenant,
         poolId: ids.budgetPool,
         accountId: ids.dispatchBudgetAccount,
+        units: 1000000,
+        startsAt: now,
+        endsAt: nextMonth,
+      },
+      {
+        id: ids.financeBudgetAllocation,
+        tenantId: ids.tenant,
+        poolId: ids.budgetPool,
+        accountId: ids.financeBudgetAccount,
         units: 1000000,
         startsAt: now,
         endsAt: nextMonth,
@@ -1431,6 +1534,26 @@ async function seed() {
         approvals: { required: ["dispatch_schedule_approval"], states: { approval_pending: ["dispatch_schedule_approval"] } },
         evidence: { packet: "dispatch_packet", required: ["job_snapshot", "calendar_dry_run_receipt", "approval_request"] },
         tests: { required: ["approved_quote_handoff", "no_external_calendar_write", "dispatch_packet"] },
+      },
+      {
+        id: ids.workflowInvoiceDraft,
+        key: "invoice_draft",
+        name: "Invoice draft",
+        purpose: "Turn closeout and job evidence into an owner-reviewable invoice draft and cash packet.",
+        domain: "finance",
+        states: {
+          order: ["draft", "source_review", "invoice_ready", "approval_pending", "ready_to_send", "blocked"],
+        },
+        transitions: {
+          draft: ["source_review", "blocked"],
+          source_review: ["invoice_ready", "blocked"],
+          invoice_ready: ["approval_pending", "blocked"],
+          approval_pending: ["ready_to_send", "blocked"],
+        },
+        objects: { required: ["job", "invoice"], optional: ["closeout", "customer", "payment"] },
+        approvals: { required: ["finance_invoice_approval"], states: { approval_pending: ["finance_invoice_approval"] } },
+        evidence: { packet: "cash_packet", required: ["job_closeout", "invoice_draft", "accounting_dry_run_receipt"] },
+        tests: { required: ["source_closeout", "no_external_send", "money_movement_blocked"] },
       },
     ])
     .onConflictDoNothing();
