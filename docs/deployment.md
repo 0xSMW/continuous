@@ -76,6 +76,21 @@ The workflow uses `DO_API_TOKEN` to add the current GitHub runner IP as a
 temporary `/32` SSH source on `continuous-fw`, then removes that rule after the
 deploy job finishes. When `app_url` is omitted, the workflow derives `APP_URL`
 from the first hostname in `site_hosts`, matching `scripts/deploy.sh`.
+Each normal deploy tags app images as `sha-<commit>` by default, or the
+provided `app_tag`, and stores the prior app tag as `PREVIOUS_APP_TAG` in the
+remote `.env`.
+
+To roll back only the app and scheduler containers to an existing image tag,
+dispatch `Deploy` with `rollback_app_tag` set. The rollback path does not run
+migrations or seed commands; it updates `APP_TAG`, restarts `app` and
+`worker-scheduler` with `--no-build`, and then runs the same production smoke
+checks. Use it only when the database is still compatible with that image.
+
+The same rollback can run from the operator shell:
+
+```sh
+HOST=45.55.53.92 APP_TAG=sha-previous ./scripts/rollback-app.sh
+```
 
 CI is separate and runs on pushes to `main`, pull requests, and manual dispatch.
 
@@ -276,8 +291,8 @@ migrations are forward-only.
 
 ## Remaining Production Hardening
 
-- Tag app releases instead of always using `APP_TAG=local`, and keep the previous
-  image/tag for one-command app rollback.
+- Drill app tag rollback and database restore together on a disposable droplet,
+  then document the exact recovery timing and compatibility boundary.
 - Add log retention, Caddy access logs, metrics, and alerting around health,
   disk, certificate renewal, backup age, and failed jobs.
 - Split the single operator bearer token into scoped credentials before adding

@@ -11,6 +11,14 @@ on:
         description: "Canonical external app URL; omitted values derive from the first site host"
         required: false
         default: ""
+      app_tag:
+        description: "Release image tag to deploy; omitted values use sha-<current commit>"
+        required: false
+        default: ""
+      rollback_app_tag:
+        description: "Existing image tag to roll app services back to without running migrations"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -32,6 +40,8 @@ jobs:
       SITE_HOSTS: ${{ inputs.site_hosts }}
       ACME_EMAIL: ${{ secrets.ACME_EMAIL || 'admin@continuoushq.com' }}
       APP_URL: ${{ inputs.app_url }}
+      APP_TAG_INPUT: ${{ inputs.app_tag }}
+      ROLLBACK_APP_TAG: ${{ inputs.rollback_app_tag }}
       WORKER_OPERATOR_EMAIL: ${{ secrets.WORKER_OPERATOR_EMAIL || 'owner@continuoushq.com' }}
       DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
       DO_API_TOKEN: ${{ secrets.DO_API_TOKEN }}
@@ -68,6 +78,14 @@ jobs:
           fi
           if [[ -n "${APP_URL:-}" && ! "$APP_URL" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?(/.*)?$ ]]; then
             echo "::error::app_url must be an https URL."
+            exit 1
+          fi
+          if [[ -n "${APP_TAG_INPUT:-}" && ! "$APP_TAG_INPUT" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "::error::app_tag may only contain letters, numbers, dot, underscore, or dash."
+            exit 1
+          fi
+          if [[ -n "${ROLLBACK_APP_TAG:-}" && ! "$ROLLBACK_APP_TAG" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "::error::rollback_app_tag may only contain letters, numbers, dot, underscore, or dash."
             exit 1
           fi
 
@@ -143,10 +161,16 @@ jobs:
             APP_URL="https://$first_host"
           fi
           app_url="${APP_URL:-https://continuoushq.com}"
+          app_tag="${APP_TAG_INPUT:-sha-${GITHUB_SHA::12}}"
           ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" \
-            "APP_DIR='$DEPLOY_PATH' SITE_HOSTS='$SITE_HOSTS' ACME_EMAIL='$ACME_EMAIL' APP_URL='$app_url' WORKER_OPERATOR_EMAIL='$WORKER_OPERATOR_EMAIL' bash -s" <<'REMOTE'
+            "APP_DIR='$DEPLOY_PATH' SITE_HOSTS='$SITE_HOSTS' ACME_EMAIL='$ACME_EMAIL' APP_URL='$app_url' WORKER_OPERATOR_EMAIL='$WORKER_OPERATOR_EMAIL' APP_IMAGE='continuous-app' APP_TAG='$app_tag' ROLLBACK_APP_TAG='$ROLLBACK_APP_TAG' bash -s" <<'REMOTE'
           set -euo pipefail
           cd "$APP_DIR"
+          if [ -n "${ROLLBACK_APP_TAG:-}" ] && [ ! -f .env ]; then
+            echo "Missing $APP_DIR/.env; cannot roll back app services." >&2
+            exit 1
+          fi
+
           if [ ! -f .env ]; then
             password="$(openssl rand -hex 32)"
             umask 077
@@ -159,8 +183,8 @@ jobs:
               printf 'APP_URL=%s\n' "$APP_URL"
               printf 'SITE_HOSTS=%s\n' "$SITE_HOSTS"
               printf 'ACME_EMAIL=%s\n' "$ACME_EMAIL"
-              printf 'APP_IMAGE=continuous-app\n'
-              printf 'APP_TAG=local\n'
+              printf 'APP_IMAGE=%s\n' "$APP_IMAGE"
+              printf 'APP_TAG=%s\n' "$APP_TAG"
               printf 'WORKER_RUN_ENABLED=true\n'
               printf 'WORKER_RUN_TOKEN=%s\n' "$(openssl rand -hex 32)"
               printf 'WORKER_OPERATOR_EMAIL=%s\n' "$WORKER_OPERATOR_EMAIL"
@@ -187,6 +211,29 @@ jobs:
             mv "$tmp" .env
             chmod 600 .env
           }
+          if [ -n "${ROLLBACK_APP_TAG:-}" ]; then
+            app_image="$(grep '^APP_IMAGE=' .env | cut -d= -f2- || true)"
+            app_image="${app_image:-continuous-app}"
+            current_app_tag="$(grep '^APP_TAG=' .env | cut -d= -f2- || true)"
+            docker image inspect "$app_image:$ROLLBACK_APP_TAG" >/dev/null
+            docker image inspect "$app_image:$ROLLBACK_APP_TAG-scheduler" >/dev/null
+            if [ -n "$current_app_tag" ] && [ "$current_app_tag" != "$ROLLBACK_APP_TAG" ]; then
+              set_env PREVIOUS_APP_TAG "$current_app_tag"
+            fi
+            set_env APP_IMAGE "$app_image"
+            set_env APP_TAG "$ROLLBACK_APP_TAG"
+            docker compose --profile scheduler up -d --no-build --no-deps app worker-scheduler
+            for attempt in $(seq 1 30); do
+              if docker compose exec -T app node -e "fetch('http://127.0.0.1:3000/api/health').then((r)=>process.exit(r.ok ? 0 : 1)).catch(()=>process.exit(1))" </dev/null; then
+                docker compose --profile scheduler ps app worker-scheduler
+                exit 0
+              fi
+              sleep 5
+            done
+            echo "App did not become healthy after rollback to $ROLLBACK_APP_TAG." >&2
+            docker compose --profile scheduler ps app worker-scheduler >&2
+            exit 1
+          fi
           set_env APP_URL "$APP_URL"
           set_env SITE_HOSTS "$SITE_HOSTS"
           set_env ACME_EMAIL "$ACME_EMAIL"
@@ -196,6 +243,12 @@ jobs:
           set_env WORKER_SCHEDULER_ENABLED true
           set_env WORKER_SCHEDULER_BASE_URL "http://app:3000"
           set_env WORKER_SCHEDULER_TENANT_SLUG "continuous-demo"
+          current_app_tag="$(grep '^APP_TAG=' .env | cut -d= -f2- || true)"
+          set_env APP_IMAGE "$APP_IMAGE"
+          if [ -n "$current_app_tag" ] && [ "$current_app_tag" != "$APP_TAG" ]; then
+            set_env PREVIOUS_APP_TAG "$current_app_tag"
+          fi
+          set_env APP_TAG "$APP_TAG"
           POSTGRES_USER="$(grep '^POSTGRES_USER=' .env | cut -d= -f2- || true)"
           POSTGRES_DB="$(grep '^POSTGRES_DB=' .env | cut -d= -f2- || true)"
           POSTGRES_USER="${POSTGRES_USER:-continuous}"
@@ -244,6 +297,26 @@ jobs:
           if [ -z "$WORKER_TOKEN" ]; then
             echo "Missing WORKER_RUN_TOKEN in $APP_DIR/.env." >&2
             exit 1
+          fi
+
+          if [ -n "${ROLLBACK_APP_TAG:-}" ]; then
+            HEALTH_RESPONSE="$(
+              curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+                https://continuoushq.com/api/health
+            )"
+            echo "$HEALTH_RESPONSE" | /usr/bin/jq -c '{service,status,mode,checkedAt}'
+            echo "$HEALTH_RESPONSE" | /usr/bin/jq -e '.status == "ok" and .mode == "production"' >/dev/null
+            worker_status="$(
+              curl -sS --resolve continuoushq.com:443:127.0.0.1 \
+                -o /tmp/rollback-worker.out -w '%{http_code}' \
+                https://continuoushq.com/worker
+            )"
+            if [ "$worker_status" != "401" ]; then
+              echo "Expected /worker to require auth after rollback; got $worker_status." >&2
+              exit 1
+            fi
+            echo "Rollback smoke passed for app tag $ROLLBACK_APP_TAG."
+            exit 0
           fi
 
           psql_db() {

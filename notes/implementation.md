@@ -76,6 +76,7 @@
 | Rejected mixed worker intake sources | Revenue Worker now treats persisted `config.intake` Core row references as authoritative and rejects requests that also include direct `leadPacket` or `lead` payloads |
 | Added Revenue workflow spine | Revenue Worker runs now create a `lead_to_cash` workflow run plus durable workflow steps for intake, packet preparation, adapter dry-run, approval request, and approval decision continuation |
 | Added worker continuation command | `POST /worker` `command=continue` is a generic idempotent continuation surface; V1 consumes `config.approvalId` for approved, revision-requested, or rejected approvals, prepares blocked no-send execution packets, revised approval packets, or rejected stop packets, creates document/evidence packet records, and keeps external execution blocked |
+| Added tag-based app rollback | Deploys now tag app images by commit, persist `PREVIOUS_APP_TAG`, and expose a no-migration rollback path through the deploy workflow and `scripts/rollback-app.sh` for compatible app-only rollbacks |
 | HTTPS is managed by Caddy | `continuoushq.com` and `getcontinuous.app` now point at the droplet, and Caddy issues and renews Let's Encrypt certificates from the persisted `caddy_data` volume |
 | Added a database recovery lane | `scripts/backup-db.sh` creates verified Postgres dumps on the droplet and copies them off-box; `scripts/restore-db.sh` performs a confirmation-gated restore, migration, restart, and health check |
 | Enabled DigitalOcean managed backups | The `continuous-01` droplet now has DO-managed backups enabled as the first off-host recovery layer; repo scripts also check custom dump age and checksum sidecars |
@@ -98,7 +99,7 @@
 | Worker selection | Runtime selection now accepts tenant or worker selectors and falls back only when a single active Revenue Worker exists |
 | Worker run lifecycle | `worker_runs` is now the idempotent lifecycle boundary for Revenue Worker runs, with events kept as the audit log |
 | Codex app-server boundary | The installed CLI has protocol generation commands, but no local daemon subcommand in this environment; keep Next MCP for Next.js diagnostics and keep app-server worker commands registry-backed rather than worker-family-specific |
-| Recovery boundary | The restore script is intentionally destructive and migrations remain forward-only, so rollback depends on a compatible database dump until tag-based app rollback and migration rollback policy exist |
+| Recovery boundary | App-only rollback is now tag-based, while destructive database restore remains dump-backed and migrations remain forward-only; full recovery still needs a drilled app/database compatibility procedure |
 | Operator-token scope | This is still a bootstrap control, not user auth; it narrows the current shared token by tenant and worker role until first-class operator identities, token rotation, per-command scopes, and audit-bound sessions exist |
 
 ### Current State

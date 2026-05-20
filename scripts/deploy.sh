@@ -13,6 +13,8 @@ APP_URL="${APP_URL:-}"
 WORKER_OPERATOR_EMAIL="${WORKER_OPERATOR_EMAIL:-owner@continuoushq.com}"
 POSTGRES_DB="${POSTGRES_DB:-continuous}"
 POSTGRES_USER="${POSTGRES_USER:-continuous}"
+APP_IMAGE="${APP_IMAGE:-continuous-app}"
+APP_TAG="${APP_TAG:-sha-$(git rev-parse --short=12 HEAD 2>/dev/null || date -u +%Y%m%d%H%M%S)}"
 REMOTE="$SSH_USER@$HOST"
 
 if [ -z "$HOST" ]; then
@@ -30,6 +32,16 @@ fi
 
 if [[ "$SITE_HOSTS" == *"http://"* || "$APP_URL" == http://* ]]; then
   echo "Plain HTTP deploys are disabled. Set HTTPS SITE_HOSTS and APP_URL." >&2
+  exit 1
+fi
+
+if [[ ! "$APP_IMAGE" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+  echo "APP_IMAGE may only contain letters, numbers, dot, underscore, slash, or dash." >&2
+  exit 1
+fi
+
+if [[ ! "$APP_TAG" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "APP_TAG may only contain letters, numbers, dot, underscore, or dash." >&2
   exit 1
 fi
 
@@ -62,7 +74,7 @@ rsync -az --delete \
   ./ "$REMOTE:$APP_DIR/"
 
 ssh "$REMOTE" \
-  "APP_DIR=$(quote "$APP_DIR") SITE_HOSTS=$(quote "$SITE_HOSTS") ACME_EMAIL=$(quote "$ACME_EMAIL") APP_URL=$(quote "$APP_URL") WORKER_OPERATOR_EMAIL=$(quote "$WORKER_OPERATOR_EMAIL") POSTGRES_DB=$(quote "$POSTGRES_DB") POSTGRES_USER=$(quote "$POSTGRES_USER") bash -s" <<'REMOTE_SCRIPT'
+  "APP_DIR=$(quote "$APP_DIR") SITE_HOSTS=$(quote "$SITE_HOSTS") ACME_EMAIL=$(quote "$ACME_EMAIL") APP_URL=$(quote "$APP_URL") WORKER_OPERATOR_EMAIL=$(quote "$WORKER_OPERATOR_EMAIL") POSTGRES_DB=$(quote "$POSTGRES_DB") POSTGRES_USER=$(quote "$POSTGRES_USER") APP_IMAGE=$(quote "$APP_IMAGE") APP_TAG=$(quote "$APP_TAG") bash -s" <<'REMOTE_SCRIPT'
 set -euo pipefail
 
 cd "$APP_DIR"
@@ -79,8 +91,8 @@ if [ ! -f .env ]; then
     printf 'APP_URL=%s\n' "$APP_URL"
     printf 'SITE_HOSTS=%s\n' "$SITE_HOSTS"
     printf 'ACME_EMAIL=%s\n' "$ACME_EMAIL"
-    printf 'APP_IMAGE=continuous-app\n'
-    printf 'APP_TAG=local\n'
+    printf 'APP_IMAGE=%s\n' "$APP_IMAGE"
+    printf 'APP_TAG=%s\n' "$APP_TAG"
     printf 'WORKER_RUN_ENABLED=true\n'
     printf 'WORKER_RUN_TOKEN=%s\n' "$(openssl rand -hex 32)"
     printf 'WORKER_OPERATOR_EMAIL=%s\n' "$WORKER_OPERATOR_EMAIL"
@@ -123,6 +135,12 @@ set_env CONTROL_PLANE_ALLOWED_WORKER_ROLES "revenue_operations,owner_chief_of_st
 set_env WORKER_SCHEDULER_ENABLED true
 set_env WORKER_SCHEDULER_BASE_URL "http://app:3000"
 set_env WORKER_SCHEDULER_TENANT_SLUG "continuous-demo"
+current_app_tag="$(grep '^APP_TAG=' .env | cut -d= -f2- || true)"
+set_env APP_IMAGE "$APP_IMAGE"
+if [ -n "$current_app_tag" ] && [ "$current_app_tag" != "$APP_TAG" ]; then
+  set_env PREVIOUS_APP_TAG "$current_app_tag"
+fi
+set_env APP_TAG "$APP_TAG"
 
 worker_token="$(grep '^WORKER_RUN_TOKEN=' .env | cut -d= -f2- || true)"
 if [ -z "$worker_token" ]; then
