@@ -7,10 +7,8 @@ import {
 import { PlatformUnavailableError } from "../../src/core/errors";
 import { env } from "../../src/env";
 import {
+  authorizeControlPlaneAccess,
   authorizeControlPlaneScope,
-  authorizeWorkerRead,
-  authorizeWorkerRun,
-  controlPlaneScopeFromEnv,
 } from "../../src/worker/security";
 
 export const dynamic = "force-dynamic";
@@ -18,11 +16,6 @@ export const dynamic = "force-dynamic";
 const apiVersion = "continuous.approval.v1";
 const approvalCommandEnvelopeFields = new Set(["command", "approval", "idempotencyKey", "config"]);
 const approvalSubjects = new Set<ApprovalSubject>(["all", "worker", "workflow", "task"]);
-const controlPlaneScope = controlPlaneScopeFromEnv({
-  allowedTenants: env.CONTROL_PLANE_ALLOWED_TENANTS,
-  allowedWorkerRoles: env.CONTROL_PLANE_ALLOWED_WORKER_ROLES,
-});
-
 function optionalString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
@@ -115,24 +108,31 @@ function unexpectedApprovalPayloadFields(body: Record<string, unknown>) {
 }
 
 export async function GET(request: Request) {
-  const auth = authorizeWorkerRead({
+  const url = new URL(request.url);
+  const view = optionalString(url.searchParams.get("view")) ?? "inbox";
+  const tenantSlug = optionalString(url.searchParams.get("tenantSlug"));
+  const subject = parseSubject(url.searchParams.get("subject"));
+  const auth = authorizeControlPlaneAccess({
     appEnv: env.APP_ENV,
     expectedToken: env.WORKER_RUN_TOKEN,
     operatorEmail: env.WORKER_OPERATOR_EMAIL,
     authorization: request.headers.get("authorization"),
     headerToken: request.headers.get("x-worker-run-token"),
+    allowedTenants: env.CONTROL_PLANE_ALLOWED_TENANTS,
+    allowedWorkerRoles: env.CONTROL_PLANE_ALLOWED_WORKER_ROLES,
+    tokenCatalogJson: env.CONTROL_PLANE_TOKENS_JSON,
+    tokenCatalogB64: env.CONTROL_PLANE_TOKEN_CATALOG_B64,
+    route: "approval",
+    access: "read",
+    command: `view.${view}`,
   });
 
   if (!auth.ok) {
     return guardErrorResponse(auth);
   }
 
-  const url = new URL(request.url);
-  const view = optionalString(url.searchParams.get("view")) ?? "inbox";
-  const tenantSlug = optionalString(url.searchParams.get("tenantSlug"));
-  const subject = parseSubject(url.searchParams.get("subject"));
   const scope = authorizeControlPlaneScope({
-    scope: controlPlaneScope,
+    scope: auth.scope,
     tenantSlug,
     requireTenant: true,
   });
@@ -193,21 +193,32 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const auth = authorizeWorkerRun({
+  const body = await readBody(request);
+  const unexpectedFields = unexpectedApprovalPayloadFields(body);
+  const command = optionalString(body.command);
+  const approval = bodyObject(body.approval);
+  const config = bodyObject(body.config);
+  const tenantSlug = optionalString(approval.tenantSlug);
+  const subject = parseSubject(approval.subject ?? config.subject);
+  const auth = authorizeControlPlaneAccess({
     enabled: env.WORKER_RUN_ENABLED,
     appEnv: env.APP_ENV,
     expectedToken: env.WORKER_RUN_TOKEN,
     operatorEmail: env.WORKER_OPERATOR_EMAIL,
     authorization: request.headers.get("authorization"),
     headerToken: request.headers.get("x-worker-run-token"),
+    allowedTenants: env.CONTROL_PLANE_ALLOWED_TENANTS,
+    allowedWorkerRoles: env.CONTROL_PLANE_ALLOWED_WORKER_ROLES,
+    tokenCatalogJson: env.CONTROL_PLANE_TOKENS_JSON,
+    tokenCatalogB64: env.CONTROL_PLANE_TOKEN_CATALOG_B64,
+    route: "approval",
+    access: "write",
+    command,
   });
 
   if (!auth.ok) {
     return guardErrorResponse(auth);
   }
-
-  const body = await readBody(request);
-  const unexpectedFields = unexpectedApprovalPayloadFields(body);
 
   if (unexpectedFields.length > 0) {
     return errorResponse(
@@ -219,13 +230,8 @@ export async function POST(request: Request) {
     );
   }
 
-  const command = optionalString(body.command);
-  const approval = bodyObject(body.approval);
-  const config = bodyObject(body.config);
-  const tenantSlug = optionalString(approval.tenantSlug);
-  const subject = parseSubject(approval.subject ?? config.subject);
   const scope = authorizeControlPlaneScope({
-    scope: controlPlaneScope,
+    scope: auth.scope,
     tenantSlug,
     requireTenant: true,
   });

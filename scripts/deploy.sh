@@ -126,6 +126,21 @@ set_env() {
   chmod 600 .env
 }
 
+set_control_plane_token_catalog() {
+  token_hash="$(printf '%s' "$worker_token" | sha256sum | awk '{print $1}')"
+  allowed_commands='"core:view.summary","core:task.create","core:task.transition","core:object.upsert","core:object.link","core:event.ingest","core:evidence.attach","core:document.create","core:packet.prepare","core:document.packet.prepare","core:decision.record","core:approval.request","core:adapter.intent.record","core:rule.change.record","core:capability.grant","core:budget.reserve","core:budget.charge","core:budget.release","core:view.publish","core:customer_signal.record","core:payroll.preview.record","core:payroll.preview.packet.prepare","worker:view.snapshot","worker:view.approvals","worker:view.briefs","worker:view.decisions","worker:run","worker:lead.read","worker:continue","worker:approval.decide","worker:adapters.reconcile","worker:adapters.retry","worker:brief.generate","worker:decision_queue.prepare","worker:anomaly.triage","workflow:view.overview","workflow:view.approvals","workflow:start","workflow:transition","workflow:steps.execute","workflow:approval.decide","approval:view.inbox","approval:approval.decide"'
+  catalog_json="$(
+    printf '[{"id":"bootstrap-operator","tokenSha256":"%s","operatorEmail":"%s","allowedTenants":["continuous-demo"],"allowedWorkerRoles":["revenue_operations","owner_chief_of_staff"],"allowedRoutes":["core","worker","workflow","approval"],"allowedAccess":["read","write"],"allowedCommands":[%s]}]' \
+      "$token_hash" \
+      "$WORKER_OPERATOR_EMAIL" \
+      "$allowed_commands"
+  )"
+  catalog_b64="$(printf '%s' "$catalog_json" | base64 -w0)"
+
+  set_env CONTROL_PLANE_TOKENS_JSON ""
+  set_env CONTROL_PLANE_TOKEN_CATALOG_B64 "$catalog_b64"
+}
+
 set_env APP_URL "$APP_URL"
 set_env SITE_HOSTS "$SITE_HOSTS"
 set_env ACME_EMAIL "$ACME_EMAIL"
@@ -148,6 +163,7 @@ if [ -z "$worker_token" ]; then
 fi
 set_env WORKER_RUN_TOKEN "$worker_token"
 set_env WORKER_RUN_ENABLED true
+set_control_plane_token_catalog
 
 docker compose pull db caddy
 docker compose up -d db

@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
     WORKER_OPERATOR_EMAIL: "operator@example.com",
     CONTROL_PLANE_ALLOWED_TENANTS: undefined as string | undefined,
     CONTROL_PLANE_ALLOWED_WORKER_ROLES: undefined as string | undefined,
+    CONTROL_PLANE_TOKENS_JSON: undefined as string | undefined,
+    CONTROL_PLANE_TOKEN_CATALOG_B64: undefined as string | undefined,
   },
 }));
 
@@ -35,6 +37,8 @@ describe("/worker route", () => {
       WORKER_OPERATOR_EMAIL: "operator@example.com",
       CONTROL_PLANE_ALLOWED_TENANTS: undefined,
       CONTROL_PLANE_ALLOWED_WORKER_ROLES: undefined,
+      CONTROL_PLANE_TOKENS_JSON: undefined,
+      CONTROL_PLANE_TOKEN_CATALOG_B64: undefined,
     });
     mocks.workerErrorStatus.mockImplementation((error: unknown, fallbackCode: string) => ({
       status:
@@ -182,6 +186,49 @@ describe("/worker route", () => {
     expect(body.error).toEqual({
       code: "control_plane_worker_role_forbidden",
       message: "This operator token is not allowed to access the requested worker role.",
+    });
+    expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
+  });
+
+  it("rejects POST commands outside a scoped token command catalog", async () => {
+    mocks.env.CONTROL_PLANE_TOKENS_JSON = JSON.stringify([
+      {
+        id: "worker-runner",
+        token: "test-token",
+        operatorEmail: "operator@example.com",
+        allowedTenants: ["continuous-demo"],
+        allowedWorkerRoles: ["revenue_operations", "owner_chief_of_staff"],
+        allowedRoutes: ["worker"],
+        allowedAccess: ["write"],
+        allowedCommands: ["worker:run"],
+      },
+    ]);
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/worker", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "brief.generate",
+          worker: {
+            role: "owner_chief_of_staff",
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "command-scope-001",
+          config: {},
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(body.error).toEqual({
+      code: "control_plane_command_forbidden",
+      message: "This operator token is not allowed to execute the requested control-plane command.",
     });
     expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
   });

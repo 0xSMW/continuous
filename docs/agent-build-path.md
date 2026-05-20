@@ -89,7 +89,9 @@ When the HTTP snapshot, approval, or run path is required, start the app with
 `owner@continuoushq.com`. Production also sets
 `CONTROL_PLANE_ALLOWED_TENANTS` and `CONTROL_PLANE_ALLOWED_WORKER_ROLES`, so
 operator routes must carry an allowed `tenantSlug` and `/worker` calls must
-carry an allowed `worker.role`. Keep worker-specific config in the JSON payload:
+carry an allowed `worker.role`. Deploys also write a hashed
+`CONTROL_PLANE_TOKEN_CATALOG_B64` entry so credentials can be scoped by route,
+read/write mode, and command. Keep worker-specific config in the JSON payload:
 
 ```json
 {

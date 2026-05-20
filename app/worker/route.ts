@@ -7,10 +7,8 @@ import {
   workerErrorStatus,
 } from "../../src/worker/registry";
 import {
+  authorizeControlPlaneAccess,
   authorizeControlPlaneScope,
-  authorizeWorkerRead,
-  authorizeWorkerRun,
-  controlPlaneScopeFromEnv,
 } from "../../src/worker/security";
 
 export const dynamic = "force-dynamic";
@@ -26,11 +24,6 @@ function bodyObject(value: unknown) {
 }
 
 const workerCommandEnvelopeFields = new Set(["command", "worker", "idempotencyKey", "config"]);
-const controlPlaneScope = controlPlaneScopeFromEnv({
-  allowedTenants: env.CONTROL_PLANE_ALLOWED_TENANTS,
-  allowedWorkerRoles: env.CONTROL_PLANE_ALLOWED_WORKER_ROLES,
-});
-
 async function readBody(request: Request) {
   if (!request.headers.get("content-type")?.includes("application/json")) {
     return {};
@@ -112,22 +105,30 @@ function guardErrorResponse(error: { code: string; message: string; status: numb
 }
 
 export async function GET(request: Request) {
-  const auth = authorizeWorkerRead({
+  const url = new URL(request.url);
+  const target = targetFromUrl(request);
+  const view = optionalString(url.searchParams.get("view")) ?? "snapshot";
+  const auth = authorizeControlPlaneAccess({
     appEnv: env.APP_ENV,
     expectedToken: env.WORKER_RUN_TOKEN,
     operatorEmail: env.WORKER_OPERATOR_EMAIL,
     authorization: request.headers.get("authorization"),
     headerToken: request.headers.get("x-worker-run-token"),
+    allowedTenants: env.CONTROL_PLANE_ALLOWED_TENANTS,
+    allowedWorkerRoles: env.CONTROL_PLANE_ALLOWED_WORKER_ROLES,
+    tokenCatalogJson: env.CONTROL_PLANE_TOKENS_JSON,
+    tokenCatalogB64: env.CONTROL_PLANE_TOKEN_CATALOG_B64,
+    route: "worker",
+    access: "read",
+    command: `view.${view}`,
   });
 
   if (!auth.ok) {
     return guardErrorResponse(auth);
   }
 
-  const url = new URL(request.url);
-  const target = targetFromUrl(request);
   const scope = authorizeControlPlaneScope({
-    scope: controlPlaneScope,
+    scope: auth.scope,
     tenantSlug: target.tenantSlug,
     workerRole: target.role,
     requireTenant: true,
@@ -142,7 +143,7 @@ export async function GET(request: Request) {
     const result = await executeWorkerView({
       operatorEmail: auth.operatorEmail,
       target,
-      view: optionalString(url.searchParams.get("view")),
+      view,
       state: optionalString(url.searchParams.get("state")),
     });
 
@@ -165,22 +166,28 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const auth = authorizeWorkerRun({
+  const body = await readBody(request);
+  const unexpectedFields = unexpectedWorkerPayloadFields(body);
+  const target = targetFrom(body.worker);
+  const auth = authorizeControlPlaneAccess({
     enabled: env.WORKER_RUN_ENABLED,
     appEnv: env.APP_ENV,
     expectedToken: env.WORKER_RUN_TOKEN,
     operatorEmail: env.WORKER_OPERATOR_EMAIL,
     authorization: request.headers.get("authorization"),
     headerToken: request.headers.get("x-worker-run-token"),
+    allowedTenants: env.CONTROL_PLANE_ALLOWED_TENANTS,
+    allowedWorkerRoles: env.CONTROL_PLANE_ALLOWED_WORKER_ROLES,
+    tokenCatalogJson: env.CONTROL_PLANE_TOKENS_JSON,
+    tokenCatalogB64: env.CONTROL_PLANE_TOKEN_CATALOG_B64,
+    route: "worker",
+    access: "write",
+    command: optionalString(body.command),
   });
 
   if (!auth.ok) {
     return guardErrorResponse(auth);
   }
-
-  const body = await readBody(request);
-  const unexpectedFields = unexpectedWorkerPayloadFields(body);
-  const target = targetFrom(body.worker);
 
   if (unexpectedFields.length > 0) {
     return errorResponse(
@@ -193,7 +200,7 @@ export async function POST(request: Request) {
   }
 
   const scope = authorizeControlPlaneScope({
-    scope: controlPlaneScope,
+    scope: auth.scope,
     tenantSlug: target.tenantSlug,
     workerRole: target.role,
     requireTenant: true,

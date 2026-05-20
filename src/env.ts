@@ -21,6 +21,12 @@ const envSchema = z.object({
   CONTROL_PLANE_ALLOWED_WORKER_ROLES: z
     .preprocess((value) => (value === "" ? undefined : value), z.string().optional())
     .optional(),
+  CONTROL_PLANE_TOKENS_JSON: z
+    .preprocess((value) => (value === "" ? undefined : value), z.string().optional())
+    .optional(),
+  CONTROL_PLANE_TOKEN_CATALOG_B64: z
+    .preprocess((value) => (value === "" ? undefined : value), z.string().optional())
+    .optional(),
 });
 
 export const env = envSchema.parse({
@@ -32,4 +38,6 @@ export const env = envSchema.parse({
   WORKER_OPERATOR_EMAIL: process.env.WORKER_OPERATOR_EMAIL,
   CONTROL_PLANE_ALLOWED_TENANTS: process.env.CONTROL_PLANE_ALLOWED_TENANTS,
   CONTROL_PLANE_ALLOWED_WORKER_ROLES: process.env.CONTROL_PLANE_ALLOWED_WORKER_ROLES,
+  CONTROL_PLANE_TOKENS_JSON: process.env.CONTROL_PLANE_TOKENS_JSON,
+  CONTROL_PLANE_TOKEN_CATALOG_B64: process.env.CONTROL_PLANE_TOKEN_CATALOG_B64,
 });

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
 
 import {
+  authorizeControlPlaneAccess,
   authorizeControlPlaneScope,
   authorizeWorkerRead,
   authorizeWorkerRun,
@@ -213,5 +215,135 @@ describe("control-plane scope", () => {
         requireWorkerRole: true,
       }),
     ).toEqual({ ok: true });
+  });
+});
+
+describe("authorizeControlPlaneAccess", () => {
+  it("accepts a scoped token catalog entry for an allowed route command", () => {
+    const tokenCatalogJson = JSON.stringify([
+      {
+        id: "worker-runner",
+        token: acceptedCredential,
+        operatorEmail,
+        allowedTenants: ["continuous-demo"],
+        allowedWorkerRoles: ["revenue_operations"],
+        allowedRoutes: ["worker"],
+        allowedAccess: ["write"],
+        allowedCommands: ["worker:run"],
+      },
+    ]);
+
+    expect(
+      authorizeControlPlaneAccess({
+        enabled: true,
+        appEnv: "production",
+        operatorEmail: "fallback@example.com",
+        authorization: `Bearer ${acceptedCredential}`,
+        tokenCatalogJson,
+        route: "worker",
+        access: "write",
+        command: "run",
+      }),
+    ).toEqual({
+      ok: true,
+      operatorEmail,
+      credentialId: "worker-runner",
+      scope: {
+        tenantSlugs: ["continuous-demo"],
+        workerRoles: ["revenue_operations"],
+      },
+    });
+  });
+
+  it("accepts a base64 catalog with a token hash", () => {
+    const tokenCatalogB64 = Buffer.from(
+      JSON.stringify([
+        {
+          id: "hashed-worker-runner",
+          tokenSha256: createHash("sha256").update(acceptedCredential).digest("hex"),
+          operatorEmail,
+          allowedRoutes: ["worker"],
+          allowedAccess: ["write"],
+          allowedCommands: ["worker:*"],
+        },
+      ]),
+    ).toString("base64");
+
+    expect(
+      authorizeControlPlaneAccess({
+        enabled: true,
+        appEnv: "production",
+        operatorEmail,
+        authorization: `Bearer ${acceptedCredential}`,
+        tokenCatalogB64,
+        route: "worker",
+        access: "write",
+        command: "lead.read",
+      }),
+    ).toEqual({
+      ok: true,
+      operatorEmail,
+      credentialId: "hashed-worker-runner",
+      scope: {
+        tenantSlugs: [],
+        workerRoles: [],
+      },
+    });
+  });
+
+  it("rejects catalog tokens outside their command scope", () => {
+    const tokenCatalogJson = JSON.stringify([
+      {
+        id: "worker-runner",
+        token: acceptedCredential,
+        operatorEmail,
+        allowedRoutes: ["worker"],
+        allowedAccess: ["write"],
+        allowedCommands: ["worker:run"],
+      },
+    ]);
+
+    expect(
+      authorizeControlPlaneAccess({
+        enabled: true,
+        appEnv: "production",
+        operatorEmail,
+        authorization: `Bearer ${acceptedCredential}`,
+        tokenCatalogJson,
+        route: "worker",
+        access: "write",
+        command: "adapters.retry",
+      }),
+    ).toEqual({
+      ok: false,
+      status: 403,
+      code: "control_plane_command_forbidden",
+      message: "This operator token is not allowed to execute the requested control-plane command.",
+    });
+  });
+
+  it("falls back to the legacy token and global allowlists when no catalog is configured", () => {
+    expect(
+      authorizeControlPlaneAccess({
+        enabled: true,
+        appEnv: "production",
+        expectedToken: acceptedCredential,
+        operatorEmail,
+        authorization: `Bearer ${acceptedCredential}`,
+        allowedTenants: "continuous-demo",
+        allowedWorkerRoles: "revenue_operations",
+        route: "core",
+        access: "write",
+        command: "task.create",
+      }),
+    ).toEqual({
+      ok: true,
+      operatorEmail,
+      credentialId: "legacy-worker-run-token",
+      scope: {
+        tenantSlugs: ["continuous-demo"],
+        workerRoles: ["revenue_operations"],
+      },
+    });
   });
 });

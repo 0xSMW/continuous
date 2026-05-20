@@ -21,10 +21,8 @@ import {
 import { createCoreTask, transitionCoreTask } from "../../src/core/tasks";
 import { PlatformUnavailableError } from "../../src/core/errors";
 import {
+  authorizeControlPlaneAccess,
   authorizeControlPlaneScope,
-  authorizeWorkerRead,
-  authorizeWorkerRun,
-  controlPlaneScopeFromEnv,
   normalizeIdempotencyKey,
 } from "../../src/worker/security";
 import type { JsonObject } from "../../src/db/schema";
@@ -33,11 +31,6 @@ export const dynamic = "force-dynamic";
 
 const apiVersion = "continuous.core.v1";
 const coreCommandEnvelopeFields = new Set(["command", "core", "idempotencyKey", "config"]);
-const controlPlaneScope = controlPlaneScopeFromEnv({
-  allowedTenants: env.CONTROL_PLANE_ALLOWED_TENANTS,
-  allowedWorkerRoles: env.CONTROL_PLANE_ALLOWED_WORKER_ROLES,
-});
-
 function optionalString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
@@ -131,22 +124,29 @@ function unexpectedCorePayloadFields(body: Record<string, unknown>) {
 }
 
 export async function GET(request: Request) {
-  const auth = authorizeWorkerRead({
+  const url = new URL(request.url);
+  const tenantSlug = optionalString(url.searchParams.get("tenantSlug"));
+  const auth = authorizeControlPlaneAccess({
     appEnv: env.APP_ENV,
     expectedToken: env.WORKER_RUN_TOKEN,
     operatorEmail: env.WORKER_OPERATOR_EMAIL,
     authorization: request.headers.get("authorization"),
     headerToken: request.headers.get("x-worker-run-token"),
+    allowedTenants: env.CONTROL_PLANE_ALLOWED_TENANTS,
+    allowedWorkerRoles: env.CONTROL_PLANE_ALLOWED_WORKER_ROLES,
+    tokenCatalogJson: env.CONTROL_PLANE_TOKENS_JSON,
+    tokenCatalogB64: env.CONTROL_PLANE_TOKEN_CATALOG_B64,
+    route: "core",
+    access: "read",
+    command: "view.summary",
   });
 
   if (!auth.ok) {
     return guardErrorResponse(auth);
   }
 
-  const url = new URL(request.url);
-  const tenantSlug = optionalString(url.searchParams.get("tenantSlug"));
   const scope = authorizeControlPlaneScope({
-    scope: controlPlaneScope,
+    scope: auth.scope,
     tenantSlug,
     requireTenant: true,
   });
@@ -178,21 +178,31 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const auth = authorizeWorkerRun({
+  const body = await readBody(request);
+  const unexpectedFields = unexpectedCorePayloadFields(body);
+  const command = optionalString(body.command);
+  const core = bodyObject(body.core);
+  const config = bodyObject(body.config);
+  const tenantSlug = optionalString(core.tenantSlug);
+  const auth = authorizeControlPlaneAccess({
     enabled: env.WORKER_RUN_ENABLED,
     appEnv: env.APP_ENV,
     expectedToken: env.WORKER_RUN_TOKEN,
     operatorEmail: env.WORKER_OPERATOR_EMAIL,
     authorization: request.headers.get("authorization"),
     headerToken: request.headers.get("x-worker-run-token"),
+    allowedTenants: env.CONTROL_PLANE_ALLOWED_TENANTS,
+    allowedWorkerRoles: env.CONTROL_PLANE_ALLOWED_WORKER_ROLES,
+    tokenCatalogJson: env.CONTROL_PLANE_TOKENS_JSON,
+    tokenCatalogB64: env.CONTROL_PLANE_TOKEN_CATALOG_B64,
+    route: "core",
+    access: "write",
+    command,
   });
 
   if (!auth.ok) {
     return guardErrorResponse(auth);
   }
-
-  const body = await readBody(request);
-  const unexpectedFields = unexpectedCorePayloadFields(body);
 
   if (unexpectedFields.length > 0) {
     return errorResponse(
@@ -204,12 +214,8 @@ export async function POST(request: Request) {
     );
   }
 
-  const command = optionalString(body.command);
-  const core = bodyObject(body.core);
-  const config = bodyObject(body.config);
-  const tenantSlug = optionalString(core.tenantSlug);
   const scope = authorizeControlPlaneScope({
-    scope: controlPlaneScope,
+    scope: auth.scope,
     tenantSlug,
     requireTenant: true,
   });

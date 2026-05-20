@@ -46,7 +46,14 @@ Open `http://localhost:3000` and `/api/health`. `/core` is an
 operator-only summary and uses the same bearer token as the canonical `/worker`
 control plane. Set `CONTROL_PLANE_ALLOWED_TENANTS` and
 `CONTROL_PLANE_ALLOWED_WORKER_ROLES` to comma-delimited allowlists when testing
-the production-scoped token behavior.
+the production-scoped token behavior. To test command-scoped credentials, set
+`CONTROL_PLANE_TOKENS_JSON` to a token catalog. Prefer `tokenSha256` so docs,
+shell history, and logs never carry bearer values:
+
+```sh
+CONTROL_PLANE_TOKEN_SHA256="$(printf '%s' "$WORKER_RUN_TOKEN" | shasum -a 256 | awk '{print $1}')"
+export CONTROL_PLANE_TOKENS_JSON='[{"id":"local-worker-runner","tokenSha256":"'"$CONTROL_PLANE_TOKEN_SHA256"'","operatorEmail":"owner@continuoushq.com","allowedTenants":["continuous-demo"],"allowedWorkerRoles":["revenue_operations"],"allowedRoutes":["worker"],"allowedAccess":["write"],"allowedCommands":["worker:run"]}]'
+```
 
 Core side effects use a structured command payload. For local-only testing,
 start the app with `WORKER_RUN_ENABLED=true` and call:
@@ -155,7 +162,9 @@ audit trail while keeping external send and money movement blocked. Use
 `config.leadPacket` is only the direct fallback for controlled local tests. If
 `CONTROL_PLANE_ALLOWED_TENANTS` is set, every operator route must include an
 allowed `tenantSlug`; if `CONTROL_PLANE_ALLOWED_WORKER_ROLES` is set, `/worker`
-calls must include an allowed `worker.role`.
+calls must include an allowed `worker.role`. If `CONTROL_PLANE_TOKENS_JSON` or
+`CONTROL_PLANE_TOKEN_CATALOG_B64` is set, the matching token's own route,
+read/write, and command scope is enforced before dispatch.
 
 The same persisted loop can run without exposing HTTP:
 

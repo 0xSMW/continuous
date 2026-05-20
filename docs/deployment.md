@@ -79,6 +79,12 @@ from the first hostname in `site_hosts`, matching `scripts/deploy.sh`.
 Each normal deploy tags app images as `sha-<commit>` by default, or the
 provided `app_tag`, and stores the prior app tag as `PREVIOUS_APP_TAG` in the
 remote `.env`.
+Deploys also derive a control-plane token catalog from the generated
+`WORKER_RUN_TOKEN`: the raw token remains in `.env` for operator smoke calls,
+while app containers receive a hashed `CONTROL_PLANE_TOKEN_CATALOG_B64` entry
+with explicit route, command, tenant, worker-role, and read/write scope. Future
+tokens can be added with `CONTROL_PLANE_TOKENS_JSON` or the base64 catalog
+without changing `/core`, `/worker`, `/workflow`, or `/approval`.
 
 To roll back only the app and scheduler containers to an existing image tag,
 dispatch `Deploy` with `rollback_app_tag` set. The rollback path does not run
@@ -105,7 +111,8 @@ openssl s_client -connect 45.55.53.92:443 -servername continuoushq.com </dev/nul
 The deploy path enables the generic worker command surface with a generated
 bearer token in `/opt/continuous/.env`. `WORKER_OPERATOR_EMAIL` defaults to the
 seeded owner user and must match an active user before approval records or
-operator decisions can be written. The deploy path also scopes that token to
+operator decisions can be written. The deploy path also writes a hashed
+control-plane token catalog and scopes that credential to
 `CONTROL_PLANE_ALLOWED_TENANTS=continuous-demo` and
 `CONTROL_PLANE_ALLOWED_WORKER_ROLES=revenue_operations,owner_chief_of_staff`;
 requests to `/worker`, `/core`, or `/workflow` must carry an allowed
@@ -182,6 +189,29 @@ approval request, capability grant, budget reserve/charge/release, object,
 object-link, event, evidence, document, packet, decision, generated-view,
 shared approval inbox route, payroll preview packet handoff, and payroll
 approval handoff after each production rollout.
+
+Control-plane token catalog entries have this shape when provided directly via
+`CONTROL_PLANE_TOKENS_JSON`:
+
+```json
+[
+  {
+    "id": "operator-token-id",
+    "tokenSha256": "hex_sha256_of_bearer_token",
+    "operatorEmail": "owner@continuoushq.com",
+    "allowedTenants": ["continuous-demo"],
+    "allowedWorkerRoles": ["revenue_operations", "owner_chief_of_staff"],
+    "allowedRoutes": ["core", "worker", "workflow", "approval"],
+    "allowedAccess": ["read", "write"],
+    "allowedCommands": ["*"],
+    "expiresAt": "2026-06-20T00:00:00.000Z"
+  }
+]
+```
+
+`allowedCommands` accepts exact route-qualified keys such as `worker:run` or
+route wildcards such as `worker:*`. GET views are authorized as
+`<route>:view.<view>`, for example `worker:view.snapshot`.
 
 ## Database Backup And Restore
 
