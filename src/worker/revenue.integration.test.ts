@@ -2356,7 +2356,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
     const [externalActionEvent] = await db
       .select()
       .from(events)
-      .where(eq(events.id, externalActionResult.eventId))
+      .where(eq(events.id, externalActionResult.eventId ?? ""))
       .limit(1);
     const [externalActionEvidence] = await db
       .select()
