@@ -70,11 +70,14 @@ describe("future worker contracts", () => {
     const routeFiles = listFiles("app").filter((path) => path.endsWith("/route.ts"));
     const workerFamilyRoutePattern =
       /^app\/(?:api\/)?(?:revenue|dispatch|finance|workforce|compliance|systems|owner)[^/]*worker\//;
+    const apiCommandRoutePattern =
+      /^app\/api\/(?:worker|workers|core|workflow|approval|approvals|revenue|dispatch|finance|workforce|compliance|systems|owner)(?:\/|-)/;
 
     expect(routeFiles).toContain("app/worker/route.ts");
     expect(routeFiles).toContain("app/core/route.ts");
     expect(routeFiles).toContain("app/workflow/route.ts");
     expect(routeFiles.filter((path) => workerFamilyRoutePattern.test(path))).toEqual([]);
+    expect(routeFiles.filter((path) => apiCommandRoutePattern.test(path))).toEqual([]);
   });
 
   it("keeps the current revenue contract on the generic worker API", () => {

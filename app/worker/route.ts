@@ -23,6 +23,26 @@ function bodyObject(value: unknown) {
     : {};
 }
 
+function configObject(value: unknown):
+  | { ok: true; value: Record<string, unknown> }
+  | { ok: false; error: { code: string; message: string } } {
+  if (value === undefined || value === null) {
+    return { ok: true, value: {} };
+  }
+
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return { ok: true, value: value as Record<string, unknown> };
+  }
+
+  return {
+    ok: false,
+    error: {
+      code: "invalid_worker_command_config",
+      message: "config must be an object when provided.",
+    },
+  };
+}
+
 const workerCommandEnvelopeFields = new Set(["command", "worker", "idempotencyKey", "config"]);
 async function readBody(request: Request) {
   if (!request.headers.get("content-type")?.includes("application/json")) {
@@ -168,6 +188,8 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const body = await readBody(request);
   const unexpectedFields = unexpectedWorkerPayloadFields(body);
+  const configResult = configObject(body.config);
+  const config = configResult.ok ? configResult.value : {};
   const target = targetFrom(body.worker);
   const auth = authorizeControlPlaneAccess({
     enabled: env.WORKER_RUN_ENABLED,
@@ -199,6 +221,10 @@ export async function POST(request: Request) {
     );
   }
 
+  if (!configResult.ok) {
+    return errorResponse(configResult.error, 400);
+  }
+
   const scope = authorizeControlPlaneScope({
     scope: auth.scope,
     tenantSlug: target.tenantSlug,
@@ -215,7 +241,7 @@ export async function POST(request: Request) {
     const result = await executeWorkerCommand({
       command: optionalString(body.command),
       target,
-      config: body.config,
+      config,
       idempotencyKey: idempotencyKeyFrom(body, request),
       operatorEmail: auth.operatorEmail,
     });
