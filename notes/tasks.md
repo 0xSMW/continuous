@@ -11,13 +11,12 @@
 - Extend customer-signal workflows, generated views, and eval fixtures beyond the seeded SatisfactionSignal, FeedbackItem, Complaint, Testimonial, and Review primitives.
 - Wire implementation handlers, retries, and generated views into the expanded operating workflow catalog; queued approval and packet handoffs now execute through `/workflow`.
 - Extend adapter-intent, rule-change, capability-backed, approval-backed, and packet-backed workflow execution into additional domain-specific handlers; scheduled command drain now covers workflow steps, Revenue lead polling, and Revenue adapter retry/reconciliation.
-- Lock the scheduler failure contract for `/workflow`, `adapters.retry`, and `adapters.reconcile`: either prove deliberate fail-fast behavior or isolate each drain lane with tests before adding more scheduled workers.
 - Extend Core adapter intent and rule-change workflow handlers into future worker contract fixtures.
 - Extend Dispatch beyond the registered `schedule.propose`, `customer_update.draft`, `closeout.prepare`, and `exception.route` slices into scoped live credential checks and external execution gates; extend Finance beyond the registered `invoice.prepare`, `ar_followup.draft`, `cash_forecast.generate`, and `payment_draft.prepare` slices into live-accounting/payment readiness and dual-control execution gates; implement runtime handlers and CI evals for Workforce, Compliance, and Systems from their registered contract metadata.
 - Extend the Owner Chief-of-Staff Worker beyond approval/revision continuations into stale-source handling and broader factuality evals.
 - Keep all worker-family HTTP controls on `/worker` with registered `worker`, `command`, `idempotencyKey`, and `config` fields; do not add worker-family-specific URL shapes.
 - Keep local worker mutation controls on `worker:tool worker.command` or `continuous.worker.command`; do not add worker-family-specific package scripts or app-server tools that bypass the command registry.
-- Provision the production object-storage bucket/key, run `scripts/install-backup-timer.sh`, and prove scheduled off-host Postgres dump retention before customer data.
+- Keep the production object-storage Postgres backup timer healthy; `scripts/check-production-readiness.sh` now proves the timer, backup env, fresh local dump, and latest DigitalOcean Spaces backup object.
 - Run `scripts/recovery-drill.sh` against a disposable droplet, then install the observability timer with a real alert webhook, add non-root host access, and make `scripts/check-production-readiness.sh` pass before using the production droplet for real customer data.
 - Keep deploy-produced token rotation, control-plane credential inventory, disposable revocation drill, and operator session review evidence current in readiness before broad customer use.
 - Provision scoped adapter credentials, tested rollback playbooks, and a first controlled send only after retry readiness evidence stays green.

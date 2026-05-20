@@ -27,6 +27,50 @@ new worker family.
 | 6 | Compliance Worker | Licenses, insurance, permits, notices, filings, and evidence binders | Rule-pack coverage, due-date obligations, source refs, and human submission approval |
 | 7 | Systems Worker | Connector health, sync repair, data quality, and workflow automation | Tenant-scoped adapter grants, rollback plans, and sync reconciliation tests |
 
+## Strategy-Wide Worker Crosswalk
+
+The first seven workers are the initial implementation wave, not the full
+strategy catalog. The broader strategy maps every SMB operating family to a
+first packaged worker so expansion can stay MECE while still shipping through
+the same `/worker` registry, Core object spine, workflow ledger, and evidence
+packets.
+
+| Strategy family | First packaged worker | Current coverage | First Core object spine | First promotion gate |
+|---|---|---|---|---|
+| Owner / General Management | Owner Chief-of-Staff Worker | Runtime started | Task, decision, KPI, anomaly, approval, worker run | Broader factuality evals, stale-source handling, read-only generated brief views |
+| Offer, Product, and Pricing | Offer and Pricing Worker | Not yet planned in runtime docs | Offer, product/service, price book, margin rule, discount policy, quote line | Quote/margin policy fixture, approval for discounts, price-change evidence packet |
+| Growth and Brand | Growth Worker | Not yet planned in runtime docs | Campaign, channel, audience, content draft, attribution event, review source | No external publish without approval, source-backed claims, budget and ROI ledger |
+| Sales and Revenue Capture | Revenue Operations Worker | Runtime live | Lead, customer, offer, quote, booking, job, invoice, payment, review | First controlled external send with receipt, rollback/escalation, connector readiness |
+| Customer / Client / Patient Experience | Customer Experience Worker | Partially covered by Dispatch customer updates and Revenue follow-up | Customer, conversation, promise, satisfaction signal, complaint, testimonial, review | Approved outbound message gate, escalation routing, complaint evidence packet |
+| Operations / Service Delivery | Operations Worker | Partially covered by Dispatch/Ops | Job, work order, schedule, checklist, closeout, exception, asset/material ref | Live calendar/job-system credential gate, conflict exceptions, closeout completeness eval |
+| Supply Chain, Assets, and Facilities | Asset and Supply Worker | Not yet planned in runtime docs | Vendor, inventory item, purchase order, asset, facility, maintenance event, stockout | Dry-run reorder/maintenance plan, approval for purchase/asset actions, rollback plan |
+| Workforce and HR | Workforce Worker | Contract/planned | Person, employment, contractor engagement, position, credential, compensation, document | Restricted document handling, classification proof, payroll blocker visibility |
+| Finance and Admin | Finance Worker | Runtime started | Invoice, bill, payment, expense, receipt, cash forecast, reconciliation item | Expense coding fixture, live accounting/payment readiness, dual-control approval |
+| Risk, Legal, Compliance, and Quality | Compliance Worker | Contract/planned | Rule pack, obligation, filing requirement, notice, license, policy, evidence binder | Source-backed rule claims, human submission approval, exportable evidence binder |
+| Data, Systems, and Automation | Systems Worker | Contract/planned | Adapter, connection, sync job, webhook, permission grant, data-quality issue | Sync repair dry-run, least-privilege permission review, rollback evidence |
+
+## ICP Packaged Workers
+
+Vertical workers are packaged operating bundles built from the strategy
+families above. They should not introduce private APIs or private object
+shapes; each one declares which family commands it composes and which Core
+objects it must prove.
+
+| ICP cluster | First packaged worker | Composed families | First packaged outcome | Required proof before runtime |
+|---|---|---|---|---|
+| Expert-service SMBs | Knowledge Delivery Worker | Revenue, Offer/Pricing, Customer Experience, Finance, Compliance | Intake, proposal, deliverable packet, retainer/billing draft, evidence-backed client update | Proposal/deliverable packet schema, billing handoff, source-backed knowledge claims |
+| Expert-service SMBs | Billing Worker | Finance, Revenue, Owner | Retainer invoice, AR follow-up, cash brief, approval queue | Invoice/retainer object map, accounting dry-run, no money movement without dual control |
+| Local field-service SMBs | Quote-to-Cash Field Worker | Revenue, Dispatch/Ops, Finance, Customer Experience | Lead response, quote, schedule proposal, closeout, invoice draft, review request | Revenue-to-dispatch-to-finance handoff, customer-send approval, adapter receipts |
+| Local field-service SMBs | Change-Order Worker | Dispatch/Ops, Offer/Pricing, Finance, Compliance | Change-order packet with margin, customer approval, invoice impact | Price/margin rule proof, contract-term approval, customer communication receipt |
+| Regulated care/trust SMBs | Intake and Documentation Worker | Customer Experience, Compliance, Workforce, Systems | Privacy-safe intake, eligibility/docs checklist, appointment/task packet | Restricted data policy, source evidence, no regulated advice without human review |
+| Regulated care/trust SMBs | Compliance QA Worker | Compliance, Systems, Owner | Documentation quality review, deadline blocker, evidence binder | Rule-source traceability, exception queue, exportable audit packet |
+| Physical goods SMBs | Inventory and Replenishment Worker | Asset/Supply, Finance, Systems | Stockout detection, reorder draft, vendor packet, cash impact | Inventory/source sync proof, purchase approval, vendor/accounting dry-run receipt |
+| Physical goods SMBs | Production Planner Worker | Operations, Workforce, Asset/Supply, Finance | Production/run plan, labor/material readiness, exception routing | Capacity/material object map, no purchase/labor commitments without approval |
+| Hospitality/experience SMBs | Demand and Guest Experience Worker | Growth, Customer Experience, Workforce, Finance | Demand campaign draft, booking/guest update, review recovery, staffing signal | Approved publish/send gate, review-source evidence, budget and staffing blockers |
+| Hospitality/experience SMBs | Event/Menu Worker | Offer/Pricing, Operations, Asset/Supply, Customer Experience | Event/menu package, inventory/labor readiness, customer packet | Margin/inventory proof, staffing readiness, external publish approval |
+| Asset-heavy SMBs | Dispatch and Asset Utilization Worker | Dispatch/Ops, Asset/Supply, Systems, Finance | Route/job dispatch, utilization view, maintenance blocker, billing handoff | Asset state proof, route conflict handling, maintenance rollback/escalation plan |
+| Asset-heavy SMBs | Maintenance Worker | Asset/Supply, Compliance, Operations, Finance | Preventive maintenance schedule, incident packet, vendor/parts draft | Asset history, safety/compliance source refs, purchase approval gate |
+
 ## Per-Worker Contracts
 
 Every worker needs an implementation-grade V1 contract before runtime code. The

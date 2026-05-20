@@ -152,6 +152,8 @@ done
 if [ "$REQUIRE_CADDY_ACCESS_LOG" = "true" ]; then
   if [ -s "$APP_DIR/logs/caddy/access.log" ]; then
     record_ok "caddy_access_log_present"
+  elif docker compose logs --tail=400 caddy 2>/dev/null | grep -q '"logger":"http.log.access"'; then
+    record_ok "caddy_access_log_present:docker_stdout"
   else
     record_failure "caddy_access_log_missing_or_empty"
   fi

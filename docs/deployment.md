@@ -302,6 +302,9 @@ inbox route, payroll preview packet handoff, and payroll
 approval handoff after each production rollout. It also runs the host
 observability check so production rollout fails if app/db/Caddy service state,
 public health, TLS freshness, disk usage, or Caddy access logging are broken.
+Access-log evidence may come from `logs/caddy/access.log` or from the Caddy
+container's structured Docker stdout logs, depending on the active Caddy file
+writer behavior.
 
 Control-plane token catalog entries have this shape when provided directly via
 `CONTROL_PLANE_TOKENS_JSON`:

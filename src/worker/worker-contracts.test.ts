@@ -257,6 +257,7 @@ describe("future worker contracts", () => {
     const deployScript = read("scripts/deploy.sh");
     const deployWorkflow = read(".github/workflows/deploy.yml");
     const readinessScript = read("scripts/check-production-readiness-on-host.sh");
+    const observabilityScript = read("scripts/check-observability-on-host.sh");
     const attestationScript = read("scripts/attest-control-plane-on-host.sh");
     const rotationScript = read("scripts/rotate-control-plane-token-on-host.sh");
 
@@ -279,6 +280,8 @@ describe("future worker contracts", () => {
     expect(readinessScript).toContain("CONTROL_PLANE_CREDENTIAL_REVOCATION_AUDIT_ID");
     expect(readinessScript).toContain("CONTROL_PLANE_SESSION_REVIEW_VIEW_ID");
     expect(readinessScript).toContain("REQUIRE_CONTROL_PLANE_CREDENTIAL_ATTESTATION");
+    expect(observabilityScript).toContain("caddy_access_log_present:docker_stdout");
+    expect(deployment).toContain("structured Docker stdout logs");
     expect(attestationScript).toContain("control_plane.credential.upsert");
     expect(attestationScript).toContain("control_plane.credential.revoke");
     expect(attestationScript).toContain("control_plane.session.review");

@@ -18,6 +18,7 @@ function scheduledResult(
     endpoint: command === "steps.execute" ? "/workflow" : "/worker",
     command,
     api: command === "steps.execute" ? "continuous.workflow.v1" : "continuous.worker.v1",
+    status: "succeeded",
     result,
   };
 }
@@ -97,13 +98,16 @@ describe("worker scheduler", () => {
     );
 
     expect(result.workflow.command).toBe("steps.execute");
+    expect(result.workflow.status).toBe("succeeded");
     expect(result.leadPolls).toMatchObject({
       attempted: 1,
       succeeded: 1,
       failed: 0,
     });
     expect(result.adapterRetry.command).toBe("adapters.retry");
+    expect(result.adapterRetry.status).toBe("succeeded");
     expect(result.adapterReconcile.command).toBe("adapters.reconcile");
+    expect(result.adapterReconcile.status).toBe("succeeded");
     expect(listLeadPollCommands).toHaveBeenCalledWith({
       tenantSlug: "continuous-demo",
       limit: 5,
@@ -434,6 +438,65 @@ describe("worker scheduler", () => {
     expect(result.workflow.command).toBe("steps.execute");
     expect(result.adapterRetry.command).toBe("adapters.retry");
     expect(result.adapterReconcile.command).toBe("adapters.reconcile");
+    expect(postCommand).toHaveBeenCalledTimes(4);
+  });
+
+  it("isolates workflow and adapter drain failures from each other", async () => {
+    const postCommand = vi.fn(async ({ payload }) => {
+      if (payload.command === "steps.execute") {
+        throw new Error("workflow unavailable");
+      }
+
+      if (payload.command === "adapters.retry") {
+        throw new Error("adapter retry unavailable");
+      }
+
+      return scheduledResult(String(payload.command));
+    });
+
+    const result = await runSchedulerCycle(
+      {
+        enabled: true,
+        once: true,
+        baseUrl: "http://app:3000",
+        token: "test-token",
+        tenantSlug: "continuous-demo",
+        intervalMs: 60_000,
+        workflowLimit: 7,
+        adapterLimit: 11,
+        leadPollLimit: 5,
+        leaseMs: 120_000,
+        leaseOwner: "scheduler-test",
+      },
+      {
+        postCommand,
+        listLeadPollCommands: vi.fn(async () => [leadPollCommand()]),
+      },
+    );
+
+    expect(result.workflow).toMatchObject({
+      command: "steps.execute",
+      status: "failed",
+      error: {
+        message: "workflow unavailable",
+      },
+    });
+    expect(result.leadPolls).toMatchObject({
+      attempted: 1,
+      succeeded: 1,
+      failed: 0,
+    });
+    expect(result.adapterRetry).toMatchObject({
+      command: "adapters.retry",
+      status: "failed",
+      error: {
+        message: "adapter retry unavailable",
+      },
+    });
+    expect(result.adapterReconcile).toMatchObject({
+      command: "adapters.reconcile",
+      status: "succeeded",
+    });
     expect(postCommand).toHaveBeenCalledTimes(4);
   });
 

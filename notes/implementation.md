@@ -35,6 +35,7 @@
 | Added packet-backed workflow execution | `packet_prepare`, `document_packet_prepare`, and `evidence_packet_prepare` steps now reuse Core packet creation from the workflow executor and write packet/document/event/audit/evidence/task proof |
 | Expanded packet-backed workflow coverage | CI now proves generic workflow packet steps can prepare new-hire, contractor, payroll, filing, termination, AI-action, and rule-change packets without worker-specific routes |
 | Added scheduled internal command drain | The `worker-scheduler` Compose service posts the canonical `/workflow` and `/worker` command envelopes for workflow step execution, Revenue lead source polling, and Revenue adapter retry/reconciliation work |
+| Isolated scheduler drain lanes | A failure in workflow step execution, Revenue lead polling, Revenue run handoff, adapter retry, or adapter reconciliation is recorded in the cycle result without blocking the other scheduler lanes |
 | Added shared approval service | Worker and workflow approvals now use a neutral approval service over `approval_requests`, with subject-scoped listing and decisions |
 | Seeded the first open-workflow set | Entity setup, hire employee, contractor engagement, termination, payroll preview, AI budget cycle, and synthetic-worker lifecycle now all have persisted definitions, runs, and steps |
 | Seeded the expanded operating workflow catalog | Open-state, compensation-change, location-change, payroll-run, off-cycle payroll, quarter-close, year-end, leave, incident, benefits-renewal, agency-notice, and filing-draft workflows now have persisted definitions, runs, and seed steps |
@@ -140,8 +141,9 @@
 | Codex app-server boundary | The installed CLI has protocol generation commands, but no local daemon subcommand in this environment; keep Next MCP for Next.js diagnostics and keep app-server worker commands registry-backed rather than worker-family-specific |
 | Recovery boundary | App-only rollback is tag-based and destructive database restore is dump-backed; the new drill harness makes the app/database compatibility procedure repeatable, but it still must be run on a disposable droplet before customer data |
 | Operator-token scope | The current production token now has hashed catalog metadata, per-command scope enforcement, durable auth session records, deploy-time token-rotation attestations, managed credential inventory, revocation enforcement, and operator session review views; broad use still needs broader operator review policy and customer-specific credential handling |
-| Alerting boundary | Deploy smoke now proves the host observability check, but recurring alerts are not active until `scripts/install-observability-timer.sh` is run with a real `ALERT_WEBHOOK_URL` |
-| Readiness boundary | The production readiness gate is strict and opt-in; it is expected to fail until object-storage credentials, backup and observability timers, alert webhook, recovery drill report, production connector credentials, and non-root host access are all actually provisioned and attested |
+| Backup boundary | Production has a systemd Postgres backup timer plus DigitalOcean Spaces object-storage backup evidence; keep freshness checks passing before customer data |
+| Alerting boundary | Deploy smoke now proves the host observability check, but recurring alerts are not complete until `scripts/install-observability-timer.sh` is run with a real `ALERT_WEBHOOK_URL` |
+| Readiness boundary | The production readiness gate is strict and opt-in; it is expected to fail until observability timer/webhook, recovery drill report, production connector credentials, and non-root host access are all actually provisioned and attested |
 | Worker selector boundary | `/worker`, `worker.command`, and `continuous.worker.command` now treat `worker` as a strict selector object with only `role`, `id`, and `tenantSlug`; every operation-specific field must live under `config` |
 | Command body boundary | `/core` and `/worker` reject non-JSON, malformed JSON, and non-object command bodies after authentication instead of collapsing them into empty envelopes |
 | Local mutation trust boundary | `worker.command` and `continuous.worker.command` are disabled under `APP_ENV=production` unless `CONTINUOUS_TRUSTED_LOCAL_WORKER_TOOLS=true`; production automation should prefer the authenticated `/worker` route |
@@ -222,4 +224,6 @@ Production deploys also run the internal `worker-scheduler` sidecar. It calls
 `/workflow` with `command=steps.execute`, then `/worker` with
 `command=lead.read`, `command=adapters.retry`, and
 `command=adapters.reconcile`, using the same tenant-scoped bearer-token
-envelope as operator calls.
+envelope as operator calls. Each drain lane reports `succeeded` or `failed`;
+workflow, polling, revenue handoff, retry, and reconciliation failures no
+longer prevent the remaining lanes from running in that scheduler cycle.

@@ -53,7 +53,9 @@ export type ScheduledCommandResult = {
   endpoint: "/workflow" | "/worker";
   command: string;
   api: string;
+  status: "succeeded" | "failed";
   result: unknown;
+  error?: { message: string };
 };
 
 export type ScheduledRevenueRunResult = {
@@ -85,6 +87,7 @@ export type ScheduledLeadPollResult = {
   attempted: number;
   succeeded: number;
   failed: number;
+  error?: { message: string };
   revenueRuns: {
     attempted: number;
     succeeded: number;
@@ -338,6 +341,10 @@ function errorPayload(error: unknown) {
   };
 }
 
+function errorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
+}
+
 async function parseJsonResponse(response: Response): Promise<ApiEnvelope> {
   const fallback: ApiEnvelope = {
     api: "continuous.scheduler.unknown",
@@ -383,8 +390,39 @@ export async function postCommand(input: {
     endpoint: input.endpoint,
     command,
     api: envelope.api,
+    status: "succeeded",
     result: envelope.data?.result ?? null,
   };
+}
+
+async function runScheduledCommand(input: {
+  postCommand: typeof postCommand;
+  baseUrl: string;
+  token: string;
+  endpoint: "/workflow" | "/worker";
+  payload: Record<string, unknown>;
+}): Promise<ScheduledCommandResult> {
+  const command = optionalString(input.payload.command) ?? "unknown";
+
+  try {
+    return await input.postCommand({
+      baseUrl: input.baseUrl,
+      token: input.token,
+      endpoint: input.endpoint,
+      payload: input.payload,
+    });
+  } catch (error) {
+    return {
+      endpoint: input.endpoint,
+      command,
+      api: "continuous.scheduler.error",
+      status: "failed",
+      result: null,
+      error: {
+        message: errorMessage(error, `${input.endpoint} ${command} failed.`),
+      },
+    };
+  }
 }
 
 export async function listLeadPollCommands(input: {
@@ -417,10 +455,30 @@ async function runLeadPollCommands(input: {
   postCommand: typeof postCommand;
   listCommands: typeof listLeadPollCommands;
 }) {
-  const commands = await input.listCommands({
-    tenantSlug: input.config.tenantSlug,
-    limit: input.config.leadPollLimit,
-  });
+  let commands: LeadPollCommand[];
+
+  try {
+    commands = await input.listCommands({
+      tenantSlug: input.config.tenantSlug,
+      limit: input.config.leadPollLimit,
+    });
+  } catch (error) {
+    return {
+      attempted: 0,
+      succeeded: 0,
+      failed: 1,
+      error: {
+        message: errorMessage(error, "Lead source discovery failed."),
+      },
+      revenueRuns: {
+        attempted: 0,
+        succeeded: 0,
+        failed: 0,
+      },
+      commands: [],
+    } satisfies ScheduledLeadPollResult;
+  }
+
   const result: ScheduledLeadPollResult = {
     attempted: commands.length,
     succeeded: 0,
@@ -588,7 +646,8 @@ export async function runSchedulerCycle(
   }
 
   const cycleKey = new Date().toISOString();
-  const workflow = await post({
+  const workflow = await runScheduledCommand({
+    postCommand: post,
     baseUrl: config.baseUrl,
     token: config.token,
     endpoint: "/workflow",
@@ -609,7 +668,8 @@ export async function runSchedulerCycle(
     postCommand: post,
     listCommands,
   });
-  const adapterRetry = await post({
+  const adapterRetry = await runScheduledCommand({
+    postCommand: post,
     baseUrl: config.baseUrl,
     token: config.token,
     endpoint: "/worker",
@@ -625,7 +685,8 @@ export async function runSchedulerCycle(
       },
     },
   });
-  const adapterReconcile = await post({
+  const adapterReconcile = await runScheduledCommand({
+    postCommand: post,
     baseUrl: config.baseUrl,
     token: config.token,
     endpoint: "/worker",
@@ -688,10 +749,22 @@ export async function runScheduler(
         level: "info",
         event: "scheduler_cycle_completed",
         tenantSlug: config.tenantSlug,
-        workflow: result.workflow.result,
+        workflow: {
+          status: result.workflow.status,
+          result: result.workflow.result,
+          error: result.workflow.error,
+        },
         leadPolls: result.leadPolls,
-        adapterRetry: result.adapterRetry.result,
-        adapterReconcile: result.adapterReconcile.result,
+        adapterRetry: {
+          status: result.adapterRetry.status,
+          result: result.adapterRetry.result,
+          error: result.adapterRetry.error,
+        },
+        adapterReconcile: {
+          status: result.adapterReconcile.status,
+          result: result.adapterReconcile.result,
+          error: result.adapterReconcile.error,
+        },
       });
     } catch (error) {
       log({
