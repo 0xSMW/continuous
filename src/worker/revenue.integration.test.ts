@@ -5449,9 +5449,9 @@ maybeDescribe("Revenue Worker integration eval", () => {
 
   it("runs the Owner Chief-of-Staff worker as a read-only brief generator", async () => {
     const runId = randomUUID();
-    const result = await executeWorkerCommand({
+    const result = await executeAppServerWorkerTool("continuous.worker.command", {
       command: "brief.generate",
-      target: {
+      worker: {
         role: "owner_chief_of_staff",
         tenantSlug: "continuous-demo",
       },
@@ -5466,11 +5466,12 @@ maybeDescribe("Revenue Worker integration eval", () => {
         includeEvidence: true,
       },
     });
-    const ownerResult = result.result as Awaited<ReturnType<typeof import("./owner").generateOwnerBrief>>;
+    const resultEnvelope = objectValue(result);
+    const ownerResult = resultEnvelope.result as Awaited<ReturnType<typeof import("./owner").generateOwnerBrief>>;
     const score = scoreOwnerBriefRun(ownerResult, ownerBriefEvalCases[0]);
 
-    expect(result.worker.role).toBe("owner_chief_of_staff");
-    expect(result.command).toBe("brief.generate");
+    expect(objectValue(resultEnvelope.worker).role).toBe("owner_chief_of_staff");
+    expect(resultEnvelope.command).toBe("brief.generate");
     expect(ownerResult.created).toBe(true);
     expect(ownerResult.objectId).toBeTruthy();
     expect(ownerResult.objectVersionId).toBeTruthy();
@@ -5919,9 +5920,9 @@ maybeDescribe("Revenue Worker integration eval", () => {
       },
     ]);
 
-    const response = await executeWorkerCommand({
+    const response = await executeAppServerWorkerTool("continuous.worker.command", {
       command: "schedule.propose",
-      target: {
+      worker: {
         role: "dispatch_operations",
         tenantSlug: "continuous-demo",
       },
@@ -5942,13 +5943,14 @@ maybeDescribe("Revenue Worker integration eval", () => {
         },
       },
     });
-    const result = response.result as Awaited<
+    const responseEnvelope = objectValue(response);
+    const result = responseEnvelope.result as Awaited<
       ReturnType<typeof import("./dispatch").proposeDispatchSchedule>
     >;
     const output = objectValue(result.output);
 
-    expect(response.command).toBe("schedule.propose");
-    expect(response.worker.role).toBe("dispatch_operations");
+    expect(responseEnvelope.command).toBe("schedule.propose");
+    expect(objectValue(responseEnvelope.worker).role).toBe("dispatch_operations");
     expect(result.created).toBe(true);
     expect(result.workflowStepIds).toHaveLength(4);
     expect(output.externalExecution).toBe("dry_run");

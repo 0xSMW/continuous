@@ -18,12 +18,13 @@ agents can inspect payload requirements before handlers exist.
 `continuous.worker.command`, `/worker`, and `worker:tool` all run through that
 same registry validation before dispatch.
 The CI integration suite exercises `continuous.worker.command` on real
-Revenue `lead.read` and `run` commands, proving the app-server boundary writes
-the same worker run, approval, evidence, budget, and event records as `/worker`.
-Dispatch `customer_update.draft`, `closeout.prepare`, and `exception.route`
-are also schema-discoverable through the same registry-backed command list and
-keep customer-send, QA, Finance handoff, exception reason, severity, and
-related Core refs under `config`.
+Revenue `lead.read` and `run`, Owner `brief.generate`, and Dispatch
+`schedule.propose` commands, proving the app-server boundary writes the same
+worker run, approval, evidence, budget, event, adapter dry-run, generated view,
+and workflow records as `/worker`. Dispatch `customer_update.draft`,
+`closeout.prepare`, and `exception.route` are also schema-discoverable through
+the same registry-backed command list and keep customer-send, QA, Finance
+handoff, exception reason, severity, and related Core refs under `config`.
 Finance `invoice.prepare` uses the same envelope with job, closeout, customer,
 and evidence selectors under `config.sourceRefs`, prepares an invoice draft,
 cash packet, owner approval request, and accounting dry-run receipt, and keeps

@@ -23,6 +23,30 @@ describe("app-server worker tools", () => {
     expect(schema.registry.commands.some((command) => command.name === "response.draft")).toBe(true);
     expect(
       schema.registry.commands.some(
+        (command) =>
+          command.role === "owner_chief_of_staff" &&
+          command.name === "brief.generate" &&
+          command.externalExecution === "blocked",
+      ),
+    ).toBe(true);
+    expect(
+      schema.registry.commands.some(
+        (command) =>
+          command.role === "owner_chief_of_staff" &&
+          command.name === "decision_queue.prepare" &&
+          command.externalExecution === "blocked",
+      ),
+    ).toBe(true);
+    expect(
+      schema.registry.commands.some(
+        (command) =>
+          command.role === "owner_chief_of_staff" &&
+          command.name === "anomaly.triage" &&
+          command.externalExecution === "blocked",
+      ),
+    ).toBe(true);
+    expect(
+      schema.registry.commands.some(
         (command) => command.role === "dispatch_operations" && command.name === "schedule.propose",
       ),
     ).toBe(true);
