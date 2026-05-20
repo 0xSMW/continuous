@@ -96,6 +96,7 @@ function contractSummary(contract: (typeof workerContracts)[number]) {
   return {
     role: contract.role,
     name: contract.name,
+    apiRoute: contract.apiRoute,
     contractPath: contract.contractPath,
     firstOutcome: contract.firstOutcome,
     autonomyLevel: contract.autonomyLevel,

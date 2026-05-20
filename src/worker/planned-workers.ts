@@ -2,6 +2,9 @@ type IdempotencyPolicy = "required" | "none";
 type SideEffectLevel = "internal" | "dry_run" | "approved_only" | "external" | "none";
 type ExternalExecution = "blocked" | "dry_run" | "approved_only" | "enabled";
 
+export const workerApiRoute = "/worker" as const;
+type WorkerApiRoute = typeof workerApiRoute;
+
 export type PlannedWorkerConfigSchema = {
   type: "object" | "array" | "string" | "number" | "boolean";
   description?: string;
@@ -44,12 +47,14 @@ export type PlannedWorkerViewMetadata = {
 };
 
 export type PlannedWorkerCommandRegistryEntry = Omit<PlannedWorkerCommandMetadata, "configSchema"> & {
+  apiRoute: WorkerApiRoute;
   contractPath: string;
   evidencePacket: string;
   configSchema: PlannedWorkerConfigSchema;
 };
 
 export type PlannedWorkerViewRegistryEntry = PlannedWorkerViewMetadata & {
+  apiRoute: WorkerApiRoute;
   contractPath: string;
   evidencePacket: string | null;
 };
@@ -57,6 +62,7 @@ export type PlannedWorkerViewRegistryEntry = PlannedWorkerViewMetadata & {
 export type PlannedWorkerContractMetadata = {
   role: string;
   name: string;
+  apiRoute: WorkerApiRoute;
   contractPath: string;
   firstOutcome: string;
   autonomyLevel: number;
@@ -148,6 +154,7 @@ export const workerContracts: PlannedWorkerContractMetadata[] = [
   {
     role: "revenue_operations",
     name: "Revenue Operations Worker",
+    apiRoute: workerApiRoute,
     contractPath: "docs/revenue-operations-worker-v1-contract.md",
     firstOutcome: "Lead intake, classification, response draft, quote approval, and no-send continuation proof",
     autonomyLevel: 2,
@@ -336,6 +343,7 @@ export const workerContracts: PlannedWorkerContractMetadata[] = [
   {
     role: "owner_chief_of_staff",
     name: "Owner Chief-of-Staff Worker",
+    apiRoute: workerApiRoute,
     contractPath: "docs/owner-chief-of-staff-worker-v1-contract.md",
     firstOutcome: "Daily owner brief and decision queue with evidence links",
     autonomyLevel: 1,
@@ -423,6 +431,7 @@ export const workerContracts: PlannedWorkerContractMetadata[] = [
   {
     role: "dispatch_operations",
     name: "Dispatch Operations Worker",
+    apiRoute: workerApiRoute,
     contractPath: "docs/dispatch-operations-worker-v1-contract.md",
     firstOutcome: "Job schedule proposal, customer update packet, and closeout packet",
     autonomyLevel: 2,
@@ -521,6 +530,7 @@ export const workerContracts: PlannedWorkerContractMetadata[] = [
   {
     role: "finance_operations",
     name: "Finance Operations Worker",
+    apiRoute: workerApiRoute,
     contractPath: "docs/finance-operations-worker-v1-contract.md",
     firstOutcome: "Cash packet with invoice draft, AR queue, and forecast evidence",
     autonomyLevel: 2,
@@ -623,6 +633,7 @@ export const workerContracts: PlannedWorkerContractMetadata[] = [
   {
     role: "workforce_operations",
     name: "Workforce Operations Worker",
+    apiRoute: workerApiRoute,
     contractPath: "docs/workforce-operations-worker-v1-contract.md",
     firstOutcome: "New-hire or contractor packet with payroll blockers",
     autonomyLevel: 2,
@@ -723,6 +734,7 @@ export const workerContracts: PlannedWorkerContractMetadata[] = [
   {
     role: "compliance_operations",
     name: "Compliance Operations Worker",
+    apiRoute: workerApiRoute,
     contractPath: "docs/compliance-operations-worker-v1-contract.md",
     firstOutcome: "Compliance packet with obligation, rule source, draft, and approval path",
     autonomyLevel: 2,
@@ -832,6 +844,7 @@ export const workerContracts: PlannedWorkerContractMetadata[] = [
   {
     role: "systems_operations",
     name: "Systems Operations Worker",
+    apiRoute: workerApiRoute,
     contractPath: "docs/systems-operations-worker-v1-contract.md",
     firstOutcome: "Connector health and sync repair packet with rollback plan",
     autonomyLevel: 2,
@@ -965,6 +978,7 @@ export function plannedWorkerCommands(): PlannedWorkerCommandRegistryEntry[] {
     contract.commands.map((command) => {
       return {
         ...command,
+        apiRoute: contract.apiRoute,
         contractPath: contract.contractPath,
         evidencePacket: contract.evidencePacket,
         configSchema: plannedConfigSchema(command),
@@ -977,6 +991,7 @@ export function plannedWorkerViews(): PlannedWorkerViewRegistryEntry[] {
   return plannedWorkerContracts.flatMap((contract) =>
     contract.views.map((view) => ({
       ...view,
+      apiRoute: contract.apiRoute,
       contractPath: contract.contractPath,
       evidencePacket: view.name === "snapshot" ? null : contract.evidencePacket,
     })),
@@ -1002,6 +1017,7 @@ export function workerFollowUpCommands(
       .filter((command) => !registered.has(`${command.role}:${command.name}`))
       .map((command) => ({
         ...command,
+        apiRoute: contract.apiRoute,
         contractPath: contract.contractPath,
         evidencePacket: contract.evidencePacket,
         configSchema: plannedConfigSchema(command),
@@ -1019,6 +1035,7 @@ export function workerFollowUpViews(
       .filter((view) => !registered.has(`${view.role}:${view.name}`))
       .map((view) => ({
         ...view,
+        apiRoute: contract.apiRoute,
         contractPath: contract.contractPath,
         evidencePacket: view.name === "snapshot" ? null : contract.evidencePacket,
       })),

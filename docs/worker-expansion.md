@@ -74,8 +74,8 @@ objects it must prove.
 ## Per-Worker Contracts
 
 Every worker needs an implementation-grade V1 contract before runtime code. The
-contract must name the exact `/worker` `command`, `worker`, `config`, and
-`idempotencyKey` shape; required Core commands; object fields and link types;
+contract must name the exact `/worker` `command`, `worker`, `idempotencyKey`,
+and `config` shape; required Core commands; object fields and link types;
 workflow states and transitions; capability grants; adapter dry-run payloads;
 evidence packet schema; generated view contract; eval fixtures; and security
 boundaries.

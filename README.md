@@ -74,7 +74,9 @@ Then open `http://localhost:3000`.
   exact Core row ids; `config.leadPacket` remains a direct operator/test
   fallback. The route validates roles, commands, idempotency, tenant
   requirements, and external-execution posture through the worker command
-  registry.
+  registry. Worker contract metadata also carries `apiRoute: "/worker"` so new
+  roles inherit the route from the registry instead of creating a role-specific
+  URL.
 - Dispatch schedule proposals use the same shape:
   `POST /worker` with `worker.role=dispatch_operations`,
   `command=schedule.propose`, handoff ids in `config.sourceRefs`, and schedule
@@ -96,7 +98,7 @@ Then open `http://localhost:3000`.
   external execution.
 Worker-specific HTTP routes and local family-specific mutation shortcuts are
 intentionally absent; new worker families extend `/worker` and generic
-`worker:tool` surfaces by registering commands and structured payload fields.
+`worker:tool` surfaces by registering commands, views, and structured payload fields.
 The HTTP, app-server, and local worker command surfaces reject stray top-level
 operation fields so worker-specific inputs stay under `config`.
 

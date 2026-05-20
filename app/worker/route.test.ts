@@ -480,7 +480,7 @@ describe("/worker route", () => {
     expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
   });
 
-  it("keeps idempotency-key as a fallback only when the payload omits idempotencyKey", async () => {
+  it("does not treat idempotency-key as a worker payload fallback", async () => {
     mocks.executeWorkerCommand.mockResolvedValue({
       worker: {
         role: "revenue_operations",
@@ -516,11 +516,22 @@ describe("/worker route", () => {
       }),
     );
 
-    expect(mocks.executeWorkerCommand).toHaveBeenCalledWith(
-      expect.objectContaining({
-        idempotencyKey: "header-key-001",
-      }),
-    );
+    expect(mocks.executeWorkerCommand).toHaveBeenCalledWith({
+      command: "run",
+      target: {
+        role: "revenue_operations",
+        id: undefined,
+        tenantSlug: "continuous-demo",
+      },
+      config: {
+        intake: {
+          source: "website_form",
+          sourceEventId: "header-key-form-001",
+        },
+      },
+      idempotencyKey: undefined,
+      operatorEmail: "operator@example.com",
+    });
   });
 
   it("keeps payload idempotencyKey authoritative when the header is also present", async () => {

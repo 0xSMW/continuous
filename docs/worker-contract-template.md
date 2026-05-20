@@ -9,13 +9,16 @@ routes.
 | Field | Value |
 |---|---|
 | Worker role | `<role>` |
+| API route | `/worker` |
 | First outcome | `<operator-visible outcome>` |
 | Autonomy level | `0`, `1`, or `2` for V1 |
 | External execution | `blocked`, `dry_run`, or `approved_only` |
 
 ## API Shape
 
-`POST /worker` is the only worker mutation surface.
+`/worker` is the only worker control-plane route. Use `POST /worker` for
+commands and `GET /worker` for read views; do not add worker-family URLs such
+as `/api/<role>-worker`, `/worker/<role>`, or `<role>-worker`.
 
 ```json
 {
@@ -41,10 +44,30 @@ adapter selectors belong under `config`.
 The `worker` object is only a selector and must not contain operation fields;
 accepted worker selector fields are `role`, `id`, and `tenantSlug`.
 
+Read views use the same worker selector and keep read filters under `config`.
+HTTP callers use query parameters for cacheable operator reads:
+
+```txt
+GET /worker?view=snapshot&role=<role>&tenantSlug=continuous-demo
+```
+
+Local/tool callers use the read envelope:
+
+```json
+{
+  "view": "<view>",
+  "worker": {
+    "role": "<role>",
+    "tenantSlug": "continuous-demo"
+  },
+  "config": {}
+}
+```
+
 ## Command Registry
 
 Every worker command must be registered before implementation. The registry
-entry owns the command key, tool alias, handler, config validation, target
+entry owns the `/worker` API route, command key, tool alias, handler, config validation, target
 requirements, idempotency policy, output shape, side-effect level, and
 external-execution status. `bun run worker:tool schema` must expose enough
 metadata for agents to discover the command without adding a worker-specific
@@ -52,6 +75,7 @@ route.
 
 | Field | Required behavior |
 |---|---|
+| API route | Always `/worker`; never role-specific |
 | Command key | Plain action name used by `POST /worker`, such as `run` or `approval.decide` |
 | Tool surface | Agent/toolbox surface, such as `worker.command`, mapped to the same handler |
 | Role | Worker role allowed to execute the command |

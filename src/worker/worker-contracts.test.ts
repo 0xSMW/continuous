@@ -11,6 +11,7 @@ import {
   workerContracts,
   workerFollowUpCommands,
   workerFollowUpViews,
+  workerApiRoute,
 } from "./planned-workers";
 
 const root = process.cwd();
@@ -57,18 +58,17 @@ const contracts = [
 const runtimeRoles = new Set<string>(
   contracts.filter((contract) => contract.runtime).map((contract) => contract.role),
 );
-const workerFamilyNames = "(?:revenue|dispatch|finance|workforce|compliance|systems|owner)";
 const workerFamilyRoutePattern = new RegExp(
-  `^app/(?:api/)?${workerFamilyNames}[^/]*worker/`,
+  "^app/(?:[a-z0-9_-]+-worker/|worker/[^/]+/|workers/[^/]+/|api/(?:[a-z0-9_-]+-worker|worker|workers)(?:/|$))",
 );
 const apiCommandRoutePattern = new RegExp(
-  `^app/api/(?:worker|workers|core|workflow|approval|approvals|revenue|dispatch|finance|workforce|compliance|systems|owner)(?:/|-)`,
+  "^app/api/(?:worker|workers)(?:/|-|$)",
 );
 const forbiddenWorkerUrlPattern = new RegExp(
-  `(?:^|["'\`\\s(])/(?:api/(?:worker|workers|core|workflow|approval|approvals|revenue|dispatch|finance|workforce|compliance|systems|owner)(?:[-/][a-z0-9-]+)?|workers?/${workerFamilyNames}(?:[-/][a-z0-9-]+)?|${workerFamilyNames}[a-z0-9-]*worker)(?:/|["'\`\\s),.;]|$)`,
+  '(?:^|["\'`\\s(])/(?:(?:api/)?[a-z0-9_-]+-worker(?:/[a-z0-9_-]+)?|api/workers?(?:/[a-z0-9_-]+)?|workers?/[a-z0-9_-]+)(?:/|["\'`\\s),.;?]|$)',
 );
 const forbiddenWorkerNamespacePattern = new RegExp(
-  `continuous\\.(?:revenue|dispatch|finance|owner|workforce|compliance|systems)_worker|(?:revenue|dispatch|finance|owner|workforce|compliance|systems)_worker\\.`,
+  "continuous\\.[a-z0-9_]+_worker|[a-z0-9_]+_worker\\.",
 );
 
 function read(path: string) {
@@ -134,10 +134,16 @@ describe("future worker contracts", () => {
     const nonCanonical = [
       path("api", "revenue-worker"),
       path("api", "revenue-worker", "run"),
+      path("api", "marketing-operations-worker"),
+      path("api", "field_robotics-worker", "run"),
+      path("api", "worker"),
       path("api", "worker", "revenue"),
+      path("api", "workers", "finance"),
       path("worker", "revenue"),
+      path("worker", "marketing-operations"),
       path("workers", "finance"),
       path("dispatch-worker"),
+      path("field_robotics-worker"),
     ];
 
     for (const url of nonCanonical) {
@@ -145,6 +151,7 @@ describe("future worker contracts", () => {
     }
 
     expect(forbiddenWorkerUrlPattern.test(" /worker ")).toBe(false);
+    expect(forbiddenWorkerUrlPattern.test(" /worker?view=snapshot ")).toBe(false);
     expect(forbiddenWorkerUrlPattern.test(" /core ")).toBe(false);
     expect(forbiddenWorkerUrlPattern.test(" /workflow ")).toBe(false);
   });
@@ -220,6 +227,9 @@ describe("future worker contracts", () => {
       "compliance_operations",
       "systems_operations",
     ]);
+    expect(new Set(workerContracts.map((contract) => contract.apiRoute))).toEqual(
+      new Set([workerApiRoute]),
+    );
     expect(runtimeWorkerContracts.map((contract) => contract.role)).toEqual([
       "revenue_operations",
       "owner_chief_of_staff",
@@ -233,11 +243,18 @@ describe("future worker contracts", () => {
       "quote.prepare",
       "payment_link.prepare",
     ]);
+    expect(new Set(revenueFollowUps.map((command) => command.apiRoute))).toEqual(
+      new Set([workerApiRoute]),
+    );
+    expect(new Set(revenueViews.map((view) => view.apiRoute))).toEqual(new Set([workerApiRoute]));
     expect(
       revenueFollowUps.find((command) => command.name === "payment_link.prepare")?.configSchema.properties?.sourceRefs
         ?.type,
     ).toBe("object");
     expect(revenueViews.map((view) => view.name)).toEqual(["quote_review"]);
+    expect(workerContracts.every((contract) => contract.apiRoute === "/worker")).toBe(true);
+    expect(revenueFollowUps.every((command) => command.apiRoute === "/worker")).toBe(true);
+    expect(revenueViews.every((view) => view.apiRoute === "/worker")).toBe(true);
   });
 
   it("uses one shared worker envelope guard across HTTP and tool surfaces", () => {
@@ -262,6 +279,7 @@ describe("future worker contracts", () => {
     expect(read("src/worker/envelope.ts")).toContain(
       'export const workerTargetEnvelopeFields = ["role", "id", "tenantSlug"] as const;',
     );
+    expect(read("app/worker/route.ts")).not.toContain('request.headers.get("idempotency-key")');
   });
 
   it("has implementation-grade contracts for every worker", () => {
@@ -347,7 +365,7 @@ describe("future worker contracts", () => {
     expect(expansion).toContain("worker-readiness.md");
     expect(expansion).toContain("worker-handoffs.md");
     expect(expansion).toContain("the same `/worker` registry");
-    expect(expansion).toContain("the exact `/worker` `command`, `worker`, `config`, and");
+    expect(expansion).toContain("the exact `/worker` `command`, `worker`, `idempotencyKey`,");
   });
 
   it("keeps the worker roadmap pinned to generic worker routes", () => {
@@ -504,9 +522,16 @@ describe("future worker contracts", () => {
       const planned = plannedWorkerContracts.find((item) => item.role === contract.role);
 
       expect(planned?.contractPath).toBe(contract.path);
+      expect(planned?.apiRoute).toBe(workerApiRoute);
       expect(planned?.evidencePacket).toBe(contract.evidencePacket);
       expect(commandRoles.has(contract.role)).toBe(true);
       expect(viewRoles.has(contract.role)).toBe(true);
+      expect(
+        plannedWorkerCommands().every((command) => command.role !== contract.role || command.apiRoute === workerApiRoute),
+      ).toBe(true);
+      expect(
+        plannedWorkerViews().every((view) => view.role !== contract.role || view.apiRoute === workerApiRoute),
+      ).toBe(true);
       expect(
         plannedWorkerCommands().some(
           (command) => command.role === contract.role && command.name === "approval.decide",

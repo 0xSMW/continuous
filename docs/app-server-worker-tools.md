@@ -13,7 +13,7 @@ The generated Codex app-server protocol defines a dynamic tool as `name`,
 `src/worker/app-server-tools.ts` follows that shape and delegates commands to
 the shared worker command registry.
 `continuous.worker.schema` exposes each registered command's `configSchema`,
-the full `contracts` catalog, current `runtimeContracts`, and
+canonical `apiRoute: "/worker"`, the full `contracts` catalog, current `runtimeContracts`, and
 `followUpCommands` that are contract-defined but not executable yet. Planned
 future-worker commands also expose a non-executable `configSchema` so agents
 can inspect payload requirements before handlers exist.
@@ -68,10 +68,9 @@ registry without loading production tokens or executing external reads.
 The app-server command tool is intentionally narrow:
 
 - Commands are resolved by the same registry as `/worker` and `worker:tool`.
-- Mutation envelopes are strict. Top-level fields are limited to `command`,
-  `worker`, `idempotencyKey`, and `config` for
-  `continuous.worker.command`; top-level operation inputs such as `approvalId`,
-  source records, retry limits, or lead payloads are rejected and must live
+- Mutation envelopes are strict. `continuous.worker.command` accepts only
+  `command`, `worker`, `idempotencyKey`, and `config`; `approvalId`, source
+  records, retry limits, lead payloads, and every other operation input belong
   under `config`.
 - Worker-specific options stay inside `config` and are validated by the
   command registry's `configSchema`.

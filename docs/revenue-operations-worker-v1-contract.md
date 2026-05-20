@@ -158,6 +158,7 @@ Approval decisions use the same route:
     "role": "revenue_operations",
     "tenantSlug": "continuous-demo"
   },
+  "idempotencyKey": "worker-approval-decision-001",
   "config": {
     "approvalId": "approval_uuid",
     "action": "approved",
@@ -192,6 +193,7 @@ Adapter reconciliation also stays on the same command surface:
     "role": "revenue_operations",
     "tenantSlug": "continuous-demo"
   },
+  "idempotencyKey": "adapter-reconcile-001",
   "config": {
     "limit": 25
   }
@@ -208,6 +210,7 @@ dry-run only:
     "role": "revenue_operations",
     "tenantSlug": "continuous-demo"
   },
+  "idempotencyKey": "adapter-retry-001",
   "config": {
     "limit": 25
   }
@@ -218,7 +221,7 @@ Worker-family-specific routes are not part of the public API. There is no
 Revenue Operations compatibility path or worker-specific local mutation
 shortcut; HTTP and CLI callers both go through the registered `/worker` command
 envelope. Future workers must use `/worker` with role, command, idempotency,
-and config in structured fields; ad hoc top-level operation fields are rejected.
+and config in structured fields; operation inputs are valid only under `config`.
 
 ## Registry Entries
 

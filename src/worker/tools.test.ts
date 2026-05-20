@@ -295,6 +295,7 @@ describe("worker tool contract", () => {
     const contractSummary = (contract: (typeof workerContracts)[number]) => ({
       role: contract.role,
       name: contract.name,
+      apiRoute: contract.apiRoute,
       contractPath: contract.contractPath,
       firstOutcome: contract.firstOutcome,
       autonomyLevel: contract.autonomyLevel,
@@ -624,6 +625,7 @@ describe("worker tool contract", () => {
     const plannedCommands = workerToolSchema.registry.plannedCommands as Array<{
       role: string;
       name: string;
+      apiRoute: string;
       toolAlias: string;
       requiredConfig: string[];
       oneRequiredConfig?: string[];
@@ -660,21 +662,25 @@ describe("worker tool contract", () => {
         expect.objectContaining({
           role: "revenue_operations",
           name: "quote.prepare",
+          apiRoute: "/worker",
           sideEffects: "internal",
         }),
         expect.objectContaining({
           role: "finance_operations",
           name: "expense_code.propose",
+          apiRoute: "/worker",
           sideEffects: "internal",
         }),
         expect.objectContaining({
           role: "systems_operations",
           name: "sync.repair.plan",
+          apiRoute: "/worker",
           sideEffects: "dry_run",
         }),
       ]),
     );
     for (const command of plannedCommands) {
+      expect(command.apiRoute).toBe("/worker");
       expect(command.toolAlias).toBe("worker.command");
       expect(command.configSchema.type).toBe("object");
       expect(command.configSchema.required).toEqual(command.requiredConfig);

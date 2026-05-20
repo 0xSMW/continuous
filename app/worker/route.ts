@@ -109,12 +109,8 @@ function validateWorkerTarget(value: unknown):
   return { ok: true };
 }
 
-function idempotencyKeyFrom(body: Record<string, unknown>, request: Request) {
-  if (Object.prototype.hasOwnProperty.call(body, "idempotencyKey")) {
-    return body.idempotencyKey;
-  }
-
-  return request.headers.get("idempotency-key") ?? undefined;
+function idempotencyKeyFrom(body: Record<string, unknown>) {
+  return body.idempotencyKey;
 }
 
 function unexpectedWorkerPayloadFields(body: Record<string, unknown>) {
@@ -444,7 +440,7 @@ export async function POST(request: Request) {
       command: optionalString(body.command),
       target,
       config,
-      idempotencyKey: idempotencyKeyFrom(body, request),
+      idempotencyKey: idempotencyKeyFrom(body),
       operatorEmail: auth.operatorEmail,
     });
 

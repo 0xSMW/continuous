@@ -41,7 +41,7 @@ import {
   prepareFinanceInvoice,
   prepareFinancePaymentDraft,
 } from "./finance";
-import { plannedWorkerContractForRole } from "./planned-workers";
+import { plannedWorkerContractForRole, workerApiRoute } from "./planned-workers";
 import { normalizeIdempotencyKey } from "./security";
 
 export const workerApiVersion = "continuous.worker.v1";
@@ -1597,6 +1597,7 @@ export function registeredWorkerCommands() {
     Object.values(definition.commands).map((command) => ({
       role: definition.role,
       name: command.name,
+      apiRoute: workerApiRoute,
       description: command.description,
       idempotency: command.idempotency,
       sideEffects: command.sideEffects,
@@ -1612,6 +1613,7 @@ export function registeredWorkerViews() {
     Object.values(definition.views).map((view) => ({
       role: definition.role,
       name: view.name,
+      apiRoute: workerApiRoute,
       description: view.description,
     })),
   );

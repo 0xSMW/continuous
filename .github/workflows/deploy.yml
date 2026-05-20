@@ -506,7 +506,7 @@ jobs:
             >/dev/null
 
           SCHEMA="$(docker compose --profile tools run --rm migrate bun run worker:tool schema </dev/null)"
-          echo "$SCHEMA" | /usr/bin/jq -c '{commands:.registry.commands, views:.registry.views, contracts:[.registry.contracts[].role], runtime:[.registry.runtimeContracts[].role], planned:[.registry.plannedContracts[].role], followUpCommandCount:(.registry.followUpCommands|length), followUpViewCount:(.registry.followUpViews|length), tools:[.tools[].name]}'
+          echo "$SCHEMA" | /usr/bin/jq -c '{commands:.registry.commands, views:.registry.views, contracts:[.registry.contracts[].role], routes:[.registry.contracts[].apiRoute], runtime:[.registry.runtimeContracts[].role], planned:[.registry.plannedContracts[].role], followUpCommandCount:(.registry.followUpCommands|length), followUpViewCount:(.registry.followUpViews|length), tools:[.tools[].name]}'
           echo "$SCHEMA" | /usr/bin/jq -e '
             (.registry.commands | map(.name) | index("run")) != null and
             (.registry.commands | any(.role == "revenue_operations" and .name == "lead.read" and .idempotency == "required" and .requiresTenant == true)) and
@@ -533,8 +533,11 @@ jobs:
             (.registry.views | any(.role == "dispatch_operations" and .name == "exceptions")) and
             (.registry.views | any(.role == "finance_operations" and .name == "approvals")) and
             (.registry.contracts | map(.role) == ["revenue_operations","owner_chief_of_staff","dispatch_operations","finance_operations","workforce_operations","compliance_operations","systems_operations"]) and
+            (.registry.contracts | all(.apiRoute == "/worker")) and
             (.registry.runtimeContracts | map(.role) == ["revenue_operations","owner_chief_of_staff","dispatch_operations","finance_operations"]) and
             (.registry.plannedContracts | map(.role) == ["workforce_operations","compliance_operations","systems_operations"]) and
+            (.registry.commands | all(.apiRoute == "/worker")) and
+            (.registry.views | all(.apiRoute == "/worker")) and
             (.registry.plannedCommands == .registry.followUpCommands) and
             (.registry.plannedViews == .registry.followUpViews) and
             (.registry.followUpCommands | length) == 21 and

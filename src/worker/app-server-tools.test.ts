@@ -56,6 +56,9 @@ describe("app-server worker tools", () => {
       "compliance_operations",
       "systems_operations",
     ]);
+    expect(registry.contracts.every((contract) => contract.apiRoute === "/worker")).toBe(true);
+    expect(registry.commands.every((command) => command.apiRoute === "/worker")).toBe(true);
+    expect(registry.views.every((view) => view.apiRoute === "/worker")).toBe(true);
     expect(runtimeRoles).toEqual([
       "revenue_operations",
       "owner_chief_of_staff",
