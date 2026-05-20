@@ -78,4 +78,46 @@ describe("worker tool envelope forwarding", () => {
     );
     expect(mocks.executeWorkerView).not.toHaveBeenCalled();
   });
+
+  it("keeps app-server worker view filters under config", async () => {
+    mocks.executeWorkerView.mockResolvedValue({
+      data: {
+        worker: {
+          role: "revenue_operations",
+          id: null,
+          tenantSlug: "continuous-demo",
+        },
+        view: "approvals",
+        approvals: [],
+      },
+      error: null,
+    });
+
+    const { executeAppServerWorkerTool } = await import("./app-server-tools");
+    const result = await executeAppServerWorkerTool("continuous.worker.view", {
+      view: "approvals",
+      worker: {
+        role: "revenue_operations",
+        tenantSlug: "continuous-demo",
+      },
+      config: {
+        state: "pending",
+      },
+    });
+
+    expect(mocks.executeWorkerView).toHaveBeenCalledWith({
+      view: "approvals",
+      target: {
+        role: "revenue_operations",
+        id: undefined,
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      state: "pending",
+    });
+    expect(result).toMatchObject({
+      view: "approvals",
+      error: null,
+    });
+  });
 });

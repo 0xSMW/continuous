@@ -1,12 +1,18 @@
 import type { JsonObject } from "../db/schema";
-import { executeWorkerCommand, type WorkerTargetInput } from "./registry";
-import { assertTrustedLocalWorkerMutation, workerToolSchema } from "./tools";
+import { executeWorkerCommand, executeWorkerView, type WorkerTargetInput } from "./registry";
+import {
+  assertTrustedLocalWorkerMutation,
+  assertTrustedLocalWorkerRead,
+  workerToolSchema,
+} from "./tools";
 import {
   unexpectedEnvelopeFields,
   validateWorkerTargetEnvelope,
   workerCommandEnvelopeDescription,
   workerCommandEnvelopeFieldSet,
   workerEnvelopeFieldError,
+  workerViewEnvelopeDescription,
+  workerViewEnvelopeFieldSet,
 } from "./envelope";
 
 export type AppServerDynamicToolSpec = {
@@ -57,6 +63,43 @@ export const appServerWorkerTools = [
       },
     },
   },
+  {
+    name: "continuous.worker.view",
+    description:
+      "Read a registered Continuous worker view through the canonical worker view payload envelope.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        view: {
+          type: "string",
+          description: "Registered view name. Defaults to snapshot when omitted.",
+        },
+        worker: { $ref: "#/$defs/workerTarget" },
+        config: {
+          type: "object",
+          description: "View config. Put read filters such as state under config.",
+          properties: {
+            state: { type: "string" },
+          },
+          additionalProperties: true,
+        },
+      },
+      required: ["worker"],
+      additionalProperties: false,
+      $defs: {
+        workerTarget: {
+          type: "object",
+          properties: {
+            role: { type: "string" },
+            id: { type: "string" },
+            tenantSlug: { type: "string" },
+          },
+          required: ["role"],
+          additionalProperties: false,
+        },
+      },
+    },
+  },
 ] as const satisfies readonly AppServerDynamicToolSpec[];
 
 export const appServerWorkerToolManifest = {
@@ -66,9 +109,10 @@ export const appServerWorkerToolManifest = {
   boundary: {
     sideEffects: "registered_worker_commands_only",
     externalExecution: "blocked",
+    readTools: "continuous.worker.view",
     mutationTools: "continuous.worker.command",
     runtimeControl:
-      "App-server worker commands delegate to the same command registry used by POST /worker and bun run worker:tool. Caller supplies command, worker target, idempotencyKey, and config; operator identity is resolved from the trusted local environment and no production token is loaded.",
+      "App-server worker reads and commands delegate to the same registry used by /worker and bun run worker:tool. Caller supplies view or command, worker target, idempotencyKey when needed, and config; operator identity is resolved from the trusted local environment and no production token is loaded.",
   },
   tools: appServerWorkerTools,
 } as const;
@@ -101,6 +145,26 @@ function assertAppServerWorkerCommandEnvelope(args: JsonObject) {
       workerEnvelopeFieldError(
         "continuous.worker.command payload",
         workerCommandEnvelopeDescription,
+        unexpectedFields,
+      ),
+    );
+  }
+
+  const targetResult = validateWorkerTargetEnvelope(args.worker);
+
+  if (!targetResult.ok) {
+    throw new Error(targetResult.message);
+  }
+}
+
+function assertAppServerWorkerViewEnvelope(args: JsonObject) {
+  const unexpectedFields = unexpectedEnvelopeFields(args, workerViewEnvelopeFieldSet);
+
+  if (unexpectedFields.length > 0) {
+    throw new Error(
+      workerEnvelopeFieldError(
+        "continuous.worker.view payload",
+        workerViewEnvelopeDescription,
         unexpectedFields,
       ),
     );
@@ -146,6 +210,28 @@ export async function executeAppServerWorkerTool(name: string, args: JsonObject 
       idempotencyKey: args.idempotencyKey,
       config: args.config,
     });
+  }
+
+  if (name === "continuous.worker.view") {
+    assertAppServerWorkerViewEnvelope(args);
+
+    const view = stringValue(args.view) ?? "snapshot";
+    const operatorEmail = process.env.WORKER_OPERATOR_EMAIL ?? "owner@continuoushq.com";
+    const config = objectValue(args.config);
+
+    assertTrustedLocalWorkerRead("continuous.worker.view");
+
+    const result = await executeWorkerView({
+      view,
+      target: targetFrom(args),
+      operatorEmail,
+      state: stringValue(config.state),
+    });
+
+    return {
+      ...result.data,
+      error: result.error,
+    };
   }
 
   throw new Error(`Unknown app-server worker tool: ${name}`);

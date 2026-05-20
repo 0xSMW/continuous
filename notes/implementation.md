@@ -100,6 +100,7 @@
 | Hardened Core AI replay | `ai.infer` now stores a replay fingerprint over route selector, budget, actor/task/object/capability refs, raw input, redaction, and evaluation config, and rejects idempotency-key reuse with changed AI input |
 | Agent build path uses app-server protocol tooling plus Next.js MCP | The installed Codex app-server CLI exposes protocol generation/help commands; `.mcp.json` keeps the Next.js 16 MCP bridge for route/runtime diagnostics |
 | Added app-server worker command control | `continuous.worker.schema` exposes the registry, and `continuous.worker.command` invokes registered worker commands through the same `command`, `worker`, `idempotencyKey`, and `config` envelope without loading production tokens |
+| Added app-server worker view control | `continuous.worker.view` reads registered worker views through the same `view`, `worker`, and `config` envelope as local worker tooling, so app-server can inspect snapshots and readiness without worker-family URLs |
 | Matched local worker envelopes to `/worker` | `worker.command` and `continuous.worker.command` no longer accept top-level `operatorEmail`; trusted local execution resolves operator identity from `WORKER_OPERATOR_EMAIL` so payloads stay `command`, `worker`, `idempotencyKey`, and `config` |
 | Added registry-owned worker config schemas | `/worker`, `worker:tool`, and `continuous.worker.command` now share per-command `configSchema` checks for required fields, enums, integer bounds, and non-empty arrays before handlers run |
 | Tightened selector/config boundaries | Shared approval decisions now require `approval.subject` in the `approval` selector object instead of accepting `config.subject`, and worker view filters stay under `config` on local tool calls |
@@ -275,3 +276,9 @@ Workforce readiness now includes existing employment objects updated by
 `hire.packet.prepare`, so production deploy smoke can keep proving both hire
 packet visibility and payroll readiness rows through the generic `/worker`
 readiness view.
+
+The expansion roadmap now has a concrete Revenue completion gate and a
+post-Systems sequencing wave for Offer/Pricing, Customer Experience,
+Asset/Supply, Growth, and vertical packaged workers. `docs/worker-handoffs.md`
+also names the first Core-record handoff fixture each post-initial family must
+prove before runtime promotion.

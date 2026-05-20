@@ -3,8 +3,9 @@
 The installed Codex app-server CLI exposes protocol tooling, not a repo-owned
 daemon command. Continuous now defines repo-owned app-server worker tools:
 `continuous.worker.schema` for registry discovery and
-`continuous.worker.command` for registry-backed command execution. Use the
-Next.js 16 MCP bridge for route/runtime visibility.
+`continuous.worker.view` / `continuous.worker.command` for registry-backed read
+and command execution. Use the Next.js 16 MCP bridge for route/runtime
+visibility.
 
 ```sh
 bun run app-server:help
@@ -45,7 +46,8 @@ Useful app surfaces for worker development:
 | `/workflow?view=approvals` | Canonical operator-gated workflow approval queue |
 | `POST /workflow` | Canonical workflow command surface for starts, transitions, queued step execution, and workflow approval decisions |
 | `bun run worker:tool` | Repo-owned JSON worker toolbox for agents and local automation |
-| `bun run app-server:worker-tools continuous.worker.command` | App-server command surface backed by the same worker registry |
+| `bun run app-server:worker-tools continuous.worker.view` | App-server read surface backed by the same worker view registry |
+| `bun run app-server:worker-tools continuous.worker.command` | App-server command surface backed by the same worker command registry |
 
 `bun run worker:tool schema` exposes the registered worker commands and local
 generic tool surfaces. Agents should inspect that registry metadata before
@@ -56,7 +58,9 @@ and `idempotencyKey` payload shape through either the toolbox or `/worker`.
 
 Use the Next.js MCP bridge for Next.js diagnostics. Keep side-effecting worker
 execution on explicit operator commands, guarded `POST` routes, or the
-registry-backed app-server worker command. The Revenue Worker now records the
+registry-backed app-server worker command. Worker reads through app-server stay
+on the same `view`, `worker`, and `config` envelope as `worker.view`. The
+Revenue Worker now records the
 configured operator, active capability grant, approval request, audit event, and
 evidence before any external action can be approved. The shared approval service
 decides worker and workflow approvals by subject so new worker families do not

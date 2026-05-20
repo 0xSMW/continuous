@@ -1,24 +1,25 @@
 # App-Server Worker Tools
 
 Continuous exposes repo-owned app-server dynamic tool specs for worker
-discovery and registry-backed command execution:
+discovery plus registry-backed read and command execution:
 
 | Tool | Mode | Purpose |
 |---|---|---|
 | `continuous.worker.schema` | Read-only | Returns worker contracts, runtime roles, registered commands, follow-up commands, planned future-worker metadata, worker tool schema, and integration boundary |
+| `continuous.worker.view` | Registry-backed read | Reads registered worker views with the same `view`, `worker`, and `config` envelope used by local worker tooling and `/worker` query selectors |
 | `continuous.worker.command` | Registry-backed command | Invokes an existing worker command with the same `command`, `worker`, `idempotencyKey`, and `config` envelope used by `/worker` |
 
 The generated Codex app-server protocol defines a dynamic tool as `name`,
 `description`, and `inputSchema`. The local manifest in
-`src/worker/app-server-tools.ts` follows that shape and delegates commands to
-the shared worker command registry.
+`src/worker/app-server-tools.ts` follows that shape and delegates reads and
+commands to the shared worker registry.
 `continuous.worker.schema` exposes each registered command's `configSchema`,
 canonical `apiRoute: "/worker"`, the full `contracts` catalog, current `runtimeContracts`, and
 `followUpCommands` that are contract-defined but not executable yet. Planned
 future-worker commands also expose a non-executable `configSchema` so agents
 can inspect payload requirements before handlers exist.
-`continuous.worker.command`, `/worker`, and `worker:tool` all run through that
-same registry validation before dispatch.
+`continuous.worker.view`, `continuous.worker.command`, `/worker`, and
+`worker:tool` all run through the same registry validation before dispatch.
 The CI integration suite exercises `continuous.worker.command` on real
 Revenue `lead.read`, `run`, `lead.classify`, and `response.draft`, Owner
 `brief.generate`, Dispatch `schedule.propose`, and Finance
@@ -61,6 +62,7 @@ money movement remain blocked or dry-run.
 ```sh
 bun run app-server:worker-tools
 bun run app-server:worker-tools continuous.worker.schema
+bun run app-server:worker-tools continuous.worker.view --payload='{"view":"snapshot","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{}}'
 ```
 
 ```sh
@@ -73,9 +75,13 @@ registry without loading production tokens or executing external reads.
 
 ## Boundary
 
-The app-server command tool is intentionally narrow:
+The app-server worker tools are intentionally narrow:
 
 - Commands are resolved by the same registry as `/worker` and `worker:tool`.
+- Reads are resolved by the same view registry as `/worker?view=...` and
+  `worker.view`.
+- Read envelopes are strict. `continuous.worker.view` accepts only `view`,
+  `worker`, and `config`; read filters such as `state` belong under `config`.
 - Mutation envelopes are strict. `continuous.worker.command` accepts only
   `command`, `worker`, `idempotencyKey`, and `config`; `approvalId`, source
   records, retry limits, lead payloads, and every other operation input belong

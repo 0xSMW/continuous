@@ -30,6 +30,7 @@ describe("app-server worker tools", () => {
     expect(appServerWorkerToolManifest.tools.map((tool) => tool.name)).toEqual([
       "continuous.worker.schema",
       "continuous.worker.command",
+      "continuous.worker.view",
     ]);
     expect(
       Object.keys(
@@ -37,7 +38,7 @@ describe("app-server worker tools", () => {
           ?.inputSchema.properties ?? {},
       ),
     ).not.toContain("operatorEmail");
-    if (!("registry" in schema)) {
+    if (!("registry" in schema) || !schema.registry) {
       throw new Error("Expected schema result.");
     }
     const registry = schema.registry;
@@ -258,6 +259,53 @@ describe("app-server worker tools", () => {
     );
   });
 
+  it("requires a clean canonical view envelope before dispatch", async () => {
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.view", {
+        view: "snapshot",
+        config: {},
+      }),
+    ).rejects.toThrow("worker must be an object with role, id, and tenantSlug selectors.");
+
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.view", {
+        view: "snapshot",
+        worker: {},
+        config: {},
+      }),
+    ).rejects.toThrow("worker.role is required.");
+
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.view", {
+        view: "snapshot",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        state: "active",
+        config: {},
+      }),
+    ).rejects.toThrow(
+      "continuous.worker.view payload fields must be view, worker, and config. Move operation inputs into config. Unexpected fields: state.",
+    );
+
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.view", {
+        view: "snapshot",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+          approvalId: "approval-1",
+        },
+        config: {
+          state: "active",
+        },
+      }),
+    ).rejects.toThrow(
+      "worker target fields must be role, id, and tenantSlug. Move operation inputs into config. Unexpected fields: approvalId.",
+    );
+  });
+
   it("applies registry schemas to workforce commands through the app-server envelope", async () => {
     await expect(
       executeAppServerWorkerTool("continuous.worker.command", {
@@ -316,6 +364,24 @@ describe("app-server worker tools", () => {
         config: {},
       }),
     ).rejects.toThrow("Worker command must be run");
+  });
+
+  it("disables app-server worker reads in production unless explicitly trusted", async () => {
+    process.env.APP_ENV = "production";
+    delete process.env.CONTINUOUS_TRUSTED_LOCAL_WORKER_TOOLS;
+
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.view", {
+        view: "snapshot",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        config: {},
+      }),
+    ).rejects.toThrow(
+      "continuous.worker.view is a trusted local read surface and is disabled in production unless CONTINUOUS_TRUSTED_LOCAL_WORKER_TOOLS=true.",
+    );
   });
 
   it("forwards nested lead reader config through the registry-backed command envelope", async () => {

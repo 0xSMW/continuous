@@ -1462,14 +1462,16 @@ describe("worker tool contract", () => {
     expect(appServerWorkerTools.map((tool) => tool.name)).toEqual([
       "continuous.worker.schema",
       "continuous.worker.command",
+      "continuous.worker.view",
     ]);
     expect(appServerWorkerToolManifest.mode).toBe("registry_backed_worker_control");
     expect(appServerWorkerToolManifest.boundary.sideEffects).toBe("registered_worker_commands_only");
+    expect(appServerWorkerToolManifest.boundary.readTools).toBe("continuous.worker.view");
     expect(appServerWorkerToolManifest.boundary.mutationTools).toBe("continuous.worker.command");
 
     const result = await executeAppServerWorkerTool("continuous.worker.schema");
 
-    if (!("registry" in result)) {
+    if (!("registry" in result) || !result.registry || !result.manifest) {
       throw new Error("Expected schema result.");
     }
     expect(result.registry.commands).toEqual(registeredWorkerCommands());

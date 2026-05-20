@@ -98,9 +98,10 @@ Then open `http://localhost:3000`.
   external execution.
 Worker-specific HTTP routes and local family-specific mutation shortcuts are
 intentionally absent; new worker families extend `/worker` and generic
-`worker:tool` surfaces by registering commands, views, and structured payload fields.
-The HTTP, app-server, and local worker command surfaces reject stray top-level
-operation fields so worker-specific inputs stay under `config`.
+`worker:tool` / app-server surfaces by registering commands, views, and
+structured payload fields. The HTTP, app-server, and local worker read/command
+surfaces reject stray top-level operation fields so worker-specific inputs stay
+under `config`.
 
 ## Docs
 

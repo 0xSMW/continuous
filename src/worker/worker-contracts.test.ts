@@ -375,6 +375,12 @@ describe("future worker contracts", () => {
 
     expect(roadmap).toContain("Do not add worker-specific HTTP routes.");
     expect(roadmap).toContain("New worker families extend `/worker`");
+    expect(roadmap).toContain("Revenue Completion Gate");
+    expect(roadmap).toContain("Controlled send");
+    expect(roadmap).toContain("Phase 8+: Post-Systems Worker Waves");
+    expect(roadmap).toContain("Offer and Pricing Worker");
+    expect(roadmap).toContain("Vertical packaged workers");
+    expect(roadmap).toContain("keep operation inputs under `config`");
   });
 
   it("tracks worker expansion readiness against shared launch gates", () => {
@@ -500,6 +506,11 @@ describe("future worker contracts", () => {
       "workforce.payroll_to_compliance",
       "compliance.obligation_to_owner_review",
       "systems.sync_issue_to_worker",
+      "revenue.quote_to_pricing",
+      "customer.signal_to_experience",
+      "dispatch.asset_need_to_supply",
+      "growth.campaign_to_owner_review",
+      "systems.connection_to_packaged_worker",
     ];
 
     for (const handoff of requiredHandoffs) {
@@ -513,6 +524,11 @@ describe("future worker contracts", () => {
       "Workforce",
       "Compliance",
       "Systems",
+      "Offer and Pricing",
+      "Customer Experience",
+      "Asset and Supply",
+      "Growth",
+      "Vertical packaged workers",
     ]) {
       expect(handoffs).toContain(`| ${role} |`);
     }

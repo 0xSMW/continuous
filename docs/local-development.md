@@ -217,7 +217,12 @@ bun run worker:tool worker.command --payload='{"command":"lead.read","worker":{"
 generic tool surfaces, idempotency policy, tenant requirements, and
 external-execution status before a command is invoked.
 
-The app-server worker tool uses the same command envelope and registry:
+The app-server worker tools use the same read and command envelopes as the
+worker registry:
+
+```sh
+bun run app-server:worker-tools continuous.worker.view --payload='{"view":"snapshot","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{}}'
+```
 
 ```sh
 bun run app-server:worker-tools continuous.worker.command --payload='{"command":"lead.read","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-app-server-lead-001","config":{"source":"website_form","records":[{"sourceEventId":"form-local-app-server-001","customerName":"Acme Roof Repair","customerIntent":"roof leak inspection","serviceArea":"roofing","urgency":"high"}]}}'

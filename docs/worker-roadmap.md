@@ -36,6 +36,20 @@ work from one worker family to the next.
 | Eval harness | CI-enforced lead-to-quote cases prove classification, approval, budget, adapter receipt, and idempotency replay |
 | First controlled send | Approved external message sends through adapter with receipt and rollback/escalation evidence |
 
+### Revenue Completion Gate
+
+Revenue is the first worker proof only when these gates are all live in the
+same deploy. Until then, Revenue remains a strong Level 2 worker with external
+execution blocked.
+
+| Gate | Required evidence |
+|---|---|
+| Source coverage | Production `lead.read` runs from at least one live inbox or CRM connection created through `/core connection.upsert`, with `/core connection.health.record` proof and scheduler cursor evidence |
+| Quote decision | `lead.classify`, `response.draft`, `run`, shared approval, and `continue` all write worker run, workflow, approval, audit, evidence, budget, generated-view, and adapter records from persisted Core refs |
+| Controlled send | An approved customer message send uses a scoped managed credential, stores an adapter receipt, records rollback/escalation evidence, and rejects replay with changed input |
+| Cash handoff | Approved quote or closeout records can hand Dispatch/Ops and Finance enough Core refs to prepare schedule, invoice, AR follow-up, and payment-draft packets without private payloads |
+| Eval and deploy | CI evals plus production smoke prove no send, payment link, filing, payroll submission, or money movement happens without the matching approval and receipt gate |
+
 ## Phase 2: Owner Chief-of-Staff Worker
 
 Status: first read-only runtime slice is registered on `/worker` for
@@ -148,6 +162,26 @@ schedule readiness, and live HR/payroll credential gates.
 | Capabilities | `worker.read`, `approval.request`, `document_packet.prepare` |
 | Adapters | All platform adapters with scoped grants and rollback plans |
 | Launch gate | Sync repair proves reconciliation and least-privilege scope before mutation |
+
+## Phase 8+: Post-Systems Worker Waves
+
+Systems is the platform reliability gate, not the end of the worker catalog.
+After Systems can prove connector health, least-privilege scopes, sync repair,
+data-quality remediation, and rollback evidence, expansion should move in
+waves that compose the first seven workers instead of creating private APIs.
+
+| Wave | Worker family | First packaged outcome | Entry gate |
+|---|---|---|---|
+| 8 | Offer and Pricing Worker | Price book, quote-line, margin, discount, and change-order packets | Revenue quote evidence, margin rules, and approval policies are available as Core records |
+| 9 | Customer Experience Worker | Complaint, testimonial, review, promise, and customer-update packets | Revenue/Dispatch customer messages and customer-signal records have source evidence and approval posture |
+| 10 | Asset and Supply Worker | Inventory, vendor, purchase, maintenance, and stockout packets | Dispatch closeout, Finance cash, and Systems sync refs prove asset/vendor state without purchase mutation |
+| 11 | Growth Worker | Campaign, channel, audience, content draft, and attribution packets | Customer signal, review, budget, and source-claim evidence can block external publish until approval |
+| 12 | Vertical packaged workers | Quote-to-Cash Field, Knowledge Delivery, Inventory/Replenishment, Compliance QA, and Maintenance bundles | The package declares which existing family commands it composes, which Core refs are accepted, and which approvals block execution |
+
+Post-Systems workers must still register commands on `/worker`, keep selectors
+under `worker`, keep operation inputs under `config`, reuse shared approval and
+evidence packets, and add at least one Core-record handoff fixture before any
+runtime handler is promoted.
 
 ## Expansion Rule
 
