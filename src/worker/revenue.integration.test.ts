@@ -4476,7 +4476,6 @@ maybeDescribe("Revenue Worker integration eval", () => {
     const sourceEventId = `app-server:lead:${runId}`;
     const read = await executeAppServerWorkerTool("continuous.worker.command", {
       command: "lead.read",
-      operatorEmail: "owner@continuoushq.com",
       worker: {
         role: "revenue_operations",
         tenantSlug: "continuous-demo",
@@ -4516,7 +4515,6 @@ maybeDescribe("Revenue Worker integration eval", () => {
 
     const run = await executeAppServerWorkerTool("continuous.worker.command", {
       command: "run",
-      operatorEmail: "owner@continuoushq.com",
       worker: {
         role: "revenue_operations",
         tenantSlug: "continuous-demo",
@@ -5824,7 +5822,6 @@ maybeDescribe("Revenue Worker integration eval", () => {
         role: "owner_chief_of_staff",
         tenantSlug: "continuous-demo",
       },
-      operatorEmail: "owner@continuoushq.com",
       idempotencyKey: `ci-owner-brief-${runId}`,
       config: {
         window: {
@@ -6295,7 +6292,6 @@ maybeDescribe("Revenue Worker integration eval", () => {
         role: "dispatch_operations",
         tenantSlug: "continuous-demo",
       },
-      operatorEmail: "owner@continuoushq.com",
       idempotencyKey: `ci-dispatch-schedule-${runId}`,
       config: {
         sourceRefs: {
@@ -6999,7 +6995,6 @@ maybeDescribe("Revenue Worker integration eval", () => {
 
     const paymentDraftResponse = await executeAppServerWorkerTool("continuous.worker.command", {
       command: "payment_draft.prepare",
-      operatorEmail: "owner@continuoushq.com",
       worker: {
         role: "finance_operations",
         tenantSlug: "continuous-demo",
