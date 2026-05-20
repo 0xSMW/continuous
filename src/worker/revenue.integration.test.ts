@@ -4692,7 +4692,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
         role: "revenue_operations",
         tenantSlug: "continuous-demo",
       },
-      idempotencyKey: `ci-app-server-revenue-run-${runId}`,
+      idempotencyKey: `ci-app-server-worker-run-${runId}`,
       config: {
         intake: objectValue(selector.intake),
       },

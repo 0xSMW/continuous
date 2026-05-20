@@ -63,8 +63,8 @@ Then open `http://localhost:3000`.
   `config` payloads for side-effecting worker commands. Worker mutation
   requests accept only `command`, `worker`, `idempotencyKey`, and `config` as
   top-level command fields; `worker` is limited to role, id, and tenant
-  selectors, and operation inputs such as source records, approval ids, retry
-  limits, or lead payloads live under `config`. Revenue operations runs can first call
+  selectors, and every operation-specific input lives under `config`. Revenue
+  operations runs can first call
   `command=lead.read` with `config.source` and
   `config.records[]` to persist Core lead source snapshots, then call
   `command=lead.classify`, `command=response.draft`, or the full `command=run`

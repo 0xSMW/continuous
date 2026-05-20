@@ -79,7 +79,7 @@ bun run worker:tool worker.command <<'JSON'
 JSON
 
 bun run worker:tool worker.command <<'JSON'
-{"command":"run","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-revenue-run-001","config":{"intake":{"source":"website_form","sourceEventId":"form-001"}}}
+{"command":"run","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-worker-run-001","config":{"intake":{"source":"website_form","sourceEventId":"form-001"}}}
 JSON
 ```
 
@@ -102,7 +102,7 @@ read/write mode, and command. Keep worker-specific config in the JSON payload:
     "role": "revenue_operations",
     "tenantSlug": "continuous-demo"
   },
-  "idempotencyKey": "local-revenue-run-001",
+  "idempotencyKey": "local-worker-run-001",
   "config": {
     "intake": {
       "objectId": "lead_object_uuid",

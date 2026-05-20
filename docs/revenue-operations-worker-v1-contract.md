@@ -66,7 +66,7 @@ The command returns `result.selectors[]`; pass one selector's
     "id": null,
     "tenantSlug": "continuous-demo"
   },
-  "idempotencyKey": "rev-worker-001",
+  "idempotencyKey": "worker-command-001",
   "config": {
     "intake": {
       "source": "website_form",
@@ -83,7 +83,7 @@ The command returns `result.selectors[]`; pass one selector's
     "role": "revenue_operations",
     "tenantSlug": "continuous-demo"
   },
-  "idempotencyKey": "rev-worker-draft-001",
+  "idempotencyKey": "worker-draft-001",
   "config": {
     "intake": {
       "source": "website_form",
@@ -103,7 +103,7 @@ approval packet plus dry-run adapter receipt:
     "role": "revenue_operations",
     "tenantSlug": "continuous-demo"
   },
-  "idempotencyKey": "rev-worker-001",
+  "idempotencyKey": "worker-run-001",
   "config": {
     "intake": {
       "source": "website_form",
@@ -123,7 +123,7 @@ references in the same `config.intake` object:
     "role": "revenue_operations",
     "tenantSlug": "continuous-demo"
   },
-  "idempotencyKey": "rev-worker-row-001",
+  "idempotencyKey": "worker-run-row-001",
   "config": {
     "intake": {
       "objectId": "lead_object_uuid",
@@ -176,7 +176,7 @@ approval state; the URL does not encode the worker family or continuation type.
     "role": "revenue_operations",
     "tenantSlug": "continuous-demo"
   },
-  "idempotencyKey": "rev-worker-continue-001",
+  "idempotencyKey": "worker-continue-001",
   "config": {
     "approvalId": "approval_uuid"
   }

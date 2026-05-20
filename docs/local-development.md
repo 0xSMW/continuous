@@ -146,7 +146,7 @@ curl -X POST http://localhost:3000/worker \
   -d '{
     "command": "run",
     "worker": {"role": "revenue_operations"},
-    "idempotencyKey": "local-revenue-run-001",
+    "idempotencyKey": "local-worker-run-001",
     "config": {
       "intake": {
         "objectId": "lead_object_uuid",
@@ -177,7 +177,7 @@ bun run worker:tool worker.command <<'JSON'
 JSON
 
 bun run worker:tool worker.command <<'JSON'
-{"command":"run","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-revenue-run-002","config":{"intake":{"source":"website_form","sourceEventId":"form-local-001"}}}
+{"command":"run","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-worker-run-002","config":{"intake":{"source":"website_form","sourceEventId":"form-local-001"}}}
 JSON
 ```
 

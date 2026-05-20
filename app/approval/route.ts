@@ -328,7 +328,7 @@ export async function POST(request: Request) {
   const configResult = configObject(body.config);
   const config = configResult.ok ? configResult.value : {};
   const tenantSlug = optionalString(approval.tenantSlug);
-  const subject = parseSubject(approval.subject ?? config.subject, null);
+  const subject = parseSubject(approval.subject, null);
   const auth = authorizeControlPlaneAccess({
     enabled: env.WORKER_RUN_ENABLED,
     appEnv: env.APP_ENV,

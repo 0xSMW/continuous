@@ -59,9 +59,9 @@ describe("authorizeWorkerRun", () => {
 
 describe("normalizeIdempotencyKey", () => {
   it("accepts stable operator-provided keys", () => {
-    expect(normalizeIdempotencyKey("rev-worker:2026-05-19:001")).toEqual({
+    expect(normalizeIdempotencyKey("worker:2026-05-19:001")).toEqual({
       ok: true,
-      key: "rev-worker:2026-05-19:001",
+      key: "worker:2026-05-19:001",
     });
   });
 

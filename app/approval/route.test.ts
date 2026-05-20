@@ -547,6 +547,38 @@ describe("/approval route", () => {
     expect(mocks.decideApproval).not.toHaveBeenCalled();
   });
 
+  it("rejects approval decisions that hide the subject in config", async () => {
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/approval", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "approval.decide",
+          approval: {
+            id: "77777777-7777-4777-8777-000000000001",
+            tenantSlug: "continuous-demo",
+          },
+          config: {
+            subject: "worker",
+            action: "approved",
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toEqual({
+      code: "approval_subject_required",
+      message: "approval.subject is required for approval.decide.",
+    });
+    expect(mocks.decideApproval).not.toHaveBeenCalled();
+  });
+
   it("rejects unsupported decision subjects before dispatch", async () => {
     const { POST } = await import("./route");
     const response = await POST(

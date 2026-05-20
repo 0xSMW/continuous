@@ -685,7 +685,7 @@ describe("worker tool contract", () => {
           role: "revenue_operations",
           tenantSlug: "continuous-demo",
         },
-        idempotencyKey: "revenue-run-empty-config-001",
+        idempotencyKey: "worker-run-empty-config-001",
         config: {},
       }),
     ).rejects.toThrow("config.intake, leadPacket or lead is required for run.");
