@@ -1390,6 +1390,102 @@ jobs:
             >/dev/null
 
           CORE_DECISION_ID="$(echo "$CORE_DECISION_RESPONSE" | /usr/bin/jq -r '.data.result.decisionId')"
+          CORE_CONNECTION_ID="$(psql_db -Atc "select c.id from connections c inner join tenants t on t.id = c.tenant_id where t.slug = 'continuous-demo' order by c.created_at limit 1;")"
+          CORE_RULE_PACK_ID="$(psql_db -Atc "select id from rule_packs where active = true order by created_at limit 1;")"
+
+          if [ -z "$CORE_CONNECTION_ID" ] || [ -z "$CORE_RULE_PACK_ID" ]; then
+            echo "Missing connection or rule pack for Core adapter/rule smoke." >&2
+            exit 1
+          fi
+
+          CORE_ADAPTER_INTENT_KEY="deploy-core-adapter-intent-$RUN_ID"
+          CORE_ADAPTER_INTENT_PAYLOAD="$(
+            /usr/bin/jq -nc \
+              --arg key "$CORE_ADAPTER_INTENT_KEY" \
+              --arg connectionId "$CORE_CONNECTION_ID" \
+              --arg taskId "$CORE_TASK_ID" \
+              --arg eventId "$CORE_INGESTED_EVENT_ID" \
+              --arg capabilityId "$CORE_CAPABILITY_ID" \
+              --arg objectId "$CORE_OBJECT_ID" '{
+                command: "adapter.intent.record",
+                core: {tenantSlug: "continuous-demo"},
+                idempotencyKey: $key,
+                config: {
+                  connectionId: $connectionId,
+                  taskId: $taskId,
+                  eventId: $eventId,
+                  capabilityId: $capabilityId,
+                  operation: "draft_agency_response",
+                  mode: "dry_run",
+                  maxAttempts: 2,
+                  request: {
+                    objectId: $objectId,
+                    externalSend: false
+                  },
+                  data: {
+                    source: "deploy_smoke"
+                  }
+                }
+              }'
+          )"
+          CORE_ADAPTER_INTENT_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/core \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$CORE_ADAPTER_INTENT_PAYLOAD"
+          )"
+
+          echo "$CORE_ADAPTER_INTENT_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:.data.result}'
+          echo "$CORE_ADAPTER_INTENT_RESPONSE" | /usr/bin/jq -e \
+            '.error == null and .data.command == "adapter.intent.record" and .data.result.created == true and (.data.result.adapterRunId | length > 0) and (.data.result.adapterActionId | length > 0) and .data.result.externalExecution == "blocked"' \
+            >/dev/null
+
+          CORE_ADAPTER_RUN_ID="$(echo "$CORE_ADAPTER_INTENT_RESPONSE" | /usr/bin/jq -r '.data.result.adapterRunId')"
+          CORE_ADAPTER_ACTION_ID="$(echo "$CORE_ADAPTER_INTENT_RESPONSE" | /usr/bin/jq -r '.data.result.adapterActionId')"
+          CORE_RULE_CHANGE_KEY="deploy-core-rule-change-$RUN_ID"
+          CORE_RULE_CHANGE_PAYLOAD="$(
+            /usr/bin/jq -nc \
+              --arg key "$CORE_RULE_CHANGE_KEY" \
+              --arg rulePackId "$CORE_RULE_PACK_ID" \
+              --arg taskId "$CORE_TASK_ID" \
+              --arg capabilityId "$CORE_CAPABILITY_ID" \
+              --arg objectId "$CORE_OBJECT_ID" '{
+                command: "rule.change.record",
+                core: {tenantSlug: "continuous-demo"},
+                idempotencyKey: $key,
+                config: {
+                  rulePackId: $rulePackId,
+                  taskId: $taskId,
+                  capabilityId: $capabilityId,
+                  ruleKey: "deploy_smoke.notice_response_window",
+                  changeType: "operator_policy_update",
+                  title: "Deploy smoke notice response rule change",
+                  state: "proposed",
+                  decision: "owner_review_required",
+                  rationale: "Deploy smoke rule change; no rule pack mutation.",
+                  before: {responseWindowDays: 14},
+                  after: {responseWindowDays: 10},
+                  impact: {objectIds: [$objectId]},
+                  data: {source: "deploy_smoke"}
+                }
+              }'
+          )"
+          CORE_RULE_CHANGE_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/core \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$CORE_RULE_CHANGE_PAYLOAD"
+          )"
+
+          echo "$CORE_RULE_CHANGE_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:.data.result}'
+          echo "$CORE_RULE_CHANGE_RESPONSE" | /usr/bin/jq -e \
+            '.error == null and .data.command == "rule.change.record" and .data.result.created == true and (.data.result.objectId | length > 0) and (.data.result.decisionId | length > 0) and .data.result.externalExecution == "blocked"' \
+            >/dev/null
+
+          CORE_RULE_CHANGE_OBJECT_ID="$(echo "$CORE_RULE_CHANGE_RESPONSE" | /usr/bin/jq -r '.data.result.objectId')"
+          CORE_RULE_CHANGE_DECISION_ID="$(echo "$CORE_RULE_CHANGE_RESPONSE" | /usr/bin/jq -r '.data.result.decisionId')"
           psql_db -At <<SQL
           select 'core_object' as kind, type, state, external_id
           from objects where id = '$CORE_OBJECT_ID'::uuid;
@@ -1407,6 +1503,14 @@ jobs:
           from documents where id = '$CORE_PACKET_DOCUMENT_ID'::uuid;
           select 'core_decision' as kind, kind, state, decision
           from decisions where id = '$CORE_DECISION_ID'::uuid;
+          select 'core_adapter_run' as kind, mode, operation, reconciliation_state
+          from adapter_runs where id = '$CORE_ADAPTER_RUN_ID'::uuid;
+          select 'core_adapter_action' as kind, mode, operation, request->>'externalExecution'
+          from adapter_actions where id = '$CORE_ADAPTER_ACTION_ID'::uuid;
+          select 'core_rule_change' as kind, type, state, data->>'ruleKey'
+          from objects where id = '$CORE_RULE_CHANGE_OBJECT_ID'::uuid;
+          select 'core_rule_change_decision' as kind, kind, decision
+          from decisions where id = '$CORE_RULE_CHANGE_DECISION_ID'::uuid;
           SQL
           REMOTE
 

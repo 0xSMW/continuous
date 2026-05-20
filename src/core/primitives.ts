@@ -3,6 +3,8 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { db as defaultDb } from "../db/client";
 import {
   adapters,
+  adapterActions,
+  adapterRuns,
   auditEvents,
   capabilities,
   connections,
@@ -16,6 +18,7 @@ import {
   objects,
   objectLinks,
   objectVersions,
+  rulePacks,
   tasks,
   uiContracts,
   workflowRuns,
@@ -55,6 +58,8 @@ const decisionSource = "continuous.core.decisions";
 const objectLinkSource = "continuous.core.object_links";
 const customerSignalSource = "continuous.core.customer_signals";
 const viewSource = "continuous.core.views";
+const adapterIntentSource = "continuous.core.adapter_intents";
+const ruleChangeSource = "continuous.core.rule_changes";
 const customerSignalTypes = new Set([
   "satisfaction_signal",
   "feedback_item",
@@ -243,6 +248,46 @@ export type CoreViewPublishInput = {
   db?: Database;
 };
 
+export type CoreAdapterIntentRecordInput = {
+  operatorEmail: string;
+  idempotencyKey: string;
+  tenantSlug?: string;
+  connectionId: string;
+  operation: string;
+  mode?: string;
+  taskId?: string;
+  eventId?: string;
+  capabilityId?: string;
+  request?: JsonObject;
+  data?: JsonObject;
+  maxAttempts?: unknown;
+  db?: Database;
+};
+
+export type CoreRuleChangeRecordInput = {
+  operatorEmail: string;
+  idempotencyKey: string;
+  tenantSlug?: string;
+  rulePackId?: string;
+  ruleKey: string;
+  changeType: string;
+  title: string;
+  summary?: string;
+  state?: string;
+  decision?: string;
+  rationale?: string;
+  taskId?: string;
+  workflowRunId?: string;
+  capabilityId?: string;
+  sourceRefs?: JsonObject;
+  before?: JsonObject;
+  after?: JsonObject;
+  impact?: JsonObject;
+  data?: JsonObject;
+  effectiveAt?: string;
+  db?: Database;
+};
+
 function cleanString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
@@ -393,6 +438,29 @@ function parseRisk(value: string | undefined) {
     "config.sensitivity must be low, medium, high, or critical.",
     400,
   );
+}
+
+function boundedInteger(value: unknown, field: string, fallback: number, min: number, max: number) {
+  if (value === undefined || value === null || value === "") {
+    return fallback;
+  }
+
+  const numericValue =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && /^\d+$/.test(value.trim())
+        ? Number(value.trim())
+        : Number.NaN;
+
+  if (!Number.isInteger(numericValue) || numericValue < min || numericValue > max) {
+    throw new PlatformUnavailableError(
+      "core_integer_invalid",
+      `${field} must be an integer between ${min} and ${max}.`,
+      400,
+    );
+  }
+
+  return numericValue;
 }
 
 function parseTaskState(value: string | undefined) {
@@ -548,6 +616,48 @@ async function assertConnection(tx: QueryClient, tenantId: string, connectionId?
     throw new PlatformUnavailableError(
       "core_connection_not_found",
       "config.connectionId does not match a connection in this tenant.",
+      404,
+    );
+  }
+}
+
+async function loadConnection(tx: QueryClient, tenantId: string, connectionId: string) {
+  const [connection] = await tx
+    .select({
+      id: connections.id,
+      adapterId: connections.adapterId,
+      name: connections.name,
+    })
+    .from(connections)
+    .where(and(eq(connections.tenantId, tenantId), eq(connections.id, connectionId)))
+    .limit(1);
+
+  if (!connection) {
+    throw new PlatformUnavailableError(
+      "core_connection_not_found",
+      "config.connectionId does not match a connection in this tenant.",
+      404,
+    );
+  }
+
+  return connection;
+}
+
+async function assertRulePack(tx: QueryClient, rulePackId?: string) {
+  if (!rulePackId) {
+    return;
+  }
+
+  const [rulePack] = await tx
+    .select({ id: rulePacks.id })
+    .from(rulePacks)
+    .where(eq(rulePacks.id, rulePackId))
+    .limit(1);
+
+  if (!rulePack) {
+    throw new PlatformUnavailableError(
+      "core_rule_pack_not_found",
+      "config.rulePackId does not match a rule pack.",
       404,
     );
   }
@@ -1537,6 +1647,451 @@ export async function recordCoreDecision(input: CoreDecisionRecordInput) {
       decisionId: decision.id,
       eventId: event.id,
       auditEventId: audit.id,
+    };
+  });
+}
+
+export async function recordAdapterIntent(input: CoreAdapterIntentRecordInput) {
+  const db = input.db ?? defaultDb;
+  const connectionId = requiredUuid(input.connectionId, "config.connectionId");
+  const operation = requiredStringMax(input.operation, "config.operation", 140);
+  const mode = cleanString(input.mode) ?? "dry_run";
+  const taskId = optionalUuid(input.taskId, "config.taskId");
+  const eventId = optionalUuid(input.eventId, "config.eventId");
+  const capabilityId = optionalUuid(input.capabilityId, "config.capabilityId");
+  const maxAttempts = boundedInteger(input.maxAttempts, "config.maxAttempts", 1, 1, 10);
+  const operator = await loadOperatorContext({
+    db,
+    operatorEmail: input.operatorEmail,
+    tenantSlug: input.tenantSlug,
+  });
+
+  if (mode !== "dry_run") {
+    throw new PlatformUnavailableError(
+      "core_adapter_intent_mode_blocked",
+      "Adapter intents must use config.mode=dry_run until external execution is enabled.",
+      400,
+    );
+  }
+
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${operator.tenantId}), hashtext(${`${adapterIntentSource}:${input.idempotencyKey}`}))`,
+    );
+
+    const [existingAudit] = await tx
+      .select({
+        auditEventId: auditEvents.id,
+        targetId: auditEvents.targetId,
+        eventId: auditEvents.eventId,
+        data: auditEvents.data,
+      })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.tenantId, operator.tenantId),
+          eq(auditEvents.source, adapterIntentSource),
+          eq(auditEvents.idempotencyKey, `${input.idempotencyKey}:adapter_intent_recorded`),
+          eq(auditEvents.targetType, "adapter_action"),
+        ),
+      )
+      .limit(1);
+
+    if (existingAudit?.targetId) {
+      return {
+        created: false,
+        adapterRunId: cleanString(existingAudit.data.adapterRunId) ?? null,
+        adapterActionId: existingAudit.targetId,
+        eventId: existingAudit.eventId,
+        auditEventId: existingAudit.auditEventId,
+        evidenceId: await evidenceForAudit(tx, operator.tenantId, existingAudit.auditEventId),
+        externalExecution: "blocked",
+      };
+    }
+
+    await Promise.all([
+      assertTask(tx, operator.tenantId, taskId),
+      assertEvent(tx, operator.tenantId, eventId),
+      assertCapability(tx, capabilityId),
+    ]);
+
+    const connection = await loadConnection(tx, operator.tenantId, connectionId);
+    const now = new Date();
+    const request = {
+      ...jsonObject(input.request),
+      operation,
+      mode,
+      dryRun: true,
+      externalExecution: "blocked",
+      externalMutation: false,
+    };
+    const intentData = {
+      ...jsonObject(input.data),
+      connectionId,
+      adapterId: connection.adapterId,
+      operation,
+      mode,
+      taskId: taskId ?? null,
+      eventId: eventId ?? null,
+      capabilityId: capabilityId ?? null,
+      requestedByUserId: operator.userId,
+      externalExecution: "blocked",
+    };
+    const [intentEvent] = await tx
+      .insert(events)
+      .values({
+        tenantId: operator.tenantId,
+        type: "adapter.intent.recorded",
+        source: adapterIntentSource,
+        actorType: "user",
+        actorId: operator.userId,
+        actorRef: operator.actorRef,
+        taskId,
+        capabilityId,
+        adapterId: connection.adapterId,
+        connectionId,
+        idempotencyKey: `${input.idempotencyKey}:adapter_intent_recorded`,
+        data: {
+          ...intentData,
+          request,
+          originalEventId: eventId ?? null,
+        },
+        occurredAt: now,
+      })
+      .returning({ id: events.id });
+    const [adapterRun] = await tx
+      .insert(adapterRuns)
+      .values({
+        tenantId: operator.tenantId,
+        connectionId,
+        eventId: intentEvent.id,
+        mode,
+        operation,
+        idempotencyKey: input.idempotencyKey,
+        state: "queued",
+        attempt: 1,
+        maxAttempts,
+        reconciliationState: "pending",
+        readCount: 0,
+        writeCount: 0,
+        receipt: {
+          mode,
+          externalExecution: "blocked",
+          externalMutation: false,
+        },
+        data: intentData,
+      })
+      .returning({ id: adapterRuns.id });
+    const [adapterAction] = await tx
+      .insert(adapterActions)
+      .values({
+        tenantId: operator.tenantId,
+        connectionId,
+        adapterRunId: adapterRun.id,
+        capabilityId,
+        taskId,
+        eventId: intentEvent.id,
+        idempotencyKey: input.idempotencyKey,
+        state: "queued",
+        mode,
+        operation,
+        attempt: 1,
+        maxAttempts,
+        reconciliationState: "pending",
+        request,
+        response: {
+          status: "not_executed",
+          externalExecution: "blocked",
+        },
+        receipt: {
+          mode,
+          adapterRunId: adapterRun.id,
+          externalExecution: "blocked",
+          externalMutation: false,
+        },
+      })
+      .returning({ id: adapterActions.id });
+    const [audit] = await tx
+      .insert(auditEvents)
+      .values({
+        tenantId: operator.tenantId,
+        type: "adapter.intent.recorded",
+        source: adapterIntentSource,
+        actorType: "user",
+        actorId: operator.userId,
+        actorRef: operator.actorRef,
+        targetType: "adapter_action",
+        targetId: adapterAction.id,
+        taskId,
+        eventId: intentEvent.id,
+        capabilityId,
+        risk: "medium",
+        idempotencyKey: `${input.idempotencyKey}:adapter_intent_recorded`,
+        data: {
+          adapterRunId: adapterRun.id,
+          adapterActionId: adapterAction.id,
+          connectionId,
+          adapterId: connection.adapterId,
+          operation,
+          mode,
+          externalExecution: "blocked",
+        },
+      })
+      .returning({ id: auditEvents.id });
+    const [intentEvidence] = await tx
+      .insert(evidence)
+      .values({
+        tenantId: operator.tenantId,
+        kind: "trace",
+        name: `Adapter intent recorded: ${operation}`,
+        taskId,
+        eventId: intentEvent.id,
+        capabilityId,
+        actorType: "user",
+        actorId: operator.userId,
+        hash: `${adapterIntentSource}:${adapterAction.id}:recorded:${now.toISOString()}`,
+        data: {
+          adapterRunId: adapterRun.id,
+          adapterActionId: adapterAction.id,
+          auditEventId: audit.id,
+          connectionId,
+          adapterId: connection.adapterId,
+          request,
+          externalExecution: "blocked",
+        },
+      })
+      .returning({ id: evidence.id });
+
+    return {
+      created: true,
+      adapterRunId: adapterRun.id,
+      adapterActionId: adapterAction.id,
+      eventId: intentEvent.id,
+      auditEventId: audit.id,
+      evidenceId: intentEvidence.id,
+      externalExecution: "blocked",
+    };
+  });
+}
+
+export async function recordRuleChange(input: CoreRuleChangeRecordInput) {
+  const db = input.db ?? defaultDb;
+  const rulePackId = optionalUuid(input.rulePackId, "config.rulePackId");
+  const ruleKey = requiredStringMax(input.ruleKey, "config.ruleKey", 180);
+  const changeType = requiredStringMax(input.changeType, "config.changeType", 80);
+  const title = requiredString(input.title, "config.title");
+  const state = cleanString(input.state) ?? "proposed";
+  const decisionValue = cleanString(input.decision) ?? "rule_change_proposed";
+  const taskId = optionalUuid(input.taskId, "config.taskId");
+  const workflowRunId = optionalUuid(input.workflowRunId, "config.workflowRunId");
+  const capabilityId = optionalUuid(input.capabilityId, "config.capabilityId");
+  const effectiveAt = optionalDate(input.effectiveAt, "config.effectiveAt");
+  const operator = await loadOperatorContext({
+    db,
+    operatorEmail: input.operatorEmail,
+    tenantSlug: input.tenantSlug,
+  });
+
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${operator.tenantId}), hashtext(${`${ruleChangeSource}:${input.idempotencyKey}`}))`,
+    );
+
+    const [existingAudit] = await tx
+      .select({
+        auditEventId: auditEvents.id,
+        targetId: auditEvents.targetId,
+        eventId: auditEvents.eventId,
+        data: auditEvents.data,
+      })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.tenantId, operator.tenantId),
+          eq(auditEvents.source, ruleChangeSource),
+          eq(auditEvents.idempotencyKey, `${input.idempotencyKey}:rule_change_recorded`),
+          eq(auditEvents.targetType, "object"),
+        ),
+      )
+      .limit(1);
+
+    if (existingAudit?.targetId) {
+      return {
+        created: false,
+        objectId: existingAudit.targetId,
+        objectVersionId: cleanString(existingAudit.data.objectVersionId) ?? null,
+        version: typeof existingAudit.data.version === "number" ? existingAudit.data.version : null,
+        decisionId: cleanString(existingAudit.data.decisionId) ?? null,
+        eventId: existingAudit.eventId,
+        auditEventId: existingAudit.auditEventId,
+        evidenceId: await evidenceForAudit(tx, operator.tenantId, existingAudit.auditEventId),
+        externalExecution: "blocked",
+      };
+    }
+
+    await Promise.all([
+      assertRulePack(tx, rulePackId),
+      assertTask(tx, operator.tenantId, taskId),
+      assertWorkflowRun(tx, operator.tenantId, workflowRunId),
+      assertCapability(tx, capabilityId),
+    ]);
+
+    const now = new Date();
+    const changeData = {
+      ...jsonObject(input.data),
+      rulePackId: rulePackId ?? null,
+      ruleKey,
+      changeType,
+      title,
+      summary: cleanString(input.summary) ?? "",
+      state,
+      sourceRefs: jsonObject(input.sourceRefs),
+      before: jsonObject(input.before),
+      after: jsonObject(input.after),
+      impact: jsonObject(input.impact),
+      taskId: taskId ?? null,
+      workflowRunId: workflowRunId ?? null,
+      capabilityId: capabilityId ?? null,
+      effectiveAt: effectiveAt?.toISOString() ?? null,
+      externalExecution: "blocked",
+    };
+    const [object] = await tx
+      .insert(objects)
+      .values({
+        tenantId: operator.tenantId,
+        type: "rule_change",
+        name: title,
+        state,
+        source: ruleChangeSource,
+        externalId: `${rulePackId ?? "unscoped"}:${ruleKey}:${changeType}:${input.idempotencyKey}`,
+        data: changeData,
+        createdByUserId: operator.userId,
+        effectiveAt,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning();
+    const versionNumber = await nextObjectVersion(tx, object.id);
+    const [objectVersion] = await tx
+      .insert(objectVersions)
+      .values({
+        tenantId: operator.tenantId,
+        objectId: object.id,
+        version: versionNumber,
+        data: changeData,
+        changedByType: "user",
+        changedById: operator.userId,
+        reason: cleanString(input.rationale) ?? "Rule change recorded",
+      })
+      .returning({ id: objectVersions.id, version: objectVersions.version });
+    const [event] = await tx
+      .insert(events)
+      .values({
+        tenantId: operator.tenantId,
+        type: "rule.change.recorded",
+        source: ruleChangeSource,
+        actorType: "user",
+        actorId: operator.userId,
+        actorRef: operator.actorRef,
+        objectId: object.id,
+        taskId,
+        capabilityId,
+        idempotencyKey: `${input.idempotencyKey}:rule_change_recorded`,
+        data: {
+          ...changeData,
+          objectId: object.id,
+          objectVersionId: objectVersion.id,
+          version: objectVersion.version,
+        },
+        occurredAt: now,
+      })
+      .returning({ id: events.id });
+    const [decision] = await tx
+      .insert(decisions)
+      .values({
+        tenantId: operator.tenantId,
+        taskId,
+        eventId: event.id,
+        workflowRunId,
+        capabilityId,
+        actorType: "user",
+        actorId: operator.userId,
+        kind: "rule_change",
+        state,
+        decision: decisionValue,
+        rationale: cleanString(input.rationale) ?? "",
+        data: {
+          ...changeData,
+          objectId: object.id,
+          objectVersionId: objectVersion.id,
+        },
+      })
+      .returning({ id: decisions.id });
+    const [audit] = await tx
+      .insert(auditEvents)
+      .values({
+        tenantId: operator.tenantId,
+        type: "rule.change.recorded",
+        source: ruleChangeSource,
+        actorType: "user",
+        actorId: operator.userId,
+        actorRef: operator.actorRef,
+        targetType: "object",
+        targetId: object.id,
+        taskId,
+        eventId: event.id,
+        objectId: object.id,
+        capabilityId,
+        risk: "medium",
+        idempotencyKey: `${input.idempotencyKey}:rule_change_recorded`,
+        data: {
+          objectId: object.id,
+          objectVersionId: objectVersion.id,
+          version: objectVersion.version,
+          decisionId: decision.id,
+          rulePackId: rulePackId ?? null,
+          ruleKey,
+          changeType,
+          externalExecution: "blocked",
+        },
+      })
+      .returning({ id: auditEvents.id });
+    const [ruleEvidence] = await tx
+      .insert(evidence)
+      .values({
+        tenantId: operator.tenantId,
+        kind: "trace",
+        name: `Rule change recorded: ${title}`,
+        objectId: object.id,
+        taskId,
+        eventId: event.id,
+        capabilityId,
+        actorType: "user",
+        actorId: operator.userId,
+        hash: `${ruleChangeSource}:${object.id}:recorded:${now.toISOString()}`,
+        data: {
+          auditEventId: audit.id,
+          objectId: object.id,
+          objectVersionId: objectVersion.id,
+          decisionId: decision.id,
+          rulePackId: rulePackId ?? null,
+          ruleKey,
+          changeType,
+          externalExecution: "blocked",
+        },
+      })
+      .returning({ id: evidence.id });
+
+    return {
+      created: true,
+      objectId: object.id,
+      objectVersionId: objectVersion.id,
+      version: objectVersion.version,
+      decisionId: decision.id,
+      eventId: event.id,
+      auditEventId: audit.id,
+      evidenceId: ruleEvidence.id,
+      externalExecution: "blocked",
     };
   });
 }

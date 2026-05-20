@@ -15,8 +15,10 @@ import {
   linkCoreObjects,
   prepareCorePacket,
   publishCoreView,
+  recordAdapterIntent,
   recordCustomerSignal,
   recordCoreDecision,
+  recordRuleChange,
   upsertCoreObject,
 } from "../core/primitives";
 import { preparePayrollPreviewPacket, recordPayrollPreview } from "../core/payroll";
@@ -50,6 +52,7 @@ import {
   payrollRuns,
   payrollStatements,
   payrollTraces,
+  rulePacks,
   tasks,
   generatedViews,
   usageEvents,
@@ -1016,6 +1019,58 @@ maybeDescribe("Revenue Worker integration eval", () => {
       },
       db,
     });
+    const [connection] = await db.select({ id: connections.id }).from(connections).limit(1);
+    const [rulePack] = await db.select({ id: rulePacks.id }).from(rulePacks).limit(1);
+
+    expect(connection?.id).toBeTruthy();
+    expect(rulePack?.id).toBeTruthy();
+
+    const adapterIntentResult = await recordAdapterIntent({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-core-adapter-intent-${runId}`,
+      connectionId: connection?.id ?? "",
+      operation: "draft_agency_response",
+      mode: "dry_run",
+      eventId: eventResult.eventId,
+      request: {
+        objectId: objectResult.objectId,
+        externalSend: false,
+      },
+      data: {
+        source: "core_primitive_ci",
+      },
+      maxAttempts: 2,
+      db,
+    });
+    const ruleChangeResult = await recordRuleChange({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-core-rule-change-${runId}`,
+      rulePackId: rulePack?.id,
+      ruleKey: "agency_notice.response_window",
+      changeType: "operator_policy_update",
+      title: "Agency notice response window update",
+      state: "proposed",
+      decision: "owner_review_required",
+      rationale: "Rule changes need owner review before compliance automation changes.",
+      sourceRefs: {
+        source: "ci",
+      },
+      before: {
+        responseWindowDays: 14,
+      },
+      after: {
+        responseWindowDays: 10,
+      },
+      impact: {
+        objects: [objectResult.objectId],
+      },
+      data: {
+        externalExecution: "blocked",
+      },
+      db,
+    });
 
     const [object] = await db.select().from(objects).where(eq(objects.id, objectResult.objectId)).limit(1);
     const [version] = await db
@@ -1044,6 +1099,31 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .from(evidencePackets)
       .where(eq(evidencePackets.id, packetResult.packetId))
       .limit(1);
+    const [adapterRun] = await db
+      .select()
+      .from(adapterRuns)
+      .where(eq(adapterRuns.id, adapterIntentResult.adapterRunId ?? ""))
+      .limit(1);
+    const [adapterAction] = await db
+      .select()
+      .from(adapterActions)
+      .where(eq(adapterActions.id, adapterIntentResult.adapterActionId))
+      .limit(1);
+    const [ruleChangeObject] = await db
+      .select()
+      .from(objects)
+      .where(eq(objects.id, ruleChangeResult.objectId))
+      .limit(1);
+    const [ruleChangeDecision] = await db
+      .select()
+      .from(decisions)
+      .where(eq(decisions.id, ruleChangeResult.decisionId ?? ""))
+      .limit(1);
+    const [ruleChangeEvidence] = await db
+      .select()
+      .from(evidence)
+      .where(eq(evidence.id, ruleChangeResult.evidenceId ?? ""))
+      .limit(1);
     const [auditCount] = await db
       .select({ value: count() })
       .from(auditEvents)
@@ -1055,6 +1135,8 @@ maybeDescribe("Revenue Worker integration eval", () => {
           documentResult.auditEventId,
           decisionResult.auditEventId,
           packetResult.auditEventId,
+          adapterIntentResult.auditEventId,
+          ruleChangeResult.auditEventId,
         ]),
       );
     const replay = await attachCoreEvidence({
@@ -1076,7 +1158,17 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(packet?.documentId).toBe(packetResult.documentId);
     expect(packet?.state).toBe("review_ready");
     expect(objectValue(packet?.evidenceIds).ids).toEqual([evidenceResult.evidenceId]);
-    expect(auditCount.value).toBe(6);
+    expect(adapterRun?.operation).toBe("draft_agency_response");
+    expect(adapterRun?.mode).toBe("dry_run");
+    expect(adapterRun?.reconciliationState).toBe("pending");
+    expect(adapterAction?.operation).toBe("draft_agency_response");
+    expect(objectValue(adapterAction?.request).externalExecution).toBe("blocked");
+    expect(ruleChangeObject?.type).toBe("rule_change");
+    expect(ruleChangeObject?.state).toBe("proposed");
+    expect(ruleChangeDecision?.decision).toBe("owner_review_required");
+    expect(ruleChangeEvidence?.kind).toBe("trace");
+    expect(objectValue(ruleChangeEvidence?.data).decisionId).toBe(ruleChangeResult.decisionId);
+    expect(auditCount.value).toBe(8);
     expect(replay.created).toBe(false);
     expect(replay.evidenceId).toBe(evidenceResult.evidenceId);
 
@@ -1091,6 +1183,29 @@ maybeDescribe("Revenue Worker integration eval", () => {
 
     expect(packetReplay.prepared).toBe(false);
     expect(packetReplay.packetId).toBe(packetResult.packetId);
+
+    const adapterIntentReplay = await recordAdapterIntent({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-core-adapter-intent-${runId}`,
+      connectionId: connection?.id ?? "",
+      operation: "different_operation",
+      db,
+    });
+    const ruleChangeReplay = await recordRuleChange({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-core-rule-change-${runId}`,
+      ruleKey: "different.rule",
+      changeType: "different_change",
+      title: "Replay should return the first rule change",
+      db,
+    });
+
+    expect(adapterIntentReplay.created).toBe(false);
+    expect(adapterIntentReplay.adapterActionId).toBe(adapterIntentResult.adapterActionId);
+    expect(ruleChangeReplay.created).toBe(false);
+    expect(ruleChangeReplay.objectId).toBe(ruleChangeResult.objectId);
   }, 120_000);
 
   it("persists headless core object links and generated views", async () => {

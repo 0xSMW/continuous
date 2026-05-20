@@ -42,9 +42,9 @@ Then open `http://localhost:3000`.
   `task.transition`, `object.upsert`, `object.link`, `event.ingest`,
   `evidence.attach`, `document.create`, `packet.prepare`,
   `document.packet.prepare`, `decision.record`,
-  `approval.request`, `capability.grant`, `budget.reserve`,
-  `budget.charge`, `budget.release`, `view.publish`, and
-  `customer_signal.record`, `payroll.preview.record`, and
+  `approval.request`, `adapter.intent.record`, `rule.change.record`,
+  `capability.grant`, `budget.reserve`, `budget.charge`, `budget.release`,
+  `view.publish`, `customer_signal.record`, `payroll.preview.record`, and
   `payroll.preview.packet.prepare`. Core mutation requests accept only
   `command`, `core`, `idempotencyKey`, and `config` as top-level fields.
 - `/approval` is the shared approval control-plane API. Use

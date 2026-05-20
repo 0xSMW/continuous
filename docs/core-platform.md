@@ -179,7 +179,7 @@ policy-bound:
 
 | Surface | Behavior |
 |---|---|
-| `POST /core` | Canonical Core command surface for `task.create`, `task.transition`, `object.upsert`, `object.link`, `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`, `document.packet.prepare`, `decision.record`, `approval.request`, `capability.grant`, `budget.reserve`, `budget.charge`, `budget.release`, `view.publish`, `customer_signal.record`, `payroll.preview.record`, and `payroll.preview.packet.prepare`; tenant selection and command fields live in structured `core` and `config` payloads, and no other top-level command fields are accepted |
+| `POST /core` | Canonical Core command surface for `task.create`, `task.transition`, `object.upsert`, `object.link`, `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`, `document.packet.prepare`, `decision.record`, `approval.request`, `adapter.intent.record`, `rule.change.record`, `capability.grant`, `budget.reserve`, `budget.charge`, `budget.release`, `view.publish`, `customer_signal.record`, `payroll.preview.record`, and `payroll.preview.packet.prepare`; tenant selection and command fields live in structured `core` and `config` payloads, and no other top-level command fields are accepted |
 | `/worker?view=snapshot&role=revenue_operations` | Operator-only snapshot of worker state, active tasks, controls, budget usage, and recent events |
 | `/worker?view=approvals&role=revenue_operations` | Operator-only approval queue for worker decisions |
 | `POST /worker` | Canonical worker command surface for `lead.read`, `run`, `continue`, `approval.decide`, `adapters.reconcile`, and `adapters.retry`; worker role, tenant selection, idempotency, and operation config live in structured payload fields |
@@ -218,7 +218,11 @@ object versions, links objects into a navigable business graph, ingests events,
 attaches evidence, creates document packets, records decisions, requests
 platform approvals, prepares durable evidence packets, grants scoped capabilities, moves AI budget through
 reserve/charge/release ledger states, and publishes renderer-neutral generated
-views. `customer_signal.record` adds satisfaction, feedback, complaint,
+views. `adapter.intent.record` writes dry-run adapter run/action intent rows
+with event, audit, and trace proof while external mutation remains blocked;
+`rule.change.record` writes a rule-change object, object version, decision,
+event, audit, and trace evidence before rule packs or obligations are changed.
+`customer_signal.record` adds satisfaction, feedback, complaint,
 testimonial, and review records as typed customer signals. `payroll.preview.record`
 writes pay statements, payroll lines, liabilities, calculation traces, audit
 events, and trace evidence without submission or money movement.

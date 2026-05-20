@@ -12,10 +12,12 @@ const mocks = vi.hoisted(() => ({
   linkCoreObjects: vi.fn(),
   preparePayrollPreviewPacket: vi.fn(),
   recordPayrollPreview: vi.fn(),
+  recordAdapterIntent: vi.fn(),
   prepareCorePacket: vi.fn(),
   publishCoreView: vi.fn(),
   recordCoreDecision: vi.fn(),
   recordCustomerSignal: vi.fn(),
+  recordRuleChange: vi.fn(),
   releaseBudget: vi.fn(),
   requestApproval: vi.fn(),
   reserveBudget: vi.fn(),
@@ -57,8 +59,10 @@ vi.mock("../../src/core/primitives", () => ({
   linkCoreObjects: mocks.linkCoreObjects,
   prepareCorePacket: mocks.prepareCorePacket,
   publishCoreView: mocks.publishCoreView,
+  recordAdapterIntent: mocks.recordAdapterIntent,
   recordCoreDecision: mocks.recordCoreDecision,
   recordCustomerSignal: mocks.recordCustomerSignal,
+  recordRuleChange: mocks.recordRuleChange,
   upsertCoreObject: mocks.upsertCoreObject,
 }));
 
@@ -325,6 +329,157 @@ describe("POST /core", () => {
       data: {
         source: "route-test",
       },
+    });
+  });
+
+  it("dispatches adapter.intent.record with adapter config payload", async () => {
+    mocks.recordAdapterIntent.mockResolvedValue({
+      created: true,
+      adapterRunId: "88888888-8888-4888-8888-000000000001",
+      adapterActionId: "88888888-8888-4888-8888-000000000002",
+      eventId: "event-1",
+      auditEventId: "audit-1",
+      evidenceId: "evidence-1",
+      externalExecution: "blocked",
+    });
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "adapter.intent.record",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "adapter-intent-route-test-001",
+          config: {
+            connectionId: "99999999-9999-4999-8999-000000000001",
+            operation: "draft_customer_response",
+            mode: "dry_run",
+            maxAttempts: 3,
+            request: {
+              externalSend: false,
+            },
+            data: {
+              source: "route-test",
+            },
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.command).toBe("adapter.intent.record");
+    expect(body.data.result.adapterActionId).toBe("88888888-8888-4888-8888-000000000002");
+    expect(mocks.recordAdapterIntent).toHaveBeenCalledWith({
+      operatorEmail: "operator@example.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: "adapter-intent-route-test-001",
+      connectionId: "99999999-9999-4999-8999-000000000001",
+      operation: "draft_customer_response",
+      mode: "dry_run",
+      taskId: undefined,
+      eventId: undefined,
+      capabilityId: undefined,
+      request: {
+        externalSend: false,
+      },
+      data: {
+        source: "route-test",
+      },
+      maxAttempts: 3,
+    });
+  });
+
+  it("dispatches rule.change.record with rule config payload", async () => {
+    mocks.recordRuleChange.mockResolvedValue({
+      created: true,
+      objectId: "88888888-8888-4888-8888-000000000003",
+      objectVersionId: "88888888-8888-4888-8888-000000000004",
+      decisionId: "88888888-8888-4888-8888-000000000005",
+      eventId: "event-1",
+      auditEventId: "audit-1",
+      evidenceId: "evidence-1",
+      externalExecution: "blocked",
+    });
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "rule.change.record",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "rule-change-route-test-001",
+          config: {
+            rulePackId: "99999999-9999-4999-8999-000000000002",
+            ruleKey: "payroll.federal.941.deposit_schedule",
+            changeType: "threshold_update",
+            title: "Update deposit schedule threshold",
+            state: "proposed",
+            decision: "owner_review_required",
+            sourceRefs: {
+              irs: "publication-15",
+            },
+            before: {
+              threshold: "old",
+            },
+            after: {
+              threshold: "new",
+            },
+            impact: {
+              filings: ["941"],
+            },
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.command).toBe("rule.change.record");
+    expect(body.data.result.objectId).toBe("88888888-8888-4888-8888-000000000003");
+    expect(mocks.recordRuleChange).toHaveBeenCalledWith({
+      operatorEmail: "operator@example.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: "rule-change-route-test-001",
+      rulePackId: "99999999-9999-4999-8999-000000000002",
+      ruleKey: "payroll.federal.941.deposit_schedule",
+      changeType: "threshold_update",
+      title: "Update deposit schedule threshold",
+      summary: undefined,
+      state: "proposed",
+      decision: "owner_review_required",
+      rationale: undefined,
+      taskId: undefined,
+      workflowRunId: undefined,
+      capabilityId: undefined,
+      sourceRefs: {
+        irs: "publication-15",
+      },
+      before: {
+        threshold: "old",
+      },
+      after: {
+        threshold: "new",
+      },
+      impact: {
+        filings: ["941"],
+      },
+      data: {},
+      effectiveAt: undefined,
     });
   });
 

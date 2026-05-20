@@ -12,8 +12,10 @@ import {
   linkCoreObjects,
   prepareCorePacket,
   publishCoreView,
+  recordAdapterIntent,
   recordCustomerSignal,
   recordCoreDecision,
+  recordRuleChange,
   upsertCoreObject,
 } from "../../src/core/primitives";
 import { createCoreTask, transitionCoreTask } from "../../src/core/tasks";
@@ -733,6 +735,122 @@ export async function POST(request: Request) {
     }
   }
 
+  if (command === "adapter.intent.record") {
+    const idempotency = normalizeIdempotencyKey(
+      request.headers.get("idempotency-key") ?? body.idempotencyKey,
+    );
+
+    if (!idempotency.ok) {
+      return errorResponse(
+        {
+          code: "invalid_idempotency_key",
+          message: idempotency.message,
+        },
+        400,
+      );
+    }
+
+    try {
+      const result = await recordAdapterIntent({
+        operatorEmail: auth.operatorEmail,
+        idempotencyKey: idempotency.key,
+        tenantSlug,
+        connectionId: optionalString(config.connectionId) ?? "",
+        operation: optionalString(config.operation) ?? "",
+        mode: optionalString(config.mode),
+        taskId: optionalString(config.taskId),
+        eventId: optionalString(config.eventId),
+        capabilityId: optionalString(config.capabilityId),
+        request: jsonObject(config.request),
+        data: jsonObject(config.data),
+        maxAttempts: config.maxAttempts,
+      });
+
+      return Response.json(
+        {
+          api: apiVersion,
+          data: {
+            command,
+            core: {
+              tenantSlug: tenantSlug ?? null,
+            },
+            result,
+          },
+          error: null,
+        },
+        {
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    } catch (error) {
+      return coreErrorResponse(error, "core_adapter_intent_record_failed");
+    }
+  }
+
+  if (command === "rule.change.record") {
+    const idempotency = normalizeIdempotencyKey(
+      request.headers.get("idempotency-key") ?? body.idempotencyKey,
+    );
+
+    if (!idempotency.ok) {
+      return errorResponse(
+        {
+          code: "invalid_idempotency_key",
+          message: idempotency.message,
+        },
+        400,
+      );
+    }
+
+    try {
+      const result = await recordRuleChange({
+        operatorEmail: auth.operatorEmail,
+        idempotencyKey: idempotency.key,
+        tenantSlug,
+        rulePackId: optionalString(config.rulePackId),
+        ruleKey: optionalString(config.ruleKey) ?? "",
+        changeType: optionalString(config.changeType) ?? "",
+        title: optionalString(config.title) ?? "",
+        summary: optionalString(config.summary),
+        state: optionalString(config.state),
+        decision: optionalString(config.decision),
+        rationale: optionalString(config.rationale),
+        taskId: optionalString(config.taskId),
+        workflowRunId: optionalString(config.workflowRunId),
+        capabilityId: optionalString(config.capabilityId),
+        sourceRefs: jsonObject(config.sourceRefs),
+        before: jsonObject(config.before),
+        after: jsonObject(config.after),
+        impact: jsonObject(config.impact),
+        data: jsonObject(config.data),
+        effectiveAt: optionalString(config.effectiveAt),
+      });
+
+      return Response.json(
+        {
+          api: apiVersion,
+          data: {
+            command,
+            core: {
+              tenantSlug: tenantSlug ?? null,
+            },
+            result,
+          },
+          error: null,
+        },
+        {
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    } catch (error) {
+      return coreErrorResponse(error, "core_rule_change_record_failed");
+    }
+  }
+
   if (command === "capability.grant") {
     const idempotency = normalizeIdempotencyKey(
       request.headers.get("idempotency-key") ?? body.idempotencyKey,
@@ -1213,7 +1331,7 @@ export async function POST(request: Request) {
     {
       code: "core_command_unsupported",
       message:
-        "Core command must be task.create, task.transition, object.upsert, object.link, event.ingest, evidence.attach, document.create, packet.prepare, document.packet.prepare, decision.record, approval.request, capability.grant, budget.reserve, budget.charge, budget.release, view.publish, customer_signal.record, payroll.preview.record, or payroll.preview.packet.prepare.",
+        "Core command must be task.create, task.transition, object.upsert, object.link, event.ingest, evidence.attach, document.create, packet.prepare, document.packet.prepare, decision.record, approval.request, adapter.intent.record, rule.change.record, capability.grant, budget.reserve, budget.charge, budget.release, view.publish, customer_signal.record, payroll.preview.record, or payroll.preview.packet.prepare.",
     },
     400,
   );
