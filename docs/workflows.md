@@ -189,6 +189,7 @@ Transitions use the same route:
   "workflow": {
     "runId": "workflow_run_uuid"
   },
+  "idempotencyKey": "payroll-preview-transition-001",
   "config": {
     "toState": "awaiting_approval",
     "reason": "Preview packet is ready for operator review"
@@ -213,10 +214,12 @@ Queued workflow work uses the same route and keeps execution controls in
 ```
 
 The runtime validates transitions against `workflow_definitions.transitions`.
-Direct `transition` commands record a durable `workflow_steps` row with lease,
-attempt, input, output, and state-transition fields, writes events, audit
-events, and transition evidence, and creates a pending approval packet when a
-definition moves into an approval state. `steps.execute` claims queued,
+Direct `transition` commands require an idempotency key, record a durable
+`workflow_steps` row with lease, attempt, input hash, output, and
+state-transition fields, replay matching retries, return a conflict for the
+same key with different input, write events, audit events, and transition
+evidence, and create a pending approval packet when a definition moves into an
+approval state. `steps.execute` claims queued,
 retryable failed, or expired leased steps, runs generic transition-style
 handlers, advances valid transitions, records event/audit/evidence proof on
 completion, and leaves failed work on the same step ledger with retry metadata.

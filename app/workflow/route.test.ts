@@ -138,6 +138,92 @@ describe("/workflow route scope", () => {
     });
   });
 
+  it("transitions workflows through the canonical command envelope", async () => {
+    mocks.env.CONTROL_PLANE_ALLOWED_TENANTS = "continuous-demo";
+    mocks.transitionWorkflowRun.mockResolvedValue({
+      created: true,
+      replayed: false,
+      stepId: "step-1",
+      eventId: "event-1",
+    });
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/workflow", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "transition",
+          workflow: {
+            runId: "workflow-run-1",
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "workflow-transition-001",
+          config: {
+            toState: "awaiting_approval",
+            reason: "Preview packet is ready",
+            data: {
+              packetId: "packet-1",
+            },
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.command).toBe("transition");
+    expect(mocks.transitionWorkflowRun).toHaveBeenCalledWith({
+      operatorEmail: "operator@example.com",
+      tenantSlug: "continuous-demo",
+      runId: "workflow-run-1",
+      toState: "awaiting_approval",
+      idempotencyKey: "workflow-transition-001",
+      reason: "Preview packet is ready",
+      data: {
+        packetId: "packet-1",
+      },
+      blockers: {},
+      metrics: {},
+    });
+  });
+
+  it("rejects workflow transitions without an idempotency key before dispatch", async () => {
+    mocks.env.CONTROL_PLANE_ALLOWED_TENANTS = "continuous-demo";
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/workflow", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "transition",
+          workflow: {
+            runId: "workflow-run-1",
+            tenantSlug: "continuous-demo",
+          },
+          config: {
+            toState: "awaiting_approval",
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toEqual({
+      code: "invalid_workflow_transition",
+      message: "A string idempotency key is required.",
+    });
+    expect(mocks.transitionWorkflowRun).not.toHaveBeenCalled();
+  });
+
   it("executes workflow steps through the canonical command envelope", async () => {
     mocks.env.CONTROL_PLANE_ALLOWED_TENANTS = "continuous-demo";
     mocks.executeWorkflowSteps.mockResolvedValue({

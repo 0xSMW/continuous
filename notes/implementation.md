@@ -24,6 +24,7 @@
 | Hardened the worker API contract | Route-level tests now assert the generic `/worker` payload envelope, body `idempotencyKey` precedence, GET selector mapping, and malformed command config rejection |
 | Removed worker-specific local shortcuts | `worker:tool` is the only local mutation entrypoint; Revenue Operations runs now use the same `worker`, `command`, `idempotencyKey`, and `config` envelope as `/worker` |
 | Added canonical workflow API | `/workflow` validates definition-backed `start` and `transition` commands and records workflow events, audit events, and evidence |
+| Made workflow transitions replayable | `/workflow` transition commands now require canonical idempotency keys, store a stable transition input hash on `workflow_steps`, replay matching retries, and return conflicts for key reuse with different payloads |
 | Removed worker-specific HTTP wrappers | The greenfield API does not expose worker-family routes; new workers must extend `/worker` through registered commands rather than adding route names |
 | Added workflow step ledger | Workflow starts and transitions now write durable step records with lease, retry, input, output, state-transition, event, evidence, and approval links |
 | Added workflow step execution | `/workflow` now supports `command=steps.execute`, claiming queued or retryable steps, running generic transition handlers, and writing completion or retry state without workflow-specific URLs |

@@ -27,7 +27,7 @@ import {
 } from "../core/primitives";
 import { preparePayrollPreviewPacket, recordPayrollPreview } from "../core/payroll";
 import { createCoreTask, transitionCoreTask } from "../core/tasks";
-import { executeWorkflowSteps, startWorkflowRun } from "../core/workflows";
+import { executeWorkflowSteps, startWorkflowRun, transitionWorkflowRun } from "../core/workflows";
 import { db, pool } from "../db/client";
 import {
   adapters,
@@ -2916,6 +2916,83 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(finalFailedStep?.attempt).toBe(2);
     expect(finalFailedStep?.nextAttemptAt).toBeNull();
     expect(finalError.retryable).toBe(false);
+  }, 120_000);
+
+  it("replays direct workflow transitions by idempotency key", async () => {
+    const runId = randomUUID();
+    const start = await startWorkflowRun({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      workflowKey: "run_payroll",
+      idempotencyKey: `ci-workflow-transition-run-${runId}`,
+      initialState: "draft",
+      data: {
+        source: "workflow_transition_idempotency_ci",
+      },
+      db,
+    });
+    const idempotencyKey = `ci-workflow-transition-${runId}`;
+
+    const first = await transitionWorkflowRun({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      runId: start.run.id,
+      toState: "source_data_locked",
+      idempotencyKey,
+      reason: "Source data locked for CI replay proof",
+      data: {
+        source: "workflow_transition_idempotency_ci",
+      },
+      db,
+    });
+
+    expect(first.created).toBe(true);
+    expect(first.replayed).toBe(false);
+
+    const replay = await transitionWorkflowRun({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      runId: start.run.id,
+      toState: "source_data_locked",
+      idempotencyKey,
+      reason: "Source data locked for CI replay proof",
+      data: {
+        source: "workflow_transition_idempotency_ci",
+      },
+      db,
+    });
+
+    expect(replay.created).toBe(false);
+    expect(replay.replayed).toBe(true);
+    expect(replay.stepId).toBe(first.stepId);
+    expect(replay.eventId).toBe(first.eventId);
+
+    const [stepCount] = await db
+      .select({ value: count() })
+      .from(workflowSteps)
+      .where(
+        and(
+          eq(workflowSteps.workflowRunId, start.run.id),
+          eq(workflowSteps.idempotencyKey, `transition:${idempotencyKey}`),
+        ),
+      );
+
+    expect(stepCount?.value).toBe(1);
+
+    await expect(
+      transitionWorkflowRun({
+        operatorEmail: "owner@continuoushq.com",
+        tenantSlug: "continuous-demo",
+        runId: start.run.id,
+        toState: "calculating",
+        idempotencyKey,
+        reason: "Different payload should conflict",
+        db,
+      }),
+    ).rejects.toMatchObject({
+      code: "workflow_transition_idempotency_conflict",
+      status: 409,
+    });
   }, 120_000);
 
   it("prepares workflow packets for workforce, payroll, filing, AI, and rule-change domains", async () => {

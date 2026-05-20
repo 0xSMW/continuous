@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { and, desc, eq, sql } from "drizzle-orm";
 
 import { db as defaultDb } from "../db/client";
@@ -158,6 +160,26 @@ function isTerminalWorkflowState(
 
 function jsonObject(value: unknown): JsonObject {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonObject) : {};
+}
+
+function stableJson(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(stableJson);
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as JsonObject)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, item]) => [key, stableJson(item)]),
+    );
+  }
+
+  return value;
+}
+
+function hashJson(value: JsonObject) {
+  return createHash("sha256").update(JSON.stringify(stableJson(value))).digest("hex");
 }
 
 function stringValue(value: unknown) {
@@ -1661,6 +1683,7 @@ export async function transitionWorkflowRun(input: {
   operatorEmail: string;
   runId: string;
   toState: string;
+  idempotencyKey: string;
   tenantSlug?: string;
   reason?: string;
   data?: JsonObject;
@@ -1699,6 +1722,58 @@ export async function transitionWorkflowRun(input: {
     }
 
     const definition = definitionRecord(row.definition);
+    const transitionInput = {
+      schemaVersion: "workflow.transition.v1",
+      runId: row.run.id,
+      toState: input.toState,
+      reason: input.reason ?? "",
+      data: jsonObject(input.data),
+      blockers: jsonObject(input.blockers),
+      metrics: jsonObject(input.metrics),
+    } satisfies JsonObject;
+    const inputHash = hashJson(transitionInput);
+    const transitionStepKey = `transition:${input.idempotencyKey}`;
+    const [existingStep] = await tx
+      .select()
+      .from(workflowSteps)
+      .where(
+        and(
+          eq(workflowSteps.tenantId, operator.tenantId),
+          eq(workflowSteps.workflowRunId, row.run.id),
+          eq(workflowSteps.idempotencyKey, transitionStepKey),
+        ),
+      )
+      .limit(1);
+
+    if (existingStep) {
+      const existingInput = jsonObject(existingStep.input);
+      const existingOutput = jsonObject(existingStep.output);
+      const existingHash = stringValue(existingInput.inputHash);
+
+      if (
+        (existingHash && existingHash !== inputHash) ||
+        (!existingHash && stringValue(existingInput.toState) !== input.toState)
+      ) {
+        throw new RevenueWorkerUnavailableError(
+          "workflow_transition_idempotency_conflict",
+          "A workflow transition already exists for this idempotency key with different input.",
+          409,
+        );
+      }
+
+      return {
+        created: false,
+        replayed: true,
+        run: runRecord(row),
+        stepId: existingStep.id,
+        eventId: existingStep.eventId,
+        auditEventId: stringValue(existingOutput.auditEventId) ?? null,
+        evidenceId: stringValue(existingOutput.evidenceId) ?? null,
+        approvalRequestId: existingStep.approvalRequestId,
+        approvalAuditEventId: stringValue(existingOutput.approvalAuditEventId) ?? null,
+        approvalEvidenceId: stringValue(existingOutput.approvalEvidenceId) ?? null,
+      };
+    }
 
     if (!isKnownWorkflowState(definition, input.toState)) {
       throw new RevenueWorkerUnavailableError(
@@ -1726,7 +1801,6 @@ export async function transitionWorkflowRun(input: {
       operatorUserId: operator.userId,
       operatorEmail: operator.email,
     };
-    const transitionStepKey = `${row.run.id}:${row.run.state}:${input.toState}`;
 
     const [step] = await tx
       .insert(workflowSteps)
@@ -1750,6 +1824,8 @@ export async function transitionWorkflowRun(input: {
           workflowKey: definition.key,
           workflowName: definition.name,
           ...transitionData,
+          idempotencyKey: input.idempotencyKey,
+          inputHash,
           data: jsonObject(input.data),
           blockers: jsonObject(input.blockers),
           metrics: jsonObject(input.metrics),
@@ -1792,7 +1868,7 @@ export async function transitionWorkflowRun(input: {
         actorId: operator.userId,
         actorRef: operator.actorRef,
         objectId: updatedRun.objectId,
-        idempotencyKey: `${row.run.id}:${row.run.state}:${input.toState}:${now.toISOString()}`,
+        idempotencyKey: `${transitionStepKey}:event`,
         data: {
           workflowStepId: step.id,
           workflowRunId: row.run.id,
@@ -1817,6 +1893,7 @@ export async function transitionWorkflowRun(input: {
         eventId: event.id,
         objectId: updatedRun.objectId,
         risk: "medium",
+        idempotencyKey: `${transitionStepKey}:audit`,
         data: {
           workflowKey: definition.key,
           workflowName: definition.name,
@@ -1836,7 +1913,7 @@ export async function transitionWorkflowRun(input: {
         eventId: event.id,
         actorType: "user",
         actorId: operator.userId,
-        hash: `${source}:${row.run.id}:${row.run.state}:${input.toState}:${now.toISOString()}`,
+        hash: `${source}:${transitionStepKey}:transition`,
         data: {
           workflowRunId: row.run.id,
           workflowStepId: step.id,
@@ -1917,7 +1994,7 @@ export async function transitionWorkflowRun(input: {
           eventId: event.id,
           objectId: updatedRun.objectId,
           risk: "medium",
-          idempotencyKey: `${row.run.id}:${row.run.state}:${input.toState}:approval_requested`,
+          idempotencyKey: `${transitionStepKey}:approval_requested`,
           data: {
             workflowRunId: row.run.id,
             workflowStepId: step.id,
@@ -1979,6 +2056,8 @@ export async function transitionWorkflowRun(input: {
       .where(eq(workflowSteps.id, step.id));
 
     return {
+      created: true,
+      replayed: false,
       run: runRecord({ run: updatedRun, definition: row.definition }),
       stepId: step.id,
       eventId: event.id,

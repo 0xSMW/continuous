@@ -352,12 +352,20 @@ export async function POST(request: Request) {
   if (command === "transition") {
     const runId = optionalString(workflow.runId);
     const toState = optionalString(config.toState);
+    const idempotency = normalizeIdempotencyKey(
+      request.headers.get("idempotency-key") ?? body.idempotencyKey,
+    );
 
-    if (!runId || !toState) {
+    if (!runId || !toState || !idempotency.ok) {
       return errorResponse(
         {
           code: "invalid_workflow_transition",
-          message: "workflow.runId and config.toState are required for transition.",
+          message:
+            runId && toState
+              ? idempotency.ok
+                ? "Workflow transition request is invalid."
+                : idempotency.message
+              : "workflow.runId, idempotencyKey, and config.toState are required for transition.",
         },
         400,
       );
@@ -369,6 +377,7 @@ export async function POST(request: Request) {
         tenantSlug,
         runId,
         toState,
+        idempotencyKey: idempotency.key,
         reason: optionalString(config.reason),
         data: jsonObject(config.data),
         blockers: jsonObject(config.blockers),
