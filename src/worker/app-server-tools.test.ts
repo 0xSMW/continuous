@@ -70,10 +70,7 @@ describe("app-server worker tools", () => {
     expect(plannedRoles).toEqual(["compliance_operations", "systems_operations"]);
     expect(registry.plannedCommands).toEqual(registry.followUpCommands);
     expect(registry.plannedViews).toEqual(registry.followUpViews);
-    expect(revenueFollowUpCommands.map((command) => command.name)).toEqual([
-      "quote.prepare",
-      "payment_link.prepare",
-    ]);
+    expect(revenueFollowUpCommands.map((command) => command.name)).toEqual(["payment_link.prepare"]);
     expect(
       revenueFollowUpCommands.find((command) => command.name === "payment_link.prepare")?.configSchema.properties
         ?.sourceRefs?.type,
@@ -82,6 +79,16 @@ describe("app-server worker tools", () => {
     expect(registry.commands.some((command) => command.name === "approval.decide")).toBe(true);
     expect(registry.commands.some((command) => command.name === "lead.classify")).toBe(true);
     expect(registry.commands.some((command) => command.name === "response.draft")).toBe(true);
+    expect(
+      registry.commands.some(
+        (command) =>
+          command.role === "revenue_operations" &&
+          command.name === "quote.prepare" &&
+          command.apiRoute === "/worker" &&
+          command.idempotency === "required" &&
+          command.externalExecution === "blocked",
+      ),
+    ).toBe(true);
     expect(
       registry.commands.some(
         (command) =>

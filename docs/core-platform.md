@@ -183,7 +183,7 @@ policy-bound:
 | `GET /core?tenantSlug=...` | Tenant-scoped Core summary for active tasks, recent events, approvals, workers, capabilities, graph counts, and ledger counts |
 | `/worker?view=snapshot&role=revenue_operations` | Operator-only snapshot of worker state, active tasks, controls, budget usage, and recent events |
 | `/worker?view=approvals&role=revenue_operations` | Operator-only approval queue for worker decisions |
-| `POST /worker` | Canonical worker command surface for Revenue `lead.read`, `lead.classify`, `response.draft`, `run`, `continue`, `approval.decide`, `adapters.reconcile`, and `adapters.retry`; Owner `brief.generate`, `decision_queue.prepare`, `anomaly.triage`, `approval.decide`, and `continue`; Dispatch `schedule.propose`, `customer_update.draft`, `closeout.prepare`, and `exception.route`; and Finance `invoice.prepare`, `ar_followup.draft`, `cash_forecast.generate`, and `payment_draft.prepare`; invalid credentials fail before body reads, command bodies are capped at 1 MiB, and worker role, tenant selection, idempotency, and operation config live in structured payload fields |
+| `POST /worker` | Canonical worker command surface for Revenue `lead.read`, `lead.classify`, `response.draft`, `quote.prepare`, `run`, `continue`, `approval.decide`, `adapters.reconcile`, and `adapters.retry`; Owner `brief.generate`, `decision_queue.prepare`, `anomaly.triage`, `approval.decide`, and `continue`; Dispatch `schedule.propose`, `customer_update.draft`, `closeout.prepare`, and `exception.route`; and Finance `invoice.prepare`, `ar_followup.draft`, `cash_forecast.generate`, and `payment_draft.prepare`; invalid credentials fail before body reads, command bodies are capped at 1 MiB, and worker role, tenant selection, idempotency, and operation config live in structured payload fields |
 | `/approval` | Shared operator approval inbox and decision surface across Core, workflow, and worker subjects; `POST /approval` uses auth-before-body, 1 MiB bounded command reads, and structured `approval` / `config` payloads |
 | `/workflow` | Canonical workflow command surface for listing definitions/runs/steps and executing validated `start` / `transition` / `steps.execute` / `approval.decide` commands; `POST /workflow` uses auth-before-body, 1 MiB bounded command reads, top-level idempotency keys for mutation replay boundaries, and structured `workflow` / `config` payloads |
 | `/workflow?view=approvals` | Operator-only approval queue for workflow decisions backed by the shared approval service |
@@ -207,8 +207,9 @@ connection reference, including scheduler-triggered API polling when the
 connection config opts in. It stores Core lead object/event/evidence rows,
 writes a read-only worker run, attributes budget/usage, records connection
 cursor proof, and returns stable `config.intake` selectors.
-`command=lead.classify` and
-`command=response.draft` can consume those selectors as explicit persisted
+`command=lead.classify`,
+`command=response.draft`, and
+`command=quote.prepare` can consume those selectors as explicit persisted
 substeps, writing worker run, inference, usage, event, evidence, and audit proof
 while external send remains blocked. One full `command=run` then accepts the
 same selectors, or exact Core object/event/evidence row references when an

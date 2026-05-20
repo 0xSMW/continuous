@@ -70,10 +70,11 @@ Then open `http://localhost:3000`.
   operations runs can first call
   `command=lead.read` with `config.source` and
   `config.records[]` to persist Core lead source snapshots, then call
-  `command=lead.classify`, `command=response.draft`, or the full `command=run`
-  with the returned `config.intake` selector. The split classify and draft
-  commands write worker run, inference, usage, event, evidence, and audit proof
-  while external send remains blocked. Internal workflow handlers can still use
+  `command=lead.classify`, `command=response.draft`, `command=quote.prepare`,
+  or the full `command=run` with the returned `config.intake` selector. The
+  split classify, draft, and quote-preparation commands write worker run,
+  inference, usage, event, evidence, approval/view, and audit proof while
+  external send remains blocked. Internal workflow handlers can still use
   exact Core row ids; `config.leadPacket` remains a direct operator/test
   fallback. The route validates roles, commands, idempotency, tenant
   requirements, and external-execution posture through the worker command

@@ -13,7 +13,7 @@ raising autonomy or permitting external sends.
 | `worker.tenantSlug` | No | Required when an operator email spans tenants |
 | `worker.id` | No | Required when multiple Revenue Workers match |
 | `config.source` plus direct `config.records[]` / `config.record` or `config.reader` | Required for `lead.read` | Reads direct, connection-buffered, or read-only API-polled website-form, inbox, or CRM lead records into persisted Core source object/event/evidence rows |
-| `config.intake`, `config.leadPacket`, or `config.lead` | Required for `run`, `lead.classify`, and `response.draft` | Prefer persisted Core lead source identity or object/event/evidence rows in `config.intake`; direct payloads are explicit operator/test fallbacks |
+| `config.intake`, `config.leadPacket`, or `config.lead` | Required for `run`, `lead.classify`, `response.draft`, and `quote.prepare` | Prefer persisted Core lead source identity or object/event/evidence rows in `config.intake`; direct payloads are explicit operator/test fallbacks |
 
 ## API Shape
 
@@ -56,7 +56,7 @@ Read inbound lead source records before running the worker:
 
 The command returns `result.selectors[]`; pass one selector's
 `intake.source` and `intake.sourceEventId` to `command=lead.classify`,
-`command=response.draft`, or the full `command=run`:
+`command=response.draft`, `command=quote.prepare`, or the full `command=run`:
 
 ```json
 {
@@ -235,6 +235,7 @@ and local toolbox aliases resolve to the same handlers and validation rules.
 | `lead.read` | `worker.command` | `config.source`, direct `config.records[]` / `config.record`, or `config.reader` referencing an active connection | Required | Core lead object/event/evidence, worker run, budget/usage, connection cursor proof, audit | Blocked |
 | `lead.classify` | `worker.command` | One of `config.intake`, `config.leadPacket`, or `config.lead` | Required | Classification worker run, budget/usage, inference, trace evidence, audit | Blocked |
 | `response.draft` | `worker.command` | One of `config.intake`, `config.leadPacket`, or `config.lead` | Required | Draft worker run, budget/usage, inference, draft evidence, audit | Blocked |
+| `quote.prepare` | `worker.command` | One of `config.intake`, `config.leadPacket`, or `config.lead` | Required | Quote-preparation worker run, budget/usage, inference, source evidence, dry-run adapter receipt, approval request, generated quote review view, audit | Blocked |
 | `run` | `worker.command` | One of `config.intake`, `config.leadPacket`, or `config.lead` | Required | Internal records, budget, approval, dry-run adapter receipt | Blocked |
 | `continue` | `worker.command` | `config.approvalId` | Required | Approved execution packet, revised approval packet, or rejected stop packet, workflow step, task outcome, audit/evidence | Blocked |
 | `approval.decide` | `worker.command` | `config.approvalId`, `config.action`, optional `config.note` | None | Approval/task/workflow evidence only | Blocked |
@@ -308,8 +309,8 @@ receives `lastLeadRead` metadata with the worker run id, source mode, cursor,
 optional provider cursor, read count, timestamp, redacted polling receipt, and
 blocked external-execution posture.
 
-`POST /worker` with `command=run` returns a generic command response whose
-`result.output` contains worker-derived data:
+`POST /worker` with `command=quote.prepare` or `command=run` returns a generic
+command response whose `result.output` contains worker-derived data:
 
 | Output | Required behavior |
 |---|---|

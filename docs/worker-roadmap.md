@@ -45,7 +45,7 @@ execution blocked.
 | Gate | Required evidence |
 |---|---|
 | Source coverage | Production `lead.read` runs from at least one live inbox or CRM connection created through `/core connection.upsert`, with `/core connection.health.record` proof and scheduler cursor evidence |
-| Quote decision | `lead.classify`, `response.draft`, `run`, shared approval, and `continue` all write worker run, workflow, approval, audit, evidence, budget, generated-view, and adapter records from persisted Core refs |
+| Quote decision | `lead.classify`, `response.draft`, `quote.prepare`, `run`, shared approval, and `continue` all write worker run, workflow, approval, audit, evidence, budget, generated-view, and adapter records from persisted Core refs |
 | Controlled send | An approved customer message send uses a scoped managed credential, stores an adapter receipt, records rollback/escalation evidence, and rejects replay with changed input |
 | Cash handoff | Approved quote or closeout records can hand Dispatch/Ops and Finance enough Core refs to prepare schedule, invoice, AR follow-up, and payment-draft packets without private payloads |
 | Eval and deploy | CI evals plus production smoke prove no send, payment link, filing, payroll submission, or money movement happens without the matching approval and receipt gate |

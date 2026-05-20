@@ -286,7 +286,7 @@ export const workerContracts: PlannedWorkerContractMetadata[] = [
         role: "revenue_operations",
         name: "quote.prepare",
         toolAlias: "worker.command",
-        description: "Planned split quote-preparation command for owner-reviewable quote packets.",
+        description: "Prepare owner-reviewable quote packets without sending them.",
         idempotency: "required",
         sideEffects: "internal",
         externalExecution: "blocked",

@@ -5300,6 +5300,96 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(draftAudit?.type).toBe("worker.revenue_operations.response_draft.completed");
     expect(draftUsage?.units).toBeGreaterThan(0);
 
+    const quote = await executeWorkerCommand({
+      command: "quote.prepare",
+      target: {
+        role: "revenue_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: `ci-worker-quote-prepare-${runId}`,
+      config: {
+        intake: objectValue(selector.intake),
+      },
+    });
+    const quoteResult = objectValue(quote.result);
+    const quoteOutput = objectValue(quoteResult.output);
+
+    expect(quote.command).toBe("quote.prepare");
+    expect(quoteResult.created).toBe(true);
+    expect(quoteOutput.command).toBe("quote.prepare");
+    expect(quoteOutput.source).toBe("website_form");
+    expect(quoteOutput.sourceEventId).toBe(sourceEventId);
+    expect(quoteOutput.externalExecution).toBe("blocked");
+    expect(quoteOutput.externalSend).toBe(false);
+    expect(objectValue(quoteOutput.quote).policy).toMatchObject({
+      approvalRequired: true,
+      externalSend: false,
+      moneyMovement: "blocked",
+    });
+
+    const quoteReplay = await executeWorkerCommand({
+      command: "quote.prepare",
+      target: {
+        role: "revenue_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: `ci-worker-quote-prepare-${runId}`,
+      config: {
+        intake: objectValue(selector.intake),
+      },
+    });
+    const quoteReplayResult = objectValue(quoteReplay.result);
+
+    expect(quoteReplayResult.created).toBe(false);
+    expect(stringValue(quoteReplayResult.workerRunId)).toBe(stringValue(quoteResult.workerRunId));
+
+    const [quoteRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(eq(workerRuns.id, stringValue(quoteResult.workerRunId)))
+      .limit(1);
+    const [quoteEvent] = await db
+      .select()
+      .from(events)
+      .where(eq(events.id, stringValue(quoteResult.eventId)))
+      .limit(1);
+    const [quoteApproval] = await db
+      .select()
+      .from(approvalRequests)
+      .where(eq(approvalRequests.id, stringValue(quoteResult.approvalRequestId)))
+      .limit(1);
+    const [quoteView] = await db
+      .select()
+      .from(generatedViews)
+      .where(eq(generatedViews.id, stringValue(quoteResult.quoteApprovalViewId)))
+      .limit(1);
+    const [quoteAction] = await db
+      .select()
+      .from(adapterActions)
+      .where(eq(adapterActions.id, stringValue(quoteResult.adapterActionId)))
+      .limit(1);
+    const [quoteReceiptEvidence] = await db
+      .select()
+      .from(evidence)
+      .where(eq(evidence.id, stringValue(quoteResult.adapterReceiptEvidenceId)))
+      .limit(1);
+
+    expect(quoteRun?.mode).toBe("quote_preparation");
+    expect(objectValue(objectValue(quoteRun?.data).input).command).toBe("quote.prepare");
+    expect(quoteEvent?.type).toBe("worker.revenue_operations.quote_prepare.completed");
+    expect(quoteApproval?.kind).toBe("quote_approval");
+    expect(quoteApproval?.state).toBe("pending");
+    expect(objectValue(quoteApproval?.requestedAction).command).toBe("quote.prepare");
+    expect(quoteView?.key).toBe("quote.approval.review");
+    expect(objectValue(objectValue(quoteView?.data).latest).command).toBe("quote.prepare");
+    expect(quoteAction?.mode).toBe("dry_run");
+    expect(quoteAction?.operation).toBe("draft_customer_response");
+    expect(objectValue(quoteAction?.receipt).externalSend).toBe(false);
+    expect(quoteReceiptEvidence?.kind).toBe("receipt");
+    expect(objectValue(quoteReceiptEvidence?.data).externalMutation).toBe(false);
+
     const run = await runRevenueWorker({
       idempotencyKey: `ci-worker-run-from-lead-read-${runId}`,
       tenantSlug: "continuous-demo",
@@ -5399,6 +5489,27 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(output.externalExecution).toBe("blocked");
     expect(output.externalSend).toBe(false);
 
+    const quote = await executeAppServerWorkerTool("continuous.worker.command", {
+      command: "quote.prepare",
+      worker: {
+        role: "revenue_operations",
+        tenantSlug: "continuous-demo",
+      },
+      idempotencyKey: `ci-app-server-quote-prepare-${runId}`,
+      config: {
+        intake: objectValue(selector.intake),
+      },
+    });
+    const quoteEnvelope = objectValue(quote);
+    const quoteResult = objectValue(quoteEnvelope.result);
+    const quoteOutput = objectValue(quoteResult.output);
+
+    expect(quoteEnvelope.command).toBe("quote.prepare");
+    expect(quoteResult.created).toBe(true);
+    expect(quoteOutput.command).toBe("quote.prepare");
+    expect(quoteOutput.externalExecution).toBe("blocked");
+    expect(quoteOutput.externalSend).toBe(false);
+
     const [readRun] = await db
       .select()
       .from(workerRuns)
@@ -5408,6 +5519,16 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .select()
       .from(workerRuns)
       .where(eq(workerRuns.id, stringValue(runResult.workerRunId)))
+      .limit(1);
+    const [quoteRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(eq(workerRuns.id, stringValue(quoteResult.workerRunId)))
+      .limit(1);
+    const [quoteEvent] = await db
+      .select()
+      .from(events)
+      .where(eq(events.id, stringValue(quoteResult.eventId)))
       .limit(1);
     const [approval] = await db
       .select()
@@ -5419,6 +5540,9 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(runRow?.source).toBe("continuous.worker");
     expect(runRow?.state).toBe("done");
     expect(objectValue(objectValue(runRow?.data).input).inputHash).toBeTruthy();
+    expect(quoteRun?.mode).toBe("quote_preparation");
+    expect(objectValue(objectValue(quoteRun?.data).input).command).toBe("quote.prepare");
+    expect(quoteEvent?.type).toBe("worker.revenue_operations.quote_prepare.completed");
     expect(approval?.state).toBe("pending");
     expect(approval?.kind).toBe("quote_approval");
   }, 120_000);

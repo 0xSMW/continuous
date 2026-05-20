@@ -21,8 +21,9 @@ can inspect payload requirements before handlers exist.
 `continuous.worker.view`, `continuous.worker.command`, `/worker`, and
 `worker:tool` all run through the same registry validation before dispatch.
 The CI integration suite exercises `continuous.worker.command` on real
-Revenue `lead.read`, `run`, `lead.classify`, and `response.draft`, Owner
-`brief.generate`, Dispatch `schedule.propose`, and Finance
+Revenue `lead.read`, `run`, `lead.classify`, `response.draft`, and
+`quote.prepare`. It also exercises Owner `brief.generate`, Dispatch
+`schedule.propose`, and Finance
 `payment_draft.prepare` commands, proving the app-server boundary writes the
 same worker run, approval, evidence, budget, event, adapter dry-run, generated
 view, and workflow records as `/worker`.

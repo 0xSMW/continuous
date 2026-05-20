@@ -51,6 +51,7 @@ CONTROL_PLANE_ALLOWED_COMMANDS_JSON='[
   "worker:lead.read",
   "worker:lead.classify",
   "worker:response.draft",
+  "worker:quote.prepare",
   "worker:schedule.propose",
   "worker:customer_update.draft",
   "worker:closeout.prepare",

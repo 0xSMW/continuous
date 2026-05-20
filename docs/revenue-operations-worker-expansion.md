@@ -16,6 +16,7 @@ state, workflow state, and object versioning without external sends or money mov
 | Approval controls | `GET /worker?view=approvals&role=revenue_operations` and `POST /worker` with `command=approval.decide`, bearer-token required |
 | Source read command | `POST /worker` with `command=lead.read`, `idempotencyKey`, `config.source`, optional `config.reader`, and direct `config.records[]` or an active connection reference; persists website-form, inbox, CRM, buffered connection, or read-only API-polled source records as Core lead object/event/evidence rows, updates connection cursor proof when connection-backed, and returns `config.intake` selectors |
 | Split classify/draft commands | `POST /worker` with `command=lead.classify` or `command=response.draft`; both accept `config.intake` selectors or direct fallback `config.leadPacket`, write worker run/event/evidence/audit/budget records, and keep external sends blocked |
+| Quote prepare command | `POST /worker` with `command=quote.prepare`; accepts the same `config.intake` selectors or direct fallback `config.leadPacket`, writes quote packet, approval, generated view, event/evidence/audit/budget records, and keeps external sends blocked |
 | Run command | `POST /worker` with `command=run` and `config.intake` source selectors or Core references; direct `config.leadPacket` remains an operator/test fallback |
 | Continuation command | `POST /worker` with `command=continue`, `idempotencyKey`, and `config.approvalId`; V1 turns `approved` decisions into blocked no-send execution packets, `revision_requested` decisions into revised packets plus fresh pending owner approval, and `rejected` decisions into closed no-send stop packets |
 | Adapter reconciliation commands | `POST /worker` with `command=adapters.reconcile` and `command=adapters.retry`, tenant-scoped and bearer-token required |
@@ -58,7 +59,7 @@ smoke test.
 | `lead.read` | Allowed | Website-form, authenticated-inbox, CRM-style, buffered connection, and read-only API-polled source records normalize into persisted Core lead intake selectors; production credential provisioning and live-provider scheduler coverage still need operational proof |
 | `lead.classify` | Allowed | Registered command now writes classification run, inference, usage, trace evidence, event, and audit proof |
 | `response.draft` | Allowed | Registered command now writes draft run, inference, usage, draft evidence, event, and audit proof; external send remains blocked |
-| `quote.prepare` | Approval required | Keep threshold, discount, and margin rules explicit |
+| `quote.prepare` | Allowed | Registered command prepares owner-reviewable quote packets, approval requests, generated quote views, and dry-run adapter receipts while external send remains blocked |
 | `schedule.propose` | Approval required | Do not commit external calendars yet |
 | `invoice.prepare` | Approval required | Tie to job closeout evidence |
 | `payment_link.prepare` | Human approval | No autonomous money movement |

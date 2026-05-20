@@ -11,6 +11,7 @@ import {
   continueRevenueWorker,
   draftRevenueResponse,
   getRevenueWorkerSnapshotSafe,
+  prepareRevenueQuote,
   readRevenueLeads,
   RevenueWorkerUnavailableError,
   runRevenueWorker,
@@ -794,6 +795,32 @@ const revenueDefinition: WorkerDefinition = {
         }
 
         return draftRevenueResponse({
+          idempotencyKey: context.idempotencyKey,
+          tenantSlug: context.target.tenantSlug,
+          workerId: context.target.workerId,
+          operatorEmail: context.operatorEmail,
+          config: context.config,
+        });
+      },
+    },
+    "quote.prepare": {
+      name: "quote.prepare",
+      description: "Prepare an owner-reviewable quote packet without sending it.",
+      idempotency: "required",
+      sideEffects: "internal",
+      externalExecution: "blocked",
+      requiresTenant: true,
+      configSchema: workerRunConfig,
+      async handle(context) {
+        if (!context.idempotencyKey) {
+          throw new PlatformUnavailableError(
+            "invalid_idempotency_key",
+            "A string idempotency key is required.",
+            400,
+          );
+        }
+
+        return prepareRevenueQuote({
           idempotencyKey: context.idempotencyKey,
           tenantSlug: context.target.tenantSlug,
           workerId: context.target.workerId,

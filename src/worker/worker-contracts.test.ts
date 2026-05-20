@@ -203,6 +203,7 @@ describe("future worker contracts", () => {
       "lead.read",
       "lead.classify",
       "response.draft",
+      "quote.prepare",
       "continue",
       "approval.decide",
       "adapters.reconcile",
@@ -241,10 +242,7 @@ describe("future worker contracts", () => {
     expect(workerContractForRole("revenue_operations")?.contractPath).toBe(
       "docs/revenue-operations-worker-v1-contract.md",
     );
-    expect(revenueFollowUps.map((command) => command.name)).toEqual([
-      "quote.prepare",
-      "payment_link.prepare",
-    ]);
+    expect(revenueFollowUps.map((command) => command.name)).toEqual(["payment_link.prepare"]);
     expect(new Set(revenueFollowUps.map((command) => command.apiRoute))).toEqual(
       new Set([workerApiRoute]),
     );

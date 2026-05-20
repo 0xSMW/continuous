@@ -329,6 +329,7 @@ describe("worker tool contract", () => {
           role: "revenue_operations",
           name: "run",
           idempotency: "required",
+          requiresTenant: true,
           externalExecution: "blocked",
         }),
         expect.objectContaining({
@@ -354,7 +355,7 @@ describe("worker tool contract", () => {
         }),
         expect.objectContaining({
           role: "revenue_operations",
-          name: "run",
+          name: "quote.prepare",
           idempotency: "required",
           requiresTenant: true,
           externalExecution: "blocked",
@@ -375,6 +376,18 @@ describe("worker tool contract", () => {
           role: "revenue_operations",
           name: "adapters.retry",
           requiresTenant: true,
+        }),
+        expect.objectContaining({
+          role: "revenue_operations",
+          name: "quote.prepare",
+          configSchema: expect.objectContaining({
+            oneRequired: ["intake", "leadPacket", "lead"],
+            properties: expect.objectContaining({
+              intake: expect.objectContaining({ type: "object" }),
+              leadPacket: expect.objectContaining({ type: "object" }),
+              lead: expect.objectContaining({ type: "object" }),
+            }),
+          }),
         }),
         expect.objectContaining({
           role: "owner_chief_of_staff",
@@ -703,12 +716,6 @@ describe("worker tool contract", () => {
     expect(workerToolSchema.registry.plannedCommands).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          role: "revenue_operations",
-          name: "quote.prepare",
-          apiRoute: "/worker",
-          sideEffects: "internal",
-        }),
-        expect.objectContaining({
           role: "finance_operations",
           name: "expense_code.propose",
           apiRoute: "/worker",
@@ -743,11 +750,14 @@ describe("worker tool contract", () => {
         }
       }
     }
-    expect(
-      plannedCommands.find(
-        (command) => command.role === "revenue_operations" && command.name === "quote.prepare",
-      )?.configSchema.oneRequired,
-    ).toEqual(["intake", "leadPacket", "lead"]);
+    expect(workerToolSchema.registry.plannedCommands).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "revenue_operations",
+          name: "quote.prepare",
+        }),
+      ]),
+    );
     expect(
       plannedCommands.find(
         (command) => command.role === "systems_operations" && command.name === "connector.health.scan",
@@ -831,6 +841,18 @@ describe("worker tool contract", () => {
         config: {},
       }),
     ).rejects.toThrow("config.intake, leadPacket or lead is required for run.");
+
+    await expect(
+      executeWorkerTool("worker.command", {
+        command: "quote.prepare",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "quote-prepare-empty-config-001",
+        config: {},
+      }),
+    ).rejects.toThrow("config.intake, leadPacket or lead is required for quote.prepare.");
   });
 
   it("validates lead read idempotency before invoking the worker", async () => {
@@ -879,6 +901,24 @@ describe("worker tool contract", () => {
     await expect(
       executeWorkerTool("worker.command", {
         command: "response.draft",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "bad key!",
+        config: {
+          leadPacket: {
+            customerName: "Acme Roof Repair",
+          },
+        },
+      }),
+    ).rejects.toThrow(
+      "Idempotency key may only contain letters, numbers, dot, underscore, colon, or dash.",
+    );
+
+    await expect(
+      executeWorkerTool("worker.command", {
+        command: "quote.prepare",
         worker: {
           role: "revenue_operations",
           tenantSlug: "continuous-demo",

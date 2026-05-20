@@ -50,6 +50,7 @@ const runUnits = 12000;
 const leadReadUnits = 1000;
 const leadClassifyUnits = 2000;
 const responseDraftUnits = 4000;
+type RevenueRunCommand = "run" | "quote.prepare";
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -3389,8 +3390,20 @@ export async function runRevenueWorker(input: {
   workerId?: string;
   config?: JsonObject;
   db?: Database;
+  command?: RevenueRunCommand;
 }): Promise<RevenueWorkerRunResult> {
   const db = input.db ?? defaultDb;
+  const command = input.command ?? "run";
+  const commandLabel = command === "quote.prepare" ? "quote.prepare" : "run";
+  const runMode = command === "quote.prepare" ? "quote_preparation" : "simulation";
+  const requestedEventType =
+    command === "quote.prepare"
+      ? "worker.revenue_operations.quote_prepare.requested"
+      : "worker.revenue_operations.run.requested";
+  const completedEventType =
+    command === "quote.prepare"
+      ? "worker.revenue_operations.quote_prepare.completed"
+      : "worker.revenue_operations.run.completed";
   const selector: RevenueWorkerSelector = {
     tenantSlug: input.tenantSlug,
     workerId: input.workerId,
@@ -3398,12 +3411,15 @@ export async function runRevenueWorker(input: {
   const context = await loadWorkerContext(db, selector);
   const operator = await loadOperator(db, context.worker.tenantId, input.operatorEmail);
   let task = context.task;
-  const capabilityId = task?.capabilityId ?? context.quoteCapabilityId ?? context.briefCapabilityId;
+  const capabilityId =
+    command === "quote.prepare"
+      ? context.quoteCapabilityId
+      : task?.capabilityId ?? context.quoteCapabilityId ?? context.briefCapabilityId;
 
   if (!capabilityId) {
     throw new RevenueWorkerUnavailableError(
       "worker_capability_missing",
-      "Revenue Worker has no capability for the selected run.",
+      `Revenue Worker has no capability for ${commandLabel}.`,
     );
   }
 
@@ -3425,18 +3441,34 @@ export async function runRevenueWorker(input: {
     sourceEvidenceId,
   };
   const runObjectId = task?.objectId ?? sourceObjectId;
-  const inputHash = hashObject({
-    schemaVersion: "worker.revenue_operations.lead_packet.v1",
-    mode: "simulation",
-    idempotencyKey: input.idempotencyKey,
-    tenantId: context.worker.tenantId,
-    workerId: context.worker.id,
-    operatorUserId: operator.id,
-    requestConfig,
-    config,
-    ...intakeTrace,
-    leadPacket: leadPacket.sourceSnapshot,
-  });
+  const inputHash = hashObject(
+    command === "run"
+      ? {
+          schemaVersion: "worker.revenue_operations.lead_packet.v1",
+          mode: "simulation",
+          idempotencyKey: input.idempotencyKey,
+          tenantId: context.worker.tenantId,
+          workerId: context.worker.id,
+          operatorUserId: operator.id,
+          requestConfig,
+          config,
+          ...intakeTrace,
+          leadPacket: leadPacket.sourceSnapshot,
+        }
+      : {
+          schemaVersion: "worker.revenue_operations.quote_prepare.v1",
+          command,
+          mode: runMode,
+          idempotencyKey: input.idempotencyKey,
+          tenantId: context.worker.tenantId,
+          workerId: context.worker.id,
+          operatorUserId: operator.id,
+          requestConfig,
+          config,
+          ...intakeTrace,
+          leadPacket: leadPacket.sourceSnapshot,
+        },
+  );
 
   const result = await db.transaction(async (tx) => {
     await tx.execute(
@@ -3464,8 +3496,17 @@ export async function runRevenueWorker(input: {
     if (existingRun) {
       const storedInput = objectValue(existingRun.data.input);
       const storedHash = stringValue(storedInput.inputHash);
+      const storedCommand = stringValue(storedInput.command);
 
-      if (existingRun.mode !== "simulation") {
+      if ((storedCommand && storedCommand !== command) || (!storedCommand && command !== "run")) {
+        throw new RevenueWorkerUnavailableError(
+          "worker_idempotency_conflict",
+          "This idempotency key was already used with a different worker command.",
+          409,
+        );
+      }
+
+      if (existingRun.mode !== runMode) {
         throw new RevenueWorkerUnavailableError(
           "worker_idempotency_conflict",
           "This idempotency key was already used with a different worker command.",
@@ -3523,6 +3564,14 @@ export async function runRevenueWorker(input: {
       .limit(1);
 
     if (existingEvent) {
+      if (command !== "run") {
+        throw new RevenueWorkerUnavailableError(
+          "worker_idempotency_conflict",
+          "This idempotency key was already used with a different worker command.",
+          409,
+        );
+      }
+
       const output = outputData(existingEvent.data);
       const eventOutput = {
         eventId: existingEvent.id,
@@ -3633,7 +3682,7 @@ export async function runRevenueWorker(input: {
     if (perTaskUnits !== null && runUnits > perTaskUnits) {
       throw new RevenueWorkerUnavailableError(
         "worker_budget_per_task_exceeded",
-        `Revenue Worker run requires ${runUnits} units, above the per-task limit of ${perTaskUnits}.`,
+        `Revenue Worker ${commandLabel} requires ${runUnits} units, above the per-task limit of ${perTaskUnits}.`,
       );
     }
 
@@ -3690,7 +3739,7 @@ export async function runRevenueWorker(input: {
     if (maxUnits <= 0 || committedUnits + runUnits > maxUnits) {
       throw new RevenueWorkerUnavailableError(
         "worker_budget_exceeded",
-        `Revenue Worker run requires ${runUnits} units, with ${Math.max(maxUnits - committedUnits, 0)} units available.`,
+        `Revenue Worker ${commandLabel} requires ${runUnits} units, with ${Math.max(maxUnits - committedUnits, 0)} units available.`,
       );
     }
 
@@ -3764,6 +3813,7 @@ export async function runRevenueWorker(input: {
 
     const runInput = {
       idempotencyKey: input.idempotencyKey,
+      command,
       inputHash,
       config: requestConfig,
       resolvedConfig: config,
@@ -3780,7 +3830,7 @@ export async function runRevenueWorker(input: {
       budgetAccountId: context.budgetAccountId,
       routeId: context.routeId,
       units: runUnits,
-      mode: "simulation",
+      mode: runMode,
     };
 
     const [workerRun] = await tx
@@ -3795,7 +3845,7 @@ export async function runRevenueWorker(input: {
         source,
         idempotencyKey: input.idempotencyKey,
         state: "running",
-        mode: "simulation",
+        mode: runMode,
         data: {
           input: runInput,
           output: {},
@@ -3835,6 +3885,7 @@ export async function runRevenueWorker(input: {
         idempotencyKey: input.idempotencyKey,
         data: {
           workerRunId: workerRun.id,
+          command,
           inputHash,
           ...intakeTrace,
           source: leadPacket.source,
@@ -3858,7 +3909,7 @@ export async function runRevenueWorker(input: {
       .insert(auditEvents)
       .values({
         tenantId: context.worker.tenantId,
-        type: "worker.revenue_operations.run.requested",
+        type: requestedEventType,
         source,
         actorType: "user",
         actorId: operator.id,
@@ -3870,16 +3921,17 @@ export async function runRevenueWorker(input: {
         objectId: runObjectId,
         capabilityId,
         risk: "medium",
-        idempotencyKey: `${input.idempotencyKey}:run_requested`,
+        idempotencyKey: `${input.idempotencyKey}:${command}:requested`,
         data: {
           operatorEmail: operator.email,
           operatorName: operator.name,
+          command,
           inputHash,
           ...intakeTrace,
           leadPacket: leadPacket.sourceSnapshot,
           workflowRunId: workflowRun.id,
           externalExecution: "blocked",
-          mode: "simulation",
+          mode: runMode,
         },
       })
       .returning({ id: auditEvents.id });
@@ -3914,6 +3966,7 @@ export async function runRevenueWorker(input: {
         writeCount: 0,
         data: {
           workerRunId: workerRun.id,
+          command,
           workflowRunId: workflowRun.id,
           capabilityId,
           inputHash,
@@ -3939,7 +3992,8 @@ export async function runRevenueWorker(input: {
         actorId: context.worker.id,
         promptHash: traceHash(input.idempotencyKey, "prompt"),
         request: {
-          mode: "simulation",
+          mode: runMode,
+          command,
           objective: "Classify the lead packet and prepare the next owner-visible no-send action.",
           leadPacket: leadPacket.sourceSnapshot,
           ...intakeTrace,
@@ -3947,6 +4001,7 @@ export async function runRevenueWorker(input: {
           inputHash,
         },
         result: {
+          command,
           classification: leadPacket.classification,
           nextAction: "owner_approval",
           workflowRunId: workflowRun.id,
@@ -3982,7 +4037,8 @@ export async function runRevenueWorker(input: {
         costUsd: "0.000000",
         data: {
           route: "low_cost_fast",
-          mode: "simulation",
+          mode: runMode,
+          command,
           workerRunId: workerRun.id,
           ...intakeTrace,
           workflowRunId: workflowRun.id,
@@ -3995,7 +4051,7 @@ export async function runRevenueWorker(input: {
       .insert(events)
       .values({
         tenantId: context.worker.tenantId,
-        type: "worker.revenue_operations.run.completed",
+        type: completedEventType,
         source,
         actorType: "worker",
         actorId: context.worker.id,
@@ -4008,6 +4064,7 @@ export async function runRevenueWorker(input: {
         data: {
           worker: context.worker.name,
           tenant: context.tenantName,
+          command,
           inputHash,
           ...intakeTrace,
           source: leadPacket.source,
@@ -4044,6 +4101,7 @@ export async function runRevenueWorker(input: {
         hash: traceHash(input.idempotencyKey, "source_snapshot"),
         data: {
           idempotencyKey: input.idempotencyKey,
+          command,
           inputHash,
           workerRunId: workerRun.id,
           workflowRunId: workflowRun.id,
@@ -4061,7 +4119,10 @@ export async function runRevenueWorker(input: {
       .values({
         tenantId: context.worker.tenantId,
         kind: "trace",
-        name: "Revenue Worker simulation trace",
+        name:
+          command === "quote.prepare"
+            ? "Revenue Worker quote preparation trace"
+            : "Revenue Worker simulation trace",
         objectId: runObjectId,
         taskId: task?.id,
         eventId: event.id,
@@ -4071,6 +4132,7 @@ export async function runRevenueWorker(input: {
         hash: traceHash(input.idempotencyKey, "trace"),
         data: {
           idempotencyKey: input.idempotencyKey,
+          command,
           inputHash,
           workerRunId: workerRun.id,
           workflowRunId: workflowRun.id,
@@ -4108,6 +4170,7 @@ export async function runRevenueWorker(input: {
         request: {
           action: leadPacket.expectedAction,
           workerRunId: workerRun.id,
+          command,
           workflowRunId: workflowRun.id,
           ...intakeTrace,
           sourceSnapshotEvidenceId: sourceSnapshotEvidence.id,
@@ -4120,6 +4183,7 @@ export async function runRevenueWorker(input: {
         response: {
           status: "prepared",
           preparedAction: leadPacket.expectedAction,
+          command,
           ...intakeTrace,
           draftResponse: leadPacket.draftResponse,
           quote: leadPacket.quote,
@@ -4132,6 +4196,7 @@ export async function runRevenueWorker(input: {
           receiptId: traceHash(input.idempotencyKey, "adapter_receipt"),
           adapterRunId: adapterRun.id,
           workerRunId: workerRun.id,
+          command,
           ...intakeTrace,
           sourceSnapshotEvidenceId: sourceSnapshotEvidence.id,
           externalMutation: false,
@@ -4158,6 +4223,7 @@ export async function runRevenueWorker(input: {
         data: {
           mode: "dry_run",
           workerRunId: workerRun.id,
+          command,
           adapterRunId: adapterRun.id,
           adapterActionId: action.id,
           ...intakeTrace,
@@ -4186,6 +4252,7 @@ export async function runRevenueWorker(input: {
           mode: "dry_run",
           receiptEvidenceId: receiptEvidence.id,
           adapterActionId: action.id,
+          command,
           ...intakeTrace,
           sourceSnapshotEvidenceId: sourceSnapshotEvidence.id,
           externalMutation: false,
@@ -4220,6 +4287,7 @@ export async function runRevenueWorker(input: {
         requestedAction: {
           action: "review_prepared_packet",
           adapterActionId: action.id,
+          command,
           ...intakeTrace,
           sourceSnapshotEvidenceId: sourceSnapshotEvidence.id,
           classification: leadPacket.classification,
@@ -4230,6 +4298,7 @@ export async function runRevenueWorker(input: {
         },
         evidence: {
           eventId: event.id,
+          command,
           ...intakeTrace,
           sourceSnapshotEvidenceId: sourceSnapshotEvidence.id,
           evidenceId: workerEvidence.id,
@@ -4247,6 +4316,7 @@ export async function runRevenueWorker(input: {
         },
         data: {
           operatorRunAuditId: runAudit.id,
+          command,
           inputHash,
           ...intakeTrace,
           sourceSnapshotEvidenceId: sourceSnapshotEvidence.id,
@@ -4280,10 +4350,11 @@ export async function runRevenueWorker(input: {
         objectId: runObjectId,
         capabilityId,
         risk: "medium",
-        idempotencyKey: `${input.idempotencyKey}:approval_requested`,
+        idempotencyKey: `${input.idempotencyKey}:${command}:approval_requested`,
         data: {
           reviewerUserId: task?.reviewerUserId ?? operator.id,
           operatorUserId: operator.id,
+          command,
           inputHash,
           ...intakeTrace,
           sourceSnapshotEvidenceId: sourceSnapshotEvidence.id,
@@ -4382,6 +4453,7 @@ export async function runRevenueWorker(input: {
         evidenceRefs: "approval.evidenceRefs",
       },
       latest: {
+        command,
         approvalRequestId: approval.id,
         workerRunId: workerRun.id,
         workflowRunId: workflowRun.id,
@@ -4456,11 +4528,12 @@ export async function runRevenueWorker(input: {
         objectId: runObjectId,
         taskId: task?.id,
         capabilityId,
-        idempotencyKey: `${input.idempotencyKey}:quote_approval_view`,
+        idempotencyKey: `${input.idempotencyKey}:${command}:quote_approval_view`,
         data: {
           viewId: quoteApprovalView.id,
           key: quoteApprovalViewKey,
           version: quoteApprovalViewVersion,
+          command,
           approvalRequestId: approval.id,
           workerRunId: workerRun.id,
           workflowRunId: workflowRun.id,
@@ -4487,11 +4560,12 @@ export async function runRevenueWorker(input: {
         objectId: runObjectId,
         capabilityId,
         risk: "low",
-        idempotencyKey: `${input.idempotencyKey}:quote_approval_view`,
+        idempotencyKey: `${input.idempotencyKey}:${command}:quote_approval_view`,
         data: {
           viewId: quoteApprovalView.id,
           key: quoteApprovalViewKey,
           version: quoteApprovalViewVersion,
+          command,
           approvalRequestId: approval.id,
           externalExecution: "blocked",
         },
@@ -4518,6 +4592,7 @@ export async function runRevenueWorker(input: {
         kind: "worker_transition",
         name: "Revenue intake resolved",
         input: {
+          command,
           ...intakeTrace,
           leadPacket: leadPacket.sourceSnapshot,
         },
@@ -4525,6 +4600,7 @@ export async function runRevenueWorker(input: {
           sourceObjectId,
           sourceEventRowId,
           sourceEvidenceId,
+          command,
           inputHash,
         },
       },
@@ -4534,10 +4610,12 @@ export async function runRevenueWorker(input: {
         kind: "worker_transition",
         name: "Revenue packet prepared",
         input: {
+          command,
           classification: leadPacket.classification,
           quote: leadPacket.quote,
         },
         output: {
+          command,
           sourceSnapshotEvidenceId: sourceSnapshotEvidence.id,
           evidenceId: workerEvidence.id,
           inferenceId: inference.id,
@@ -4552,8 +4630,10 @@ export async function runRevenueWorker(input: {
         input: {
           operation: "draft_customer_response",
           mode: "dry_run",
+          command,
         },
         output: {
+          command,
           adapterRunId: adapterRun.id,
           adapterActionId: action.id,
           adapterReceiptEvidenceId: receiptEvidence.id,
@@ -4567,12 +4647,14 @@ export async function runRevenueWorker(input: {
         kind: "approval_request",
         name: "Revenue owner approval requested",
         input: {
+          command,
           policy: {
             externalSend: "approval_required",
             moneyMovement: "blocked",
           },
         },
         output: {
+          command,
           approvalRequestId: approval.id,
           approvalAuditEventId: approvalAudit.id,
           quoteApprovalViewId: quoteApprovalView.id,
@@ -4623,6 +4705,7 @@ export async function runRevenueWorker(input: {
         state: "approval_requested",
         data: {
           workerRunId: workerRun.id,
+          command,
           eventId: event.id,
           approvalRequestId: approval.id,
           approvalAuditEventId: approvalAudit.id,
@@ -4660,6 +4743,7 @@ export async function runRevenueWorker(input: {
       .set({
         data: {
           idempotencyKey: input.idempotencyKey,
+          command,
           inputHash,
           workerRunId: workerRun.id,
           ...intakeTrace,
@@ -4698,6 +4782,7 @@ export async function runRevenueWorker(input: {
       decision: "request_owner_approval",
       rationale: "Prepared lead packet is ready for owner review; external communication and money movement are blocked.",
       data: {
+        command,
         inputHash,
         workerRunId: workerRun.id,
         workflowRunId: workflowRun.id,
@@ -4725,6 +4810,7 @@ export async function runRevenueWorker(input: {
       score: "0.860",
       data: {
         workerRunId: workerRun.id,
+        command,
         workflowRunId: workflowRun.id,
         workflowStepIds,
         idempotencyKey: input.idempotencyKey,
@@ -4756,6 +4842,7 @@ export async function runRevenueWorker(input: {
           outcome: {
             status: leadPacket.classification,
             workerRunId: workerRun.id,
+            command,
             runEventId: event.id,
             ...intakeTrace,
             sourceSnapshotEvidenceId: sourceSnapshotEvidence.id,
@@ -4805,6 +4892,7 @@ export async function runRevenueWorker(input: {
         data: {
           state: "approval_required",
           workerRunId: workerRun.id,
+          command,
           sourceEventId: event.id,
           inputHash,
           ...intakeTrace,
@@ -4842,6 +4930,7 @@ export async function runRevenueWorker(input: {
         data: {
           worker: context.worker.name,
           tenant: context.tenantName,
+          command,
           inputHash,
           ...intakeTrace,
           source: leadPacket.source,
@@ -4875,6 +4964,7 @@ export async function runRevenueWorker(input: {
     const runOutput = {
       worker: context.worker.name,
       tenant: context.tenantName,
+      command,
       inputHash,
       ...intakeTrace,
       source: leadPacket.source,
@@ -4950,6 +5040,20 @@ export async function runRevenueWorker(input: {
     ...result,
     snapshot: await getRevenueWorkerSnapshot(db, selector),
   };
+}
+
+export async function prepareRevenueQuote(input: {
+  idempotencyKey: string;
+  operatorEmail: string;
+  tenantSlug?: string;
+  workerId?: string;
+  config?: JsonObject;
+  db?: Database;
+}): Promise<RevenueWorkerRunResult> {
+  return runRevenueWorker({
+    ...input,
+    command: "quote.prepare",
+  });
 }
 
 export async function continueRevenueWorker(input: {

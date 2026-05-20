@@ -301,6 +301,7 @@ snapshots and approval review. Worker-specific HTTP paths are intentionally
 absent; expand the worker control plane through registered `/worker` commands
 and payload fields.
 The deploy workflow smokes `lead.read`, the source-selector `run` path, a
+registered `quote.prepare` packet, a
 Core-created active buffered connection, one-shot scheduler `lead.read -> run`
 handoff proof, adapter reconciliation, continuation, and `/core` task creation,
 task transition, approval request, capability grant, budget
@@ -335,6 +336,7 @@ Control-plane token catalog entries have this shape when provided directly via
       "worker:view.snapshot",
       "worker:view.readiness",
       "worker:lead.read",
+      "worker:quote.prepare",
       "worker:run",
       "worker:hire.packet.prepare",
       "worker:payroll_input.prepare",
@@ -519,6 +521,7 @@ shape:
       "worker:view.snapshot",
       "worker:view.readiness",
       "worker:lead.read",
+      "worker:quote.prepare",
       "worker:run",
       "worker:hire.packet.prepare",
       "worker:payroll_input.prepare",
