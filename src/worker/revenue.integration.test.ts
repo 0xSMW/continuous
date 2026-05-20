@@ -210,6 +210,14 @@ maybeDescribe("Revenue Worker integration eval", () => {
 
     expect(rotation.tokenRotationAttestationId).toBeTruthy();
 
+    await db
+      .update(controlPlaneCredentials)
+      .set({
+        lastUsedAt: sql`now() + interval '1 second'`,
+        updatedAt: sql`now() + interval '1 second'`,
+      })
+      .where(eq(controlPlaneCredentials.id, upsert.controlPlaneCredentialId));
+
     const rotatedBridgeAllowed = await authorizeManagedControlPlaneCredential({
       request: rotatedRequest,
       auth: catalogAuth,

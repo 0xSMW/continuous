@@ -662,9 +662,12 @@ export async function authorizeManagedControlPlaneCredential(
             and(
               eq(controlPlaneTokenRotationAttestations.tenantId, tenant.id),
               eq(controlPlaneTokenRotationAttestations.credentialId, input.auth.credentialId),
+              eq(
+                controlPlaneTokenRotationAttestations.previousTokenFingerprint,
+                credential.tokenFingerprint,
+              ),
               eq(controlPlaneTokenRotationAttestations.nextTokenFingerprint, requestFingerprint),
               eq(controlPlaneTokenRotationAttestations.state, "attested"),
-              gte(controlPlaneTokenRotationAttestations.attestedAt, credential.updatedAt),
             ),
           )
           .orderBy(desc(controlPlaneTokenRotationAttestations.attestedAt))
