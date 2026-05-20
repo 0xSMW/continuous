@@ -217,6 +217,7 @@ describe("future worker contracts", () => {
     const deployWorkflow = read(".github/workflows/deploy.yml");
     const readinessScript = read("scripts/check-production-readiness-on-host.sh");
     const attestationScript = read("scripts/attest-control-plane-on-host.sh");
+    const rotationScript = read("scripts/rotate-control-plane-token-on-host.sh");
 
     expect(deployment).toContain("control_plane.token_rotation.attest");
     expect(deployment).toContain("control_plane.credential.upsert");
@@ -241,15 +242,20 @@ describe("future worker contracts", () => {
     expect(attestationScript).toContain("control_plane.credential.revoke");
     expect(attestationScript).toContain("control_plane.session.review");
     expect(attestationScript).toContain("CONTROL_PLANE_SESSION_REVIEW_VIEW_ID");
+    expect(rotationScript).toContain("control_plane.token_rotation.attest");
+    expect(rotationScript).toContain("TOKEN_ROTATION_ATTESTATION_ID");
+    expect(rotationScript).toContain("NEXT_WORKER_RUN_TOKEN");
     expect(deployScript).toContain("core:control_plane.token_rotation.attest");
     expect(deployScript).toContain("core:control_plane.credential.upsert");
     expect(deployScript).toContain("core:control_plane.credential.revoke");
     expect(deployScript).toContain("core:control_plane.session.review");
+    expect(deployScript).toContain("scripts/rotate-control-plane-token-on-host.sh");
     expect(deployWorkflow).toContain("core:control_plane.token_rotation.attest");
     expect(deployWorkflow).toContain("core:control_plane.credential.upsert");
     expect(deployWorkflow).toContain("core:control_plane.credential.revoke");
     expect(deployWorkflow).toContain("core:control_plane.session.review");
     expect(deployWorkflow).toContain("scripts/attest-control-plane-on-host.sh");
+    expect(deployWorkflow).toContain("scripts/rotate-control-plane-token-on-host.sh");
   });
 
   it("defines Core-record handoffs for planned worker expansion", () => {

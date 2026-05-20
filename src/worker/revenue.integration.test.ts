@@ -10,6 +10,7 @@ import { decideApproval, requestApproval } from "../core/approvals";
 import { reserveBudget, chargeBudget, releaseBudget } from "../core/budgets";
 import { grantCapability } from "../core/capabilities";
 import {
+  attestControlPlaneTokenRotation,
   authorizeManagedControlPlaneCredential,
   controlPlaneTokenFingerprint,
   recordControlPlaneAuthAttempt,
@@ -185,6 +186,80 @@ maybeDescribe("Revenue Worker integration eval", () => {
 
     expect(allowed.ok).toBe(true);
 
+    const rotatedToken = `ci-managed-rotated-token-${randomUUID()}`;
+    const rotatedTokenFingerprint = controlPlaneTokenFingerprint(rotatedToken);
+    const rotatedRequest = new Request("http://localhost/worker", {
+      headers: {
+        authorization: `Bearer ${rotatedToken}`,
+      },
+    });
+    const rotation = await attestControlPlaneTokenRotation({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-credential-rotation-${randomUUID()}`,
+      credentialId,
+      previousCredentialId: credentialId,
+      previousTokenFingerprint: tokenFingerprint ?? undefined,
+      nextTokenFingerprint: rotatedTokenFingerprint ?? undefined,
+      reason: "CI rotation bridge proof",
+      evidence: {
+        source: "ci",
+      },
+      db,
+    });
+
+    expect(rotation.tokenRotationAttestationId).toBeTruthy();
+
+    const rotatedBridgeAllowed = await authorizeManagedControlPlaneCredential({
+      request: rotatedRequest,
+      auth: catalogAuth,
+      tenantSlug: "continuous-demo",
+      workerRole: "revenue_operations",
+      route: "worker",
+      access: "write",
+      command: "run",
+      db,
+    });
+
+    expect(rotatedBridgeAllowed.ok).toBe(true);
+
+    await upsertControlPlaneCredential({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-credential-upsert-rotated-${randomUUID()}`,
+      credentialId,
+      displayName: "CI managed operator",
+      tokenFingerprint: rotatedTokenFingerprint ?? undefined,
+      allowedTenants: ["continuous-demo"],
+      allowedWorkerRoles: ["revenue_operations"],
+      allowedRoutes: ["worker"],
+      allowedAccess: ["write"],
+      allowedCommands: ["worker:run"],
+      evidence: {
+        source: "ci",
+        rotation: rotation.tokenRotationAttestationId,
+      },
+      db,
+    });
+
+    const previousTokenDenied = await authorizeManagedControlPlaneCredential({
+      request,
+      auth: catalogAuth,
+      tenantSlug: "continuous-demo",
+      workerRole: "revenue_operations",
+      route: "worker",
+      access: "write",
+      command: "run",
+      db,
+    });
+
+    expect(previousTokenDenied).toEqual({
+      ok: false,
+      status: 401,
+      code: "control_plane_credential_fingerprint_mismatch",
+      message: "Control-plane credential fingerprint does not match managed credential inventory.",
+    });
+
     const revoke = await revokeControlPlaneCredential({
       operatorEmail: "owner@continuoushq.com",
       tenantSlug: "continuous-demo",
@@ -200,7 +275,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(revoke.revoked).toBe(true);
 
     const denied = await authorizeManagedControlPlaneCredential({
-      request,
+      request: rotatedRequest,
       auth: catalogAuth,
       tenantSlug: "continuous-demo",
       workerRole: "revenue_operations",
@@ -218,7 +293,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
     });
 
     const authSession = await recordControlPlaneAuthAttempt({
-      request,
+      request: rotatedRequest,
       route: "worker",
       access: "write",
       command: "run",

@@ -654,12 +654,31 @@ export async function authorizeManagedControlPlaneCredential(
   const requestFingerprint = controlPlaneRequestTokenFingerprint(input.request);
 
   if (credential.tokenFingerprint && credential.tokenFingerprint !== requestFingerprint) {
-    return {
-      ok: false,
-      status: 401,
-      code: "control_plane_credential_fingerprint_mismatch",
-      message: "Control-plane credential fingerprint does not match managed credential inventory.",
-    };
+    const [rotationBridge] = requestFingerprint
+      ? await db
+          .select({ id: controlPlaneTokenRotationAttestations.id })
+          .from(controlPlaneTokenRotationAttestations)
+          .where(
+            and(
+              eq(controlPlaneTokenRotationAttestations.tenantId, tenant.id),
+              eq(controlPlaneTokenRotationAttestations.credentialId, input.auth.credentialId),
+              eq(controlPlaneTokenRotationAttestations.nextTokenFingerprint, requestFingerprint),
+              eq(controlPlaneTokenRotationAttestations.state, "attested"),
+              gte(controlPlaneTokenRotationAttestations.attestedAt, credential.updatedAt),
+            ),
+          )
+          .orderBy(desc(controlPlaneTokenRotationAttestations.attestedAt))
+          .limit(1)
+      : [];
+
+    if (!rotationBridge) {
+      return {
+        ok: false,
+        status: 401,
+        code: "control_plane_credential_fingerprint_mismatch",
+        message: "Control-plane credential fingerprint does not match managed credential inventory.",
+      };
+    }
   }
 
   if (credential.state === "revoked" || credential.revokedAt) {

@@ -355,12 +355,15 @@ operator acknowledgement layer: the durable source of truth is the
 `control_plane_credentials` row, the linked `control_plane_auth_sessions`
 request audit row, and the generated session review view.
 
-Deploy smoke runs `scripts/attest-control-plane-on-host.sh` after the new app is
-up. That script records the current bootstrap credential inventory row, revokes
-a disposable drill credential, reviews recent bootstrap sessions, and writes the
-non-secret credential/auth/session evidence ids into this file. It does not
-attest token rotation, recovery drills, object-storage backups, alerting, or
-non-root host access.
+Deploy rotates the bootstrap control-plane token before the new app starts by
+running `scripts/rotate-control-plane-token-on-host.sh` against the currently
+running app. That records `control_plane.token_rotation.attest` and writes the
+non-secret rotation attestation id into this file. After the new app is up,
+deploy smoke runs `scripts/attest-control-plane-on-host.sh`; that script records
+the current bootstrap credential inventory row, revokes a disposable drill
+credential, reviews recent bootstrap sessions, and writes the non-secret
+credential/auth/session evidence ids into this file. These scripts do not attest
+recovery drills, object-storage backups, alerting, or non-root host access.
 
 ```sh
 install -m 0700 -d /etc/continuous

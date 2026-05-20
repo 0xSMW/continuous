@@ -283,9 +283,21 @@ jobs:
           POSTGRES_USER="${POSTGRES_USER:-continuous}"
           POSTGRES_DB="${POSTGRES_DB:-continuous}"
           export POSTGRES_USER POSTGRES_DB
-          worker_token="$(grep '^WORKER_RUN_TOKEN=' .env | cut -d= -f2- || true)"
-          if [ -z "$worker_token" ]; then
-            worker_token="$(openssl rand -hex 32)"
+          previous_worker_token="$(grep '^WORKER_RUN_TOKEN=' .env | cut -d= -f2- || true)"
+          worker_token="$(openssl rand -hex 32)"
+          if [ -n "$previous_worker_token" ] && docker compose ps --status running app | grep -q app; then
+            TOKEN_ROTATION_OUTPUT="$(
+              APP_DIR="$APP_DIR" \
+                NEXT_WORKER_RUN_TOKEN="$worker_token" \
+                CONTROL_PLANE_ROTATION_RUN_ID="$(date -u +%Y%m%d%H%M%S)" \
+                "$APP_DIR/scripts/rotate-control-plane-token-on-host.sh"
+            )"
+            printf '%s\n' "$TOKEN_ROTATION_OUTPUT"
+            printf '%s\n' "$TOKEN_ROTATION_OUTPUT" | /usr/bin/jq -e \
+              '.control_plane_token_rotation_status == "ok" and (.tokenRotationAttestationId | length > 0)' \
+              >/dev/null
+          else
+            echo "No running app found for pre-deploy token rotation; writing a fresh bootstrap token without rotation attestation."
           fi
           set_env WORKER_RUN_TOKEN "$worker_token"
           set_env WORKER_RUN_ENABLED true
