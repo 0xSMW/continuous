@@ -50,6 +50,67 @@ function configObject(value: unknown):
 
 const workerCommandEnvelopeFields = new Set(["command", "worker", "idempotencyKey", "config"]);
 const workerTargetEnvelopeFields = new Set(["role", "id", "tenantSlug"]);
+const maxWorkerCommandBodyBytes = 1_048_576;
+
+function bodyTooLargeError() {
+  return {
+    ok: false,
+    status: 413,
+    error: {
+      code: "worker_command_body_too_large",
+      message: `Worker command body must be at most ${maxWorkerCommandBodyBytes} bytes.`,
+    },
+  } as const;
+}
+
+async function readBoundedBodyText(
+  request: Request,
+): Promise<
+    | { ok: true; value: string }
+    | { ok: false; status: number; error: { code: string; message: string } }
+  > {
+  const contentLength = Number(request.headers.get("content-length") ?? 0);
+
+  if (Number.isFinite(contentLength) && contentLength > maxWorkerCommandBodyBytes) {
+    return bodyTooLargeError();
+  }
+
+  if (!request.body) {
+    return { ok: true, value: "" };
+  }
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+
+    if (done) {
+      break;
+    }
+
+    totalBytes += value.byteLength;
+
+    if (totalBytes > maxWorkerCommandBodyBytes) {
+      await reader.cancel();
+      return bodyTooLargeError();
+    }
+
+    chunks.push(value);
+  }
+
+  const bodyBytes = new Uint8Array(totalBytes);
+  let offset = 0;
+
+  for (const chunk of chunks) {
+    bodyBytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  return { ok: true, value: new TextDecoder().decode(bodyBytes) };
+}
+
 async function readBody(
   request: Request,
 ): Promise<
@@ -68,7 +129,13 @@ async function readBody(
   }
 
   try {
-    const value = await request.json();
+    const bodyText = await readBoundedBodyText(request);
+
+    if (!bodyText.ok) {
+      return bodyText;
+    }
+
+    const value = JSON.parse(bodyText.value) as unknown;
 
     if (!value || typeof value !== "object" || Array.isArray(value)) {
       return {
@@ -313,8 +380,44 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const preAuth = authorizeControlPlaneAccess({
+    enabled: env.WORKER_RUN_ENABLED,
+    appEnv: env.APP_ENV,
+    expectedToken: env.WORKER_RUN_TOKEN,
+    operatorEmail: env.WORKER_OPERATOR_EMAIL,
+    authorization: request.headers.get("authorization"),
+    headerToken: request.headers.get("x-worker-run-token"),
+    allowedTenants: env.CONTROL_PLANE_ALLOWED_TENANTS,
+    allowedWorkerRoles: env.CONTROL_PLANE_ALLOWED_WORKER_ROLES,
+    tokenCatalogJson: env.CONTROL_PLANE_TOKENS_JSON,
+    tokenCatalogB64: env.CONTROL_PLANE_TOKEN_CATALOG_B64,
+    route: "worker",
+    access: "write",
+  });
+
+  if (!preAuth.ok) {
+    await recordControlPlaneAuthAttempt({
+      request,
+      route: "worker",
+      access: "write",
+      auth: preAuth,
+    });
+    return guardErrorResponse(preAuth);
+  }
+
   const bodyResult = await readBody(request);
-  const body = bodyResult.ok ? bodyResult.value : {};
+
+  if (!bodyResult.ok) {
+    await recordControlPlaneAuthAttempt({
+      request,
+      route: "worker",
+      access: "write",
+      auth: preAuth,
+    });
+    return errorResponse(bodyResult.error, bodyResult.status);
+  }
+
+  const body = bodyResult.value;
   const unexpectedFields = unexpectedWorkerPayloadFields(body);
   const configResult = configObject(body.config);
   const config = configResult.ok ? configResult.value : {};
@@ -347,10 +450,6 @@ export async function POST(request: Request) {
       auth,
     });
     return guardErrorResponse(auth);
-  }
-
-  if (!bodyResult.ok) {
-    return errorResponse(bodyResult.error, bodyResult.status);
   }
 
   if (unexpectedFields.length > 0) {

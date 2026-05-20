@@ -133,6 +133,32 @@ describe("/worker route", () => {
     });
   });
 
+  it("rejects unauthorized POST commands before reading the request body", async () => {
+    const getReader = vi.fn(() => {
+      throw new Error("Body should not be read before auth succeeds.");
+    });
+    const { POST } = await import("./route");
+    const response = await POST({
+      url: "http://localhost/worker",
+      headers: new Headers({
+        authorization: "Bearer wrong-token",
+        "content-type": "application/json",
+      }),
+      body: {
+        getReader,
+      },
+    } as unknown as Request);
+    const body = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(body.error).toEqual({
+      code: "worker_run_unauthorized",
+      message: "Worker run token is invalid.",
+    });
+    expect(getReader).not.toHaveBeenCalled();
+    expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
+  });
+
   it("rejects invalid worker command bodies before registry dispatch", async () => {
     const { POST } = await import("./route");
 
@@ -227,6 +253,37 @@ describe("/worker route", () => {
     expect(jsonpContentType.status).toBe(415);
     expect(malformedJson.status).toBe(400);
     expect(arrayBody.status).toBe(400);
+    expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
+  });
+
+  it("rejects oversized worker command bodies before JSON parsing", async () => {
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/worker", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+          "content-length": "1048577",
+        },
+        body: JSON.stringify({
+          command: "run",
+          worker: {
+            role: "revenue_operations",
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "oversized-body-001",
+          config: {},
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(413);
+    expect(body.error).toEqual({
+      code: "worker_command_body_too_large",
+      message: "Worker command body must be at most 1048576 bytes.",
+    });
     expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
   });
 
