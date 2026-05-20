@@ -2332,6 +2332,177 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(approvalTaskOutcome.approvalRequestId).toBe(workflowApproval.approvalRequestId);
     expect(approvalTaskOutcome.workflowStepId).toBe(approvalStep.id);
 
+    const [workflowConnection] = await db.select({ id: connections.id }).from(connections).limit(1);
+    const [workflowRulePack] = await db.select({ id: rulePacks.id }).from(rulePacks).limit(1);
+
+    expect(workflowConnection?.id).toBeTruthy();
+    expect(workflowRulePack?.id).toBeTruthy();
+
+    const [adapterIntentStep] = await db
+      .insert(workflowSteps)
+      .values({
+        tenantId: packetRun?.tenantId ?? "",
+        definitionId: packetRun?.definitionId ?? "",
+        workflowRunId: packetStart.run.id,
+        taskId: packetTask.taskId,
+        capabilityId: quoteCapabilityId,
+        kind: "adapter_intent_record",
+        name: "CI record adapter intent from workflow",
+        state: "queued",
+        priority: "urgent",
+        risk: "medium",
+        fromState: "awaiting_approval",
+        toState: "awaiting_approval",
+        attempt: 1,
+        maxAttempts: 2,
+        idempotencyKey: `ci-workflow-adapter-intent-step-${runId}`,
+        input: {
+          adapterIntent: {
+            connectionId: workflowConnection?.id,
+            operation: "draft_agency_response",
+            mode: "dry_run",
+            maxAttempts: 2,
+            request: {
+              packetId: String(packetPreparation.packetId ?? ""),
+              externalSend: false,
+            },
+            data: {
+              source: "workflow_adapter_intent_ci",
+            },
+          },
+        },
+      })
+      .returning();
+
+    const adapterIntentExecution = await executeWorkflowSteps({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      limit: 1,
+      leaseOwner: `ci-workflow-adapter-intent:${runId}`,
+      db,
+    });
+    const [adapterIntentResult] = adapterIntentExecution.results;
+    const [executedAdapterIntentStep] = await db
+      .select()
+      .from(workflowSteps)
+      .where(eq(workflowSteps.id, adapterIntentStep.id))
+      .limit(1);
+    const adapterIntentOutput = objectValue(executedAdapterIntentStep?.output);
+    const workflowAdapterIntent = objectValue(adapterIntentOutput.adapterIntentRecord);
+    const [workflowAdapterAction] = await db
+      .select()
+      .from(adapterActions)
+      .where(eq(adapterActions.id, String(workflowAdapterIntent.adapterActionId ?? "")))
+      .limit(1);
+    const [adapterIntentTask] = await db
+      .select()
+      .from(tasks)
+      .where(eq(tasks.id, packetTask.taskId))
+      .limit(1);
+    const adapterIntentTaskOutcome = objectValue(
+      objectValue(adapterIntentTask?.outcome).lastWorkflowAdapterIntent,
+    );
+
+    expect(adapterIntentExecution.processed).toBe(1);
+    expect(adapterIntentExecution.completed).toBe(1);
+    expect(adapterIntentResult?.stepId).toBe(adapterIntentStep.id);
+    expect(executedAdapterIntentStep?.state).toBe("done");
+    expect(workflowAdapterIntent.adapterActionId).toBeTruthy();
+    expect(workflowAdapterIntent.externalExecution).toBe("blocked");
+    expect(workflowAdapterAction?.mode).toBe("dry_run");
+    expect(workflowAdapterAction?.operation).toBe("draft_agency_response");
+    expect(objectValue(workflowAdapterAction?.request).workflowStepId).toBe(adapterIntentStep.id);
+    expect(adapterIntentTaskOutcome.adapterActionId).toBe(workflowAdapterIntent.adapterActionId);
+
+    const [ruleChangeStep] = await db
+      .insert(workflowSteps)
+      .values({
+        tenantId: packetRun?.tenantId ?? "",
+        definitionId: packetRun?.definitionId ?? "",
+        workflowRunId: packetStart.run.id,
+        taskId: packetTask.taskId,
+        capabilityId: quoteCapabilityId,
+        kind: "rule_change_record",
+        name: "CI record rule change from workflow",
+        state: "queued",
+        priority: "urgent",
+        risk: "high",
+        fromState: "awaiting_approval",
+        toState: "awaiting_approval",
+        attempt: 1,
+        maxAttempts: 2,
+        idempotencyKey: `ci-workflow-rule-change-step-${runId}`,
+        input: {
+          ruleChange: {
+            rulePackId: workflowRulePack?.id,
+            ruleKey: "workflow.agency_notice.response_window",
+            changeType: "operator_policy_update",
+            title: "Workflow agency response window update",
+            state: "proposed",
+            decision: "owner_review_required",
+            rationale: "Workflow-driven rule changes stay blocked until owner review.",
+            before: {
+              responseWindowDays: 14,
+            },
+            after: {
+              responseWindowDays: 10,
+            },
+            impact: {
+              packetId: String(packetPreparation.packetId ?? ""),
+            },
+            data: {
+              source: "workflow_rule_change_ci",
+            },
+          },
+        },
+      })
+      .returning();
+
+    const ruleChangeExecution = await executeWorkflowSteps({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      limit: 1,
+      leaseOwner: `ci-workflow-rule-change:${runId}`,
+      db,
+    });
+    const [ruleChangeResult] = ruleChangeExecution.results;
+    const [executedRuleChangeStep] = await db
+      .select()
+      .from(workflowSteps)
+      .where(eq(workflowSteps.id, ruleChangeStep.id))
+      .limit(1);
+    const ruleChangeOutput = objectValue(executedRuleChangeStep?.output);
+    const workflowRuleChange = objectValue(ruleChangeOutput.ruleChangeRecord);
+    const [workflowRuleChangeObject] = await db
+      .select()
+      .from(objects)
+      .where(eq(objects.id, String(workflowRuleChange.objectId ?? "")))
+      .limit(1);
+    const [workflowRuleChangeDecision] = await db
+      .select()
+      .from(decisions)
+      .where(eq(decisions.id, String(workflowRuleChange.decisionId ?? "")))
+      .limit(1);
+    const [ruleChangeTask] = await db
+      .select()
+      .from(tasks)
+      .where(eq(tasks.id, packetTask.taskId))
+      .limit(1);
+    const ruleChangeTaskOutcome = objectValue(
+      objectValue(ruleChangeTask?.outcome).lastWorkflowRuleChange,
+    );
+
+    expect(ruleChangeExecution.processed).toBe(1);
+    expect(ruleChangeExecution.completed).toBe(1);
+    expect(ruleChangeResult?.stepId).toBe(ruleChangeStep.id);
+    expect(executedRuleChangeStep?.state).toBe("done");
+    expect(workflowRuleChange.objectId).toBeTruthy();
+    expect(workflowRuleChange.externalExecution).toBe("blocked");
+    expect(workflowRuleChangeObject?.type).toBe("rule_change");
+    expect(objectValue(workflowRuleChangeObject?.data).workflowStepId).toBe(ruleChangeStep.id);
+    expect(workflowRuleChangeDecision?.decision).toBe("owner_review_required");
+    expect(ruleChangeTaskOutcome.objectId).toBe(workflowRuleChange.objectId);
+
     const retryStart = await startWorkflowRun({
       operatorEmail: "owner@continuoushq.com",
       tenantSlug: "continuous-demo",

@@ -17,7 +17,11 @@ import {
 import { RevenueWorkerUnavailableError } from "../worker/revenue";
 import { PlatformUnavailableError } from "./errors";
 import { loadOperatorContext } from "./operators";
-import { prepareCorePacketForOperator } from "./primitives";
+import {
+  prepareCorePacketForOperator,
+  recordAdapterIntentForOperator,
+  recordRuleChangeForOperator,
+} from "./primitives";
 
 type Database = typeof defaultDb;
 
@@ -305,6 +309,8 @@ const executableWorkflowStepKinds = new Set([
   "worker_transition",
   "capability_execution",
   "approval_request",
+  "adapter_intent_record",
+  "rule_change_record",
   "packet_prepare",
   "document_packet_prepare",
   "evidence_packet_prepare",
@@ -756,6 +762,179 @@ async function completeWorkflowStep(input: {
           requestedAction: JsonObject;
         }
       | null = null;
+    let adapterIntentRecord: Awaited<ReturnType<typeof recordAdapterIntentForOperator>> | null =
+      null;
+    let ruleChangeRecord: Awaited<ReturnType<typeof recordRuleChangeForOperator>> | null =
+      null;
+
+    if (step.kind === "adapter_intent_record") {
+      const adapterInput = jsonObject(step.input.adapterIntent ?? step.input.adapter ?? {});
+      const adapterTaskId = stringValue(adapterInput.taskId) ?? step.taskId ?? undefined;
+
+      adapterIntentRecord = await recordAdapterIntentForOperator(tx, input.operator, {
+        idempotencyKey: `${step.id}:adapter_intent_record`,
+        connectionId: stringValue(adapterInput.connectionId) ?? "",
+        operation: stringValue(adapterInput.operation) ?? "",
+        mode: stringValue(adapterInput.mode),
+        taskId: adapterTaskId,
+        eventId: stringValue(adapterInput.eventId) ?? event.id,
+        capabilityId: stringValue(adapterInput.capabilityId) ?? step.capabilityId ?? undefined,
+        request: {
+          ...jsonObject(adapterInput.request),
+          workflowRunId: run.id,
+          workflowStepId: step.id,
+          workflowKey: definition.key,
+          externalExecution: "blocked",
+        },
+        data: {
+          ...jsonObject(adapterInput.data),
+          workflowRunId: run.id,
+          workflowStepId: step.id,
+          workflowKey: definition.key,
+          source,
+          externalExecution: "blocked",
+        },
+        maxAttempts: adapterInput.maxAttempts,
+      });
+
+      await tx
+        .update(workflowRuns)
+        .set({
+          data: {
+            ...run.data,
+            lastExecutedStep: {
+              ...lastExecutedStep,
+              adapterIntentRecord,
+            },
+            lastAdapterIntentRecord: {
+              ...adapterIntentRecord,
+              workflowStepId: step.id,
+              recordedAt: input.now.toISOString(),
+              externalExecution: "blocked",
+            },
+          },
+          updatedAt: input.now,
+        })
+        .where(eq(workflowRuns.id, run.id));
+
+      if (adapterTaskId) {
+        const adapterTask =
+          task?.id === adapterTaskId
+            ? task
+            : (
+                await tx
+                  .select()
+                  .from(tasks)
+                  .where(and(eq(tasks.tenantId, input.operator.tenantId), eq(tasks.id, adapterTaskId)))
+                  .limit(1)
+              )[0] ?? null;
+
+        if (adapterTask) {
+          await tx
+            .update(tasks)
+            .set({
+              outcome: {
+                ...adapterTask.outcome,
+                lastWorkflowAdapterIntent: {
+                  ...adapterIntentRecord,
+                  workflowRunId: run.id,
+                  workflowStepId: step.id,
+                  recordedAt: input.now.toISOString(),
+                  externalExecution: "blocked",
+                },
+              },
+              updatedAt: input.now,
+            })
+            .where(and(eq(tasks.tenantId, input.operator.tenantId), eq(tasks.id, adapterTask.id)));
+        }
+      }
+    }
+
+    if (step.kind === "rule_change_record") {
+      const ruleInput = jsonObject(step.input.ruleChange ?? step.input.rule ?? {});
+      const ruleTaskId = stringValue(ruleInput.taskId) ?? step.taskId ?? undefined;
+
+      ruleChangeRecord = await recordRuleChangeForOperator(tx, input.operator, {
+        idempotencyKey: `${step.id}:rule_change_record`,
+        rulePackId: stringValue(ruleInput.rulePackId),
+        ruleKey: stringValue(ruleInput.ruleKey) ?? "",
+        changeType: stringValue(ruleInput.changeType) ?? "",
+        title: stringValue(ruleInput.title) ?? "",
+        summary: stringValue(ruleInput.summary),
+        state: stringValue(ruleInput.state),
+        decision: stringValue(ruleInput.decision),
+        rationale: stringValue(ruleInput.rationale),
+        taskId: ruleTaskId,
+        workflowRunId: stringValue(ruleInput.workflowRunId) ?? run.id,
+        capabilityId: stringValue(ruleInput.capabilityId) ?? step.capabilityId ?? undefined,
+        sourceRefs: jsonObject(ruleInput.sourceRefs),
+        before: jsonObject(ruleInput.before),
+        after: jsonObject(ruleInput.after),
+        impact: jsonObject(ruleInput.impact),
+        data: {
+          ...jsonObject(ruleInput.data),
+          workflowRunId: run.id,
+          workflowStepId: step.id,
+          workflowKey: definition.key,
+          workflowEventId: event.id,
+          source,
+          externalExecution: "blocked",
+        },
+        effectiveAt: stringValue(ruleInput.effectiveAt),
+      });
+
+      await tx
+        .update(workflowRuns)
+        .set({
+          data: {
+            ...run.data,
+            lastExecutedStep: {
+              ...lastExecutedStep,
+              ruleChangeRecord,
+            },
+            lastRuleChangeRecord: {
+              ...ruleChangeRecord,
+              workflowStepId: step.id,
+              recordedAt: input.now.toISOString(),
+              externalExecution: "blocked",
+            },
+          },
+          updatedAt: input.now,
+        })
+        .where(eq(workflowRuns.id, run.id));
+
+      if (ruleTaskId) {
+        const ruleTask =
+          task?.id === ruleTaskId
+            ? task
+            : (
+                await tx
+                  .select()
+                  .from(tasks)
+                  .where(and(eq(tasks.tenantId, input.operator.tenantId), eq(tasks.id, ruleTaskId)))
+                  .limit(1)
+              )[0] ?? null;
+
+        if (ruleTask) {
+          await tx
+            .update(tasks)
+            .set({
+              outcome: {
+                ...ruleTask.outcome,
+                lastWorkflowRuleChange: {
+                  ...ruleChangeRecord,
+                  workflowRunId: run.id,
+                  workflowStepId: step.id,
+                  recordedAt: input.now.toISOString(),
+                  externalExecution: "blocked",
+                },
+              },
+              updatedAt: input.now,
+            })
+            .where(and(eq(tasks.tenantId, input.operator.tenantId), eq(tasks.id, ruleTask.id)));
+        }
+      }
+    }
 
     if (step.kind === "approval_request") {
       const approvalInput = jsonObject(step.input.approval ?? step.input.approvalRequest ?? {});
@@ -1050,6 +1229,22 @@ async function completeWorkflowStep(input: {
         ? {
             approvalRequest: {
               ...approvalRequest,
+              externalExecution: "blocked",
+            },
+          }
+        : {}),
+      ...(adapterIntentRecord
+        ? {
+            adapterIntentRecord: {
+              ...adapterIntentRecord,
+              externalExecution: "blocked",
+            },
+          }
+        : {}),
+      ...(ruleChangeRecord
+        ? {
+            ruleChangeRecord: {
+              ...ruleChangeRecord,
               externalExecution: "blocked",
             },
           }

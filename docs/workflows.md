@@ -229,6 +229,14 @@ execution posture in the step output and task outcome.
 audit event, and approval evidence, update workflow run data with
 `lastWorkflowApprovalRequest`, and move linked tasks to `approval_required`
 without external execution.
+`adapter_intent_record` steps record blocked dry-run adapter intents from
+`input.adapterIntent`, creating the adapter run/action, adapter event, audit
+event, trace evidence, workflow step output, workflow run marker, and task
+outcome without giving the workflow executor a worker-specific URL.
+`rule_change_record` steps record proposed rule changes from `input.ruleChange`,
+creating the rule-change object/version, decision, event, audit event, trace
+evidence, workflow step output, workflow run marker, and task outcome before any
+rule pack, obligation, filing, or external submission is changed.
 `packet_prepare`, `document_packet_prepare`, and `evidence_packet_prepare`
 steps reuse Core `packet.prepare` semantics from the workflow executor: the step
 payload provides packet content under `input.packet`, while tenant, operator,

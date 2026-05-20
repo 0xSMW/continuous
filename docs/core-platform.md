@@ -227,9 +227,10 @@ testimonial, and review records as typed customer signals. `payroll.preview.reco
 writes pay statements, payroll lines, liabilities, calculation traces, audit
 events, and trace evidence without submission or money movement.
 Queued workflow execution can also prepare durable Core packets from
-`packet_prepare`, `document_packet_prepare`, or `evidence_packet_prepare` steps,
-linking the packet, document, event, audit, trace evidence, and task outcome
-through the same workflow ledger.
+`adapter_intent_record`, `rule_change_record`, `packet_prepare`,
+`document_packet_prepare`, or `evidence_packet_prepare` steps, linking the
+adapter intent or rule change plus packet, document, event, audit, trace
+evidence, workflow output, and task outcome through the same workflow ledger.
 `payroll.preview.packet.prepare` turns those preview artifacts into variance
 reports, pay statement documents, an approval packet, approval request, and
 blocked funding/tax handoff drafts. A shared approval decision applies the

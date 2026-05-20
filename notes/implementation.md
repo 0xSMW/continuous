@@ -29,6 +29,7 @@
 | Added workflow step execution | `/workflow` now supports `command=steps.execute`, claiming queued or retryable steps, running generic transition handlers, and writing completion or retry state without workflow-specific URLs |
 | Added capability-backed workflow execution | `capability_execution` workflow steps now require an active capability and actor grant, record worker/task capability proof, and keep external execution blocked |
 | Added approval-backed workflow execution | `approval_request` workflow steps now create shared pending approval records from queued workflow execution and write workflow/task/event/audit/evidence proof without approval-specific routes |
+| Added adapter and rule-change workflow execution | `adapter_intent_record` and `rule_change_record` workflow steps now reuse Core adapter-intent and rule-change primitives from queued workflow execution while keeping external execution blocked |
 | Added packet-backed workflow execution | `packet_prepare`, `document_packet_prepare`, and `evidence_packet_prepare` steps now reuse Core packet creation from the workflow executor and write packet/document/event/audit/evidence/task proof |
 | Added scheduled internal command drain | The `worker-scheduler` Compose service posts the canonical `/workflow` and `/worker` command envelopes for workflow step execution plus Revenue adapter retry/reconciliation work |
 | Added shared approval service | Worker and workflow approvals now use a neutral approval service over `approval_requests`, with subject-scoped listing and decisions |

@@ -1651,8 +1651,11 @@ export async function recordCoreDecision(input: CoreDecisionRecordInput) {
   });
 }
 
-export async function recordAdapterIntent(input: CoreAdapterIntentRecordInput) {
-  const db = input.db ?? defaultDb;
+export async function recordAdapterIntentForOperator(
+  tx: Transaction,
+  operator: OperatorContext,
+  input: Omit<CoreAdapterIntentRecordInput, "operatorEmail" | "tenantSlug" | "db">,
+) {
   const connectionId = requiredUuid(input.connectionId, "config.connectionId");
   const operation = requiredStringMax(input.operation, "config.operation", 140);
   const mode = cleanString(input.mode) ?? "dry_run";
@@ -1660,11 +1663,6 @@ export async function recordAdapterIntent(input: CoreAdapterIntentRecordInput) {
   const eventId = optionalUuid(input.eventId, "config.eventId");
   const capabilityId = optionalUuid(input.capabilityId, "config.capabilityId");
   const maxAttempts = boundedInteger(input.maxAttempts, "config.maxAttempts", 1, 1, 10);
-  const operator = await loadOperatorContext({
-    db,
-    operatorEmail: input.operatorEmail,
-    tenantSlug: input.tenantSlug,
-  });
 
   if (mode !== "dry_run") {
     throw new PlatformUnavailableError(
@@ -1674,10 +1672,9 @@ export async function recordAdapterIntent(input: CoreAdapterIntentRecordInput) {
     );
   }
 
-  return db.transaction(async (tx) => {
-    await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtext(${operator.tenantId}), hashtext(${`${adapterIntentSource}:${input.idempotencyKey}`}))`,
-    );
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtext(${operator.tenantId}), hashtext(${`${adapterIntentSource}:${input.idempotencyKey}`}))`,
+  );
 
     const [existingAudit] = await tx
       .select({
@@ -1862,20 +1859,33 @@ export async function recordAdapterIntent(input: CoreAdapterIntentRecordInput) {
       })
       .returning({ id: evidence.id });
 
-    return {
-      created: true,
-      adapterRunId: adapterRun.id,
-      adapterActionId: adapterAction.id,
-      eventId: intentEvent.id,
-      auditEventId: audit.id,
-      evidenceId: intentEvidence.id,
-      externalExecution: "blocked",
-    };
-  });
+  return {
+    created: true,
+    adapterRunId: adapterRun.id,
+    adapterActionId: adapterAction.id,
+    eventId: intentEvent.id,
+    auditEventId: audit.id,
+    evidenceId: intentEvidence.id,
+    externalExecution: "blocked",
+  };
 }
 
-export async function recordRuleChange(input: CoreRuleChangeRecordInput) {
+export async function recordAdapterIntent(input: CoreAdapterIntentRecordInput) {
   const db = input.db ?? defaultDb;
+  const operator = await loadOperatorContext({
+    db,
+    operatorEmail: input.operatorEmail,
+    tenantSlug: input.tenantSlug,
+  });
+
+  return db.transaction(async (tx) => recordAdapterIntentForOperator(tx, operator, input));
+}
+
+export async function recordRuleChangeForOperator(
+  tx: Transaction,
+  operator: OperatorContext,
+  input: Omit<CoreRuleChangeRecordInput, "operatorEmail" | "tenantSlug" | "db">,
+) {
   const rulePackId = optionalUuid(input.rulePackId, "config.rulePackId");
   const ruleKey = requiredStringMax(input.ruleKey, "config.ruleKey", 180);
   const changeType = requiredStringMax(input.changeType, "config.changeType", 80);
@@ -1886,16 +1896,10 @@ export async function recordRuleChange(input: CoreRuleChangeRecordInput) {
   const workflowRunId = optionalUuid(input.workflowRunId, "config.workflowRunId");
   const capabilityId = optionalUuid(input.capabilityId, "config.capabilityId");
   const effectiveAt = optionalDate(input.effectiveAt, "config.effectiveAt");
-  const operator = await loadOperatorContext({
-    db,
-    operatorEmail: input.operatorEmail,
-    tenantSlug: input.tenantSlug,
-  });
 
-  return db.transaction(async (tx) => {
-    await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtext(${operator.tenantId}), hashtext(${`${ruleChangeSource}:${input.idempotencyKey}`}))`,
-    );
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtext(${operator.tenantId}), hashtext(${`${ruleChangeSource}:${input.idempotencyKey}`}))`,
+  );
 
     const [existingAudit] = await tx
       .select({
@@ -2082,18 +2086,28 @@ export async function recordRuleChange(input: CoreRuleChangeRecordInput) {
       })
       .returning({ id: evidence.id });
 
-    return {
-      created: true,
-      objectId: object.id,
-      objectVersionId: objectVersion.id,
-      version: objectVersion.version,
-      decisionId: decision.id,
-      eventId: event.id,
-      auditEventId: audit.id,
-      evidenceId: ruleEvidence.id,
-      externalExecution: "blocked",
-    };
+  return {
+    created: true,
+    objectId: object.id,
+    objectVersionId: objectVersion.id,
+    version: objectVersion.version,
+    decisionId: decision.id,
+    eventId: event.id,
+    auditEventId: audit.id,
+    evidenceId: ruleEvidence.id,
+    externalExecution: "blocked",
+  };
+}
+
+export async function recordRuleChange(input: CoreRuleChangeRecordInput) {
+  const db = input.db ?? defaultDb;
+  const operator = await loadOperatorContext({
+    db,
+    operatorEmail: input.operatorEmail,
+    tenantSlug: input.tenantSlug,
   });
+
+  return db.transaction(async (tx) => recordRuleChangeForOperator(tx, operator, input));
 }
 
 export async function linkCoreObjects(input: CoreObjectLinkInput) {
