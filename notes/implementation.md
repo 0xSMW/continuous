@@ -157,6 +157,8 @@
 | Hardened split Revenue actions | `lead.read`, `lead.classify`, `response.draft`, and `quote.prepare` now check worker budget capacity before reserving units, and empty run/classify/draft/quote configs fail before any synthetic lead defaults or worker-run records are written |
 | Hardened workflow approvals and local reads | `/workflow command=approval.decide` now requires the same top-level idempotency key discipline as other workflow mutations, local `worker.view` reads fail closed in production unless explicitly trusted, and deploy token scopes now include the registered Finance `payment_draft.prepare` command |
 | Registered Revenue quote preparation | `POST /worker` and `continuous.worker.command` now expose `command=quote.prepare` as a first-class Revenue command using the shared `worker`, `idempotencyKey`, and `config` envelope; it writes quote-preparation run/evidence/approval/view proof, preserves legacy `run` replay hashes, and keeps external sends blocked |
+| Enforced non-root customer-data deploys | The GitHub deploy workflow now rejects `require_production_readiness=true` when `DEPLOY_USER=root`, then verifies the remote SSH session has a non-zero UID before repository sync, so strict/customer-data deploys cannot silently use the bootstrap root path |
+| Fixed non-root rotation readiness writes | Deploy-time token rotation now updates a delegated `/etc/continuous/production-readiness.env` file in place instead of trying to chmod the system directory, so non-root deploys can keep token-rotation evidence current |
 
 ### Tradeoffs
 
@@ -168,7 +170,7 @@
 | Bootstrap seed data | Seed records prove the substrate shape but are not customer fixtures |
 | Deploy updates | The deploy script keeps Postgres and its volume in place, then builds and rolls the app/Caddy services after migrations and seed data |
 | Migration runner | Drizzle Kit's container migrator failed silently, so `db:migrate` uses a small Bun/Postgres runner that records Drizzle migration history and refuses partial baselines |
-| GitHub deploy access | The manual deploy workflow adds the current GitHub runner as a temporary SSH `/32` on the DigitalOcean firewall, then removes it at the end |
+| GitHub deploy access | The manual deploy workflow adds the current GitHub runner as a temporary SSH `/32` on the DigitalOcean firewall, then removes it at the end; strict customer-data mode now requires a non-root deploy user before sync |
 | Strategy breadth versus current runtime | The running app is still a narrow persisted core demo; the updated strategy and docs now define the broader product surface that implementation should grow toward |
 | Worker runtime mode | First worker run is a deterministic simulation that writes the durable loop, operator identity, approval request, and audit events without external sends or money movement |
 | Worker selection | Runtime selection now accepts tenant or worker selectors and falls back only when a single active Revenue Worker exists |

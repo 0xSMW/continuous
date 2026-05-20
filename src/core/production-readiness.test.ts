@@ -13,6 +13,7 @@ describe("production readiness operations", () => {
     const readiness = read("scripts/check-production-readiness-on-host.sh");
     const attest = read("scripts/attest-non-root-access-on-host.sh");
     const install = read("scripts/install-non-root-access.sh");
+    const deployWorkflow = read(".github/workflows/deploy.yml");
     const deploymentDocs = read("docs/deployment.md");
 
     expect(readiness).toContain("NON_ROOT_ACCESS_ATTESTED_AT");
@@ -34,10 +35,24 @@ describe("production readiness operations", () => {
     expect(install).toContain("attest-non-root-access-on-host.sh");
 
     expect(read("scripts/attest-control-plane-on-host.sh")).toContain('cat "$tmp" > "$file"');
+    expect(read("scripts/rotate-control-plane-token-on-host.sh")).toContain('if [ ! -d "$dir" ]; then');
+    expect(read("scripts/rotate-control-plane-token-on-host.sh")).toContain('cat "$tmp" > "$file"');
+    expect(read("scripts/rotate-control-plane-token-on-host.sh")).not.toContain('mv "$tmp" "$file"');
+
+    expect(deployWorkflow).toContain(
+      'require_production_readiness=true requires DEPLOY_USER to be a non-root deploy account.',
+    );
+    expect(deployWorkflow).toContain(
+      'require_production_readiness=true requires the remote deploy session to run as non-root.',
+    );
+    expect(deployWorkflow).toContain('remote_uid="$(\n              ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "id -u"');
+    expect(deployWorkflow).toContain('if [[ "$remote_uid" == "0" ]]; then');
 
     expect(deploymentDocs).toContain("HOST=45.55.53.92 ./scripts/install-non-root-access.sh");
     expect(deploymentDocs).toContain("SSH_USER=continuous-deploy ./scripts/deploy.sh");
     expect(deploymentDocs).toContain("delegates ownership of that");
-    expect(deploymentDocs).toContain("it no longer accepts a timestamp-only assertion");
+    expect(deploymentDocs).toContain("rejects `DEPLOY_USER=root` before opening a customer-data deploy");
+    expect(deploymentDocs).toContain("it no longer accepts a");
+    expect(deploymentDocs).toContain("timestamp-only assertion");
   });
 });

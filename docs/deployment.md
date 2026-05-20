@@ -414,8 +414,11 @@ HOST=45.55.53.92 SSH_USER=continuous-deploy ./scripts/deploy.sh
 
 For GitHub Actions, set the production `DEPLOY_USER` secret to
 `continuous-deploy` after confirming the workflow deploy succeeds once with
-that account. The strict readiness gate re-runs a live non-root check using the
-attested user; it no longer accepts a timestamp-only assertion.
+that account. When `require_production_readiness=true`, the workflow now
+rejects `DEPLOY_USER=root` before opening a customer-data deploy and verifies
+`id -u` is non-zero before repository sync. The strict readiness gate re-runs a
+live non-root check using the attested user; it no longer accepts a
+timestamp-only assertion.
 
 The readiness attestation file is deliberately non-secret and deploy-writable.
 It should be created only after the underlying work is done and should not contain secrets.
@@ -577,10 +580,12 @@ fingerprints only:
 ```
 
 You can also make the manual deploy workflow enforce the same strict gate by
-dispatching it with `require_production_readiness=true`. Keep the default
-`false` while backup credentials, alerting, drill evidence, token rotation,
-credential inventory, session review, and non-root host access are still being
-provisioned.
+dispatching it with `require_production_readiness=true`. That mode requires the
+production `DEPLOY_USER` secret to be a non-root account such as
+`continuous-deploy`; bootstrap and break-glass root deploys should leave the
+flag `false` while backup credentials, alerting, drill evidence, token
+rotation, credential inventory, session review, and non-root host access are
+still being provisioned.
 
 ## Observability
 

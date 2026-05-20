@@ -27,7 +27,10 @@ set_env_file() {
   dir="$(dirname "$file")"
   tmp="$(mktemp)"
 
-  install -m 0700 -d "$dir"
+  if [ ! -d "$dir" ]; then
+    install -m 0700 -d "$dir"
+  fi
+
   if [ -f "$file" ]; then
     awk -v key="$key" -v value="$value" '
       index($0, key "=") == 1 { print key "=" value; found = 1; next }
@@ -38,7 +41,8 @@ set_env_file() {
     printf '%s=%s\n' "$key" "$value" > "$tmp"
   fi
 
-  mv "$tmp" "$file"
+  cat "$tmp" > "$file"
+  rm -f "$tmp"
   chmod 0600 "$file"
 }
 

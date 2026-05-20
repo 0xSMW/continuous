@@ -97,6 +97,10 @@ jobs:
             echo "::error::require_production_readiness must be true or false."
             exit 1
           fi
+          if [[ "$REQUIRE_PRODUCTION_READINESS" == "true" && "$DEPLOY_USER" == "root" ]]; then
+            echo "::error::require_production_readiness=true requires DEPLOY_USER to be a non-root deploy account."
+            exit 1
+          fi
 
       - name: Open runner SSH access
         shell: bash
@@ -146,6 +150,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [[ "$REQUIRE_PRODUCTION_READINESS" == "true" ]]; then
+            remote_uid="$(
+              ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "id -u"
+            )"
+            if [[ "$remote_uid" == "0" ]]; then
+              echo "::error::require_production_readiness=true requires the remote deploy session to run as non-root."
+              exit 1
+            fi
+          fi
           ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "cloud-init status --wait >/dev/null 2>&1 || true; command -v docker >/dev/null; docker compose version >/dev/null; command -v rsync >/dev/null; command -v jq >/dev/null; command -v curl >/dev/null; command -v sha256sum >/dev/null; command -v base64 >/dev/null; command -v openssl >/dev/null; mkdir -p '$DEPLOY_PATH'"
           rsync -az --delete \
             -e "ssh -i ~/.ssh/deploy_key" \
