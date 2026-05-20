@@ -1472,6 +1472,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(output.adapterActionId).toBe(first.adapterActionId);
     expect(output.adapterReceiptEvidenceId).toBe(first.adapterReceiptEvidenceId);
     expect(output.approvalRequestId).toBe(first.approvalRequestId);
+    expect(output.quoteApprovalViewId).toBe(first.quoteApprovalViewId);
 
     const [evaluation] = await db
       .select()
@@ -1495,6 +1496,34 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(dimensions.external_execution_blocked).toBe(true);
     expect(dimensions.owner_approval_required).toBe(true);
     expect(dimensions.external_send_blocked).toBe(true);
+    expect(dimensions.quote_approval_view_present).toBe(true);
+
+    const [quoteApprovalView] = await db
+      .select()
+      .from(generatedViews)
+      .where(eq(generatedViews.id, first.quoteApprovalViewId ?? ""))
+      .limit(1);
+    const viewContract = objectValue(quoteApprovalView?.contract);
+    const viewActions = objectValue(quoteApprovalView?.actions);
+    const viewData = objectValue(quoteApprovalView?.data);
+    const latestViewData = objectValue(viewData.latest);
+
+    expect(quoteApprovalView?.key).toBe("quote.approval.review");
+    expect(quoteApprovalView?.objectType).toBe("quote");
+    expect(quoteApprovalView?.taskState).toBe("approval_required");
+    expect(viewContract.schemaVersion).toBe("continuous.ui.quote_approval.v1");
+    expect(viewActions.decisionSurface).toBe("/approval");
+    expect(viewActions.postDecisionSurface).toBe("/worker");
+    expect(latestViewData.approvalRequestId).toBe(first.approvalRequestId);
+    expect(latestViewData.externalExecution).toBe("blocked");
+
+    const [quoteApprovalRequest] = await db
+      .select()
+      .from(approvalRequests)
+      .where(eq(approvalRequests.id, first.approvalRequestId ?? ""))
+      .limit(1);
+    expect(objectValue(quoteApprovalRequest?.data).quoteApprovalViewId).toBe(first.quoteApprovalViewId);
+    expect(objectValue(quoteApprovalRequest?.evidence).quoteApprovalViewId).toBe(first.quoteApprovalViewId);
 
     const [sourceSnapshot] = await db
       .select()

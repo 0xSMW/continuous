@@ -84,6 +84,7 @@ const requiredIds: Array<keyof RevenueWorkerRunResult> = [
   "adapterActionId",
   "adapterReceiptEvidenceId",
   "approvalRequestId",
+  "quoteApprovalViewId",
   "auditEventId",
   "workflowRunId",
 ];
@@ -484,6 +485,17 @@ export function scoreRevenueWorkerRun(
     result.workflowRunId
       ? `workflow ${result.workflowRunId} has ${result.workflowStepIds.length} steps`
       : "workflow spine is missing",
+  );
+
+  addDimension(
+    dimensions,
+    "quote_approval_view",
+    Boolean(result.quoteApprovalViewId) &&
+      stringValue(output.quoteApprovalViewId) === result.quoteApprovalViewId,
+    1,
+    result.quoteApprovalViewId
+      ? `quote approval view ${result.quoteApprovalViewId} is linked`
+      : "quote approval view is missing",
   );
 
   addDimension(

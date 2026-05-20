@@ -85,11 +85,13 @@ const completeResult: RevenueWorkerRunResult = {
   adapterActionId: "adapter_action_1",
   adapterReceiptEvidenceId: "receipt_1",
   approvalRequestId: "approval_1",
+  quoteApprovalViewId: "quote_view_1",
   auditEventId: "audit_1",
   workflowRunId: "workflow_run_1",
   workflowStepIds: ["workflow_step_1", "workflow_step_2", "workflow_step_3", "workflow_step_4"],
   output: {
     sourceSnapshotEvidenceId: "source_snapshot_1",
+    quoteApprovalViewId: "quote_view_1",
     workflowRunId: "workflow_run_1",
     workflowStepIds: ["workflow_step_1", "workflow_step_2", "workflow_step_3", "workflow_step_4"],
     classification: "quote_ready_for_owner_approval",

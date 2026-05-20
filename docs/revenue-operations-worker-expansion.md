@@ -21,6 +21,7 @@ state, workflow state, and object versioning without external sends or money mov
 | Scheduled internal drain | `worker-scheduler` posts `/workflow` `steps.execute`, `/worker` `adapters.retry`, and `/worker` `adapters.reconcile` on the internal Compose network with the same command envelopes |
 | Workflow packet execution | Queued `packet_prepare` steps can prepare Core packets through `/workflow` execution, carrying packet content under `workflow_steps.input.packet` and writing packet/document/event/audit/evidence/task proof |
 | Workflow approval execution | Queued `approval_request` steps can create shared workflow approval records through `/workflow` execution, carrying business approval details under `workflow_steps.input.approval` while run, step, task, event, audit, and evidence links are derived by the executor |
+| Quote approval UI | Revenue runs bind the shared `quote.approval.review` generated view contract to the latest quote approval request, including approval actions, evidence refs, and blocked continuation hints |
 | Operator run | `bun run worker:tool worker.run` or `continuous.worker.command` with the same worker/config payload |
 | Command registry | `/worker`, `worker:*` local tool aliases, and app-server worker commands share role, config, idempotency, tenant, and external-execution validation |
 | External execution | Disabled; adapter runtime records dry-run receipts, reconciliation states, retry execution receipts, retry/review system tasks, and workflow-level retry/review/post-retry steps only |
@@ -93,7 +94,6 @@ smoke test.
 ## Milestones
 
 1. Expand read-only real lead intake beyond website-form source records into authenticated inbox and CRM source readers.
-2. Add quote approval UI backed by `ui_contracts`.
-3. Extend blocked retry execution into scoped live credential checks and rollback paths for failed or uncertain adapter results.
-4. Keep missing-fact, pricing override, and policy-risk eval fixtures green as the worker expands toward higher autonomy.
-5. Raise autonomy only for Revenue read, classify, and draft capabilities; owner brief generation belongs to the Owner Chief-of-Staff worker.
+2. Extend blocked retry execution into scoped live credential checks and rollback paths for failed or uncertain adapter results.
+3. Keep missing-fact, pricing override, and policy-risk eval fixtures green as the worker expands toward higher autonomy.
+4. Raise autonomy only for Revenue read, classify, and draft capabilities; owner brief generation belongs to the Owner Chief-of-Staff worker.

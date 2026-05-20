@@ -189,6 +189,13 @@ function approvalEvidenceRefs(row: typeof approvalRequests.$inferSelect): Approv
     "Packet document",
     evidenceData.packetDocumentId ?? rowData.packetDocumentId,
   );
+  appendApprovalRef(
+    refs,
+    seen,
+    "ui_contract",
+    "Approval view",
+    rowData.quoteApprovalViewId ?? evidenceData.quoteApprovalViewId ?? action.quoteApprovalViewId,
+  );
   appendApprovalRef(refs, seen, "payroll_run", "Payroll run", evidenceData.payrollRunId ?? rowData.payrollRunId);
   appendApprovalRef(refs, seen, "filing_draft", "Filing draft", evidenceData.filingDraftId ?? rowData.filingDraftId);
   appendApprovalRef(refs, seen, "workflow_step", "Workflow step", continuation.workflowStepId);

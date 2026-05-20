@@ -133,6 +133,7 @@ export type RevenueWorkerRunResult = {
   adapterActionId: string | null;
   adapterReceiptEvidenceId: string | null;
   approvalRequestId: string | null;
+  quoteApprovalViewId: string | null;
   auditEventId: string | null;
   workflowRunId: string | null;
   workflowStepIds: string[];
@@ -2229,6 +2230,8 @@ export async function runRevenueWorker(input: {
         adapterActionId: stringData(existingRun.data, "adapterActionId"),
         adapterReceiptEvidenceId: stringData(existingRun.data, "adapterReceiptEvidenceId"),
         approvalRequestId: stringData(existingRun.data, "approvalRequestId"),
+        quoteApprovalViewId:
+          stringData(output, "quoteApprovalViewId") ?? stringData(existingRun.data, "quoteApprovalViewId"),
         auditEventId: stringData(existingRun.data, "auditEventId"),
         workflowRunId: stringData(existingRun.data, "workflowRunId"),
         workflowStepIds: getWorkflowStepIds(existingRun.data),
@@ -2270,6 +2273,8 @@ export async function runRevenueWorker(input: {
         adapterActionId: stringData(existingEvent.data, "adapterActionId"),
         adapterReceiptEvidenceId: stringData(existingEvent.data, "adapterReceiptEvidenceId"),
         approvalRequestId: stringData(existingEvent.data, "approvalRequestId"),
+        quoteApprovalViewId:
+          stringData(output, "quoteApprovalViewId") ?? stringData(existingEvent.data, "quoteApprovalViewId"),
         auditEventId: stringData(existingEvent.data, "auditEventId"),
         workflowRunId: stringData(existingEvent.data, "workflowRunId"),
         workflowStepIds: getWorkflowStepIds(existingEvent.data),
@@ -2320,6 +2325,8 @@ export async function runRevenueWorker(input: {
         adapterActionId: stringData(existingEvent.data, "adapterActionId"),
         adapterReceiptEvidenceId: stringData(existingEvent.data, "adapterReceiptEvidenceId"),
         approvalRequestId: stringData(existingEvent.data, "approvalRequestId"),
+        quoteApprovalViewId:
+          stringData(output, "quoteApprovalViewId") ?? stringData(existingEvent.data, "quoteApprovalViewId"),
         auditEventId: stringData(existingEvent.data, "auditEventId"),
         workflowRunId: eventOutput.workflowRunId,
         workflowStepIds: eventOutput.workflowStepIds,
@@ -3024,6 +3031,219 @@ export async function runRevenueWorker(input: {
       })
       .returning({ id: auditEvents.id });
 
+    const quoteApprovalViewKey = "quote.approval.review";
+    const quoteApprovalViewVersion = "1.0.0";
+    const quoteApprovalContract = {
+      schemaVersion: "continuous.ui.quote_approval.v1",
+      subject: {
+        type: "approval_request",
+        kind: "quote_approval",
+      },
+      sections: [
+        {
+          key: "customer_summary",
+          title: "Customer",
+          fields: ["customerName", "serviceArea", "urgency", "source", "sourceEventId"],
+        },
+        {
+          key: "scope_summary",
+          title: "Scope",
+          fields: ["classification", "missingFacts", "expectedAction"],
+        },
+        {
+          key: "price_and_margin",
+          title: "Price",
+          fields: ["quote.subtotalCents", "quote.totalCents", "quote.currency", "quote.policy"],
+        },
+        {
+          key: "draft_message",
+          title: "Draft response",
+          fields: ["draftResponse"],
+        },
+        {
+          key: "evidence_timeline",
+          title: "Evidence",
+          refs: [
+            "sourceSnapshotEvidenceId",
+            "evidenceId",
+            "adapterRunId",
+            "adapterActionId",
+            "adapterReceiptEvidenceId",
+            "workflowRunId",
+          ],
+        },
+        {
+          key: "action_bar",
+          title: "Decision",
+          actions: ["approved", "revision_requested", "rejected"],
+        },
+      ],
+      externalExecution: "blocked",
+    } as JsonObject;
+    const quoteApprovalActions = {
+      decisionSurface: "/approval",
+      decisionCommand: "approval.decide",
+      valid: [
+        {
+          action: "approved",
+          label: "Approve",
+          config: { action: "approved" },
+        },
+        {
+          action: "revision_requested",
+          label: "Request revision",
+          config: { action: "revision_requested" },
+        },
+        {
+          action: "rejected",
+          label: "Reject",
+          config: { action: "rejected" },
+        },
+      ],
+      postDecisionSurface: "/worker",
+      postDecisionCommand: "continue",
+      externalExecution: "blocked",
+    } as JsonObject;
+    const quoteApprovalData = {
+      bindings: {
+        approvalRequestId: "approval.id",
+        taskId: "approval.taskId",
+        workerRunId: "approval.workerRunId",
+        workflowRunId: "approval.workflowRunId",
+        quote: "approval.requestedAction.quote",
+        draftResponse: "approval.requestedAction.draftResponse",
+        evidenceRefs: "approval.evidenceRefs",
+      },
+      latest: {
+        approvalRequestId: approval.id,
+        workerRunId: workerRun.id,
+        workflowRunId: workflowRun.id,
+        taskId: task?.id ?? null,
+        objectId: runObjectId,
+        ...intakeTrace,
+        sourceSnapshotEvidenceId: sourceSnapshotEvidence.id,
+        evidenceId: workerEvidence.id,
+        adapterRunId: adapterRun.id,
+        adapterActionId: action.id,
+        adapterReceiptEvidenceId: receiptEvidence.id,
+        quote: leadPacket.quote,
+        draftResponse: leadPacket.draftResponse,
+        externalExecution: "blocked",
+        externalSend: false,
+      },
+    } as JsonObject;
+    const [existingQuoteApprovalView] = await tx
+      .select({ id: generatedViews.id })
+      .from(generatedViews)
+      .where(
+        and(
+          eq(generatedViews.tenantId, context.worker.tenantId),
+          eq(generatedViews.key, quoteApprovalViewKey),
+          eq(generatedViews.version, quoteApprovalViewVersion),
+        ),
+      )
+      .limit(1);
+    const quoteApprovalViewValues = {
+      capabilityId,
+      key: quoteApprovalViewKey,
+      version: quoteApprovalViewVersion,
+      name: "Quote approval review",
+      purpose: "Let an owner approve, revise, or reject a prepared quote packet with linked evidence.",
+      surface: "web",
+      objectType: "quote",
+      taskState: "approval_required" as const,
+      contract: quoteApprovalContract,
+      actions: quoteApprovalActions,
+      data: quoteApprovalData,
+      mask: {
+        customer_contact: "redacted_by_default",
+        payment_fields: true,
+        externalExecution: "blocked",
+      } as JsonObject,
+      active: true,
+      updatedAt: now,
+    };
+    const [quoteApprovalView] = existingQuoteApprovalView
+      ? await tx
+          .update(generatedViews)
+          .set(quoteApprovalViewValues)
+          .where(eq(generatedViews.id, existingQuoteApprovalView.id))
+          .returning({ id: generatedViews.id })
+      : await tx
+          .insert(generatedViews)
+          .values({
+            tenantId: context.worker.tenantId,
+            ...quoteApprovalViewValues,
+            createdAt: now,
+          })
+          .returning({ id: generatedViews.id });
+    const [quoteApprovalViewEvent] = await tx
+      .insert(events)
+      .values({
+        tenantId: context.worker.tenantId,
+        type: existingQuoteApprovalView ? "view.updated" : "view.published",
+        source,
+        actorType: "worker",
+        actorId: context.worker.id,
+        actorRef: `worker:${context.worker.id}`,
+        objectId: runObjectId,
+        taskId: task?.id,
+        capabilityId,
+        idempotencyKey: `${input.idempotencyKey}:quote_approval_view`,
+        data: {
+          viewId: quoteApprovalView.id,
+          key: quoteApprovalViewKey,
+          version: quoteApprovalViewVersion,
+          approvalRequestId: approval.id,
+          workerRunId: workerRun.id,
+          workflowRunId: workflowRun.id,
+          externalExecution: "blocked",
+        },
+        occurredAt: now,
+      })
+      .returning({ id: events.id });
+    const [quoteApprovalViewAudit] = await tx
+      .insert(auditEvents)
+      .values({
+        tenantId: context.worker.tenantId,
+        type: existingQuoteApprovalView ? "view.updated" : "view.published",
+        source,
+        actorType: "worker",
+        actorId: context.worker.id,
+        actorRef: `worker:${context.worker.id}`,
+        targetType: "ui_contract",
+        targetId: quoteApprovalView.id,
+        taskId: task?.id,
+        workerRunId: workerRun.id,
+        approvalRequestId: approval.id,
+        eventId: quoteApprovalViewEvent.id,
+        objectId: runObjectId,
+        capabilityId,
+        risk: "low",
+        idempotencyKey: `${input.idempotencyKey}:quote_approval_view`,
+        data: {
+          viewId: quoteApprovalView.id,
+          key: quoteApprovalViewKey,
+          version: quoteApprovalViewVersion,
+          approvalRequestId: approval.id,
+          externalExecution: "blocked",
+        },
+      })
+      .returning({ id: auditEvents.id });
+    const quoteApprovalViewLink = JSON.stringify({
+      quoteApprovalViewId: quoteApprovalView.id,
+      quoteApprovalViewAuditEventId: quoteApprovalViewAudit.id,
+    });
+
+    await tx
+      .update(approvalRequests)
+      .set({
+        requestedAction: sql`${approvalRequests.requestedAction} || ${quoteApprovalViewLink}::jsonb`,
+        evidence: sql`${approvalRequests.evidence} || ${quoteApprovalViewLink}::jsonb`,
+        data: sql`${approvalRequests.data} || ${quoteApprovalViewLink}::jsonb`,
+      })
+      .where(eq(approvalRequests.id, approval.id));
+
     const workflowStepValues = [
       {
         fromState: "received",
@@ -3088,6 +3308,7 @@ export async function runRevenueWorker(input: {
         output: {
           approvalRequestId: approval.id,
           approvalAuditEventId: approvalAudit.id,
+          quoteApprovalViewId: quoteApprovalView.id,
           externalExecution: "blocked",
         },
       },
@@ -3153,6 +3374,7 @@ export async function runRevenueWorker(input: {
           adapterReceiptEvidenceId: receiptEvidence.id,
           externalExecution: "blocked",
           externalSend: false,
+          quoteApprovalViewId: quoteApprovalView.id,
         },
         blockers: {
           open: ["owner_approval_required", "external_execution_blocked"],
@@ -3184,6 +3406,8 @@ export async function runRevenueWorker(input: {
           adapterReceiptEvidenceId: receiptEvidence.id,
           approvalRequestId: approval.id,
           auditEventId: approvalAudit.id,
+          quoteApprovalViewId: quoteApprovalView.id,
+          quoteApprovalViewAuditEventId: quoteApprovalViewAudit.id,
           workflowRunId: workflowRun.id,
           workflowStepIds,
           classification: leadPacket.classification,
@@ -3238,6 +3462,7 @@ export async function runRevenueWorker(input: {
         workflowStepIds,
         idempotencyKey: input.idempotencyKey,
         approvalRequestId: approval.id,
+        quoteApprovalViewId: quoteApprovalView.id,
         inputHash,
         ...intakeTrace,
         sourceSnapshotEvidenceId: sourceSnapshotEvidence.id,
@@ -3251,6 +3476,7 @@ export async function runRevenueWorker(input: {
           owner_approval_required: true,
           external_send_blocked: true,
           workflow_spine_present: true,
+          quote_approval_view_present: true,
         },
       },
     });
@@ -3272,6 +3498,7 @@ export async function runRevenueWorker(input: {
             adapterActionId: action.id,
             adapterReceiptEvidenceId: receiptEvidence.id,
             approvalRequestId: approval.id,
+            quoteApprovalViewId: quoteApprovalView.id,
             auditEventId: approvalAudit.id,
             workflowRunId: workflowRun.id,
             workflowStepIds,
@@ -3322,6 +3549,7 @@ export async function runRevenueWorker(input: {
           adapterActionId: action.id,
           adapterReceiptEvidenceId: receiptEvidence.id,
           approvalRequestId: approval.id,
+          quoteApprovalViewId: quoteApprovalView.id,
           workflowRunId: workflowRun.id,
           workflowStepIds,
           approvalRequired: true,
@@ -3369,6 +3597,7 @@ export async function runRevenueWorker(input: {
           adapterActionId: action.id,
           adapterReceiptEvidenceId: receiptEvidence.id,
           approvalRequestId: approval.id,
+          quoteApprovalViewId: quoteApprovalView.id,
           auditEventId: approvalAudit.id,
           workflowRunId: workflowRun.id,
           workflowStepIds,
@@ -3401,6 +3630,7 @@ export async function runRevenueWorker(input: {
       adapterActionId: action.id,
       adapterReceiptEvidenceId: receiptEvidence.id,
       approvalRequestId: approval.id,
+      quoteApprovalViewId: quoteApprovalView.id,
       auditEventId: approvalAudit.id,
       workflowRunId: workflowRun.id,
       workflowStepIds,
@@ -3420,6 +3650,7 @@ export async function runRevenueWorker(input: {
             ...runInput,
             workflowRunId: workflowRun.id,
           },
+          quoteApprovalViewId: quoteApprovalView.id,
           output: runOutput,
         },
       })
@@ -3439,6 +3670,7 @@ export async function runRevenueWorker(input: {
       adapterRunId: adapterRun.id,
       adapterReceiptEvidenceId: receiptEvidence.id,
       approvalRequestId: approval.id,
+      quoteApprovalViewId: quoteApprovalView.id,
       auditEventId: approvalAudit.id,
       workflowRunId: workflowRun.id,
       workflowStepIds,
