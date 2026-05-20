@@ -18,8 +18,8 @@ state, workflow state, and object versioning without external sends or money mov
 | Run API | `POST /worker` with `command=run` and `config.intake` source selectors or Core references; direct `config.leadPacket` remains an operator/test fallback |
 | Continuation API | `POST /worker` with `command=continue`, `idempotencyKey`, and `config.approvalId`; V1 turns `approved` decisions into blocked no-send execution packets, `revision_requested` decisions into revised packets plus fresh pending owner approval, and `rejected` decisions into closed no-send stop packets |
 | Adapter reconciliation API | `POST /worker` with `command=adapters.reconcile` and `command=adapters.retry`, tenant-scoped and bearer-token required |
-| Operator run | `bun run worker:tool worker.run` with the same worker/config payload |
-| Command registry | `/worker` commands and `worker:*` local tool aliases share role, config, idempotency, tenant, and external-execution validation |
+| Operator run | `bun run worker:tool worker.run` or `continuous.worker.command` with the same worker/config payload |
+| Command registry | `/worker`, `worker:*` local tool aliases, and app-server worker commands share role, config, idempotency, tenant, and external-execution validation |
 | External execution | Disabled; adapter runtime records dry-run receipts, reconciliation states, retry execution receipts, retry/review system tasks, and workflow-level retry/review/post-retry steps only |
 
 `/worker` is the forward API. Worker role, tenant, operation config, and
@@ -42,7 +42,7 @@ smoke test.
 | Evidence | Source snapshot, prompt/result trace, approval, and adapter receipt |
 | Approval | First-class `approval_requests`, approval decision evidence, audit trail, and allowed workflow advancement while external execution remains blocked |
 | Adapter safety | Dry-run mode, receipt evidence, attempt metadata, reconciliation worker output, due retry execution, retry/review system tasks, workflow retry/review/post-retry states, and audit/evidence records are persisted; scoped live credentials are still blocked |
-| Eval | Golden lead/quote cases with expected classification, approval, budget, adapter receipt, and idempotency outputs pass in CI |
+| Eval | Golden lead/quote cases cover direct packets, Core row intake refs, source-selector intake, normal urgency, expected classification, approval, budget, adapter receipt, and idempotency outputs in CI |
 | Launch | Production smoke proves no external mutation without approval and receipt capture |
 
 ## Next Capabilities
@@ -92,5 +92,5 @@ smoke test.
 1. Expand read-only real lead intake beyond website-form source records into authenticated inbox and CRM source readers.
 2. Add quote approval UI backed by `ui_contracts`.
 3. Extend blocked retry execution into scoped live credential checks and rollback paths for failed or uncertain adapter results.
-4. Extend eval fixtures beyond the first CI-enforced lead-to-quote cases.
+4. Extend eval fixtures into missing-fact, pricing override, and policy-risk cases.
 5. Raise autonomy only for Revenue read, classify, and draft capabilities; owner brief generation belongs to the Owner Chief-of-Staff worker.

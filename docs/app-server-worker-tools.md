@@ -1,33 +1,39 @@
 # App-Server Worker Tools
 
-Continuous exposes one repo-owned app-server dynamic tool spec for worker
-discovery:
+Continuous exposes repo-owned app-server dynamic tool specs for worker
+discovery and registry-backed command execution:
 
 | Tool | Mode | Purpose |
 |---|---|---|
 | `continuous.worker.schema` | Read-only | Returns the registered Revenue and Owner runtime commands, planned future-worker metadata, worker tool schema, and integration boundary |
+| `continuous.worker.command` | Registry-backed command | Invokes an existing worker command with the same `command`, `worker`, `idempotencyKey`, and `config` envelope used by `/worker` |
 
 The generated Codex app-server protocol defines a dynamic tool as `name`,
 `description`, and `inputSchema`. The local manifest in
-`src/worker/app-server-tools.ts` follows that shape without exposing mutation.
+`src/worker/app-server-tools.ts` follows that shape and delegates commands to
+the shared worker command registry.
 
 ```sh
 bun run app-server:worker-tools
 bun run app-server:worker-tools continuous.worker.schema
 ```
 
+```sh
+bun run app-server:worker-tools continuous.worker.command --payload='{"command":"lead.read","operatorEmail":"owner@continuoushq.com","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-app-server-lead-001","config":{"source":"website_form","records":[{"sourceEventId":"form-001","customerName":"Acme Roof Repair","customerIntent":"roof leak inspection","serviceArea":"roofing","urgency":"high"}]}}'
+```
+
 ## Boundary
 
-The app-server tool is discovery-only:
+The app-server command tool is intentionally narrow:
 
-- No database connection is opened.
-- No worker command is executed.
+- Commands are resolved by the same registry as `/worker` and `worker:tool`.
+- Planned worker roles remain non-executable until handlers are registered.
+- Caller supplies `operatorEmail`, `worker`, `idempotencyKey`, and `config`.
 - No external execution is available.
-- No production token is required.
-- Future worker metadata is discoverable but not executable until handlers are
-  registered in the runtime command registry.
+- No production token is loaded.
 
-Side-effecting worker commands stay on the canonical operator-gated surfaces:
+The legacy local worker tool remains available for explicit operator-gated
+commands:
 
 ```sh
 bun run worker:tool worker.lead.read --payload='{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-lead-read-001","config":{"source":"website_form","records":[{"sourceEventId":"form-001","customerName":"Acme Roof Repair","customerIntent":"roof leak inspection","serviceArea":"roofing","urgency":"high"}]}}'

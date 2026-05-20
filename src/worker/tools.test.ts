@@ -415,24 +415,28 @@ describe("worker tool contract", () => {
     ).rejects.toThrow("config.limit must be an integer between 1 and 100.");
   });
 
-  it("exposes one read-only app-server worker discovery tool", () => {
+  it("exposes app-server worker discovery and registry command tools", async () => {
     expect(appServerWorkerTools.map((tool) => tool.name)).toEqual([
       "continuous.worker.schema",
+      "continuous.worker.command",
     ]);
-    expect(appServerWorkerToolManifest.mode).toBe("read_only_discovery");
-    expect(appServerWorkerToolManifest.boundary.sideEffects).toBe("none");
-    expect(appServerWorkerToolManifest.boundary.mutationTools).toBe("not_exposed");
+    expect(appServerWorkerToolManifest.mode).toBe("registry_backed_worker_control");
+    expect(appServerWorkerToolManifest.boundary.sideEffects).toBe("registered_worker_commands_only");
+    expect(appServerWorkerToolManifest.boundary.mutationTools).toBe("continuous.worker.command");
 
-    const result = executeAppServerWorkerTool("continuous.worker.schema");
+    const result = await executeAppServerWorkerTool("continuous.worker.schema");
 
+    if (!("registry" in result)) {
+      throw new Error("Expected schema result.");
+    }
     expect(result.registry.commands).toEqual(registeredWorkerCommands());
     expect(result.plannedWorkers).toEqual(workerToolSchema.registry.plannedContracts);
     expect(result.workerToolSchema).toBe(workerToolSchema);
     expect(result.manifest.tools).toBe(appServerWorkerTools);
-    expect(() =>
+    await expect(
       executeAppServerWorkerTool("continuous.worker.schema", {
         worker: { role: "revenue_operations" },
       }),
-    ).toThrow("continuous.worker.schema does not accept arguments.");
+    ).rejects.toThrow("continuous.worker.schema does not accept arguments.");
   });
 });

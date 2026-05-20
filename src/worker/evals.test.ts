@@ -9,6 +9,12 @@ import {
 import type { OwnerBriefRunResult, OwnerWorkerSnapshot } from "./owner";
 import type { RevenueWorkerRunResult, RevenueWorkerSnapshot } from "./revenue";
 
+function objectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
 const snapshot: RevenueWorkerSnapshot = {
   worker: {
     id: "worker_1",
@@ -184,6 +190,27 @@ const completeOwnerResult: OwnerBriefRunResult = {
 };
 
 describe("Revenue Worker evals", () => {
+  it("covers direct lead packets and both canonical persisted-intake shapes", () => {
+    const configs = revenueWorkerEvalCases.map((evalCase) => objectValue(evalCase.config));
+    const intakeConfigs = configs.map((config) => objectValue(config.intake));
+
+    expect(revenueWorkerEvalCases).toHaveLength(5);
+    expect(configs.some((config) => Object.keys(objectValue(config.leadPacket)).length > 0)).toBe(true);
+    expect(
+      intakeConfigs.some((intake) => Boolean(intake.objectId && intake.eventId && intake.evidenceId)),
+    ).toBe(true);
+    expect(intakeConfigs.some((intake) => intake.source === "website_form" && intake.sourceEventId)).toBe(
+      true,
+    );
+    expect(
+      revenueWorkerEvalCases.some(
+        (evalCase) =>
+          evalCase.id === "revenue.normal_gutter_quote.approval_blocked" &&
+          evalCase.expected.quoteTotalCents === 12900,
+      ),
+    ).toBe(true);
+  });
+
   it("passes a run that links ledgers, blocks external execution, and requests approval", () => {
     const result = scoreRevenueWorkerRun(completeResult, revenueWorkerEvalCases[0]);
 

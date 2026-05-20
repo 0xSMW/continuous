@@ -104,8 +104,9 @@ operator-gated JSON. Decisions use `POST /approval` with `command`,
 The repo also includes `.mcp.json` for the Next.js MCP bridge. With `bun run dev`
 running, compatible coding agents can inspect routes, runtime errors, metadata,
 and logs through `next-devtools-mcp`. The installed Codex app-server CLI exposes
-protocol tooling for future repo-owned worker controls; inspect it with
-`bun run app-server:help` when worker build tooling needs it.
+protocol tooling and repo-owned worker controls; inspect it with
+`bun run app-server:help` and `bun run app-server:worker-tools` when worker
+build tooling needs it.
 
 ## Revenue Worker
 
@@ -180,6 +181,12 @@ bun run worker:tool worker.adapters.retry --payload='{"worker":{"role":"revenue_
 `worker:tool schema` is registry-backed. It exposes registered commands, local
 tool aliases, idempotency policy, tenant requirements, and external-execution
 status before a command is invoked.
+
+The app-server worker tool uses the same command envelope and registry:
+
+```sh
+bun run app-server:worker-tools continuous.worker.command --payload='{"command":"lead.read","operatorEmail":"owner@continuoushq.com","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-app-server-lead-001","config":{"source":"website_form","records":[{"sourceEventId":"form-local-app-server-001","customerName":"Acme Roof Repair","customerIntent":"roof leak inspection","serviceArea":"roofing","urgency":"high"}]}}'
+```
 
 The same reconciliation command is available through the canonical worker API:
 

@@ -1,10 +1,10 @@
 # Agent Build Path
 
 The installed Codex app-server CLI exposes protocol tooling, not a repo-owned
-daemon command. Continuous now defines one repo-owned read-only worker discovery
-tool, `continuous.worker.schema`, so agents can inspect registered worker
-commands without gaining mutation authority. Use the Next.js 16 MCP bridge for
-route/runtime visibility.
+daemon command. Continuous now defines repo-owned app-server worker tools:
+`continuous.worker.schema` for registry discovery and
+`continuous.worker.command` for registry-backed command execution. Use the
+Next.js 16 MCP bridge for route/runtime visibility.
 
 ```sh
 bun run app-server:help
@@ -14,7 +14,7 @@ bun run app-server:generate-json-schema
 ```
 
 Generated app-server protocol files are written under `generated/app-server/`
-and ignored by git. They are protocol references. The committed worker discovery
+and ignored by git. They are protocol references. The committed worker tool
 manifest lives in `src/worker/app-server-tools.ts`; details are in
 `docs/app-server-worker-tools.md`.
 
@@ -45,6 +45,7 @@ Useful app surfaces for worker development:
 | `/workflow?view=approvals` | Canonical operator-gated workflow approval queue |
 | `POST /workflow` | Canonical workflow command surface for starts, transitions, and workflow approval decisions |
 | `bun run worker:tool` | Repo-owned JSON worker toolbox for agents and local automation |
+| `bun run app-server:worker-tools continuous.worker.command` | App-server command surface backed by the same worker registry |
 
 `bun run worker:tool schema` exposes the registered worker commands and local
 tool aliases. Agents should inspect that registry metadata before invoking a
@@ -54,11 +55,12 @@ payload shape through either the toolbox or `/worker`.
 ## Boundary
 
 Use the Next.js MCP bridge for Next.js diagnostics. Keep side-effecting worker
-execution on explicit operator commands or guarded `POST` routes. The Revenue
-Worker now records the configured operator, active capability grant, approval
-request, audit event, and evidence before any external action can be approved.
-The shared approval service decides worker and workflow approvals by subject so
-new worker families do not need their own approval route or table.
+execution on explicit operator commands, guarded `POST` routes, or the
+registry-backed app-server worker command. The Revenue Worker now records the
+configured operator, active capability grant, approval request, audit event, and
+evidence before any external action can be approved. The shared approval service
+decides worker and workflow approvals by subject so new worker families do not
+need their own approval route or table.
 
 ## Build Loop
 

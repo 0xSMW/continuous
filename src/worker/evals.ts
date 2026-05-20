@@ -139,6 +139,96 @@ export const revenueWorkerEvalCases: RevenueWorkerEvalCase[] = [
       minScore: 0.9,
     },
   },
+  {
+    id: "revenue.core_intake_refs.approval_blocked",
+    name: "Persisted Core lead intake refs resolve into the same approval-blocked quote loop",
+    idempotencyKey: "eval-revenue-core-intake-refs-approval-blocked",
+    worker: {
+      role: "revenue_operations",
+      tenantSlug: "continuous-demo",
+    },
+    config: {
+      intake: {
+        objectId: "lead_object_uuid",
+        eventId: "lead_received_event_uuid",
+        evidenceId: "lead_snapshot_evidence_uuid",
+      },
+      expectedAction: "draft_customer_response",
+      externalSend: false,
+    },
+    expected: {
+      classification: "quote_ready_for_owner_approval",
+      taskState: "approval_required",
+      runState: "done",
+      runMode: "simulation",
+      externalExecution: "disabled",
+      maxBudgetUnits: 12000,
+      quoteTotalCents: 27400,
+      draftIncludes: "roof leak inspection",
+      minScore: 0.9,
+    },
+  },
+  {
+    id: "revenue.source_intake_selector.approval_blocked",
+    name: "Source selector intake resolves into the same approval-blocked quote loop",
+    idempotencyKey: "eval-revenue-source-intake-selector-approval-blocked",
+    worker: {
+      role: "revenue_operations",
+      tenantSlug: "continuous-demo",
+    },
+    config: {
+      intake: {
+        source: "website_form",
+        sourceEventId: "eval-form-source-selector",
+      },
+      expectedAction: "draft_customer_response",
+      externalSend: false,
+    },
+    expected: {
+      classification: "quote_ready_for_owner_approval",
+      taskState: "approval_required",
+      runState: "done",
+      runMode: "simulation",
+      externalExecution: "disabled",
+      maxBudgetUnits: 12000,
+      quoteTotalCents: 27400,
+      draftIncludes: "roof leak inspection",
+      minScore: 0.9,
+    },
+  },
+  {
+    id: "revenue.normal_gutter_quote.approval_blocked",
+    name: "Normal-urgency gutter lead stays approval-blocked without urgency pricing",
+    idempotencyKey: "eval-revenue-normal-gutter-approval-blocked",
+    worker: {
+      role: "revenue_operations",
+      tenantSlug: "continuous-demo",
+    },
+    config: {
+      leadPacket: {
+        source: "website_form",
+        sourceEventId: "eval-form-normal-gutter",
+        customerName: "Oak Street Cafe",
+        customerIntent: "gutter cleaning",
+        urgency: "normal",
+        serviceArea: "gutter",
+        missingFacts: [],
+      },
+      expectedAction: "draft_customer_response",
+      externalSend: false,
+    },
+    expected: {
+      classification: "quote_ready_for_owner_approval",
+      taskState: "approval_required",
+      runState: "done",
+      runMode: "simulation",
+      externalExecution: "disabled",
+      maxBudgetUnits: 12000,
+      quoteTotalCents: 12900,
+      draftIncludes: "gutter cleaning",
+      minScore: 0.9,
+    },
+  },
 ];
 
 export const ownerBriefEvalCases: OwnerBriefEvalCase[] = [

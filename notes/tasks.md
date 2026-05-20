@@ -17,7 +17,7 @@
 - Implement runtime handlers and CI evals for Dispatch, Finance, Workforce, Compliance, and Systems from their registered contract metadata.
 - Extend the Owner Chief-of-Staff Worker beyond the first read-only brief slice into approval/revision continuations, stale-source handling, and broader factuality evals.
 - Keep all worker-family HTTP controls on `/worker` with registered `worker`, `command`, `idempotencyKey`, and `config` fields; do not add worker-family-specific URL shapes.
-- Keep local worker mutation controls on `worker:tool`; do not add worker-family-specific package scripts that bypass the command registry.
+- Keep local worker mutation controls on `worker:tool` or `continuous.worker.command`; do not add worker-family-specific package scripts or app-server tools that bypass the command registry.
 - Provision the production object-storage bucket/key, run `scripts/install-backup-timer.sh`, and prove scheduled off-host Postgres dump retention before customer data.
 - Complete production hardening with tag-based deploy rollback, observability/alerts, scoped tokens, non-root host access, and a restore drill before using the droplet for real customer data.
 - Replace the bootstrap shared operator token with first-class operator auth, per-command scopes, token rotation, and session-level audit trails before broad customer use.
@@ -25,5 +25,5 @@
 - Expand read-only real lead intake from website-form `lead.read` records into authenticated inbox and CRM source readers.
 - Use `docs/revenue-operations-worker-expansion.md` as the expansion gate list for the next worker iteration.
 - Use `docs/revenue-operations-worker-v1-contract.md` as the machine-actionable contract for run and approval effects.
-- Extend Revenue Worker evals beyond the first two lead-to-quote golden cases.
-- Keep Next MCP for Next.js diagnostics; keep app-server worker tooling read-only until a real repo-owned daemon integration needs mutation.
+- Extend Revenue Worker evals into missing-fact, pricing override, and policy-risk cases beyond the current direct lead packet, Core intake ref, source-selector intake, and normal-gutter quote cases.
+- Keep Next MCP for Next.js diagnostics; keep app-server worker tooling registry-backed and free of production-token plumbing.

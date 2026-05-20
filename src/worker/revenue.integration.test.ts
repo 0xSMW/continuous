@@ -2216,6 +2216,14 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(output.classification).toBe("quote_ready_for_owner_approval");
     expect(output.externalSend).toBe(false);
 
+    const evalCase = revenueWorkerEvalCases.find((item) => item.id === "revenue.core_intake_refs.approval_blocked");
+    expect(evalCase).toBeDefined();
+    if (!evalCase) {
+      throw new Error("Missing core intake refs eval case.");
+    }
+    const scored = scoreRevenueWorkerRun(first, evalCase);
+    expect(scored.passed).toBe(true);
+
     const [workerRun] = await db
       .select()
       .from(workerRuns)
@@ -2358,6 +2366,16 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(intake.evidenceId).toBe(evidenceResult.evidenceId);
     expect(output.classification).toBe("quote_ready_for_owner_approval");
     expect(output.externalSend).toBe(false);
+
+    const evalCase = revenueWorkerEvalCases.find(
+      (item) => item.id === "revenue.source_intake_selector.approval_blocked",
+    );
+    expect(evalCase).toBeDefined();
+    if (!evalCase) {
+      throw new Error("Missing source intake selector eval case.");
+    }
+    const scored = scoreRevenueWorkerRun(first, evalCase);
+    expect(scored.passed).toBe(true);
 
     const [workerRun] = await db
       .select()

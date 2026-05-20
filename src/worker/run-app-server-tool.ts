@@ -1,3 +1,4 @@
+import { pool } from "../db/client";
 import type { JsonObject } from "../db/schema";
 import {
   appServerWorkerToolManifest,
@@ -32,20 +33,24 @@ async function main() {
   const stdinPayload = inlinePayload ? "" : await readStdin();
   const payloadSource = inlinePayload ?? (stdinPayload || "{}");
   const payload = JSON.parse(payloadSource) as JsonObject;
-  const result = executeAppServerWorkerTool(name, payload);
+  const result = await executeAppServerWorkerTool(name, payload);
   console.log(JSON.stringify({ ok: true, tool: name, data: result, error: null }, null, 2));
 }
 
-main().catch((error) => {
-  console.error(
-    JSON.stringify(
-      {
-        ok: false,
-        error: error instanceof Error ? error.message : "Unknown app-server worker tool error",
-      },
-      null,
-      2,
-    ),
-  );
-  process.exitCode = 1;
-});
+main()
+  .catch((error) => {
+    console.error(
+      JSON.stringify(
+        {
+          ok: false,
+          error: error instanceof Error ? error.message : "Unknown app-server worker tool error",
+        },
+        null,
+        2,
+      ),
+    );
+    process.exitCode = 1;
+  })
+  .finally(async () => {
+    await pool.end();
+  });
