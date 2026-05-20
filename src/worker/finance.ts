@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { and, count, desc, eq, sql } from "drizzle-orm";
+import { and, count, desc, eq, inArray, sql } from "drizzle-orm";
 
 import { PlatformUnavailableError } from "../core/errors";
 import { loadOperatorContext } from "../core/operators";
@@ -273,7 +273,7 @@ async function loadEvidenceRefs(db: Database, tenantId: string, ids: string[], f
   const rows = await db
     .select({ id: evidence.id })
     .from(evidence)
-    .where(and(eq(evidence.tenantId, tenantId), sql`${evidence.id} = any(${ids})`));
+    .where(and(eq(evidence.tenantId, tenantId), inArray(evidence.id, ids)));
 
   if (rows.length !== ids.length) {
     throw new PlatformUnavailableError(
