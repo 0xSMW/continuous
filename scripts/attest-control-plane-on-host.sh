@@ -7,6 +7,72 @@ SITE_HOST="${SITE_HOST:-continuoushq.com}"
 TENANT_SLUG="${TENANT_SLUG:-continuous-demo}"
 BOOTSTRAP_CREDENTIAL_ID="${BOOTSTRAP_CREDENTIAL_ID:-bootstrap-operator}"
 RUN_ID="${CONTROL_PLANE_ATTESTATION_RUN_ID:-$(date -u +%Y%m%d%H%M%S)}"
+CONTROL_PLANE_ALLOWED_COMMANDS_JSON='[
+  "core:view.summary",
+  "core:task.create",
+  "core:task.transition",
+  "core:object.upsert",
+  "core:adapter.upsert",
+  "core:connection.upsert",
+  "core:connection.health.record",
+  "core:object.link",
+  "core:event.ingest",
+  "core:evidence.attach",
+  "core:document.create",
+  "core:packet.prepare",
+  "core:document.packet.prepare",
+  "core:decision.record",
+  "core:approval.request",
+  "core:adapter.intent.record",
+  "core:rule.change.record",
+  "core:external_action.record",
+  "core:capability.grant",
+  "core:budget.reserve",
+  "core:budget.charge",
+  "core:budget.release",
+  "core:ai.infer",
+  "core:view.publish",
+  "core:customer_signal.record",
+  "core:payroll.preview.record",
+  "core:payroll.preview.packet.prepare",
+  "core:control_plane.token_rotation.attest",
+  "core:control_plane.credential.upsert",
+  "core:control_plane.credential.revoke",
+  "core:control_plane.session.review",
+  "worker:view.snapshot",
+  "worker:view.approvals",
+  "worker:view.briefs",
+  "worker:view.decisions",
+  "worker:view.board",
+  "worker:view.exceptions",
+  "worker:run",
+  "worker:lead.read",
+  "worker:lead.classify",
+  "worker:response.draft",
+  "worker:schedule.propose",
+  "worker:customer_update.draft",
+  "worker:closeout.prepare",
+  "worker:exception.route",
+  "worker:invoice.prepare",
+  "worker:ar_followup.draft",
+  "worker:cash_forecast.generate",
+  "worker:payment_draft.prepare",
+  "worker:continue",
+  "worker:approval.decide",
+  "worker:adapters.reconcile",
+  "worker:adapters.retry",
+  "worker:brief.generate",
+  "worker:decision_queue.prepare",
+  "worker:anomaly.triage",
+  "workflow:view.overview",
+  "workflow:view.approvals",
+  "workflow:start",
+  "workflow:transition",
+  "workflow:steps.execute",
+  "workflow:approval.decide",
+  "approval:view.inbox",
+  "approval:approval.decide"
+]'
 
 cd "$APP_DIR"
 
@@ -78,7 +144,8 @@ BOOTSTRAP_PAYLOAD="$(
     --arg tenant "$TENANT_SLUG" \
     --arg credentialId "$BOOTSTRAP_CREDENTIAL_ID" \
     --arg operatorEmail "$WORKER_OPERATOR_EMAIL" \
-    --arg fingerprint "$BOOTSTRAP_FINGERPRINT" '{
+    --arg fingerprint "$BOOTSTRAP_FINGERPRINT" \
+    --argjson allowedCommands "$CONTROL_PLANE_ALLOWED_COMMANDS_JSON" '{
       command: "control_plane.credential.upsert",
       core: {tenantSlug: $tenant},
       idempotencyKey: $key,
@@ -96,7 +163,7 @@ BOOTSTRAP_PAYLOAD="$(
         ],
         allowedRoutes: ["core", "worker", "workflow", "approval"],
         allowedAccess: ["read", "write"],
-        allowedCommands: ["core:*", "worker:*", "workflow:*", "approval:*"],
+        allowedCommands: $allowedCommands,
         evidence: {
           source: "deploy_control_plane_attestation",
           rawTokenStored: false,

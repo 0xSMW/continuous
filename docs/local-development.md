@@ -53,7 +53,7 @@ shell history, and logs never carry bearer values:
 ```sh
 read -rsp "Route-scoped operator token: " CONTROL_PLANE_OPERATOR_TOKEN
 CONTROL_PLANE_TOKEN_SHA256="$(printf '%s' "$CONTROL_PLANE_OPERATOR_TOKEN" | shasum -a 256 | awk '{print $1}')"
-export CONTROL_PLANE_TOKENS_JSON='[{"id":"local-operator","tokenSha256":"'"$CONTROL_PLANE_TOKEN_SHA256"'","operatorEmail":"owner@continuoushq.com","allowedTenants":["continuous-demo"],"allowedWorkerRoles":["revenue_operations"],"allowedRoutes":["core","worker","workflow","approval"],"allowedAccess":["read","write"],"allowedCommands":["core:*","worker:*","workflow:*","approval:*"]}]'
+export CONTROL_PLANE_TOKENS_JSON='[{"id":"local-operator","tokenSha256":"'"$CONTROL_PLANE_TOKEN_SHA256"'","operatorEmail":"owner@continuoushq.com","allowedTenants":["continuous-demo"],"allowedWorkerRoles":["revenue_operations"],"allowedRoutes":["core","worker","workflow","approval"],"allowedAccess":["read","write"],"allowedCommands":["core:view.summary","core:task.create","core:object.upsert","worker:view.snapshot","worker:view.approvals","worker:lead.read","worker:run","worker:adapters.reconcile","worker:adapters.retry","workflow:view.overview","approval:view.inbox","approval:approval.decide"]}]'
 ```
 
 Core side effects use a structured command payload. For local-only testing,

@@ -325,15 +325,25 @@ Control-plane token catalog entries have this shape when provided directly via
     "allowedWorkerRoles": ["revenue_operations", "owner_chief_of_staff", "dispatch_operations"],
     "allowedRoutes": ["core", "worker", "workflow", "approval"],
     "allowedAccess": ["read", "write"],
-    "allowedCommands": ["core:*", "worker:*", "workflow:*", "approval:*"],
+    "allowedCommands": [
+      "core:view.summary",
+      "core:task.create",
+      "core:object.upsert",
+      "worker:view.snapshot",
+      "worker:lead.read",
+      "worker:run",
+      "workflow:view.overview",
+      "approval:view.inbox"
+    ],
     "expiresAt": "2026-06-20T00:00:00.000Z"
   }
 ]
 ```
 
-`allowedCommands` accepts exact route-qualified keys such as `worker:run` or
-route wildcards such as `worker:*`. GET views are authorized as
-`<route>:view.<view>`, for example `worker:view.snapshot`.
+`allowedCommands` should use exact route-qualified keys such as `worker:run`.
+GET views are authorized as `<route>:view.<view>`, for example
+`worker:view.snapshot`. Production deploys generate the full current exact
+command catalog in `.github/workflows/deploy.yml` and `scripts/deploy.sh`.
 Treat the legacy single `WORKER_RUN_TOKEN` path as bootstrap-only. New
 control-plane credentials must set explicit `allowedRoutes`, `allowedAccess`,
 and `allowedCommands`; omitted route, access, or command scope fields fail
@@ -492,7 +502,23 @@ shape:
     ],
     "allowedRoutes": ["core", "worker", "workflow", "approval"],
     "allowedAccess": ["read", "write"],
-    "allowedCommands": ["core:*", "worker:*", "workflow:*", "approval:*"],
+    "allowedCommands": [
+      "core:view.summary",
+      "core:control_plane.token_rotation.attest",
+      "core:control_plane.credential.upsert",
+      "core:control_plane.credential.revoke",
+      "core:control_plane.session.review",
+      "worker:view.snapshot",
+      "worker:lead.read",
+      "worker:run",
+      "worker:continue",
+      "worker:approval.decide",
+      "workflow:view.overview",
+      "workflow:steps.execute",
+      "workflow:approval.decide",
+      "approval:view.inbox",
+      "approval:approval.decide"
+    ],
     "evidence": {
       "owner": "ops",
       "source": "scoped control-plane catalog"
