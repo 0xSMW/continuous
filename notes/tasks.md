@@ -18,7 +18,7 @@
 - Keep local worker mutation controls on `worker:tool worker.command` or `continuous.worker.command`; do not add worker-family-specific package scripts or app-server tools that bypass the command registry.
 - Provision the production object-storage bucket/key, run `scripts/install-backup-timer.sh`, and prove scheduled off-host Postgres dump retention before customer data.
 - Run `scripts/recovery-drill.sh` against a disposable droplet, then install the observability timer with a real alert webhook, execute and attest a real token rotation, add non-root host access, and make `scripts/check-production-readiness.sh` pass before using the production droplet for real customer data.
-- Use the durable control-plane credential inventory, revocation, and operator session review commands to attest the production bootstrap credential, run a revocation drill, and reference the resulting ids in readiness before broad customer use.
+- Execute and attest a real token rotation, then keep the deploy-produced control-plane credential inventory, disposable revocation drill, and operator session review evidence current in readiness before broad customer use.
 - Provision scoped adapter credentials, tested rollback playbooks, and a first controlled send only after retry readiness evidence stays green.
 - Provision production inbox and CRM managed credential refs, create pollable active live-provider connections through `/core connection.upsert`, record readiness through `/core connection.health.record`, and monitor scheduler coverage behind the persisted connection-backed `lead.read` source-reader shape.
 - Extend Revenue `lead.classify` and `response.draft` eval scoring now that they are explicit persisted command surfaces.

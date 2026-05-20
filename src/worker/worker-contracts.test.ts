@@ -216,6 +216,7 @@ describe("future worker contracts", () => {
     const deployScript = read("scripts/deploy.sh");
     const deployWorkflow = read(".github/workflows/deploy.yml");
     const readinessScript = read("scripts/check-production-readiness-on-host.sh");
+    const attestationScript = read("scripts/attest-control-plane-on-host.sh");
 
     expect(deployment).toContain("control_plane.token_rotation.attest");
     expect(deployment).toContain("control_plane.credential.upsert");
@@ -235,6 +236,11 @@ describe("future worker contracts", () => {
     expect(readinessScript).toContain("CONTROL_PLANE_CREDENTIAL_ID");
     expect(readinessScript).toContain("CONTROL_PLANE_CREDENTIAL_REVOCATION_AUDIT_ID");
     expect(readinessScript).toContain("CONTROL_PLANE_SESSION_REVIEW_VIEW_ID");
+    expect(readinessScript).toContain("REQUIRE_CONTROL_PLANE_CREDENTIAL_ATTESTATION");
+    expect(attestationScript).toContain("control_plane.credential.upsert");
+    expect(attestationScript).toContain("control_plane.credential.revoke");
+    expect(attestationScript).toContain("control_plane.session.review");
+    expect(attestationScript).toContain("CONTROL_PLANE_SESSION_REVIEW_VIEW_ID");
     expect(deployScript).toContain("core:control_plane.token_rotation.attest");
     expect(deployScript).toContain("core:control_plane.credential.upsert");
     expect(deployScript).toContain("core:control_plane.credential.revoke");
@@ -243,6 +249,7 @@ describe("future worker contracts", () => {
     expect(deployWorkflow).toContain("core:control_plane.credential.upsert");
     expect(deployWorkflow).toContain("core:control_plane.credential.revoke");
     expect(deployWorkflow).toContain("core:control_plane.session.review");
+    expect(deployWorkflow).toContain("scripts/attest-control-plane-on-host.sh");
   });
 
   it("defines Core-record handoffs for planned worker expansion", () => {

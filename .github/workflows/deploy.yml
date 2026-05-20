@@ -354,6 +354,16 @@ jobs:
           }
 
           SMOKE_RUN_ID="$(date -u +%Y%m%d%H%M%S)"
+          CONTROL_PLANE_ATTESTATION_OUTPUT="$(
+            APP_DIR="$APP_DIR" \
+              CONTROL_PLANE_ATTESTATION_RUN_ID="$SMOKE_RUN_ID" \
+              "$APP_DIR/scripts/attest-control-plane-on-host.sh"
+          )"
+          printf '%s\n' "$CONTROL_PLANE_ATTESTATION_OUTPUT"
+          printf '%s\n' "$CONTROL_PLANE_ATTESTATION_OUTPUT" | /usr/bin/jq -e \
+            '.control_plane_attestation_status == "ok" and (.credentialId | length > 0) and (.revocationAuditId | length > 0) and (.sessionReviewViewId | length > 0) and (.authSessionId | length > 0)' \
+            >/dev/null
+
           PAYROLL_KEY="deploy-payroll-preview-smoke"
           PAYROLL_PAYLOAD="$(
             /usr/bin/jq -nc --arg key "$PAYROLL_KEY" --arg externalId "$PAYROLL_KEY" '{

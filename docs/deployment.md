@@ -355,6 +355,13 @@ operator acknowledgement layer: the durable source of truth is the
 `control_plane_credentials` row, the linked `control_plane_auth_sessions`
 request audit row, and the generated session review view.
 
+Deploy smoke runs `scripts/attest-control-plane-on-host.sh` after the new app is
+up. That script records the current bootstrap credential inventory row, revokes
+a disposable drill credential, reviews recent bootstrap sessions, and writes the
+non-secret credential/auth/session evidence ids into this file. It does not
+attest token rotation, recovery drills, object-storage backups, alerting, or
+non-root host access.
+
 ```sh
 install -m 0700 -d /etc/continuous
 cat >/etc/continuous/production-readiness.env <<'ENV'
