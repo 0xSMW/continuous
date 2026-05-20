@@ -2110,6 +2110,113 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(packetTaskOutcome.packetId).toBe(packetPreparation.packetId);
     expect(packetTaskOutcome.workflowStepId).toBe(packetStep.id);
 
+    const [approvalStep] = await db
+      .insert(workflowSteps)
+      .values({
+        tenantId: packetRun?.tenantId ?? "",
+        definitionId: packetRun?.definitionId ?? "",
+        workflowRunId: packetStart.run.id,
+        taskId: packetTask.taskId,
+        kind: "approval_request",
+        name: "CI request payroll workflow approval",
+        state: "queued",
+        priority: "urgent",
+        risk: "high",
+        fromState: "awaiting_approval",
+        toState: "awaiting_approval",
+        attempt: 1,
+        maxAttempts: 2,
+        idempotencyKey: `ci-workflow-approval-step-${runId}`,
+        input: {
+          approval: {
+            kind: "payroll_approval",
+            title: "CI payroll workflow approval",
+            summary: "Queued workflow execution requested payroll approval.",
+            requestedAction: {
+              action: "approve_payroll_packet",
+              packetId: String(packetPreparation.packetId ?? ""),
+            },
+            evidence: {
+              packetId: String(packetPreparation.packetId ?? ""),
+              packetEvidenceId: String(packetResult?.evidenceId ?? ""),
+            },
+            data: {
+              source: "workflow_approval_ci",
+            },
+          },
+        },
+      })
+      .returning();
+
+    const approvalExecution = await executeWorkflowSteps({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      limit: 1,
+      leaseOwner: `ci-workflow-approval:${runId}`,
+      db,
+    });
+    const [approvalResult] = approvalExecution.results;
+    const [executedApprovalStep] = await db
+      .select()
+      .from(workflowSteps)
+      .where(eq(workflowSteps.id, approvalStep.id))
+      .limit(1);
+    const [approvalRun] = await db
+      .select()
+      .from(workflowRuns)
+      .where(eq(workflowRuns.id, packetStart.run.id))
+      .limit(1);
+    const approvalStepOutput = objectValue(executedApprovalStep?.output);
+    const workflowApproval = objectValue(approvalStepOutput.approvalRequest);
+    const [workflowApprovalRequest] = await db
+      .select()
+      .from(approvalRequests)
+      .where(eq(approvalRequests.id, String(workflowApproval.approvalRequestId ?? "")))
+      .limit(1);
+    const [workflowApprovalAudit] = await db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.id, String(workflowApproval.approvalAuditEventId ?? "")))
+      .limit(1);
+    const [workflowApprovalEvidence] = await db
+      .select()
+      .from(evidence)
+      .where(eq(evidence.id, String(workflowApproval.approvalEvidenceId ?? "")))
+      .limit(1);
+    const [approvalTaskRow] = await db
+      .select()
+      .from(tasks)
+      .where(eq(tasks.id, packetTask.taskId))
+      .limit(1);
+    const approvalRunData = objectValue(approvalRun?.data);
+    const lastWorkflowApproval = objectValue(approvalRunData.lastWorkflowApprovalRequest);
+    const approvalTaskOutcome = objectValue(
+      objectValue(approvalTaskRow?.outcome).lastWorkflowApprovalRequest,
+    );
+
+    expect(approvalExecution.processed).toBe(1);
+    expect(approvalExecution.completed).toBe(1);
+    expect(approvalResult?.stepId).toBe(approvalStep.id);
+    expect(executedApprovalStep?.state).toBe("done");
+    expect(executedApprovalStep?.approvalRequestId).toBe(workflowApproval.approvalRequestId);
+    expect(approvalRun?.state).toBe("awaiting_approval");
+    expect(workflowApproval.approvalRequestId).toBeTruthy();
+    expect(workflowApproval.externalExecution).toBe("blocked");
+    expect(workflowApprovalRequest?.kind).toBe("payroll_approval");
+    expect(workflowApprovalRequest?.state).toBe("pending");
+    expect(workflowApprovalRequest?.workflowRunId).toBe(packetStart.run.id);
+    expect(workflowApprovalRequest?.taskId).toBe(packetTask.taskId);
+    expect(workflowApprovalRequest?.eventId).toBe(approvalResult?.eventId);
+    expect(objectValue(workflowApprovalRequest?.requestedAction).packetId).toBe(packetPreparation.packetId);
+    expect(workflowApprovalAudit?.targetId).toBe(workflowApproval.approvalRequestId);
+    expect(workflowApprovalAudit?.approvalRequestId).toBe(workflowApproval.approvalRequestId);
+    expect(workflowApprovalEvidence?.kind).toBe("approval");
+    expect(objectValue(workflowApprovalEvidence?.data).workflowStepId).toBe(approvalStep.id);
+    expect(lastWorkflowApproval.approvalRequestId).toBe(workflowApproval.approvalRequestId);
+    expect(approvalTaskRow?.state).toBe("approval_required");
+    expect(approvalTaskOutcome.approvalRequestId).toBe(workflowApproval.approvalRequestId);
+    expect(approvalTaskOutcome.workflowStepId).toBe(approvalStep.id);
+
     const retryStart = await startWorkflowRun({
       operatorEmail: "owner@continuoushq.com",
       tenantSlug: "continuous-demo",

@@ -296,11 +296,15 @@ type ClaimedWorkflowStep = {
   definition: typeof workflowDefinitions.$inferSelect;
 };
 
+type WorkflowPriority = "low" | "normal" | "high" | "urgent";
+type WorkflowRisk = "low" | "medium" | "high" | "critical";
+
 const executableWorkflowStepKinds = new Set([
   "transition",
   "workflow_transition",
   "worker_transition",
   "capability_execution",
+  "approval_request",
   "packet_prepare",
   "document_packet_prepare",
   "evidence_packet_prepare",
@@ -324,6 +328,42 @@ class WorkflowStepLeaseLostError extends Error {
 
 function workflowStepPriorityRank() {
   return sql`case ${workflowSteps.priority} when 'urgent' then 0 when 'high' then 1 when 'normal' then 2 else 3 end`;
+}
+
+function optionalDate(value: unknown, field: string) {
+  const string = stringValue(value);
+
+  if (!string) {
+    return undefined;
+  }
+
+  const date = new Date(string);
+
+  if (Number.isNaN(date.getTime())) {
+    throw new RevenueWorkerUnavailableError(
+      "workflow_step_date_invalid",
+      `${field} must be an ISO date string.`,
+      400,
+    );
+  }
+
+  return date;
+}
+
+function priorityValue(value: unknown, fallback: WorkflowPriority): WorkflowPriority {
+  const priority = stringValue(value);
+
+  return priority === "low" || priority === "normal" || priority === "high" || priority === "urgent"
+    ? priority
+    : fallback;
+}
+
+function riskValue(value: unknown, fallback: WorkflowRisk): WorkflowRisk {
+  const risk = stringValue(value);
+
+  return risk === "low" || risk === "medium" || risk === "high" || risk === "critical"
+    ? risk
+    : fallback;
 }
 
 function errorData(error: unknown, attempt: number, maxAttempts: number): JsonObject {
@@ -704,6 +744,212 @@ async function completeWorkflowStep(input: {
       })
       .returning({ id: evidence.id });
     let packetPreparation: Awaited<ReturnType<typeof prepareCorePacketForOperator>> | null = null;
+    let approvalRequest:
+      | {
+          approvalRequestId: string;
+          approvalEventId: string;
+          approvalAuditEventId: string;
+          approvalEvidenceId: string;
+          reviewerUserId: string;
+          requirements: string[];
+          policy: JsonObject;
+          requestedAction: JsonObject;
+        }
+      | null = null;
+
+    if (step.kind === "approval_request") {
+      const approvalInput = jsonObject(step.input.approval ?? step.input.approvalRequest ?? {});
+      const requirements = workflowApprovalRequirements(definitionView, step.toState);
+      const reviewerUserId = stringValue(approvalInput.reviewerUserId) ?? input.operator.userId;
+      const approvalKind = stringValue(approvalInput.kind) ?? `${definition.key}_approval`;
+      const approvalTitle =
+        stringValue(approvalInput.title) ?? `${definition.name} approval required`;
+      const approvalSummary =
+        stringValue(approvalInput.summary) ??
+        `Workflow ${definition.name} is waiting for approval at ${step.toState}.`;
+      const approvalPriority = priorityValue(approvalInput.priority, step.priority as WorkflowPriority);
+      const approvalRisk = riskValue(approvalInput.risk, step.risk as WorkflowRisk);
+      const approvalTask =
+        task ??
+        (step.taskId
+          ? (
+              await tx
+                .select()
+                .from(tasks)
+                .where(and(eq(tasks.tenantId, input.operator.tenantId), eq(tasks.id, step.taskId)))
+                .limit(1)
+                .for("update", { of: tasks })
+            )[0] ?? null
+          : null);
+      const requestedAction = {
+        action: stringValue(approvalInput.action) ?? "approve_workflow_step",
+        ...jsonObject(approvalInput.requestedAction),
+        workflowRunId: run.id,
+        workflowStepId: step.id,
+        workflowKey: definition.key,
+        fromState: currentFromState,
+        toState: step.toState,
+        externalExecution: "blocked",
+      };
+      const policy = {
+        source: "workflow_steps.input.approval",
+        requirements,
+        approvalState: step.toState,
+        ...jsonObject(approvalInput.policy),
+      };
+      const approvalData = {
+        ...jsonObject(approvalInput.data),
+        workflowRunId: run.id,
+        workflowStepId: step.id,
+        workflowDefinitionId: definition.id,
+        workflowKey: definition.key,
+        workflowName: definition.name,
+        taskId: step.taskId ?? null,
+        objectId: step.objectId ?? run.objectId ?? null,
+        capabilityId: step.capabilityId ?? null,
+        externalExecution: "blocked",
+      };
+      const [approval] = await tx
+        .insert(approvalRequests)
+        .values({
+          tenantId: input.operator.tenantId,
+          workflowRunId: run.id,
+          taskId: step.taskId,
+          eventId: event.id,
+          objectId: step.objectId ?? run.objectId,
+          capabilityId: step.capabilityId,
+          requesterType: executionActor.type,
+          requesterId: executionActor.id,
+          requesterRef: executionActor.ref,
+          reviewerUserId,
+          kind: approvalKind,
+          state: "pending",
+          priority: approvalPriority,
+          risk: approvalRisk,
+          title: approvalTitle,
+          summary: approvalSummary,
+          requestedAction,
+          evidence: {
+            ...jsonObject(approvalInput.evidence),
+            eventId: event.id,
+            auditEventId: audit.id,
+            evidenceId: proof.id,
+            workflowStepId: step.id,
+          },
+          policy,
+          data: approvalData,
+          dueAt: optionalDate(approvalInput.dueAt, "approval.dueAt"),
+          createdAt: input.now,
+          updatedAt: input.now,
+        })
+        .returning({ id: approvalRequests.id });
+      const [approvalAudit] = await tx
+        .insert(auditEvents)
+        .values({
+          tenantId: input.operator.tenantId,
+          type: "approval.requested",
+          source,
+          actorType: executionActor.type,
+          actorId: executionActor.id,
+          actorRef: executionActor.ref,
+          targetType: "approval_request",
+          targetId: approval.id,
+          approvalRequestId: approval.id,
+          eventId: event.id,
+          taskId: step.taskId,
+          objectId: step.objectId ?? run.objectId,
+          capabilityId: step.capabilityId,
+          risk: approvalRisk,
+          idempotencyKey: `${step.id}:approval_requested`,
+          data: {
+            approvalRequestId: approval.id,
+            workflowRunId: run.id,
+            workflowStepId: step.id,
+            workflowKey: definition.key,
+            workflowName: definition.name,
+            reviewerUserId,
+            requirements,
+            externalExecution: "blocked",
+          },
+        })
+        .returning({ id: auditEvents.id });
+      const [approvalEvidence] = await tx
+        .insert(evidence)
+        .values({
+          tenantId: input.operator.tenantId,
+          kind: "approval",
+          name: `Workflow approval requested: ${approvalTitle}`,
+          taskId: step.taskId,
+          objectId: step.objectId ?? run.objectId,
+          eventId: event.id,
+          capabilityId: step.capabilityId,
+          actorType: executionActor.type,
+          actorId: executionActor.id,
+          hash: `${source}:approval:${approval.id}`,
+          data: {
+            approvalRequestId: approval.id,
+            workflowRunId: run.id,
+            workflowStepId: step.id,
+            workflowKey: definition.key,
+            approvalAuditEventId: approvalAudit.id,
+            workflowStepEvidenceId: proof.id,
+            requirements,
+            requestedAction,
+            externalExecution: "blocked",
+          },
+        })
+        .returning({ id: evidence.id });
+
+      approvalRequest = {
+        approvalRequestId: approval.id,
+        approvalEventId: event.id,
+        approvalAuditEventId: approvalAudit.id,
+        approvalEvidenceId: approvalEvidence.id,
+        reviewerUserId,
+        requirements,
+        policy,
+        requestedAction,
+      };
+
+      await tx
+        .update(workflowRuns)
+        .set({
+          data: {
+            ...run.data,
+            lastExecutedStep: {
+              ...lastExecutedStep,
+              approvalRequest,
+            },
+            lastWorkflowApprovalRequest: {
+              ...approvalRequest,
+              requestedAt: input.now.toISOString(),
+              externalExecution: "blocked",
+            },
+          },
+          updatedAt: input.now,
+        })
+        .where(eq(workflowRuns.id, run.id));
+
+      if (approvalTask) {
+        await tx
+          .update(tasks)
+          .set({
+            state: "approval_required",
+            outcome: {
+              ...approvalTask.outcome,
+              lastWorkflowApprovalRequest: {
+                ...approvalRequest,
+                workflowRunId: run.id,
+                workflowStepId: step.id,
+                requestedAt: input.now.toISOString(),
+                externalExecution: "blocked",
+              },
+            },
+            updatedAt: input.now,
+          })
+          .where(and(eq(tasks.tenantId, input.operator.tenantId), eq(tasks.id, approvalTask.id)));
+      }
+    }
 
     if (packetWorkflowStepKinds.has(step.kind)) {
       const packetInput = jsonObject(step.input.packet ?? step.input.corePacket ?? {});
@@ -800,6 +1046,14 @@ async function completeWorkflowStep(input: {
       eventId: event.id,
       auditEventId: audit.id,
       evidenceId: proof.id,
+      ...(approvalRequest
+        ? {
+            approvalRequest: {
+              ...approvalRequest,
+              externalExecution: "blocked",
+            },
+          }
+        : {}),
       ...(packetPreparation
         ? {
             packetPreparation: {
@@ -835,6 +1089,7 @@ async function completeWorkflowStep(input: {
       .update(workflowSteps)
       .set({
         eventId: event.id,
+        approvalRequestId: approvalRequest?.approvalRequestId ?? step.approvalRequestId,
         state: "done",
         leaseOwner: null,
         leasedUntil: null,

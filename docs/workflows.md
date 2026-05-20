@@ -224,6 +224,11 @@ completion, and leaves failed work on the same step ledger with retry metadata.
 an active grant for the worker or task owner actor before they can complete; the
 executor records the capability key, grant, actor, task, and blocked external
 execution posture in the step output and task outcome.
+`approval_request` steps create pending shared `approval_requests` rows from
+`input.approval`, link the approval to the workflow run, step, task, event,
+audit event, and approval evidence, update workflow run data with
+`lastWorkflowApprovalRequest`, and move linked tasks to `approval_required`
+without external execution.
 `packet_prepare`, `document_packet_prepare`, and `evidence_packet_prepare`
 steps reuse Core `packet.prepare` semantics from the workflow executor: the step
 payload provides packet content under `input.packet`, while tenant, operator,
