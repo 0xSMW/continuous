@@ -17,6 +17,9 @@ planned future-worker commands also expose a non-executable `configSchema` so
 agents can inspect payload requirements before handlers exist.
 `continuous.worker.command`, `/worker`, and `worker:tool` all run through that
 same registry validation before dispatch.
+The CI integration suite exercises `continuous.worker.command` on real
+Revenue `lead.read` and `run` commands, proving the app-server boundary writes
+the same worker run, approval, evidence, budget, and event records as `/worker`.
 
 ```sh
 bun run app-server:worker-tools

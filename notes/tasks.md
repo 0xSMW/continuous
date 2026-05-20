@@ -26,4 +26,4 @@
 - Use `docs/revenue-operations-worker-v1-contract.md` as the machine-actionable contract for run and approval effects.
 - Keep `docs/worker-readiness.md` and `docs/worker-handoffs.md` updated in the same change as any worker promotion or new cross-worker fixture.
 - Keep Core HTTP controls on `/core` with registered `command`, `core`, `idempotencyKey`, and `config` fields; do not add `/api/*` command paths or command-specific URLs.
-- Keep Next MCP for Next.js diagnostics; keep app-server worker tooling registry-backed and free of production-token plumbing.
+- Keep Next MCP for Next.js diagnostics; keep app-server worker tooling registry-backed and free of production-token plumbing; CI now proves `continuous.worker.command` can execute real Revenue commands, so extend that proof to Dispatch/Owner as their runtime surfaces mature.

@@ -75,6 +75,7 @@ import {
   scoreOwnerBriefRun,
   scoreRevenueWorkerRun,
 } from "./evals";
+import { executeAppServerWorkerTool } from "./app-server-tools";
 import { executeWorkerCommand } from "./registry";
 import { continueRevenueWorker, runRevenueWorker } from "./revenue";
 
@@ -4020,6 +4021,99 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(readRun?.mode).toBe("read_only");
     expect(objectValue(readRunData.input).command).toBe("lead.read");
     expect(objectValue(readRunData.output).readCount).toBe(1);
+  }, 120_000);
+
+  it("executes Revenue commands through the app-server worker command surface", async () => {
+    const runId = randomUUID();
+    const sourceEventId = `app-server:lead:${runId}`;
+    const read = await executeAppServerWorkerTool("continuous.worker.command", {
+      command: "lead.read",
+      operatorEmail: "owner@continuoushq.com",
+      worker: {
+        role: "revenue_operations",
+        tenantSlug: "continuous-demo",
+      },
+      idempotencyKey: `ci-app-server-lead-read-${runId}`,
+      config: {
+        source: "website_form",
+        records: [
+          {
+            sourceEventId,
+            customerName: "App Server Roofing",
+            customerIntent: "roof leak inspection",
+            serviceArea: "roofing",
+            urgency: "high",
+          },
+        ],
+      },
+    });
+    const readEnvelope = objectValue(read);
+    const readResult = objectValue(readEnvelope.result);
+    const selectors = Array.isArray(readResult.selectors)
+      ? readResult.selectors.map((selector) => objectValue(selector))
+      : [];
+    const selector = selectors[0] ?? {};
+
+    expect(readEnvelope.command).toBe("lead.read");
+    expect(objectValue(readEnvelope.worker)).toMatchObject({
+      role: "revenue_operations",
+      tenantSlug: "continuous-demo",
+    });
+    expect(readResult.created).toBe(true);
+    expect(selector.source).toBe("website_form");
+    expect(selector.sourceEventId).toBe(sourceEventId);
+    expect(selector.objectId).toBeTruthy();
+    expect(selector.eventId).toBeTruthy();
+    expect(selector.evidenceId).toBeTruthy();
+
+    const run = await executeAppServerWorkerTool("continuous.worker.command", {
+      command: "run",
+      operatorEmail: "owner@continuoushq.com",
+      worker: {
+        role: "revenue_operations",
+        tenantSlug: "continuous-demo",
+      },
+      idempotencyKey: `ci-app-server-revenue-run-${runId}`,
+      config: {
+        intake: objectValue(selector.intake),
+      },
+    });
+    const runEnvelope = objectValue(run);
+    const runResult = objectValue(runEnvelope.result);
+    const output = objectValue(runResult.output);
+
+    expect(runEnvelope.command).toBe("run");
+    expect(runResult.created).toBe(true);
+    expect(output.source).toBe("website_form");
+    expect(output.sourceEventId).toBe(sourceEventId);
+    expect(output.sourceObjectId).toBe(selector.objectId);
+    expect(output.sourceEventRowId).toBe(selector.eventId);
+    expect(output.sourceEvidenceId).toBe(selector.evidenceId);
+    expect(output.externalExecution).toBe("blocked");
+    expect(output.externalSend).toBe(false);
+
+    const [readRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(eq(workerRuns.id, stringValue(readResult.workerRunId)))
+      .limit(1);
+    const [runRow] = await db
+      .select()
+      .from(workerRuns)
+      .where(eq(workerRuns.id, stringValue(runResult.workerRunId)))
+      .limit(1);
+    const [approval] = await db
+      .select()
+      .from(approvalRequests)
+      .where(eq(approvalRequests.id, stringValue(runResult.approvalRequestId)))
+      .limit(1);
+
+    expect(objectValue(objectValue(readRun?.data).input).command).toBe("lead.read");
+    expect(runRow?.source).toBe("continuous.revenue_worker");
+    expect(runRow?.state).toBe("done");
+    expect(objectValue(objectValue(runRow?.data).input).inputHash).toBeTruthy();
+    expect(approval?.state).toBe("pending");
+    expect(approval?.kind).toBe("quote_approval");
   }, 120_000);
 
   it("normalizes inbox and CRM source readers into persisted lead intake selectors", async () => {
