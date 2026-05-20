@@ -1237,8 +1237,25 @@ maybeDescribe("Revenue Worker integration eval", () => {
       tenantSlug: "continuous-demo",
       idempotencyKey: `ci-core-approval-${runId}`,
       taskId: taskResult.taskId,
-      kind: "different_kind",
-      title: "Different title should replay",
+      eventId: transitionResult.eventId ?? undefined,
+      kind: "agency_notice_response_approval",
+      title: "Approve agency response packet",
+      summary: "Prepared response packet is ready for review; external submission is blocked.",
+      priority: "high",
+      risk: "medium",
+      requestedAction: {
+        action: "approve_prepared_response",
+        externalExecution: "blocked",
+      },
+      evidence: {
+        transitionEvidenceId: transitionResult.evidenceId,
+      },
+      policy: {
+        externalSubmission: "approval_required",
+      },
+      data: {
+        source: "ci.core",
+      },
       db,
     });
 
@@ -1246,6 +1263,20 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(transitionReplay.taskId).toBe(taskResult.taskId);
     expect(approvalReplay.created).toBe(false);
     expect(approvalReplay.approvalRequestId).toBe(approvalResult.approvalRequestId);
+    await expect(
+      requestApproval({
+        operatorEmail: "owner@continuoushq.com",
+        tenantSlug: "continuous-demo",
+        idempotencyKey: `ci-core-approval-${runId}`,
+        taskId: taskResult.taskId,
+        kind: "different_kind",
+        title: "Different title should conflict.",
+        db,
+      }),
+    ).rejects.toMatchObject({
+      code: "core_command_idempotency_conflict",
+      status: 409,
+    });
   }, 120_000);
 
   it("grants capabilities and moves budget through reserve charge and release", async () => {
@@ -1302,6 +1333,53 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(grantResult.evidenceId).toBeTruthy();
     expect(grantResult.grant.actor.type).toBe("worker");
     expect(grantResult.grant.capabilityKey).toBe("worker.read");
+
+    const grantReplay = await grantCapability({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-capability-grant-${runId}`,
+      capabilityId: capability.id,
+      actor: {
+        type: "worker",
+        id: worker.id,
+      },
+      scope: {
+        flow: "ci_budget_control",
+      },
+      policy: {
+        autonomyLevel: 1,
+        externalExecution: "blocked",
+      },
+      reason: "CI grants a scoped worker capability through Core.",
+      db,
+    });
+
+    expect(grantReplay.granted).toBe(false);
+    expect(grantReplay.capabilityGrantId).toBe(grantResult.capabilityGrantId);
+    await expect(
+      grantCapability({
+        operatorEmail: "owner@continuoushq.com",
+        tenantSlug: "continuous-demo",
+        idempotencyKey: `ci-capability-grant-${runId}`,
+        capabilityId: capability.id,
+        actor: {
+          type: "worker",
+          id: worker.id,
+        },
+        scope: {
+          flow: "changed_scope",
+        },
+        policy: {
+          autonomyLevel: 1,
+          externalExecution: "blocked",
+        },
+        reason: "Changed capability input must conflict.",
+        db,
+      }),
+    ).rejects.toMatchObject({
+      code: "core_command_idempotency_conflict",
+      status: 409,
+    });
 
     const taskResult = await createCoreTask({
       operatorEmail: "owner@continuoushq.com",
@@ -1437,8 +1515,13 @@ maybeDescribe("Revenue Worker integration eval", () => {
       tenantSlug: "continuous-demo",
       idempotencyKey: `ci-budget-reserve-${runId}`,
       budgetAccountId: budgetAccount.id,
-      units: 999,
-      reason: "Replay should return the first reservation.",
+      taskId: taskResult.taskId,
+      capabilityId: capability.id,
+      units: 1200,
+      reason: "Reserve budget before worker action.",
+      data: {
+        source: "ci.core",
+      },
       db,
     });
     const chargeReplay = await chargeBudget({
@@ -1450,7 +1533,13 @@ maybeDescribe("Revenue Worker integration eval", () => {
         type: "worker",
         id: worker.id,
       },
-      reason: "Replay should return the first usage event.",
+      taskId: taskResult.taskId,
+      capabilityId: capability.id,
+      costUsd: "0.000000",
+      reason: "Charge the reserved budget after the worker action.",
+      data: {
+        source: "ci.core",
+      },
       db,
     });
     const releaseReplay = await releaseBudget({
@@ -1458,7 +1547,10 @@ maybeDescribe("Revenue Worker integration eval", () => {
       tenantSlug: "continuous-demo",
       idempotencyKey: `ci-budget-release-${runId}`,
       reservationId: releaseReserve.reservationId,
-      reason: "Replay should return the first release.",
+      reason: "Release unused budget after canceling the action.",
+      data: {
+        source: "ci.core",
+      },
       db,
     });
 
@@ -1468,6 +1560,51 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(chargeReplay.usageEventId).toBe(chargeResult.usageEventId);
     expect(releaseReplay.released).toBe(false);
     expect(releaseReplay.reservationId).toBe(releaseReserve.reservationId);
+
+    await expect(
+      reserveBudget({
+        operatorEmail: "owner@continuoushq.com",
+        tenantSlug: "continuous-demo",
+        idempotencyKey: `ci-budget-reserve-${runId}`,
+        budgetAccountId: budgetAccount.id,
+        units: 999,
+        reason: "Changed budget reserve input must conflict.",
+        db,
+      }),
+    ).rejects.toMatchObject({
+      code: "core_command_idempotency_conflict",
+      status: 409,
+    });
+    await expect(
+      chargeBudget({
+        operatorEmail: "owner@continuoushq.com",
+        tenantSlug: "continuous-demo",
+        idempotencyKey: `ci-budget-charge-${runId}`,
+        reservationId: reserveResult.reservationId,
+        actor: {
+          type: "worker",
+          id: worker.id,
+        },
+        reason: "Changed budget charge input must conflict.",
+        db,
+      }),
+    ).rejects.toMatchObject({
+      code: "core_command_idempotency_conflict",
+      status: 409,
+    });
+    await expect(
+      releaseBudget({
+        operatorEmail: "owner@continuoushq.com",
+        tenantSlug: "continuous-demo",
+        idempotencyKey: `ci-budget-release-${runId}`,
+        reservationId: releaseReserve.reservationId,
+        reason: "Changed budget release input must conflict.",
+        db,
+      }),
+    ).rejects.toMatchObject({
+      code: "core_command_idempotency_conflict",
+      status: 409,
+    });
   }, 120_000);
 
   it("upserts adapters and pollable read-only connections through headless core primitives", async () => {

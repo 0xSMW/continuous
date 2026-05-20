@@ -23,6 +23,7 @@ import {
   type JsonObject,
 } from "../db/schema";
 import { PlatformUnavailableError } from "./errors";
+import { assertCoreIdempotencyReplay, coreIdempotencyFingerprint } from "./idempotency";
 import { loadOperatorContext } from "./operators";
 
 type Database = typeof defaultDb;
@@ -571,6 +572,28 @@ export async function requestApproval(input: ApprovalRequestInput): Promise<Appr
   const requestedCapabilityId = optionalUuid(cleanString(input.capabilityId), "config.capabilityId");
   const requestedReviewerUserId = optionalUuid(cleanString(input.reviewerUserId), "config.reviewerUserId");
   const dueAt = parseDueAt(cleanString(input.dueAt));
+  const summary = input.summary ?? "";
+  const requestedAction = jsonObject(input.requestedAction);
+  const evidenceData = jsonObject(input.evidence);
+  const policy = jsonObject(input.policy);
+  const data = jsonObject(input.data);
+  const idempotency = coreIdempotencyFingerprint("approval.request", {
+    kind,
+    title,
+    summary,
+    taskId: taskId ?? null,
+    eventId: requestedEventId ?? null,
+    objectId: requestedObjectId ?? null,
+    capabilityId: requestedCapabilityId ?? null,
+    reviewerUserId: requestedReviewerUserId ?? null,
+    priority: cleanString(input.priority) ?? null,
+    risk: cleanString(input.risk) ?? null,
+    dueAt: dueAt?.toISOString() ?? null,
+    requestedAction,
+    evidence: evidenceData,
+    policy,
+    data,
+  });
 
   return db.transaction(async (tx) => {
     await tx.execute(
@@ -581,6 +604,7 @@ export async function requestApproval(input: ApprovalRequestInput): Promise<Appr
       .select({
         auditEventId: auditEvents.id,
         eventId: auditEvents.eventId,
+        data: auditEvents.data,
         approval: approvalRequests,
       })
       .from(auditEvents)
@@ -596,6 +620,12 @@ export async function requestApproval(input: ApprovalRequestInput): Promise<Appr
       .limit(1);
 
     if (existingAudit) {
+      assertCoreIdempotencyReplay({
+        command: "approval.request",
+        fingerprint: idempotency,
+        storedData: existingAudit.data,
+      });
+
       const [approvalEvidence] = await tx
         .select({ id: evidence.id })
         .from(evidence)
@@ -722,11 +752,11 @@ export async function requestApproval(input: ApprovalRequestInput): Promise<Appr
 
     const now = new Date();
     const action = {
-      ...jsonObject(input.requestedAction),
+      ...requestedAction,
       externalExecution: "blocked",
     };
     const requestData = {
-      ...jsonObject(input.data),
+      ...data,
       taskId: taskId ?? null,
       objectId: objectId ?? null,
       capabilityId: capabilityId ?? null,
@@ -751,8 +781,9 @@ export async function requestApproval(input: ApprovalRequestInput): Promise<Appr
             data: {
               kind,
               title,
-              summary: input.summary ?? "",
+              summary,
               reviewerUserId,
+              idempotency,
               ...requestData,
             },
             occurredAt: now,
@@ -775,13 +806,13 @@ export async function requestApproval(input: ApprovalRequestInput): Promise<Appr
         priority,
         risk,
         title,
-        summary: input.summary ?? "",
+        summary,
         requestedAction: action,
         evidence: {
-          ...jsonObject(input.evidence),
+          ...evidenceData,
           eventId: createdEvent.id,
         },
-        policy: jsonObject(input.policy),
+        policy,
         data: requestData,
         dueAt,
         createdAt: now,
@@ -810,6 +841,7 @@ export async function requestApproval(input: ApprovalRequestInput): Promise<Appr
           approvalRequestId: approval.id,
           reviewerUserId,
           subject: approvalSubject(approval),
+          idempotency,
           externalExecution: "blocked",
         },
       })
@@ -832,6 +864,7 @@ export async function requestApproval(input: ApprovalRequestInput): Promise<Appr
           auditEventId: audit.id,
           subject: approvalSubject(approval),
           requestedAction: action,
+          idempotency,
           externalExecution: "blocked",
         },
       })

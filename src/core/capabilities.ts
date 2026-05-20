@@ -13,6 +13,7 @@ import {
   type JsonObject,
 } from "../db/schema";
 import { PlatformUnavailableError } from "./errors";
+import { assertCoreIdempotencyReplay, coreIdempotencyFingerprint } from "./idempotency";
 import { loadOperatorContext } from "./operators";
 
 type Database = typeof defaultDb;
@@ -267,6 +268,22 @@ export async function grantCapability(input: CapabilityGrantInput): Promise<Capa
   const startsAt = optionalDate(cleanString(input.startsAt), "config.startsAt");
   const endsAt = optionalDate(cleanString(input.endsAt), "config.endsAt");
   const reason = requiredString(input.reason, "config.reason");
+  const scope = jsonObject(input.scope);
+  const policy = jsonObject(input.policy);
+  const approvalRequestId = optionalUuid(cleanString(input.approvalRequestId), "config.approvalRequestId");
+  const idempotency = coreIdempotencyFingerprint("capability.grant", {
+    capabilityId: requestedCapabilityId ?? null,
+    capabilityKey: capabilityKey ?? null,
+    capabilityVersion,
+    actor,
+    scope,
+    policy,
+    active,
+    startsAt: startsAt?.toISOString() ?? null,
+    endsAt: endsAt?.toISOString() ?? null,
+    approvalRequestId: approvalRequestId ?? null,
+    reason,
+  });
 
   if (startsAt && endsAt && startsAt >= endsAt) {
     throw new PlatformUnavailableError(
@@ -300,6 +317,7 @@ export async function grantCapability(input: CapabilityGrantInput): Promise<Capa
         auditEventId: auditEvents.id,
         eventId: auditEvents.eventId,
         targetId: auditEvents.targetId,
+        data: auditEvents.data,
       })
       .from(auditEvents)
       .where(
@@ -313,6 +331,12 @@ export async function grantCapability(input: CapabilityGrantInput): Promise<Capa
       .limit(1);
 
     if (existingAudit?.targetId) {
+      assertCoreIdempotencyReplay({
+        command: "capability.grant",
+        fingerprint: idempotency,
+        storedData: existingAudit.data,
+      });
+
       const [grant] = await tx
         .select({ grant: capabilityGrants, capabilityKey: capabilities.key })
         .from(capabilityGrants)
@@ -367,7 +391,7 @@ export async function grantCapability(input: CapabilityGrantInput): Promise<Capa
       await assertApprovedRequest({
         tx,
         tenantId: operator.tenantId,
-        approvalRequestId: cleanString(input.approvalRequestId),
+        approvalRequestId,
         capabilityId: capability.id,
       });
     }
@@ -386,8 +410,8 @@ export async function grantCapability(input: CapabilityGrantInput): Promise<Capa
       .limit(1);
     const now = new Date();
     const values = {
-      scope: jsonObject(input.scope),
-      policy: jsonObject(input.policy),
+      scope,
+      policy,
       active,
       startsAt,
       endsAt,
@@ -419,7 +443,8 @@ export async function grantCapability(input: CapabilityGrantInput): Promise<Capa
       startsAt: startsAt?.toISOString() ?? null,
       endsAt: endsAt?.toISOString() ?? null,
       reason,
-      approvalRequestId: cleanString(input.approvalRequestId) ?? null,
+      approvalRequestId: approvalRequestId ?? null,
+      idempotency,
       externalExecution: "blocked",
     };
     const [event] = await tx

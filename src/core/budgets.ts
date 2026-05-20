@@ -17,6 +17,7 @@ import {
   type JsonObject,
 } from "../db/schema";
 import { PlatformUnavailableError } from "./errors";
+import { assertCoreIdempotencyReplay, coreIdempotencyFingerprint } from "./idempotency";
 import { loadOperatorContext } from "./operators";
 
 type Database = typeof defaultDb;
@@ -435,10 +436,21 @@ export async function reserveBudget(input: BudgetReserveInput): Promise<BudgetRe
   const capabilityId = optionalUuid(cleanString(input.capabilityId), "config.capabilityId");
   const units = parseUnits(input.units, "config.units");
   const reason = requiredString(input.reason, "config.reason");
+  const data = jsonObject(input.data);
+  const requestedExpiresAt = optionalDate(cleanString(input.expiresAt), "config.expiresAt");
   const operator = await loadOperatorContext({
     db,
     operatorEmail: input.operatorEmail,
     tenantSlug: input.tenantSlug,
+  });
+  const idempotency = coreIdempotencyFingerprint("budget.reserve", {
+    budgetAccountId: accountId,
+    taskId: taskId ?? null,
+    capabilityId: capabilityId ?? null,
+    units,
+    reason,
+    expiresAt: requestedExpiresAt?.toISOString() ?? null,
+    data,
   });
 
   return db.transaction(async (tx) => {
@@ -447,7 +459,12 @@ export async function reserveBudget(input: BudgetReserveInput): Promise<BudgetRe
     );
 
     const [existingAudit] = await tx
-      .select({ auditEventId: auditEvents.id, eventId: auditEvents.eventId, targetId: auditEvents.targetId })
+      .select({
+        auditEventId: auditEvents.id,
+        eventId: auditEvents.eventId,
+        targetId: auditEvents.targetId,
+        data: auditEvents.data,
+      })
       .from(auditEvents)
       .where(
         and(
@@ -460,6 +477,12 @@ export async function reserveBudget(input: BudgetReserveInput): Promise<BudgetRe
       .limit(1);
 
     if (existingAudit?.targetId) {
+      assertCoreIdempotencyReplay({
+        command: "budget.reserve",
+        fingerprint: idempotency,
+        storedData: existingAudit.data,
+      });
+
       const [reservation] = await tx
         .select()
         .from(budgetReservations)
@@ -501,7 +524,7 @@ export async function reserveBudget(input: BudgetReserveInput): Promise<BudgetRe
     ]);
 
     const now = new Date();
-    const expiresAt = optionalDate(cleanString(input.expiresAt), "config.expiresAt") ?? new Date(now.getTime() + 15 * 60 * 1000);
+    const expiresAt = requestedExpiresAt ?? new Date(now.getTime() + 15 * 60 * 1000);
 
     if (expiresAt <= now) {
       throw new PlatformUnavailableError("budget_expiration_invalid", "config.expiresAt must be in the future.", 400);
@@ -528,8 +551,9 @@ export async function reserveBudget(input: BudgetReserveInput): Promise<BudgetRe
       units,
       reason,
       expiresAt: expiresAt.toISOString(),
+      idempotency,
       externalExecution: "blocked",
-      data: jsonObject(input.data),
+      data,
     };
     const [event] = await tx
       .insert(events)
@@ -604,6 +628,10 @@ export async function chargeBudget(input: BudgetChargeInput): Promise<BudgetChar
   const inferenceId = optionalUuid(cleanString(input.inferenceId), "config.inferenceId");
   const reason = requiredString(input.reason, "config.reason");
   const costUsd = parseCostUsd(input.costUsd);
+  const requestedUnits = input.units === undefined || input.units === null
+    ? null
+    : parseUnits(input.units, "config.units");
+  const data = jsonObject(input.data);
   const operator = await loadOperatorContext({
     db,
     operatorEmail: input.operatorEmail,
@@ -614,6 +642,17 @@ export async function chargeBudget(input: BudgetChargeInput): Promise<BudgetChar
     operatorUserId: operator.userId,
     operatorActorRef: operator.actorRef,
   });
+  const idempotency = coreIdempotencyFingerprint("budget.charge", {
+    reservationId,
+    units: requestedUnits,
+    costUsd,
+    actor,
+    taskId: taskId ?? null,
+    capabilityId: capabilityId ?? null,
+    inferenceId: inferenceId ?? null,
+    reason,
+    data,
+  });
 
   return db.transaction(async (tx) => {
     await tx.execute(
@@ -621,7 +660,12 @@ export async function chargeBudget(input: BudgetChargeInput): Promise<BudgetChar
     );
 
     const [existingAudit] = await tx
-      .select({ auditEventId: auditEvents.id, eventId: auditEvents.eventId, targetId: auditEvents.targetId })
+      .select({
+        auditEventId: auditEvents.id,
+        eventId: auditEvents.eventId,
+        targetId: auditEvents.targetId,
+        data: auditEvents.data,
+      })
       .from(auditEvents)
       .where(
         and(
@@ -634,6 +678,12 @@ export async function chargeBudget(input: BudgetChargeInput): Promise<BudgetChar
       .limit(1);
 
     if (existingAudit?.targetId) {
+      assertCoreIdempotencyReplay({
+        command: "budget.charge",
+        fingerprint: idempotency,
+        storedData: existingAudit.data,
+      });
+
       const [usage] = await tx
         .select()
         .from(usageEvents)
@@ -699,9 +749,7 @@ export async function chargeBudget(input: BudgetChargeInput): Promise<BudgetChar
       );
     }
 
-    const units = input.units === undefined || input.units === null
-      ? reservation.units
-      : parseUnits(input.units, "config.units");
+    const units = requestedUnits ?? reservation.units;
 
     if (units !== reservation.units) {
       throw new PlatformUnavailableError(
@@ -733,7 +781,7 @@ export async function chargeBudget(input: BudgetChargeInput): Promise<BudgetChar
         data: {
           reason,
           externalExecution: "blocked",
-          ...jsonObject(input.data),
+          ...data,
         },
         createdAt: now,
       })
@@ -754,6 +802,7 @@ export async function chargeBudget(input: BudgetChargeInput): Promise<BudgetChar
       units,
       costUsd,
       reason,
+      idempotency,
       externalExecution: "blocked",
     };
     const [event] = await tx
@@ -833,10 +882,16 @@ export async function releaseBudget(input: BudgetReleaseInput): Promise<BudgetRe
   const db = input.db ?? defaultDb;
   const reservationId = requiredUuid(input.reservationId, "config.reservationId");
   const reason = requiredString(input.reason, "config.reason");
+  const data = jsonObject(input.data);
   const operator = await loadOperatorContext({
     db,
     operatorEmail: input.operatorEmail,
     tenantSlug: input.tenantSlug,
+  });
+  const idempotency = coreIdempotencyFingerprint("budget.release", {
+    reservationId,
+    reason,
+    data,
   });
 
   return db.transaction(async (tx) => {
@@ -845,7 +900,12 @@ export async function releaseBudget(input: BudgetReleaseInput): Promise<BudgetRe
     );
 
     const [existingAudit] = await tx
-      .select({ auditEventId: auditEvents.id, eventId: auditEvents.eventId, targetId: auditEvents.targetId })
+      .select({
+        auditEventId: auditEvents.id,
+        eventId: auditEvents.eventId,
+        targetId: auditEvents.targetId,
+        data: auditEvents.data,
+      })
       .from(auditEvents)
       .where(
         and(
@@ -858,6 +918,12 @@ export async function releaseBudget(input: BudgetReleaseInput): Promise<BudgetRe
       .limit(1);
 
     if (existingAudit?.targetId) {
+      assertCoreIdempotencyReplay({
+        command: "budget.release",
+        fingerprint: idempotency,
+        storedData: existingAudit.data,
+      });
+
       const [reservation] = await tx
         .select()
         .from(budgetReservations)
@@ -913,8 +979,9 @@ export async function releaseBudget(input: BudgetReleaseInput): Promise<BudgetRe
       taskId: reservation.taskId,
       units: reservation.units,
       reason,
+      idempotency,
       externalExecution: "blocked",
-      data: jsonObject(input.data),
+      data,
     };
     const [event] = await tx
       .insert(events)
