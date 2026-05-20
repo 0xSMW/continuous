@@ -34,4 +34,6 @@
 - Remove the compatibility `/api/health` alias only after old probes and external monitors have moved to `/health`; decide whether the `/approvals` UI route should stay as a human console while `/approval` remains the API surface.
 - Add production-grade app-server worker transport that derives operator identity from authenticated control-plane request state instead of `WORKER_OPERATOR_EMAIL` and trusted-local toggles.
 - Make normal DigitalOcean deploys non-root by default, then make the production-readiness gate mandatory for customer-data deploys; strict workflow runs now fail before sync if `DEPLOY_USER` resolves to root, but bootstrap provisioning for backup, observability, and non-root readiness still needs a first-class host setup path.
-- Add missing replay/security coverage for `external_action.record` and workflow route failure mapping.
+- Remove the app-server worker operator fallback and require explicit transport-provided operator identity before local command/view execution.
+- Start the Systems Operations runtime slice next: activate `sync.repair.plan` and `permission.review` with `snapshot` and `repairs` views before Compliance runtime.
+- Build the DigitalOcean release gate gaps: deploy CI-built image digests, add Postgres 17 parity smoke, reuse a parameterized host smoke script, and make non-root deploys the normal default.

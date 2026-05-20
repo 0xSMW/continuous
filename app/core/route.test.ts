@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { PlatformUnavailableError } from "../../src/core/errors";
+
 const mocks = vi.hoisted(() => ({
   executeAiInference: vi.fn(),
   attachCoreEvidence: vi.fn(),
@@ -2527,6 +2529,132 @@ describe("POST /core", () => {
       data: {
         source: "route-test",
       },
+    });
+  });
+
+  it("rejects external_action.record before dispatch when idempotency is invalid", async () => {
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "external_action.record",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          config: {
+            targetType: "payment_instruction",
+            targetId: "99999999-9999-4999-8999-000000000077",
+            kind: "payment_receipt",
+            state: "receipt_recorded",
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toEqual({
+      code: "invalid_idempotency_key",
+      message: "A string idempotency key is required.",
+    });
+    expect(mocks.recordExternalAction).not.toHaveBeenCalled();
+  });
+
+  it("preserves external_action.record security and validation failures", async () => {
+    mocks.recordExternalAction.mockRejectedValue(
+      new PlatformUnavailableError(
+        "core_external_action_adapter_mismatch",
+        "config.connectionId must match config.adapterActionId when both are provided.",
+        400,
+      ),
+    );
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "external_action.record",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "external-action-route-mismatch-001",
+          config: {
+            targetType: "payment",
+            targetId: "99999999-9999-4999-8999-000000000077",
+            kind: "payment_receipt",
+            state: "receipt_recorded",
+            connectionId: "99999999-9999-4999-8999-000000000001",
+            adapterActionId: "99999999-9999-4999-8999-000000000002",
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toEqual({
+      code: "core_external_action_adapter_mismatch",
+      message: "config.connectionId must match config.adapterActionId when both are provided.",
+    });
+    expect(mocks.recordExternalAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        idempotencyKey: "external-action-route-mismatch-001",
+        targetType: "payment",
+        targetId: "99999999-9999-4999-8999-000000000077",
+      }),
+    );
+  });
+
+  it("preserves external_action.record replay conflicts", async () => {
+    mocks.recordExternalAction.mockRejectedValue(
+      new PlatformUnavailableError(
+        "core_command_idempotency_conflict",
+        "external_action.record idempotency key was reused with different input.",
+        409,
+      ),
+    );
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "external_action.record",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "external-action-route-replay-conflict-001",
+          config: {
+            targetType: "payment",
+            targetId: "99999999-9999-4999-8999-000000000077",
+            kind: "payment_receipt",
+            state: "receipt_recorded",
+            amountCents: 24900,
+            currency: "usd",
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body.error).toEqual({
+      code: "core_command_idempotency_conflict",
+      message: "external_action.record idempotency key was reused with different input.",
     });
   });
 

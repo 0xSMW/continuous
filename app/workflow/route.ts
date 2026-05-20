@@ -131,6 +131,10 @@ function errorResponse(error: { code: string; message: string }, status: number)
 }
 
 function workflowErrorResponse(error: unknown, fallbackCode: string) {
+  const structuredError =
+    error && typeof error === "object" && "status" in error && "code" in error
+      ? (error as { status: unknown; code: unknown; message?: unknown })
+      : null;
   const workflowError =
     error instanceof RevenueWorkerUnavailableError || error instanceof PlatformUnavailableError
       ? {
@@ -138,6 +142,17 @@ function workflowErrorResponse(error: unknown, fallbackCode: string) {
           code: error.code,
           message: error.message,
         }
+      : structuredError &&
+          typeof structuredError.status === "number" &&
+          typeof structuredError.code === "string"
+        ? {
+            status: structuredError.status,
+            code: structuredError.code,
+            message:
+              typeof structuredError.message === "string"
+                ? structuredError.message
+                : "Workflow command failed.",
+          }
       : {
           status: 500,
           code: fallbackCode,

@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { PlatformUnavailableError } from "../../src/core/errors";
+import { RevenueWorkerUnavailableError } from "../../src/worker/revenue";
+
 const mocks = vi.hoisted(() => ({
   authorizeManagedControlPlaneCredential: vi.fn(),
   decideApproval: vi.fn(),
@@ -660,5 +663,186 @@ describe("/workflow route scope", () => {
       message: "config must be an object when provided.",
     });
     expect(mocks.executeWorkflowSteps).not.toHaveBeenCalled();
+  });
+
+  it("preserves mapped workflow service failures", async () => {
+    mocks.env.CONTROL_PLANE_ALLOWED_TENANTS = "continuous-demo";
+    mocks.listWorkflows.mockRejectedValueOnce(
+      new PlatformUnavailableError(
+        "workflow_overview_unavailable",
+        "Workflow overview is unavailable.",
+        503,
+      ),
+    );
+    mocks.listApprovals.mockRejectedValueOnce(
+      new RevenueWorkerUnavailableError(
+        "Workflow approvals are unavailable.",
+        "Workflow approvals are unavailable.",
+        503,
+      ),
+    );
+    mocks.startWorkflowRun.mockRejectedValueOnce(
+      new PlatformUnavailableError(
+        "workflow_definition_missing",
+        "Workflow definition is missing.",
+        404,
+      ),
+    );
+    mocks.transitionWorkflowRun.mockRejectedValueOnce(
+      new PlatformUnavailableError(
+        "workflow_transition_invalid",
+        "Workflow transition is not allowed.",
+        409,
+      ),
+    );
+    mocks.executeWorkflowSteps.mockRejectedValueOnce(
+      new PlatformUnavailableError(
+        "workflow_step_execution_blocked",
+        "Workflow step execution is blocked.",
+        423,
+      ),
+    );
+    mocks.decideApproval.mockRejectedValueOnce(
+      new PlatformUnavailableError(
+        "workflow_approval_decision_invalid",
+        "Workflow approval decision is invalid.",
+        422,
+      ),
+    );
+
+    const { GET, POST } = await import("./route");
+    const overview = await GET(
+      new Request("http://localhost/workflow?view=overview&tenantSlug=continuous-demo", {
+        headers: {
+          authorization: "Bearer test-token",
+        },
+      }),
+    );
+    const approvals = await GET(
+      new Request("http://localhost/workflow?view=approvals&tenantSlug=continuous-demo", {
+        headers: {
+          authorization: "Bearer test-token",
+        },
+      }),
+    );
+    const start = await POST(
+      new Request("http://localhost/workflow", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "start",
+          workflow: {
+            key: "lead_to_cash",
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "workflow-start-failure-map",
+          config: {},
+        }),
+      }),
+    );
+    const transition = await POST(
+      new Request("http://localhost/workflow", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "transition",
+          workflow: {
+            runId: "workflow-run-1",
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "workflow-transition-failure-map",
+          config: {
+            toState: "blocked",
+          },
+        }),
+      }),
+    );
+    const steps = await POST(
+      new Request("http://localhost/workflow", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "steps.execute",
+          workflow: {
+            tenantSlug: "continuous-demo",
+          },
+          config: {
+            limit: 1,
+          },
+        }),
+      }),
+    );
+    const approval = await POST(
+      new Request("http://localhost/workflow", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "approval.decide",
+          workflow: {
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "workflow-approval-failure-map",
+          config: {
+            approvalId: "approval-1",
+            action: "approved",
+          },
+        }),
+      }),
+    );
+
+    await expect(overview.json()).resolves.toMatchObject({
+      error: {
+        code: "workflow_overview_unavailable",
+        message: "Workflow overview is unavailable.",
+      },
+    });
+    await expect(approvals.json()).resolves.toMatchObject({
+      error: {
+        code: "worker_unavailable",
+        message: "Workflow approvals are unavailable.",
+      },
+    });
+    await expect(start.json()).resolves.toMatchObject({
+      error: {
+        code: "workflow_definition_missing",
+        message: "Workflow definition is missing.",
+      },
+    });
+    await expect(transition.json()).resolves.toMatchObject({
+      error: {
+        code: "workflow_transition_invalid",
+        message: "Workflow transition is not allowed.",
+      },
+    });
+    await expect(steps.json()).resolves.toMatchObject({
+      error: {
+        code: "workflow_step_execution_blocked",
+        message: "Workflow step execution is blocked.",
+      },
+    });
+    await expect(approval.json()).resolves.toMatchObject({
+      error: {
+        code: "workflow_approval_decision_invalid",
+        message: "Workflow approval decision is invalid.",
+      },
+    });
+    expect(overview.status).toBe(503);
+    expect(approvals.status).toBe(503);
+    expect(start.status).toBe(404);
+    expect(transition.status).toBe(409);
+    expect(steps.status).toBe(423);
+    expect(approval.status).toBe(422);
   });
 });

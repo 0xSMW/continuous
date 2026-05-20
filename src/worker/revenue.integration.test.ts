@@ -2666,6 +2666,67 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(externalActionReplay.targetId).toBe(payment.id);
     expect(externalActionReplay.evidenceId).toBe(externalActionResult.evidenceId);
 
+    await expect(
+      recordExternalAction({
+        operatorEmail: "owner@continuoushq.com",
+        tenantSlug: "continuous-demo",
+        idempotencyKey: `ci-core-external-action-${runId}`,
+        targetType: "payment",
+        targetId: payment.id,
+        kind: "payment_receipt",
+        state: "receipt_recorded",
+        adapterActionId: adapterIntentResult.adapterActionId,
+        amountCents: 25000,
+        currency: "usd",
+        occurredAt: "2026-05-20T08:00:00.000Z",
+        receipt: {
+          receiptId: `receipt-${runId}`,
+          provider: "ci",
+        },
+        response: {
+          status: "recorded",
+        },
+        data: {
+          source: "core_primitive_ci",
+        },
+        db,
+      }),
+    ).rejects.toMatchObject({
+      code: "core_command_idempotency_conflict",
+      status: 409,
+    });
+
+    await expect(
+      recordExternalAction({
+        operatorEmail: "owner@continuoushq.com",
+        tenantSlug: "continuous-demo",
+        idempotencyKey: `ci-core-external-action-mismatch-${runId}`,
+        targetType: "payment",
+        targetId: payment.id,
+        kind: "payment_receipt",
+        state: "receipt_recorded",
+        connectionId: randomUUID(),
+        adapterActionId: adapterIntentResult.adapterActionId,
+        amountCents: 24900,
+        currency: "usd",
+        occurredAt: "2026-05-20T08:00:00.000Z",
+        receipt: {
+          receiptId: `receipt-mismatch-${runId}`,
+          provider: "ci",
+        },
+        response: {
+          status: "recorded",
+        },
+        data: {
+          source: "core_primitive_ci",
+        },
+        db,
+      }),
+    ).rejects.toMatchObject({
+      code: "core_external_action_adapter_mismatch",
+      status: 400,
+    });
+
     await db.delete(payments).where(eq(payments.id, payment.id));
 
     const externalActionDeletedTargetReplay = await recordExternalAction({

@@ -189,6 +189,7 @@
 | Local mutation trust boundary | `worker.command` and `continuous.worker.command` are disabled under `APP_ENV=production` unless `CONTINUOUS_TRUSTED_LOCAL_WORKER_TOOLS=true`; their payloads mirror `/worker`, and production automation should prefer the authenticated `/worker` route |
 | Worker ledger namespace boundary | Role-specific worker behavior is carried by `worker.role`, event type suffixes, command names, and persisted payloads; sources stay generic as `continuous.worker` so new worker families do not require new source namespaces |
 | Hardened command-scoped control-plane auth | Catalog-backed control-plane credentials now reject explicit blank commands when command scopes exist, managed credential command lists fail closed on missing command names, malformed catalog payloads have regression coverage, and `/worker` read queries reject worker-family-specific selector drift |
+| Hardened Core/workflow failure coverage | `/core external_action.record` now has route-level invalid-idempotency, adapter mismatch, and replay-conflict coverage plus integration coverage for changed-input replay and adapter/connection mismatch; `/workflow` now preserves structured route failures across overview, approvals, start, transition, step execution, and approval decisions |
 
 ### Current State
 
