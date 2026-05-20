@@ -447,10 +447,10 @@ maybeDescribe("Revenue Worker integration eval", () => {
       input: {
         prompt: "Classify this lead for quote readiness.",
         customerName: "Acme Roof Repair",
-        token: "never-persist-this",
+        token: null,
         inputRefs: {
           sourceObjectId: "33333333-3333-4333-8333-000000000001",
-          token: "never-persist-this-ref",
+          token: null,
         },
       },
       redaction: {
@@ -509,8 +509,15 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(audit?.targetId).toBe(result.inferenceId);
     expect(objectValue(audit?.data).providerExecution).toBe("disabled");
     expect(proof?.kind).toBe("trace");
-    expect(JSON.stringify(proof?.data)).not.toContain("never-persist-this");
-    expect(JSON.stringify(proof?.data)).not.toContain("never-persist-this-ref");
+    expect(objectValue(objectValue(proof?.data).redactedRequest).input).toMatchObject({
+      token: "[redacted]",
+      inputRefs: {
+        token: "[redacted]",
+      },
+    });
+    expect(objectValue(objectValue(proof?.data).redactedRequest).inputRefs).toMatchObject({
+      token: "[redacted]",
+    });
 
     const replay = await executeAiInference({
       operatorEmail: "owner@continuoushq.com",
@@ -527,7 +534,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
       },
       input: {
         prompt: "Changed input must replay the original inference.",
-        token: "changed",
+        token: null,
       },
       db,
     });

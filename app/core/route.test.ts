@@ -195,7 +195,7 @@ describe("POST /core", () => {
           core: {
             tenantSlug: "continuous-demo",
           },
-          idempotencyKey: "rotation-attest-raw-token-001",
+          idempotencyKey: "rotation-attest-forbidden-field-001",
           config: {
             credentialId: "ops-credential",
             token: null,
@@ -500,10 +500,10 @@ describe("POST /core", () => {
           core: {
             tenantSlug: "continuous-demo",
           },
-          idempotencyKey: "credential-upsert-raw-token-001",
+          idempotencyKey: "credential-upsert-forbidden-field-001",
           config: {
             credentialId: "bootstrap-operator",
-            token: "x",
+            token: null,
           },
         }),
       }),
