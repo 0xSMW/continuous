@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   executeWorkflowSteps: vi.fn(),
   listApprovals: vi.fn(),
   listWorkflows: vi.fn(),
+  recordControlPlaneAuthAttempt: vi.fn(),
   startWorkflowRun: vi.fn(),
   transitionWorkflowRun: vi.fn(),
   env: {
@@ -37,6 +38,10 @@ vi.mock("../../src/core/workflows", () => ({
   transitionWorkflowRun: mocks.transitionWorkflowRun,
 }));
 
+vi.mock("../../src/core/control-plane-auth", () => ({
+  recordControlPlaneAuthAttempt: mocks.recordControlPlaneAuthAttempt,
+}));
+
 vi.mock("../../src/worker/revenue", () => ({
   RevenueWorkerUnavailableError: class RevenueWorkerUnavailableError extends Error {
     status = 503;
@@ -55,6 +60,7 @@ describe("/workflow route scope", () => {
       CONTROL_PLANE_ALLOWED_TENANTS: undefined,
       CONTROL_PLANE_ALLOWED_WORKER_ROLES: undefined,
     });
+    mocks.recordControlPlaneAuthAttempt.mockResolvedValue({ id: "auth-session-1" });
   });
 
   afterEach(() => {

@@ -18,6 +18,7 @@ import {
   authorizeControlPlaneScope,
   normalizeIdempotencyKey,
 } from "../../src/worker/security";
+import { recordControlPlaneAuthAttempt } from "../../src/core/control-plane-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -167,6 +168,14 @@ export async function GET(request: Request) {
   });
 
   if (!auth.ok) {
+    await recordControlPlaneAuthAttempt({
+      request,
+      route: "workflow",
+      access: "read",
+      command: `view.${view}`,
+      tenantSlug,
+      auth,
+    });
     return guardErrorResponse(auth);
   }
 
@@ -177,8 +186,27 @@ export async function GET(request: Request) {
   });
 
   if (!scope.ok) {
+    await recordControlPlaneAuthAttempt({
+      request,
+      route: "workflow",
+      access: "read",
+      command: `view.${view}`,
+      tenantSlug,
+      auth,
+      scope,
+    });
     return guardErrorResponse(scope);
   }
+
+  await recordControlPlaneAuthAttempt({
+    request,
+    route: "workflow",
+    access: "read",
+    command: `view.${view}`,
+    tenantSlug,
+    auth,
+    scope,
+  });
 
   try {
     if (view === "approvals") {
@@ -264,6 +292,14 @@ export async function POST(request: Request) {
   });
 
   if (!auth.ok) {
+    await recordControlPlaneAuthAttempt({
+      request,
+      route: "workflow",
+      access: "write",
+      command,
+      tenantSlug,
+      auth,
+    });
     return guardErrorResponse(auth);
   }
 
@@ -288,8 +324,27 @@ export async function POST(request: Request) {
   });
 
   if (!scope.ok) {
+    await recordControlPlaneAuthAttempt({
+      request,
+      route: "workflow",
+      access: "write",
+      command,
+      tenantSlug,
+      auth,
+      scope,
+    });
     return guardErrorResponse(scope);
   }
+
+  await recordControlPlaneAuthAttempt({
+    request,
+    route: "workflow",
+    access: "write",
+    command,
+    tenantSlug,
+    auth,
+    scope,
+  });
 
   if (command === "start") {
     const workflowKey = optionalString(workflow.key);

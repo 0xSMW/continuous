@@ -10,6 +10,7 @@ import {
   authorizeControlPlaneAccess,
   authorizeControlPlaneScope,
 } from "../../src/worker/security";
+import { recordControlPlaneAuthAttempt } from "../../src/core/control-plane-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -149,6 +150,14 @@ export async function GET(request: Request) {
   });
 
   if (!auth.ok) {
+    await recordControlPlaneAuthAttempt({
+      request,
+      route: "approval",
+      access: "read",
+      command: `view.${view}`,
+      tenantSlug,
+      auth,
+    });
     return guardErrorResponse(auth);
   }
 
@@ -159,8 +168,27 @@ export async function GET(request: Request) {
   });
 
   if (!scope.ok) {
+    await recordControlPlaneAuthAttempt({
+      request,
+      route: "approval",
+      access: "read",
+      command: `view.${view}`,
+      tenantSlug,
+      auth,
+      scope,
+    });
     return guardErrorResponse(scope);
   }
+
+  await recordControlPlaneAuthAttempt({
+    request,
+    route: "approval",
+    access: "read",
+    command: `view.${view}`,
+    tenantSlug,
+    auth,
+    scope,
+  });
 
   if (view !== "inbox") {
     return errorResponse(
@@ -239,6 +267,14 @@ export async function POST(request: Request) {
   });
 
   if (!auth.ok) {
+    await recordControlPlaneAuthAttempt({
+      request,
+      route: "approval",
+      access: "write",
+      command,
+      tenantSlug,
+      auth,
+    });
     return guardErrorResponse(auth);
   }
 
@@ -263,8 +299,27 @@ export async function POST(request: Request) {
   });
 
   if (!scope.ok) {
+    await recordControlPlaneAuthAttempt({
+      request,
+      route: "approval",
+      access: "write",
+      command,
+      tenantSlug,
+      auth,
+      scope,
+    });
     return guardErrorResponse(scope);
   }
+
+  await recordControlPlaneAuthAttempt({
+    request,
+    route: "approval",
+    access: "write",
+    command,
+    tenantSlug,
+    auth,
+    scope,
+  });
 
   if (subject === undefined) {
     return errorResponse(

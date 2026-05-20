@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   attachCoreEvidence: vi.fn(),
+  attestControlPlaneTokenRotation: vi.fn(),
   chargeBudget: vi.fn(),
   createCoreDocument: vi.fn(),
   createCoreTask: vi.fn(),
@@ -26,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   upsertCoreAdapter: vi.fn(),
   upsertCoreConnection: vi.fn(),
   upsertCoreObject: vi.fn(),
+  recordControlPlaneAuthAttempt: vi.fn(),
 }));
 
 vi.mock("../../src/core/approvals", () => ({
@@ -53,6 +55,11 @@ vi.mock("../../src/core/payroll", () => ({
 
 vi.mock("../../src/core/summary", () => ({
   getCoreSummarySafe: mocks.getCoreSummarySafe,
+}));
+
+vi.mock("../../src/core/control-plane-auth", () => ({
+  attestControlPlaneTokenRotation: mocks.attestControlPlaneTokenRotation,
+  recordControlPlaneAuthAttempt: mocks.recordControlPlaneAuthAttempt,
 }));
 
 vi.mock("../../src/core/primitives", () => ({
@@ -84,11 +91,80 @@ describe("POST /core", () => {
     vi.stubEnv("WORKER_RUN_ENABLED", "true");
     vi.stubEnv("WORKER_RUN_TOKEN", "test-token");
     vi.stubEnv("WORKER_OPERATOR_EMAIL", "operator@example.com");
+    mocks.recordControlPlaneAuthAttempt.mockResolvedValue({ id: "auth-session-1" });
   });
 
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.resetAllMocks();
+  });
+
+  it("attests control-plane token rotation through the Core command envelope", async () => {
+    const previousFingerprint = ["1111", "2222", "3333", "4444"].join("");
+    const nextFingerprint = ["5555", "6666", "7777", "8888"].join("");
+
+    mocks.attestControlPlaneTokenRotation.mockResolvedValue({
+      created: true,
+      tokenRotationAttestationId: "rotation-1",
+      eventId: "event-1",
+      auditEventId: "audit-1",
+      credentialId: "ops-credential",
+      previousCredentialId: "ops-credential-old",
+      previousTokenFingerprint: previousFingerprint,
+      nextTokenFingerprint: nextFingerprint,
+      state: "attested",
+      rotatedAt: "2026-05-20T00:00:00.000Z",
+      attestedAt: "2026-05-20T00:01:00.000Z",
+    });
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "control_plane.token_rotation.attest",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "rotation-attest-001",
+          config: {
+            credentialId: "ops-credential",
+            previousCredentialId: "ops-credential-old",
+            previousTokenFingerprint: previousFingerprint,
+            nextTokenFingerprint: nextFingerprint,
+            rotatedAt: "2026-05-20T00:00:00.000Z",
+            reason: "scheduled operator rotation",
+            evidence: {
+              report: "ops/rotation/2026-05-20",
+            },
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.command).toBe("control_plane.token_rotation.attest");
+    expect(body.data.result.tokenRotationAttestationId).toBe("rotation-1");
+    expect(mocks.attestControlPlaneTokenRotation).toHaveBeenCalledWith({
+      operatorEmail: "operator@example.com",
+      idempotencyKey: "rotation-attest-001",
+      tenantSlug: "continuous-demo",
+      credentialId: "ops-credential",
+      previousCredentialId: "ops-credential-old",
+      previousTokenFingerprint: previousFingerprint,
+      nextTokenFingerprint: nextFingerprint,
+      rotatedAt: "2026-05-20T00:00:00.000Z",
+      reason: "scheduled operator rotation",
+      evidence: {
+        report: "ops/rotation/2026-05-20",
+      },
+      authSessionId: "auth-session-1",
+    });
   });
 
   it("dispatches customer_signal.record with command config payload", async () => {

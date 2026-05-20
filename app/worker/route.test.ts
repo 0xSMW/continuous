@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   executeWorkerCommand: vi.fn(),
   executeWorkerView: vi.fn(),
+  recordControlPlaneAuthAttempt: vi.fn(),
   workerErrorStatus: vi.fn(),
   env: {
     APP_ENV: "test",
@@ -25,6 +26,10 @@ vi.mock("../../src/worker/registry", () => ({
   executeWorkerView: mocks.executeWorkerView,
   workerApiVersion: "continuous.worker.v1",
   workerErrorStatus: mocks.workerErrorStatus,
+}));
+
+vi.mock("../../src/core/control-plane-auth", () => ({
+  recordControlPlaneAuthAttempt: mocks.recordControlPlaneAuthAttempt,
 }));
 
 describe("/worker route", () => {
@@ -51,6 +56,7 @@ describe("/worker route", () => {
           : fallbackCode,
       message: error instanceof Error ? error.message : "Unknown worker error.",
     }));
+    mocks.recordControlPlaneAuthAttempt.mockResolvedValue({ id: "auth-session-1" });
   });
 
   afterEach(() => {
@@ -230,6 +236,8 @@ describe("/worker route", () => {
       code: "control_plane_command_forbidden",
       message: "This operator token is not allowed to execute the requested control-plane command.",
     });
+    expect(JSON.stringify(body)).not.toContain("test-token");
+    expect(JSON.stringify(body)).not.toContain("x-worker-run-token");
     expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
   });
 

@@ -1902,6 +1902,99 @@ export const auditEvents = pgTable(
   ],
 );
 
+export const controlPlaneAuthSessions = pgTable(
+  "control_plane_auth_sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").references(() => tenants.id, {
+      onDelete: "set null",
+    }),
+    userId: uuid("user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    operatorEmail: text("operator_email"),
+    credentialId: text("credential_id"),
+    tokenFingerprint: varchar("token_fingerprint", { length: 64 }),
+    route: varchar("route", { length: 40 }).notNull(),
+    access: varchar("access", { length: 20 }).notNull(),
+    command: text("command"),
+    tenantSlug: text("tenant_slug"),
+    workerRole: text("worker_role"),
+    outcome: varchar("outcome", { length: 24 }).notNull(),
+    reasonCode: varchar("reason_code", { length: 140 }).notNull(),
+    scope: jsonb("scope")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    request: jsonb("request")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("control_plane_auth_sessions_tenant_idx").on(table.tenantId, table.createdAt),
+    index("control_plane_auth_sessions_user_idx").on(table.userId, table.createdAt),
+    index("control_plane_auth_sessions_credential_idx").on(table.credentialId, table.createdAt),
+    index("control_plane_auth_sessions_route_idx").on(table.route, table.access, table.createdAt),
+    index("control_plane_auth_sessions_outcome_idx").on(table.outcome, table.createdAt),
+  ],
+);
+
+export const controlPlaneTokenRotationAttestations = pgTable(
+  "control_plane_token_rotation_attestations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    authSessionId: uuid("auth_session_id").references(
+      () => controlPlaneAuthSessions.id,
+      { onDelete: "set null" },
+    ),
+    eventId: uuid("event_id").references(() => events.id, {
+      onDelete: "set null",
+    }),
+    auditEventId: uuid("audit_event_id").references(() => auditEvents.id, {
+      onDelete: "set null",
+    }),
+    operatorEmail: text("operator_email").notNull(),
+    credentialId: text("credential_id").notNull(),
+    previousCredentialId: text("previous_credential_id"),
+    previousTokenFingerprint: varchar("previous_token_fingerprint", { length: 64 }),
+    nextTokenFingerprint: varchar("next_token_fingerprint", { length: 64 }).notNull(),
+    state: varchar("state", { length: 40 }).notNull().default("attested"),
+    reason: text("reason").notNull().default(""),
+    idempotencyKey: text("idempotency_key").notNull(),
+    evidence: jsonb("evidence")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    rotatedAt: timestamp("rotated_at", { withTimezone: true }).notNull(),
+    attestedAt: timestamp("attested_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("control_plane_token_rotations_tenant_idx").on(table.tenantId, table.createdAt),
+    index("control_plane_token_rotations_user_idx").on(table.userId, table.createdAt),
+    index("control_plane_token_rotations_credential_idx").on(table.credentialId, table.createdAt),
+    index("control_plane_token_rotations_auth_session_idx").on(table.authSessionId),
+    uniqueIndex("control_plane_token_rotations_idempotency_idx").on(
+      table.tenantId,
+      table.idempotencyKey,
+    ),
+  ],
+);
+
 export const evidence = pgTable(
   "evidence",
   {
@@ -2578,6 +2671,8 @@ export const generatedViews = uiContracts;
 export const tenantsRelations = relations(tenants, ({ many }) => ({
   users: many(users),
   workers: many(workers),
+  controlPlaneAuthSessions: many(controlPlaneAuthSessions),
+  controlPlaneTokenRotationAttestations: many(controlPlaneTokenRotationAttestations),
   approvalRequests: many(approvalRequests),
   auditEvents: many(auditEvents),
   evidencePackets: many(evidencePackets),
@@ -2609,6 +2704,8 @@ export const usersRelations = relations(users, ({ one, many }) => ({
     references: [tenants.id],
   }),
   managedWorkers: many(workers),
+  controlPlaneAuthSessions: many(controlPlaneAuthSessions),
+  controlPlaneTokenRotationAttestations: many(controlPlaneTokenRotationAttestations),
   reviewRequests: many(approvalRequests, { relationName: "reviewer" }),
   decidedRequests: many(approvalRequests, { relationName: "decider" }),
 }));
@@ -3193,6 +3290,47 @@ export const auditEventsRelations = relations(auditEvents, ({ one }) => ({
     references: [capabilities.id],
   }),
 }));
+
+export const controlPlaneAuthSessionsRelations = relations(
+  controlPlaneAuthSessions,
+  ({ one, many }) => ({
+    tenant: one(tenants, {
+      fields: [controlPlaneAuthSessions.tenantId],
+      references: [tenants.id],
+    }),
+    user: one(users, {
+      fields: [controlPlaneAuthSessions.userId],
+      references: [users.id],
+    }),
+    tokenRotationAttestations: many(controlPlaneTokenRotationAttestations),
+  }),
+);
+
+export const controlPlaneTokenRotationAttestationsRelations = relations(
+  controlPlaneTokenRotationAttestations,
+  ({ one }) => ({
+    tenant: one(tenants, {
+      fields: [controlPlaneTokenRotationAttestations.tenantId],
+      references: [tenants.id],
+    }),
+    user: one(users, {
+      fields: [controlPlaneTokenRotationAttestations.userId],
+      references: [users.id],
+    }),
+    authSession: one(controlPlaneAuthSessions, {
+      fields: [controlPlaneTokenRotationAttestations.authSessionId],
+      references: [controlPlaneAuthSessions.id],
+    }),
+    event: one(events, {
+      fields: [controlPlaneTokenRotationAttestations.eventId],
+      references: [events.id],
+    }),
+    auditEvent: one(auditEvents, {
+      fields: [controlPlaneTokenRotationAttestations.auditEventId],
+      references: [auditEvents.id],
+    }),
+  }),
+);
 
 export const evidenceRelations = relations(evidence, ({ one }) => ({
   tenant: one(tenants, {

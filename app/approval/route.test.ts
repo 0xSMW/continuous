@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   decideApproval: vi.fn(),
   listApprovals: vi.fn(),
+  recordControlPlaneAuthAttempt: vi.fn(),
   env: {
     APP_ENV: "test",
     WORKER_RUN_ENABLED: true,
@@ -26,6 +27,10 @@ vi.mock("../../src/core/approvals", () => ({
       : null,
 }));
 
+vi.mock("../../src/core/control-plane-auth", () => ({
+  recordControlPlaneAuthAttempt: mocks.recordControlPlaneAuthAttempt,
+}));
+
 describe("/approval route", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -37,6 +42,7 @@ describe("/approval route", () => {
       CONTROL_PLANE_ALLOWED_TENANTS: undefined,
       CONTROL_PLANE_ALLOWED_WORKER_ROLES: undefined,
     });
+    mocks.recordControlPlaneAuthAttempt.mockResolvedValue({ id: "auth-session-1" });
   });
 
   afterEach(() => {

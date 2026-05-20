@@ -352,6 +352,69 @@ describe("authorizeControlPlaneAccess", () => {
     });
   });
 
+  it("rejects expired catalog credentials while accepting active rotated credentials", () => {
+    const rotatedCredential = ["rotated", "worker", "credential"].join(".");
+    const tokenCatalogJson = JSON.stringify([
+      {
+        id: "expired-worker-runner",
+        token: acceptedCredential,
+        operatorEmail,
+        allowedRoutes: ["worker"],
+        allowedAccess: ["write"],
+        allowedCommands: ["worker:run"],
+        expiresAt: "2020-01-01T00:00:00.000Z",
+      },
+      {
+        id: "active-worker-runner",
+        token: rotatedCredential,
+        operatorEmail,
+        allowedRoutes: ["worker"],
+        allowedAccess: ["write"],
+        allowedCommands: ["worker:run"],
+        expiresAt: "2999-01-01T00:00:00.000Z",
+      },
+    ]);
+
+    expect(
+      authorizeControlPlaneAccess({
+        enabled: true,
+        appEnv: "production",
+        operatorEmail,
+        authorization: `Bearer ${acceptedCredential}`,
+        tokenCatalogJson,
+        route: "worker",
+        access: "write",
+        command: "run",
+      }),
+    ).toEqual({
+      ok: false,
+      status: 401,
+      code: "control_plane_token_expired",
+      message: "Control-plane token has expired.",
+    });
+
+    expect(
+      authorizeControlPlaneAccess({
+        enabled: true,
+        appEnv: "production",
+        operatorEmail,
+        authorization: `Bearer ${rotatedCredential}`,
+        tokenCatalogJson,
+        route: "worker",
+        access: "write",
+        command: "run",
+      }),
+    ).toEqual({
+      ok: true,
+      operatorEmail,
+      credentialId: "active-worker-runner",
+      scope: {
+        tenantSlugs: [],
+        workerRoles: [],
+      },
+    });
+  });
+
   it("falls back to the legacy token and global allowlists when no catalog is configured", () => {
     expect(
       authorizeControlPlaneAccess({

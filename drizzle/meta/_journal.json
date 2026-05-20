@@ -64,6 +64,13 @@
       "when": 1779231685211,
       "tag": "0008_mixed_zodiak",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1779287722636,
+      "tag": "0009_red_justin_hammer",
+      "breakpoints": true
     }
   ]
 }

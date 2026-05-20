@@ -209,6 +209,9 @@ fi
 
 if bool_enabled "$REQUIRE_TOKEN_ROTATION_ATTESTATION"; then
   require_env_value "$READINESS_ENV_FILE" TOKEN_ROTATION_ATTESTED_AT
+  require_env_value "$READINESS_ENV_FILE" TOKEN_ROTATION_ATTESTATION_ID
+  require_env_value "$READINESS_ENV_FILE" CONTROL_PLANE_AUTH_AUDIT_ATTESTED_AT
+  require_env_value "$READINESS_ENV_FILE" CONTROL_PLANE_AUTH_SESSION_ID
 else
   record_ok "token_rotation_attestation_skipped"
 fi

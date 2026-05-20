@@ -344,10 +344,13 @@ The gate runs on the droplet and requires:
   `ALERT_WEBHOOK_URL`;
 - strict host observability to pass, including failed systemd unit checks;
 - `/etc/continuous/production-readiness.env` to attest the completed recovery
-  drill, token rotation, and non-root access work.
+  drill, token rotation, control-plane auth audit, and non-root access work.
 
 The readiness attestation file is deliberately operator-owned. It should be
-created only after the underlying work is done and should not contain secrets:
+created only after the underlying work is done and should not contain secrets.
+For token rotation, the timestamp is only the operator acknowledgement layer:
+the durable source of truth is the `control_plane_token_rotation_attestations`
+row plus the linked `control_plane_auth_sessions` request audit row.
 
 ```sh
 install -m 0700 -d /etc/continuous
@@ -355,9 +358,34 @@ cat >/etc/continuous/production-readiness.env <<'ENV'
 RECOVERY_DRILL_ATTESTED_AT=2026-05-20T00:00:00Z
 RECOVERY_DRILL_REPORT=reports/recovery-drills/continuous-recovery-YYYYMMDDTHHMMSSZ.md
 TOKEN_ROTATION_ATTESTED_AT=2026-05-20T00:00:00Z
+TOKEN_ROTATION_ATTESTATION_ID=00000000-0000-0000-0000-000000000000
+CONTROL_PLANE_AUTH_AUDIT_ATTESTED_AT=2026-05-20T00:00:00Z
+CONTROL_PLANE_AUTH_SESSION_ID=00000000-0000-0000-0000-000000000000
 NON_ROOT_ACCESS_ATTESTED_AT=2026-05-20T00:00:00Z
 ENV
 chmod 0600 /etc/continuous/production-readiness.env
+```
+
+Record the rotation with the Core command surface, keeping operation details in
+`config` and sending only token fingerprints, never token material:
+
+```json
+{
+  "command": "control_plane.token_rotation.attest",
+  "core": { "tenantSlug": "continuous-demo" },
+  "idempotencyKey": "rotation-attest-YYYYMMDD",
+  "config": {
+    "credentialId": "operator-credential-id",
+    "previousCredentialId": "prior-credential-id",
+    "previousTokenFingerprint": "<8-to-64-hex-fingerprint>",
+    "nextTokenFingerprint": "<8-to-64-hex-fingerprint>",
+    "rotatedAt": "2026-05-20T00:00:00.000Z",
+    "reason": "scheduled operator rotation",
+    "evidence": {
+      "report": "ops/rotation/continuous-YYYYMMDD"
+    }
+  }
+}
 ```
 
 You can also make the manual deploy workflow enforce the same strict gate by
@@ -537,7 +565,10 @@ compatible with the chosen app tag because migrations are forward-only.
 - Run `scripts/check-production-readiness.sh` successfully, or dispatch the
   deploy workflow with `require_production_readiness=true`, before treating the
   droplet as customer-data ready.
-- Add managed token rotation, credential inventory, and request/session audit
-  records before adding multiple real operators or customer data.
+- Run a real operator token rotation through
+  `control_plane.token_rotation.attest`, reference the rotation attestation and
+  recent auth session ids in `/etc/continuous/production-readiness.env`, and
+  keep credential inventory tied to scoped catalog entries before adding
+  multiple real operators or customer data.
 - Replace root SSH deployment with a dedicated deploy user and least-privilege
   sudo policy.

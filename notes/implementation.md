@@ -111,10 +111,12 @@
 | Added object-storage backup wiring | Verified Postgres dumps can now upload to an S3-compatible target with checksum sidecar and `latest.json`; a systemd timer installer wires daily scheduled retention once bucket credentials are available |
 | Scoped the shared operator token | `/worker`, `/core`, and `/workflow` now enforce tenant and worker-role allowlists from `CONTROL_PLANE_ALLOWED_TENANTS` and `CONTROL_PLANE_ALLOWED_WORKER_ROLES`; deploy writes production defaults for the demo tenant and currently executable worker roles |
 | Added scoped control-plane token catalog | `/core`, `/worker`, `/workflow`, and `/approval` now authorize against route/read-write/command-scoped token catalog entries when present; deploy writes a hashed catalog entry derived from the generated worker token so future rotation does not require new API shapes |
+| Added durable control-plane auth audit | `/core`, `/worker`, `/workflow`, and `/approval` now record route-level auth attempts into `control_plane_auth_sessions`, including credential id, token fingerprint, route, command, tenant, worker role, outcome, reason code, and safe request metadata without storing token material |
+| Added token rotation attestations | `/core` now accepts `command=control_plane.token_rotation.attest` with rotation details inside `config`, persists append-only `control_plane_token_rotation_attestations`, links Core event/audit rows, and rejects raw token fields in the payload |
 | Added recovery drill harness | `scripts/recovery-drill.sh` composes tag-based app rollback and confirmation-gated database restore into one measured disposable-host drill, refuses known production hosts by default, and writes a local timing/compatibility report |
 | Added production observability checks | Caddy now writes retained JSON access logs, deploy creates log directories, and `scripts/check-observability-on-host.sh` verifies Compose service state, public health, TLS freshness, disk usage, Caddy logs, and optional backup/systemd checks with webhook failure alerts |
 | Tightened control-plane config envelopes | `/worker`, `/core`, `/workflow`, and `/approval` now reject non-object `config` values instead of silently normalizing them to `{}` |
-| Added production readiness gate | `scripts/check-production-readiness.sh` and the optional deploy workflow gate now compose strict observability, scheduled off-host backup freshness, object-storage backup manifests, alerting, recovery-drill attestation, token-rotation attestation, and non-root access attestation into one customer-data readiness check |
+| Added production readiness gate | `scripts/check-production-readiness.sh` and the optional deploy workflow gate now compose strict observability, scheduled off-host backup freshness, object-storage backup manifests, alerting, recovery-drill attestation, token-rotation and auth-audit record references, and non-root access attestation into one customer-data readiness check |
 
 ### Tradeoffs
 
@@ -133,9 +135,9 @@
 | Worker run lifecycle | `worker_runs` is now the idempotent lifecycle boundary for Revenue Worker runs, with events kept as the audit log |
 | Codex app-server boundary | The installed CLI has protocol generation commands, but no local daemon subcommand in this environment; keep Next MCP for Next.js diagnostics and keep app-server worker commands registry-backed rather than worker-family-specific |
 | Recovery boundary | App-only rollback is tag-based and destructive database restore is dump-backed; the new drill harness makes the app/database compatibility procedure repeatable, but it still must be run on a disposable droplet before customer data |
-| Operator-token scope | The current production token now has hashed catalog metadata and per-command scope enforcement, but this is still env-backed operator auth; broad use still needs managed rotation and request/session audit records tied to credential ids |
+| Operator-token scope | The current production token now has hashed catalog metadata, per-command scope enforcement, durable auth session records, and token-rotation attestations; broad use still needs managed credential inventory, revocation workflows, and operator session review UX |
 | Alerting boundary | Deploy smoke now proves the host observability check, but recurring alerts are not active until `scripts/install-observability-timer.sh` is run with a real `ALERT_WEBHOOK_URL` |
-| Readiness boundary | The production readiness gate is strict and opt-in; it is expected to fail until object-storage credentials, backup and observability timers, alert webhook, recovery drill report, token rotation, production connector credentials, and non-root host access are all actually provisioned and attested |
+| Readiness boundary | The production readiness gate is strict and opt-in; it is expected to fail until object-storage credentials, backup and observability timers, alert webhook, recovery drill report, real token-rotation/auth-audit record references, production connector credentials, and non-root host access are all actually provisioned and attested |
 
 ### Current State
 

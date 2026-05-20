@@ -6,6 +6,10 @@ import { getHealth } from "../../src/core/health";
 import { preparePayrollPreviewPacket, recordPayrollPreview } from "../../src/core/payroll";
 import { getCoreSummarySafe } from "../../src/core/summary";
 import {
+  attestControlPlaneTokenRotation,
+  recordControlPlaneAuthAttempt,
+} from "../../src/core/control-plane-auth";
+import {
   attachCoreEvidence,
   createCoreDocument,
   ingestCoreEvent,
@@ -34,6 +38,14 @@ export const dynamic = "force-dynamic";
 
 const apiVersion = "continuous.core.v1";
 const coreCommandEnvelopeFields = new Set(["command", "core", "idempotencyKey", "config"]);
+const forbiddenTokenRotationFields = new Set([
+  "token",
+  "nextToken",
+  "previousToken",
+  "tokenSha256",
+  "nextTokenSha256",
+  "previousTokenSha256",
+]);
 function optionalString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
@@ -108,6 +120,10 @@ function errorResponse(error: { code: string; message: string }, status: number)
 }
 
 function coreErrorResponse(error: unknown, fallbackCode: string) {
+  const structuredError =
+    error && typeof error === "object" && "status" in error && "code" in error
+      ? (error as { status: unknown; code: unknown; message?: unknown })
+      : null;
   const coreError =
     error instanceof PlatformUnavailableError
       ? {
@@ -115,6 +131,17 @@ function coreErrorResponse(error: unknown, fallbackCode: string) {
           code: error.code,
           message: error.message,
         }
+      : structuredError &&
+          typeof structuredError.status === "number" &&
+          typeof structuredError.code === "string"
+        ? {
+            status: structuredError.status,
+            code: structuredError.code,
+            message:
+              typeof structuredError.message === "string"
+                ? structuredError.message
+                : "Core command failed.",
+          }
       : {
           status: 500,
           code: fallbackCode,
@@ -144,6 +171,10 @@ function unexpectedCorePayloadFields(body: Record<string, unknown>) {
   return Object.keys(body).filter((field) => !coreCommandEnvelopeFields.has(field));
 }
 
+function unexpectedTokenRotationFields(config: Record<string, unknown>) {
+  return Object.keys(config).filter((field) => forbiddenTokenRotationFields.has(field));
+}
+
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const tenantSlug = optionalString(url.searchParams.get("tenantSlug"));
@@ -163,6 +194,14 @@ export async function GET(request: Request) {
   });
 
   if (!auth.ok) {
+    await recordControlPlaneAuthAttempt({
+      request,
+      route: "core",
+      access: "read",
+      command: "view.summary",
+      tenantSlug,
+      auth,
+    });
     return guardErrorResponse(auth);
   }
 
@@ -173,8 +212,27 @@ export async function GET(request: Request) {
   });
 
   if (!scope.ok) {
+    await recordControlPlaneAuthAttempt({
+      request,
+      route: "core",
+      access: "read",
+      command: "view.summary",
+      tenantSlug,
+      auth,
+      scope,
+    });
     return guardErrorResponse(scope);
   }
+
+  await recordControlPlaneAuthAttempt({
+    request,
+    route: "core",
+    access: "read",
+    command: "view.summary",
+    tenantSlug,
+    auth,
+    scope,
+  });
 
   const result = await getCoreSummarySafe({ tenantSlug });
   const health = getHealth({
@@ -223,6 +281,14 @@ export async function POST(request: Request) {
   });
 
   if (!auth.ok) {
+    await recordControlPlaneAuthAttempt({
+      request,
+      route: "core",
+      access: "write",
+      command,
+      tenantSlug,
+      auth,
+    });
     return guardErrorResponse(auth);
   }
 
@@ -247,7 +313,90 @@ export async function POST(request: Request) {
   });
 
   if (!scope.ok) {
+    await recordControlPlaneAuthAttempt({
+      request,
+      route: "core",
+      access: "write",
+      command,
+      tenantSlug,
+      auth,
+      scope,
+    });
     return guardErrorResponse(scope);
+  }
+
+  const controlPlaneAuthSession = await recordControlPlaneAuthAttempt({
+    request,
+    route: "core",
+    access: "write",
+    command,
+    tenantSlug,
+    auth,
+    scope,
+  });
+
+  if (command === "control_plane.token_rotation.attest") {
+    const idempotency = normalizeIdempotencyKey(
+      request.headers.get("idempotency-key") ?? body.idempotencyKey,
+    );
+    const forbiddenFields = unexpectedTokenRotationFields(config);
+
+    if (!idempotency.ok) {
+      return errorResponse(
+        {
+          code: "invalid_idempotency_key",
+          message: idempotency.message,
+        },
+        400,
+      );
+    }
+
+    if (forbiddenFields.length > 0) {
+      return errorResponse(
+        {
+          code: "invalid_control_plane_token_rotation",
+          message: `Token rotation attestations accept credential ids and token fingerprints only. Remove raw token fields: ${forbiddenFields.join(", ")}.`,
+        },
+        400,
+      );
+    }
+
+    try {
+      const result = await attestControlPlaneTokenRotation({
+        operatorEmail: auth.operatorEmail,
+        idempotencyKey: idempotency.key,
+        tenantSlug,
+        credentialId: optionalString(config.credentialId) ?? auth.credentialId,
+        previousCredentialId: optionalString(config.previousCredentialId),
+        previousTokenFingerprint: optionalString(config.previousTokenFingerprint),
+        nextTokenFingerprint: optionalString(config.nextTokenFingerprint),
+        rotatedAt: optionalString(config.rotatedAt),
+        reason: optionalString(config.reason),
+        evidence: jsonObject(config.evidence),
+        authSessionId: controlPlaneAuthSession?.id ?? null,
+      });
+
+      return Response.json(
+        {
+          api: apiVersion,
+          data: {
+            command,
+            core: {
+              tenantSlug: tenantSlug ?? null,
+            },
+            result,
+          },
+          error: null,
+        },
+        {
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    } catch (error) {
+      return coreErrorResponse(error, "control_plane_token_rotation_attest_failed");
+    }
   }
 
   if (command === "task.create") {
