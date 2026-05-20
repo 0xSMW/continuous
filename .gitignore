@@ -10,6 +10,7 @@ reports/recovery-drills/
 dist/
 generated/app-server/
 *.log
+logs/
 *.tsbuildinfo
 .claude/settings.local.json
 npm-debug.log*

@@ -166,6 +166,7 @@ jobs:
             "APP_DIR='$DEPLOY_PATH' SITE_HOSTS='$SITE_HOSTS' ACME_EMAIL='$ACME_EMAIL' APP_URL='$app_url' WORKER_OPERATOR_EMAIL='$WORKER_OPERATOR_EMAIL' APP_IMAGE='continuous-app' APP_TAG='$app_tag' ROLLBACK_APP_TAG='$ROLLBACK_APP_TAG' bash -s" <<'REMOTE'
           set -euo pipefail
           cd "$APP_DIR"
+          install -m 0755 -d logs/caddy logs/observability
           if [ -n "${ROLLBACK_APP_TAG:-}" ] && [ ! -f .env ]; then
             echo "Missing $APP_DIR/.env; cannot roll back app services." >&2
             exit 1
@@ -1600,6 +1601,7 @@ jobs:
           select 'core_rule_change_decision' as kind, kind, decision
           from decisions where id = '$CORE_RULE_CHANGE_DECISION_ID'::uuid;
           SQL
+          CHECK_SYSTEMD_FAILED=false REQUIRE_BACKUP_FRESH=false ./scripts/check-observability-on-host.sh
           REMOTE
 
       - name: Close runner SSH access

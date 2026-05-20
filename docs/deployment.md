@@ -60,6 +60,8 @@ the ACME account and certificates in the `caddy_data` Docker volume, redirects
 HTTP to HTTPS, and renews certificates automatically before they expire. If
 `www` hostnames should serve the app, include them in `SITE_HOSTS` before
 rerunning `scripts/configure-domain.sh` or the deploy workflow.
+Caddy access logs are written as JSON to `logs/caddy/access.log` on the
+droplet with built-in Caddy rotation at 10 MiB, 10 retained files, and 30 days.
 
 ## GitHub Deploy
 
@@ -188,7 +190,9 @@ reconciliation, continuation, and `/core` task creation, task transition,
 approval request, capability grant, budget reserve/charge/release, object,
 object-link, event, evidence, document, packet, decision, generated-view,
 shared approval inbox route, payroll preview packet handoff, and payroll
-approval handoff after each production rollout.
+approval handoff after each production rollout. It also runs the host
+observability check so production rollout fails if app/db/Caddy service state,
+public health, TLS freshness, disk usage, or Caddy access logging are broken.
 
 Control-plane token catalog entries have this shape when provided directly via
 `CONTROL_PLANE_TOKENS_JSON`:
@@ -212,6 +216,41 @@ Control-plane token catalog entries have this shape when provided directly via
 `allowedCommands` accepts exact route-qualified keys such as `worker:run` or
 route wildcards such as `worker:*`. GET views are authorized as
 `<route>:view.<view>`, for example `worker:view.snapshot`.
+
+## Observability
+
+Run the host observability check from the operator shell:
+
+```sh
+HOST=45.55.53.92 ./scripts/check-observability.sh
+```
+
+The check runs on the droplet and verifies Docker Compose service state,
+SNI-routed HTTPS `/api/health` for every configured `SITE_HOSTS` hostname,
+certificate freshness, disk usage, and Caddy access-log creation. Backup
+freshness and failed systemd unit checks are opt-in so unrelated host units or
+not-yet-provisioned object storage do not block ordinary deploys:
+
+```sh
+HOST=45.55.53.92 \
+  REQUIRE_BACKUP_FRESH=true \
+  CHECK_SYSTEMD_FAILED=true \
+  ./scripts/check-observability.sh
+```
+
+Install the recurring timer after selecting an alert destination:
+
+```sh
+HOST=45.55.53.92 \
+  ALERT_WEBHOOK_URL=... \
+  REQUIRE_BACKUP_FRESH=true \
+  ./scripts/install-observability-timer.sh
+```
+
+The timer stores private configuration in `/etc/continuous/observability.env`,
+runs every 15 minutes by default, appends output to
+`logs/observability/check.log`, and sends a compact JSON webhook only on
+failure when `ALERT_WEBHOOK_URL` is set.
 
 ## Database Backup And Restore
 
@@ -344,8 +383,9 @@ compatible with the chosen app tag because migrations are forward-only.
 - Run `scripts/recovery-drill.sh` against a disposable droplet and document the
   measured recovery timing before using the production droplet for customer
   data.
-- Add log retention, Caddy access logs, metrics, and alerting around health,
-  disk, certificate renewal, backup age, and failed jobs.
+- Install `scripts/install-observability-timer.sh` with `ALERT_WEBHOOK_URL`
+  after choosing an alert destination; deploy smoke already verifies the same
+  host checks without requiring a webhook.
 - Add managed token rotation, credential inventory, and request/session audit
   records before adding multiple real operators or customer data.
 - Replace root SSH deployment with a dedicated deploy user and least-privilege

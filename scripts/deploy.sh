@@ -78,6 +78,7 @@ ssh "$REMOTE" \
 set -euo pipefail
 
 cd "$APP_DIR"
+install -m 0755 -d logs/caddy logs/observability
 
 if [ ! -f .env ]; then
   password="$(openssl rand -hex 32)"
