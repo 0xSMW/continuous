@@ -23,6 +23,7 @@
 | Normalized worker role naming | Strategy examples and contract guardrails now use role-based names such as `revenue_operations` instead of `_worker` identifiers, so future workers extend the same `/worker` command envelope |
 | Added worker command registry | `/worker` and `bun run worker:tool` now share registered command metadata, role allowlisting, config validation, idempotency rules, tenant requirements, and external-execution posture |
 | Hardened the worker API contract | Route-level tests now assert the generic `/worker` payload envelope, body `idempotencyKey` precedence, GET selector mapping, and malformed command config rejection |
+| Reasserted generic worker URL shape | Contract tests now explicitly classify worker-family URL shapes as non-canonical; worker families must use `/worker` with `command`, `worker`, `idempotencyKey`, and `config` instead of adding family-specific routes |
 | Shared the worker envelope guard | `/worker`, `worker.command`, `worker.view`, and `continuous.worker.command` now use one `command`/`worker`/`idempotencyKey`/`config` envelope helper so future worker families cannot drift into route-specific or tool-specific payload shapes |
 | Removed worker-specific local shortcuts | `worker:tool` is the only local mutation entrypoint; Revenue Operations runs now use the same `worker`, `command`, `idempotencyKey`, and `config` envelope as `/worker` |
 | Collapsed local worker aliases | `worker:tool` now exposes only `worker.command` and `worker.view`; command/view names live on the payload, and docs/tests reject worker-family-specific local tool names |
@@ -88,6 +89,7 @@
 | Hardened Core payroll replay | `payroll.preview.record` and `payroll.preview.packet.prepare` now store replay fingerprints and reject idempotency-key reuse with changed payroll input |
 | Added payroll approval handoff | Shared approval decisions for `payroll_preview_approval` now transition the payroll run plus funding, tax, filing, packet, audit, and evidence handoff records while keeping external execution, submission, and money movement blocked |
 | Added Core AI gateway | `POST /core` now supports `command=ai.infer`, selecting an active model route, redacting configured request fields, reserving and charging budget, storing replay fingerprints, and writing inference, usage, event, audit, and evidence proof while live provider execution remains blocked |
+| Hardened Core AI replay | `ai.infer` now stores a replay fingerprint over route selector, budget, actor/task/object/capability refs, raw input, redaction, and evaluation config, and rejects idempotency-key reuse with changed AI input |
 | Agent build path uses app-server protocol tooling plus Next.js MCP | The installed Codex app-server CLI exposes protocol generation/help commands; `.mcp.json` keeps the Next.js 16 MCP bridge for route/runtime diagnostics |
 | Added app-server worker command control | `continuous.worker.schema` exposes the registry, and `continuous.worker.command` invokes registered worker commands through the same `command`, `worker`, `idempotencyKey`, and `config` envelope without loading production tokens |
 | Matched local worker envelopes to `/worker` | `worker.command` and `continuous.worker.command` no longer accept top-level `operatorEmail`; trusted local execution resolves operator identity from `WORKER_OPERATOR_EMAIL` so payloads stay `command`, `worker`, `idempotencyKey`, and `config` |
@@ -123,6 +125,7 @@
 | Added durable control-plane auth audit | `/core`, `/worker`, `/workflow`, and `/approval` now record route-level auth attempts into `control_plane_auth_sessions`, including credential id, token fingerprint, route, command, tenant, worker role, outcome, reason code, and safe request metadata without storing token material |
 | Added token rotation attestations | `/core` now accepts `command=control_plane.token_rotation.attest` with rotation details inside `config`, persists append-only `control_plane_token_rotation_attestations`, stores replay fingerprints, links Core event/audit rows, and rejects raw token fields in the payload |
 | Added managed control-plane credentials | `/core` now accepts `control_plane.credential.upsert`, `control_plane.credential.revoke`, and `control_plane.session.review`, storing scoped credential inventory with replay fingerprints, enforcing revoked/paused/expired managed credentials after catalog auth succeeds, and publishing safe operator session review views |
+| Hardened control-plane credential replay | `control_plane.token_rotation.attest`, `control_plane.credential.upsert`, `control_plane.credential.revoke`, and `control_plane.session.review` now store replay fingerprints and reject idempotency-key reuse with changed control-plane input |
 | Added deploy control-plane attestation | Production deploy now rotates and attests the bootstrap control-plane token, then smoke records the bootstrap credential inventory row, revokes a disposable drill credential, reviews recent operator sessions, and writes the non-secret evidence ids into `/etc/continuous/production-readiness.env` |
 | Added token-rotation recovery behavior | If a prior deploy leaves the host half-rotated, the next deploy preserves the current bootstrap token instead of minting another un-attested token, then lets the fixed app and post-deploy credential attestation bring managed inventory back in sync |
 | Added recovery drill harness | `scripts/recovery-drill.sh` composes tag-based app rollback and confirmation-gated database restore into one measured disposable-host drill, refuses known production hosts by default, and writes a local timing/compatibility report |
@@ -179,8 +182,10 @@ document, decision, workflow, and generated UI primitives plus worker run lifecy
 records and `/`, `/api/health`, `/approval`, `/approvals`, `/core`, and `POST /core` task,
 task-transition, approval-request, capability-grant, budget-ledger, object,
 object-link, event, evidence, document, packet, payroll preview, payroll packet,
-decision, and generated-view commands. Route tests now prove those canonical
-Core command dispatch paths, including successful tenant-scoped `GET /core`.
+decision, generated-view, AI inference, and control-plane credential/session
+commands. Route tests now prove those canonical Core command dispatch paths,
+including successful tenant-scoped `GET /core`; integration tests prove
+changed-input replay rejection for the hardened Core command families.
 Local
 Node-side validation passes; the real Bun path is verified in the droplet
 containers and GitHub CI.
