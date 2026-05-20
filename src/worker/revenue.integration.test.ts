@@ -10,6 +10,14 @@ import { decideApproval, requestApproval } from "../core/approvals";
 import { reserveBudget, chargeBudget, releaseBudget } from "../core/budgets";
 import { grantCapability } from "../core/capabilities";
 import {
+  authorizeManagedControlPlaneCredential,
+  controlPlaneTokenFingerprint,
+  recordControlPlaneAuthAttempt,
+  reviewControlPlaneSessions,
+  revokeControlPlaneCredential,
+  upsertControlPlaneCredential,
+} from "../core/control-plane-auth";
+import {
   attachCoreEvidence,
   createCoreDocument,
   ingestCoreEvent,
@@ -40,6 +48,7 @@ import {
   capabilities,
   capabilityGrants,
   connections,
+  controlPlaneCredentials,
   customerSignals,
   decisions,
   documents,
@@ -114,6 +123,135 @@ maybeDescribe("Revenue Worker integration eval", () => {
 
   afterAll(async () => {
     await pool.end();
+  });
+
+  it("enforces managed control-plane credential revocation after catalog auth succeeds", async () => {
+    const credentialId = `ci-managed-${randomUUID()}`;
+    const token = `ci-managed-token-${randomUUID()}`;
+    const tokenFingerprint = controlPlaneTokenFingerprint(token);
+    const upsert = await upsertControlPlaneCredential({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-credential-upsert-${randomUUID()}`,
+      credentialId,
+      displayName: "CI managed operator",
+      tokenFingerprint: tokenFingerprint ?? undefined,
+      allowedTenants: ["continuous-demo"],
+      allowedWorkerRoles: ["revenue_operations"],
+      allowedRoutes: ["worker"],
+      allowedAccess: ["write"],
+      allowedCommands: ["worker:run"],
+      evidence: {
+        source: "ci",
+      },
+      db,
+    });
+
+    expect(upsert.created).toBe(true);
+
+    const [storedCredential] = await db
+      .select()
+      .from(controlPlaneCredentials)
+      .where(eq(controlPlaneCredentials.id, upsert.controlPlaneCredentialId))
+      .limit(1);
+
+    expect(storedCredential.tokenFingerprint).toBe(tokenFingerprint);
+    expect(JSON.stringify(storedCredential.evidence)).not.toContain(token);
+
+    const request = new Request("http://localhost/worker", {
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+    });
+    const catalogAuth = {
+      ok: true as const,
+      operatorEmail: "owner@continuoushq.com",
+      credentialId,
+      scope: {
+        tenantSlugs: ["continuous-demo"],
+        workerRoles: ["revenue_operations"],
+      },
+    };
+    const allowed = await authorizeManagedControlPlaneCredential({
+      request,
+      auth: catalogAuth,
+      tenantSlug: "continuous-demo",
+      workerRole: "revenue_operations",
+      route: "worker",
+      access: "write",
+      command: "run",
+      db,
+    });
+
+    expect(allowed.ok).toBe(true);
+
+    const revoke = await revokeControlPlaneCredential({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-credential-revoke-${randomUUID()}`,
+      credentialId,
+      reason: "CI revocation proof",
+      evidence: {
+        source: "ci",
+      },
+      db,
+    });
+
+    expect(revoke.revoked).toBe(true);
+
+    const denied = await authorizeManagedControlPlaneCredential({
+      request,
+      auth: catalogAuth,
+      tenantSlug: "continuous-demo",
+      workerRole: "revenue_operations",
+      route: "worker",
+      access: "write",
+      command: "run",
+      db,
+    });
+
+    expect(denied).toEqual({
+      ok: false,
+      status: 401,
+      code: "control_plane_credential_revoked",
+      message: "Control-plane credential has been revoked.",
+    });
+
+    const authSession = await recordControlPlaneAuthAttempt({
+      request,
+      route: "worker",
+      access: "write",
+      command: "run",
+      tenantSlug: "continuous-demo",
+      workerRole: "revenue_operations",
+      auth: catalogAuth,
+      guard: denied,
+      scope: { ok: true },
+      db,
+    });
+
+    expect(authSession?.id).toBeTruthy();
+
+    const review = await reviewControlPlaneSessions({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-session-review-${randomUUID()}`,
+      credentialId,
+      outcome: "denied",
+      limit: 10,
+      db,
+    });
+
+    expect(review.reviewed).toBe(true);
+    expect(review.counts.denied).toBeGreaterThanOrEqual(1);
+    expect(review.sessions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          credentialId,
+          reasonCode: "control_plane_credential_revoked",
+        }),
+      ]),
+    );
   });
 
   it("creates headless core tasks with event and audit proof", async () => {

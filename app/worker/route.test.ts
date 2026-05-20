@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  authorizeManagedControlPlaneCredential: vi.fn(),
   executeWorkerCommand: vi.fn(),
   executeWorkerView: vi.fn(),
   recordControlPlaneAuthAttempt: vi.fn(),
@@ -29,6 +30,7 @@ vi.mock("../../src/worker/registry", () => ({
 }));
 
 vi.mock("../../src/core/control-plane-auth", () => ({
+  authorizeManagedControlPlaneCredential: mocks.authorizeManagedControlPlaneCredential,
   recordControlPlaneAuthAttempt: mocks.recordControlPlaneAuthAttempt,
 }));
 
@@ -56,6 +58,7 @@ describe("/worker route", () => {
           : fallbackCode,
       message: error instanceof Error ? error.message : "Unknown worker error.",
     }));
+    mocks.authorizeManagedControlPlaneCredential.mockResolvedValue({ ok: true });
     mocks.recordControlPlaneAuthAttempt.mockResolvedValue({ id: "auth-session-1" });
   });
 
@@ -128,6 +131,56 @@ describe("/worker route", () => {
       idempotencyKey: "body-key-001",
       operatorEmail: "operator@example.com",
     });
+  });
+
+  it("denies worker commands when the managed credential inventory revokes the token", async () => {
+    mocks.env.CONTROL_PLANE_ALLOWED_TENANTS = "continuous-demo";
+    mocks.env.CONTROL_PLANE_ALLOWED_WORKER_ROLES = "revenue_operations";
+    mocks.authorizeManagedControlPlaneCredential.mockResolvedValue({
+      ok: false,
+      status: 401,
+      code: "control_plane_credential_revoked",
+      message: "Control-plane credential has been revoked.",
+    });
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/worker", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "run",
+          worker: {
+            role: "revenue_operations",
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "revoked-managed-credential-001",
+          config: {
+            leadPacket: {
+              customerName: "Acme",
+            },
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(body.error).toEqual({
+      code: "control_plane_credential_revoked",
+      message: "Control-plane credential has been revoked.",
+    });
+    expect(mocks.recordControlPlaneAuthAttempt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        guard: expect.objectContaining({
+          code: "control_plane_credential_revoked",
+        }),
+      }),
+    );
+    expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
   });
 
   it("rejects POST commands outside the configured tenant scope", async () => {

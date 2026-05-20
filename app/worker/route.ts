@@ -10,7 +10,10 @@ import {
   authorizeControlPlaneAccess,
   authorizeControlPlaneScope,
 } from "../../src/worker/security";
-import { recordControlPlaneAuthAttempt } from "../../src/core/control-plane-auth";
+import {
+  authorizeManagedControlPlaneCredential,
+  recordControlPlaneAuthAttempt,
+} from "../../src/core/control-plane-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -179,6 +182,31 @@ export async function GET(request: Request) {
     return guardErrorResponse(scope);
   }
 
+  const managedCredential = await authorizeManagedControlPlaneCredential({
+    request,
+    route: "worker",
+    access: "read",
+    command: `view.${view}`,
+    tenantSlug: target.tenantSlug,
+    workerRole: target.role,
+    auth,
+  });
+
+  if (!managedCredential.ok) {
+    await recordControlPlaneAuthAttempt({
+      request,
+      route: "worker",
+      access: "read",
+      command: `view.${view}`,
+      tenantSlug: target.tenantSlug,
+      workerRole: target.role,
+      auth,
+      scope,
+      guard: managedCredential,
+    });
+    return guardErrorResponse(managedCredential);
+  }
+
   await recordControlPlaneAuthAttempt({
     request,
     route: "worker",
@@ -285,6 +313,31 @@ export async function POST(request: Request) {
       scope,
     });
     return guardErrorResponse(scope);
+  }
+
+  const managedCredential = await authorizeManagedControlPlaneCredential({
+    request,
+    route: "worker",
+    access: "write",
+    command: optionalString(body.command),
+    tenantSlug: target.tenantSlug,
+    workerRole: target.role,
+    auth,
+  });
+
+  if (!managedCredential.ok) {
+    await recordControlPlaneAuthAttempt({
+      request,
+      route: "worker",
+      access: "write",
+      command: optionalString(body.command),
+      tenantSlug: target.tenantSlug,
+      workerRole: target.role,
+      auth,
+      scope,
+      guard: managedCredential,
+    });
+    return guardErrorResponse(managedCredential);
   }
 
   await recordControlPlaneAuthAttempt({

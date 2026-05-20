@@ -6,8 +6,12 @@ import { getHealth } from "../../src/core/health";
 import { preparePayrollPreviewPacket, recordPayrollPreview } from "../../src/core/payroll";
 import { getCoreSummarySafe } from "../../src/core/summary";
 import {
+  authorizeManagedControlPlaneCredential,
   attestControlPlaneTokenRotation,
   recordControlPlaneAuthAttempt,
+  reviewControlPlaneSessions,
+  revokeControlPlaneCredential,
+  upsertControlPlaneCredential,
 } from "../../src/core/control-plane-auth";
 import {
   attachCoreEvidence,
@@ -39,6 +43,14 @@ export const dynamic = "force-dynamic";
 const apiVersion = "continuous.core.v1";
 const coreCommandEnvelopeFields = new Set(["command", "core", "idempotencyKey", "config"]);
 const forbiddenTokenRotationFields = new Set([
+  "token",
+  "nextToken",
+  "previousToken",
+  "tokenSha256",
+  "nextTokenSha256",
+  "previousTokenSha256",
+]);
+const forbiddenControlPlaneCredentialFields = new Set([
   "token",
   "nextToken",
   "previousToken",
@@ -175,6 +187,10 @@ function unexpectedTokenRotationFields(config: Record<string, unknown>) {
   return Object.keys(config).filter((field) => forbiddenTokenRotationFields.has(field));
 }
 
+function unexpectedControlPlaneCredentialFields(config: Record<string, unknown>) {
+  return Object.keys(config).filter((field) => forbiddenControlPlaneCredentialFields.has(field));
+}
+
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const tenantSlug = optionalString(url.searchParams.get("tenantSlug"));
@@ -222,6 +238,29 @@ export async function GET(request: Request) {
       scope,
     });
     return guardErrorResponse(scope);
+  }
+
+  const managedCredential = await authorizeManagedControlPlaneCredential({
+    request,
+    route: "core",
+    access: "read",
+    command: "view.summary",
+    tenantSlug,
+    auth,
+  });
+
+  if (!managedCredential.ok) {
+    await recordControlPlaneAuthAttempt({
+      request,
+      route: "core",
+      access: "read",
+      command: "view.summary",
+      tenantSlug,
+      auth,
+      scope,
+      guard: managedCredential,
+    });
+    return guardErrorResponse(managedCredential);
   }
 
   await recordControlPlaneAuthAttempt({
@@ -325,6 +364,29 @@ export async function POST(request: Request) {
     return guardErrorResponse(scope);
   }
 
+  const managedCredential = await authorizeManagedControlPlaneCredential({
+    request,
+    route: "core",
+    access: "write",
+    command,
+    tenantSlug,
+    auth,
+  });
+
+  if (!managedCredential.ok) {
+    await recordControlPlaneAuthAttempt({
+      request,
+      route: "core",
+      access: "write",
+      command,
+      tenantSlug,
+      auth,
+      scope,
+      guard: managedCredential,
+    });
+    return guardErrorResponse(managedCredential);
+  }
+
   const controlPlaneAuthSession = await recordControlPlaneAuthAttempt({
     request,
     route: "core",
@@ -396,6 +458,182 @@ export async function POST(request: Request) {
       );
     } catch (error) {
       return coreErrorResponse(error, "control_plane_token_rotation_attest_failed");
+    }
+  }
+
+  if (command === "control_plane.credential.upsert") {
+    const idempotency = normalizeIdempotencyKey(
+      request.headers.get("idempotency-key") ?? body.idempotencyKey,
+    );
+    const forbiddenFields = unexpectedControlPlaneCredentialFields(config);
+
+    if (!idempotency.ok) {
+      return errorResponse(
+        {
+          code: "invalid_idempotency_key",
+          message: idempotency.message,
+        },
+        400,
+      );
+    }
+
+    if (forbiddenFields.length > 0) {
+      return errorResponse(
+        {
+          code: "invalid_control_plane_credential",
+          message: `Control-plane credential inventory accepts credential ids and token fingerprints only. Remove raw token fields: ${forbiddenFields.join(", ")}.`,
+        },
+        400,
+      );
+    }
+
+    try {
+      const result = await upsertControlPlaneCredential({
+        operatorEmail: auth.operatorEmail,
+        idempotencyKey: idempotency.key,
+        tenantSlug,
+        credentialId: optionalString(config.credentialId) ?? auth.credentialId,
+        displayName: optionalString(config.displayName),
+        credentialOperatorEmail: optionalString(config.operatorEmail),
+        state: optionalString(config.state),
+        tokenFingerprint: optionalString(config.tokenFingerprint),
+        allowedTenants: config.allowedTenants,
+        allowedWorkerRoles: config.allowedWorkerRoles,
+        allowedRoutes: config.allowedRoutes,
+        allowedAccess: config.allowedAccess,
+        allowedCommands: config.allowedCommands,
+        expiresAt: optionalString(config.expiresAt),
+        evidence: jsonObject(config.evidence),
+      });
+
+      return Response.json(
+        {
+          api: apiVersion,
+          data: {
+            command,
+            core: {
+              tenantSlug: tenantSlug ?? null,
+            },
+            result,
+          },
+          error: null,
+        },
+        {
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    } catch (error) {
+      return coreErrorResponse(error, "control_plane_credential_upsert_failed");
+    }
+  }
+
+  if (command === "control_plane.credential.revoke") {
+    const idempotency = normalizeIdempotencyKey(
+      request.headers.get("idempotency-key") ?? body.idempotencyKey,
+    );
+    const forbiddenFields = unexpectedControlPlaneCredentialFields(config);
+
+    if (!idempotency.ok) {
+      return errorResponse(
+        {
+          code: "invalid_idempotency_key",
+          message: idempotency.message,
+        },
+        400,
+      );
+    }
+
+    if (forbiddenFields.length > 0) {
+      return errorResponse(
+        {
+          code: "invalid_control_plane_credential",
+          message: `Control-plane credential revocation accepts credential ids and evidence only. Remove raw token fields: ${forbiddenFields.join(", ")}.`,
+        },
+        400,
+      );
+    }
+
+    try {
+      const result = await revokeControlPlaneCredential({
+        operatorEmail: auth.operatorEmail,
+        idempotencyKey: idempotency.key,
+        tenantSlug,
+        credentialId: optionalString(config.credentialId) ?? auth.credentialId,
+        reason: optionalString(config.reason),
+        evidence: jsonObject(config.evidence),
+      });
+
+      return Response.json(
+        {
+          api: apiVersion,
+          data: {
+            command,
+            core: {
+              tenantSlug: tenantSlug ?? null,
+            },
+            result,
+          },
+          error: null,
+        },
+        {
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    } catch (error) {
+      return coreErrorResponse(error, "control_plane_credential_revoke_failed");
+    }
+  }
+
+  if (command === "control_plane.session.review") {
+    const idempotency = normalizeIdempotencyKey(
+      request.headers.get("idempotency-key") ?? body.idempotencyKey,
+    );
+
+    if (!idempotency.ok) {
+      return errorResponse(
+        {
+          code: "invalid_idempotency_key",
+          message: idempotency.message,
+        },
+        400,
+      );
+    }
+
+    try {
+      const result = await reviewControlPlaneSessions({
+        operatorEmail: auth.operatorEmail,
+        idempotencyKey: idempotency.key,
+        tenantSlug,
+        credentialId: optionalString(config.credentialId),
+        outcome: optionalString(config.outcome),
+        since: optionalString(config.since),
+        limit: config.limit,
+      });
+
+      return Response.json(
+        {
+          api: apiVersion,
+          data: {
+            command,
+            core: {
+              tenantSlug: tenantSlug ?? null,
+            },
+            result,
+          },
+          error: null,
+        },
+        {
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    } catch (error) {
+      return coreErrorResponse(error, "control_plane_session_review_failed");
     }
   }
 

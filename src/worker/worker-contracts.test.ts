@@ -218,15 +218,31 @@ describe("future worker contracts", () => {
     const readinessScript = read("scripts/check-production-readiness-on-host.sh");
 
     expect(deployment).toContain("control_plane.token_rotation.attest");
+    expect(deployment).toContain("control_plane.credential.upsert");
+    expect(deployment).toContain("control_plane.credential.revoke");
+    expect(deployment).toContain("control_plane.session.review");
     expect(deployment).toContain("control_plane_token_rotation_attestations");
+    expect(deployment).toContain("control_plane_credentials");
     expect(deployment).toContain("control_plane_auth_sessions");
     expect(deployment).toContain("TOKEN_ROTATION_ATTESTATION_ID");
     expect(deployment).toContain("CONTROL_PLANE_AUTH_SESSION_ID");
+    expect(deployment).toContain("CONTROL_PLANE_CREDENTIAL_ID");
+    expect(deployment).toContain("CONTROL_PLANE_CREDENTIAL_REVOCATION_AUDIT_ID");
+    expect(deployment).toContain("CONTROL_PLANE_SESSION_REVIEW_VIEW_ID");
     expect(readinessScript).toContain("TOKEN_ROTATION_ATTESTATION_ID");
     expect(readinessScript).toContain("CONTROL_PLANE_AUTH_AUDIT_ATTESTED_AT");
     expect(readinessScript).toContain("CONTROL_PLANE_AUTH_SESSION_ID");
+    expect(readinessScript).toContain("CONTROL_PLANE_CREDENTIAL_ID");
+    expect(readinessScript).toContain("CONTROL_PLANE_CREDENTIAL_REVOCATION_AUDIT_ID");
+    expect(readinessScript).toContain("CONTROL_PLANE_SESSION_REVIEW_VIEW_ID");
     expect(deployScript).toContain("core:control_plane.token_rotation.attest");
+    expect(deployScript).toContain("core:control_plane.credential.upsert");
+    expect(deployScript).toContain("core:control_plane.credential.revoke");
+    expect(deployScript).toContain("core:control_plane.session.review");
     expect(deployWorkflow).toContain("core:control_plane.token_rotation.attest");
+    expect(deployWorkflow).toContain("core:control_plane.credential.upsert");
+    expect(deployWorkflow).toContain("core:control_plane.credential.revoke");
+    expect(deployWorkflow).toContain("core:control_plane.session.review");
   });
 
   it("defines Core-record handoffs for planned worker expansion", () => {

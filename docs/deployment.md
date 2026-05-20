@@ -344,13 +344,16 @@ The gate runs on the droplet and requires:
   `ALERT_WEBHOOK_URL`;
 - strict host observability to pass, including failed systemd unit checks;
 - `/etc/continuous/production-readiness.env` to attest the completed recovery
-  drill, token rotation, control-plane auth audit, and non-root access work.
+  drill, token rotation, managed credential inventory, credential revocation,
+  operator session review, control-plane auth audit, and non-root access work.
 
 The readiness attestation file is deliberately operator-owned. It should be
 created only after the underlying work is done and should not contain secrets.
-For token rotation, the timestamp is only the operator acknowledgement layer:
-the durable source of truth is the `control_plane_token_rotation_attestations`
-row plus the linked `control_plane_auth_sessions` request audit row.
+For token rotation and operator access review, the timestamp is only the
+operator acknowledgement layer: the durable source of truth is the
+`control_plane_token_rotation_attestations` row, the managed
+`control_plane_credentials` row, the linked `control_plane_auth_sessions`
+request audit row, and the generated session review view.
 
 ```sh
 install -m 0700 -d /etc/continuous
@@ -361,6 +364,12 @@ TOKEN_ROTATION_ATTESTED_AT=2026-05-20T00:00:00Z
 TOKEN_ROTATION_ATTESTATION_ID=00000000-0000-0000-0000-000000000000
 CONTROL_PLANE_AUTH_AUDIT_ATTESTED_AT=2026-05-20T00:00:00Z
 CONTROL_PLANE_AUTH_SESSION_ID=00000000-0000-0000-0000-000000000000
+CONTROL_PLANE_CREDENTIAL_INVENTORY_ATTESTED_AT=2026-05-20T00:00:00Z
+CONTROL_PLANE_CREDENTIAL_ID=00000000-0000-0000-0000-000000000000
+CONTROL_PLANE_CREDENTIAL_REVOCATION_ATTESTED_AT=2026-05-20T00:00:00Z
+CONTROL_PLANE_CREDENTIAL_REVOCATION_AUDIT_ID=00000000-0000-0000-0000-000000000000
+CONTROL_PLANE_SESSION_REVIEW_ATTESTED_AT=2026-05-20T00:00:00Z
+CONTROL_PLANE_SESSION_REVIEW_VIEW_ID=00000000-0000-0000-0000-000000000000
 NON_ROOT_ACCESS_ATTESTED_AT=2026-05-20T00:00:00Z
 ENV
 chmod 0600 /etc/continuous/production-readiness.env
@@ -388,10 +397,78 @@ Record the rotation with the Core command surface, keeping operation details in
 }
 ```
 
+Record the managed credential inventory row with the same Core envelope. The
+runtime still proves the bearer token against the hashed catalog, then the
+durable inventory can narrow, pause, expire, or revoke the matching
+`credentialId` without changing the API shape:
+
+```json
+{
+  "command": "control_plane.credential.upsert",
+  "core": { "tenantSlug": "continuous-demo" },
+  "idempotencyKey": "credential-upsert-YYYYMMDD",
+  "config": {
+    "credentialId": "bootstrap-operator",
+    "displayName": "Bootstrap operator",
+    "tokenFingerprint": "<8-to-64-hex-fingerprint>",
+    "allowedTenants": ["continuous-demo"],
+    "allowedWorkerRoles": [
+      "revenue_operations",
+      "owner_chief_of_staff",
+      "dispatch_operations",
+      "finance_operations"
+    ],
+    "allowedRoutes": ["core", "worker", "workflow", "approval"],
+    "allowedAccess": ["read", "write"],
+    "allowedCommands": ["core:*", "worker:*", "workflow:*", "approval:*"],
+    "evidence": {
+      "owner": "ops",
+      "source": "scoped control-plane catalog"
+    }
+  }
+}
+```
+
+Operator offboarding or incident response should revoke the inventory row
+first, then rotate or remove the underlying catalog hash:
+
+```json
+{
+  "command": "control_plane.credential.revoke",
+  "core": { "tenantSlug": "continuous-demo" },
+  "idempotencyKey": "credential-revoke-YYYYMMDD",
+  "config": {
+    "credentialId": "bootstrap-operator",
+    "reason": "operator offboarding",
+    "evidence": {
+      "ticket": "SEC-YYYYMMDD"
+    }
+  }
+}
+```
+
+Run an operator session review after inventory or revocation changes. The
+command publishes a renderer-neutral review view with safe request metadata and
+fingerprints only:
+
+```json
+{
+  "command": "control_plane.session.review",
+  "core": { "tenantSlug": "continuous-demo" },
+  "idempotencyKey": "session-review-YYYYMMDD",
+  "config": {
+    "credentialId": "bootstrap-operator",
+    "since": "2026-05-20T00:00:00.000Z",
+    "limit": 50
+  }
+}
+```
+
 You can also make the manual deploy workflow enforce the same strict gate by
 dispatching it with `require_production_readiness=true`. Keep the default
-`false` while backup credentials, alerting, drill evidence, token rotation, and
-non-root host access are still being provisioned.
+`false` while backup credentials, alerting, drill evidence, token rotation,
+credential inventory, session review, and non-root host access are still being
+provisioned.
 
 ## Observability
 
@@ -566,9 +643,11 @@ compatible with the chosen app tag because migrations are forward-only.
   deploy workflow with `require_production_readiness=true`, before treating the
   droplet as customer-data ready.
 - Run a real operator token rotation through
-  `control_plane.token_rotation.attest`, reference the rotation attestation and
-  recent auth session ids in `/etc/continuous/production-readiness.env`, and
-  keep credential inventory tied to scoped catalog entries before adding
-  multiple real operators or customer data.
+  `control_plane.token_rotation.attest`, record the managed credential with
+  `control_plane.credential.upsert`, run `control_plane.session.review`,
+  reference the rotation, credential, revocation, session review, and recent
+  auth session ids in `/etc/continuous/production-readiness.env`, and keep
+  the revocation path tested before adding multiple real operators or customer
+  data.
 - Replace root SSH deployment with a dedicated deploy user and least-privilege
   sudo policy.

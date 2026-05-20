@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  authorizeManagedControlPlaneCredential: vi.fn(),
   decideApproval: vi.fn(),
   executeWorkflowSteps: vi.fn(),
   listApprovals: vi.fn(),
@@ -39,6 +40,7 @@ vi.mock("../../src/core/workflows", () => ({
 }));
 
 vi.mock("../../src/core/control-plane-auth", () => ({
+  authorizeManagedControlPlaneCredential: mocks.authorizeManagedControlPlaneCredential,
   recordControlPlaneAuthAttempt: mocks.recordControlPlaneAuthAttempt,
 }));
 
@@ -60,6 +62,7 @@ describe("/workflow route scope", () => {
       CONTROL_PLANE_ALLOWED_TENANTS: undefined,
       CONTROL_PLANE_ALLOWED_WORKER_ROLES: undefined,
     });
+    mocks.authorizeManagedControlPlaneCredential.mockResolvedValue({ ok: true });
     mocks.recordControlPlaneAuthAttempt.mockResolvedValue({ id: "auth-session-1" });
   });
 

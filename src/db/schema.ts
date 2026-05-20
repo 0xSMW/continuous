@@ -1943,6 +1943,66 @@ export const controlPlaneAuthSessions = pgTable(
   ],
 );
 
+export const controlPlaneCredentials = pgTable(
+  "control_plane_credentials",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    lastAuthSessionId: uuid("last_auth_session_id").references(
+      () => controlPlaneAuthSessions.id,
+      { onDelete: "set null" },
+    ),
+    credentialId: varchar("credential_id", { length: 140 }).notNull(),
+    displayName: text("display_name").notNull(),
+    operatorEmail: text("operator_email").notNull(),
+    state: varchar("state", { length: 32 }).notNull().default("active"),
+    tokenFingerprint: varchar("token_fingerprint", { length: 64 }),
+    scope: jsonb("scope")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    routes: jsonb("routes")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    access: jsonb("access")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    commands: jsonb("commands")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    evidence: jsonb("evidence")
+      .$type<JsonObject>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("control_plane_credentials_tenant_idx").on(table.tenantId, table.state),
+    index("control_plane_credentials_user_idx").on(table.userId, table.state),
+    index("control_plane_credentials_last_auth_session_idx").on(table.lastAuthSessionId),
+    uniqueIndex("control_plane_credentials_tenant_credential_idx").on(
+      table.tenantId,
+      table.credentialId,
+    ),
+  ],
+);
+
 export const controlPlaneTokenRotationAttestations = pgTable(
   "control_plane_token_rotation_attestations",
   {
@@ -2671,6 +2731,7 @@ export const generatedViews = uiContracts;
 export const tenantsRelations = relations(tenants, ({ many }) => ({
   users: many(users),
   workers: many(workers),
+  controlPlaneCredentials: many(controlPlaneCredentials),
   controlPlaneAuthSessions: many(controlPlaneAuthSessions),
   controlPlaneTokenRotationAttestations: many(controlPlaneTokenRotationAttestations),
   approvalRequests: many(approvalRequests),
@@ -2704,6 +2765,7 @@ export const usersRelations = relations(users, ({ one, many }) => ({
     references: [tenants.id],
   }),
   managedWorkers: many(workers),
+  controlPlaneCredentials: many(controlPlaneCredentials),
   controlPlaneAuthSessions: many(controlPlaneAuthSessions),
   controlPlaneTokenRotationAttestations: many(controlPlaneTokenRotationAttestations),
   reviewRequests: many(approvalRequests, { relationName: "reviewer" }),
@@ -3303,6 +3365,24 @@ export const controlPlaneAuthSessionsRelations = relations(
       references: [users.id],
     }),
     tokenRotationAttestations: many(controlPlaneTokenRotationAttestations),
+  }),
+);
+
+export const controlPlaneCredentialsRelations = relations(
+  controlPlaneCredentials,
+  ({ one }) => ({
+    tenant: one(tenants, {
+      fields: [controlPlaneCredentials.tenantId],
+      references: [tenants.id],
+    }),
+    user: one(users, {
+      fields: [controlPlaneCredentials.userId],
+      references: [users.id],
+    }),
+    lastAuthSession: one(controlPlaneAuthSessions, {
+      fields: [controlPlaneCredentials.lastAuthSessionId],
+      references: [controlPlaneAuthSessions.id],
+    }),
   }),
 );
 

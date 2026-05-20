@@ -1,14 +1,16 @@
 import { createHash } from "node:crypto";
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, desc, eq, gte, sql } from "drizzle-orm";
 
 import { db as defaultDb } from "../db/client";
 import {
   auditEvents,
   controlPlaneAuthSessions,
+  controlPlaneCredentials,
   controlPlaneTokenRotationAttestations,
   events,
   tenants,
+  uiContracts,
   users,
   type JsonObject,
 } from "../db/schema";
@@ -28,6 +30,7 @@ const controlPlaneSource = "continuous.core.control_plane";
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const tokenFingerprintPattern = /^[a-f0-9]{8,64}$/i;
+const controlPlaneCredentialStates = new Set(["active", "paused", "revoked", "expired"]);
 
 export type ControlPlaneAuthAttemptInput = {
   request: Request;
@@ -37,6 +40,7 @@ export type ControlPlaneAuthAttemptInput = {
   tenantSlug?: string | null;
   workerRole?: string | null;
   auth: ControlPlaneAccessResult;
+  guard?: ManagedControlPlaneCredentialResult;
   scope?: ControlPlaneScopeResult;
   db?: Database;
 };
@@ -56,12 +60,140 @@ export type ControlPlaneTokenRotationAttestationInput = {
   db?: Database;
 };
 
+export type ManagedControlPlaneCredentialInput = {
+  auth: ControlPlaneAccessResult;
+  request: Request;
+  tenantSlug?: string | null;
+  workerRole?: string | null;
+  route: ControlPlaneRoute;
+  access: ControlPlaneAccess;
+  command?: string | null;
+  db?: Database;
+};
+
+export type ManagedControlPlaneCredentialResult =
+  | { ok: true; managedCredentialId?: string | null }
+  | { ok: false; status: 401 | 403; code: string; message: string };
+
+export type ControlPlaneCredentialUpsertInput = {
+  operatorEmail: string;
+  tenantSlug?: string;
+  idempotencyKey: string;
+  credentialId: string;
+  displayName?: string;
+  credentialOperatorEmail?: string;
+  state?: string;
+  tokenFingerprint?: string;
+  allowedTenants?: unknown;
+  allowedWorkerRoles?: unknown;
+  allowedRoutes?: unknown;
+  allowedAccess?: unknown;
+  allowedCommands?: unknown;
+  expiresAt?: string;
+  evidence?: JsonObject;
+  db?: Database;
+};
+
+export type ControlPlaneCredentialRevokeInput = {
+  operatorEmail: string;
+  tenantSlug?: string;
+  idempotencyKey: string;
+  credentialId: string;
+  reason?: string;
+  evidence?: JsonObject;
+  db?: Database;
+};
+
+export type ControlPlaneSessionReviewInput = {
+  operatorEmail: string;
+  tenantSlug?: string;
+  idempotencyKey: string;
+  credentialId?: string;
+  outcome?: string;
+  since?: string;
+  limit?: unknown;
+  db?: Database;
+};
+
 function cleanString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function jsonObject(value: unknown): JsonObject {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonObject) : {};
+}
+
+function stringList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return Array.from(
+      new Set(
+        value
+          .map((item) => (typeof item === "string" ? item.trim() : ""))
+          .filter(Boolean),
+      ),
+    );
+  }
+
+  if (typeof value === "string") {
+    return Array.from(
+      new Set(
+        value
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean),
+      ),
+    );
+  }
+
+  return [];
+}
+
+function listObject(value: unknown): JsonObject {
+  return {
+    items: stringList(value),
+  };
+}
+
+function listItems(value: JsonObject | null | undefined, key = "items") {
+  return stringList(value?.[key]);
+}
+
+function scopedListAllows(items: string[], value?: string | null) {
+  const cleaned = cleanString(value);
+
+  if (items.length === 0) {
+    return true;
+  }
+
+  if (!cleaned) {
+    return false;
+  }
+
+  return items.includes("*") || items.includes(cleaned);
+}
+
+function patternListAllows(items: string[], value?: string | null) {
+  const cleaned = cleanString(value);
+
+  if (items.length === 0) {
+    return true;
+  }
+
+  if (!cleaned) {
+    return false;
+  }
+
+  return items.some((item) => {
+    if (item === "*" || item === cleaned) {
+      return true;
+    }
+
+    if (item.endsWith(":*")) {
+      return cleaned.startsWith(item.slice(0, -1));
+    }
+
+    return false;
+  });
 }
 
 function hashFingerprint(value?: string | null) {
@@ -189,10 +321,13 @@ export async function recordControlPlaneAuthAttempt(input: ControlPlaneAuthAttem
   const db = input.db ?? defaultDb;
 
   try {
+    const guardFailure = input.guard && !input.guard.ok ? input.guard : null;
     const scopeFailure = input.scope && !input.scope.ok ? input.scope : null;
-    const outcome = input.auth.ok && !scopeFailure ? "allowed" : "denied";
+    const outcome = input.auth.ok && !guardFailure && !scopeFailure ? "allowed" : "denied";
     const reasonCode = !input.auth.ok
       ? input.auth.code
+      : guardFailure
+        ? guardFailure.code
       : scopeFailure
         ? scopeFailure.code
         : "allowed";
@@ -223,6 +358,22 @@ export async function recordControlPlaneAuthAttempt(input: ControlPlaneAuthAttem
       })
       .returning({ id: controlPlaneAuthSessions.id });
 
+    if (session && outcome === "allowed" && anchors.tenantId && credentialId) {
+      await db
+        .update(controlPlaneCredentials)
+        .set({
+          lastAuthSessionId: session.id,
+          lastUsedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(controlPlaneCredentials.tenantId, anchors.tenantId),
+            eq(controlPlaneCredentials.credentialId, credentialId),
+          ),
+        );
+    }
+
     return session ?? null;
   } catch (error) {
     console.error("control_plane_auth_session_record_failed", {
@@ -236,18 +387,821 @@ export async function recordControlPlaneAuthAttempt(input: ControlPlaneAuthAttem
   }
 }
 
-function requiredString(value: unknown, field: string) {
+function requiredString(
+  value: unknown,
+  field: string,
+  code = "invalid_control_plane_token_rotation",
+) {
   const cleaned = cleanString(value);
 
   if (!cleaned) {
+    throw new PlatformUnavailableError(code, `${field} is required.`, 400);
+  }
+
+  return cleaned;
+}
+
+function requiredStringMax(value: unknown, field: string, max: number) {
+  const cleaned = requiredString(value, field, "invalid_control_plane_credential");
+
+  if (cleaned.length > max) {
     throw new PlatformUnavailableError(
-      "invalid_control_plane_token_rotation",
-      `${field} is required.`,
+      "invalid_control_plane_credential",
+      `${field} must be ${max} characters or fewer.`,
       400,
     );
   }
 
   return cleaned;
+}
+
+function parseCredentialState(value: unknown) {
+  const state = cleanString(value) ?? "active";
+
+  if (!controlPlaneCredentialStates.has(state)) {
+    throw new PlatformUnavailableError(
+      "invalid_control_plane_credential_state",
+      "config.state must be active, paused, revoked, or expired.",
+      400,
+    );
+  }
+
+  return state;
+}
+
+function parseSessionReviewLimit(value: unknown) {
+  if (value === undefined || value === null) {
+    return 50;
+  }
+
+  const limit = typeof value === "number" ? value : Number.parseInt(String(value), 10);
+
+  if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
+    throw new PlatformUnavailableError(
+      "invalid_control_plane_session_review_limit",
+      "config.limit must be an integer between 1 and 200.",
+      400,
+    );
+  }
+
+  return limit;
+}
+
+function credentialScopeObject(input: {
+  allowedTenants?: unknown;
+  allowedWorkerRoles?: unknown;
+}): JsonObject {
+  return {
+    tenantSlugs: stringList(input.allowedTenants),
+    workerRoles: stringList(input.allowedWorkerRoles),
+  };
+}
+
+function credentialView(row: typeof controlPlaneCredentials.$inferSelect) {
+  return {
+    id: row.id,
+    credentialId: row.credentialId,
+    displayName: row.displayName,
+    operatorEmail: row.operatorEmail,
+    state: row.state,
+    tokenFingerprint: row.tokenFingerprint,
+    scope: row.scope,
+    routes: row.routes,
+    access: row.access,
+    commands: row.commands,
+    expiresAt: row.expiresAt?.toISOString() ?? null,
+    lastUsedAt: row.lastUsedAt?.toISOString() ?? null,
+    revokedAt: row.revokedAt?.toISOString() ?? null,
+    lastAuthSessionId: row.lastAuthSessionId,
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+function sessionView(row: typeof controlPlaneAuthSessions.$inferSelect) {
+  return {
+    id: row.id,
+    credentialId: row.credentialId,
+    operatorEmail: row.operatorEmail,
+    route: row.route,
+    access: row.access,
+    command: row.command,
+    tenantSlug: row.tenantSlug,
+    workerRole: row.workerRole,
+    outcome: row.outcome,
+    reasonCode: row.reasonCode,
+    request: row.request,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+async function existingCredentialAuditResult(
+  tx: Transaction,
+  tenantId: string,
+  idempotencyKey: string,
+  suffix: string,
+) {
+  const [existingAudit] = await tx
+    .select({
+      auditEventId: auditEvents.id,
+      eventId: auditEvents.eventId,
+      targetId: auditEvents.targetId,
+    })
+    .from(auditEvents)
+    .where(
+      and(
+        eq(auditEvents.tenantId, tenantId),
+        eq(auditEvents.source, controlPlaneSource),
+        eq(auditEvents.idempotencyKey, `${idempotencyKey}:${suffix}`),
+        eq(auditEvents.targetType, "control_plane_credential"),
+      ),
+    )
+    .limit(1);
+
+  if (!existingAudit?.targetId) {
+    return null;
+  }
+
+  const [credential] = await tx
+    .select()
+    .from(controlPlaneCredentials)
+    .where(eq(controlPlaneCredentials.id, existingAudit.targetId))
+    .limit(1);
+
+  if (!credential) {
+    return null;
+  }
+
+  return {
+    eventId: existingAudit.eventId,
+    auditEventId: existingAudit.auditEventId,
+    credential,
+  };
+}
+
+async function upsertSessionReviewView(
+  tx: Transaction,
+  input: {
+    tenantId: string;
+    contract: JsonObject;
+    actions: JsonObject;
+    data: JsonObject;
+    now: Date;
+  },
+) {
+  const key = "control_plane.session_review";
+  const version = "1.0.0";
+  const [existing] = await tx
+    .select({ id: uiContracts.id })
+    .from(uiContracts)
+    .where(
+      and(
+        eq(uiContracts.tenantId, input.tenantId),
+        eq(uiContracts.key, key),
+        eq(uiContracts.version, version),
+      ),
+    )
+    .limit(1);
+
+  if (existing) {
+    const [view] = await tx
+      .update(uiContracts)
+      .set({
+        name: "Control-plane session review",
+        purpose: "Review operator control-plane credential use and denied attempts.",
+        surface: "web",
+        objectType: "control_plane_session",
+        contract: input.contract,
+        actions: input.actions,
+        data: input.data,
+        mask: {
+          rawTokens: "never",
+          request: "fingerprints_only",
+        },
+        active: true,
+        updatedAt: input.now,
+      })
+      .where(eq(uiContracts.id, existing.id))
+      .returning();
+
+    return view;
+  }
+
+  const [view] = await tx
+    .insert(uiContracts)
+    .values({
+      tenantId: input.tenantId,
+      key,
+      version,
+      name: "Control-plane session review",
+      purpose: "Review operator control-plane credential use and denied attempts.",
+      surface: "web",
+      objectType: "control_plane_session",
+      contract: input.contract,
+      actions: input.actions,
+      data: input.data,
+      mask: {
+        rawTokens: "never",
+        request: "fingerprints_only",
+      },
+      active: true,
+      createdAt: input.now,
+      updatedAt: input.now,
+    })
+    .returning();
+
+  return view;
+}
+
+export async function authorizeManagedControlPlaneCredential(
+  input: ManagedControlPlaneCredentialInput,
+): Promise<ManagedControlPlaneCredentialResult> {
+  if (!input.auth.ok) {
+    return { ok: true };
+  }
+
+  const db = input.db ?? defaultDb;
+  const tenantSlug = cleanString(input.tenantSlug);
+
+  if (!tenantSlug) {
+    return { ok: true };
+  }
+
+  const [tenant] = await db
+    .select({ id: tenants.id })
+    .from(tenants)
+    .where(eq(tenants.slug, tenantSlug))
+    .limit(1);
+
+  if (!tenant) {
+    return { ok: true };
+  }
+
+  const [credential] = await db
+    .select()
+    .from(controlPlaneCredentials)
+    .where(
+      and(
+        eq(controlPlaneCredentials.tenantId, tenant.id),
+        eq(controlPlaneCredentials.credentialId, input.auth.credentialId),
+      ),
+    )
+    .limit(1);
+
+  if (!credential) {
+    return { ok: true };
+  }
+
+  const requestFingerprint = controlPlaneRequestTokenFingerprint(input.request);
+
+  if (credential.tokenFingerprint && credential.tokenFingerprint !== requestFingerprint) {
+    return {
+      ok: false,
+      status: 401,
+      code: "control_plane_credential_fingerprint_mismatch",
+      message: "Control-plane credential fingerprint does not match managed credential inventory.",
+    };
+  }
+
+  if (credential.state === "revoked" || credential.revokedAt) {
+    return {
+      ok: false,
+      status: 401,
+      code: "control_plane_credential_revoked",
+      message: "Control-plane credential has been revoked.",
+    };
+  }
+
+  if (credential.state === "paused") {
+    return {
+      ok: false,
+      status: 403,
+      code: "control_plane_credential_paused",
+      message: "Control-plane credential is paused.",
+    };
+  }
+
+  if (credential.state === "expired" || (credential.expiresAt && Date.now() > credential.expiresAt.getTime())) {
+    return {
+      ok: false,
+      status: 401,
+      code: "control_plane_credential_expired",
+      message: "Control-plane credential has expired.",
+    };
+  }
+
+  if (!scopedListAllows(listItems(credential.scope, "tenantSlugs"), tenantSlug)) {
+    return {
+      ok: false,
+      status: 403,
+      code: "control_plane_tenant_forbidden",
+      message: "This managed control-plane credential is not allowed to access the requested tenant.",
+    };
+  }
+
+  if (
+    cleanString(input.workerRole) &&
+    !scopedListAllows(listItems(credential.scope, "workerRoles"), input.workerRole)
+  ) {
+    return {
+      ok: false,
+      status: 403,
+      code: "control_plane_worker_role_forbidden",
+      message: "This managed control-plane credential is not allowed to access the requested worker role.",
+    };
+  }
+
+  if (!patternListAllows(listItems(credential.routes), input.route)) {
+    return {
+      ok: false,
+      status: 403,
+      code: "control_plane_route_forbidden",
+      message: "This managed control-plane credential is not allowed to access the requested route.",
+    };
+  }
+
+  if (!patternListAllows(listItems(credential.access), input.access)) {
+    return {
+      ok: false,
+      status: 403,
+      code: "control_plane_access_forbidden",
+      message: "This managed control-plane credential is not allowed to perform the requested access.",
+    };
+  }
+
+  const command = cleanString(input.command);
+
+  if (
+    command &&
+    !patternListAllows(listItems(credential.commands), `${input.route}:${command}`) &&
+    !patternListAllows(listItems(credential.commands), command)
+  ) {
+    return {
+      ok: false,
+      status: 403,
+      code: "control_plane_command_forbidden",
+      message: "This managed control-plane credential is not allowed to execute the requested command.",
+    };
+  }
+
+  return {
+    ok: true,
+    managedCredentialId: credential.id,
+  };
+}
+
+export async function upsertControlPlaneCredential(input: ControlPlaneCredentialUpsertInput) {
+  const db = input.db ?? defaultDb;
+  const operator = await loadOperatorContext({
+    db,
+    operatorEmail: input.operatorEmail,
+    tenantSlug: input.tenantSlug,
+  });
+  const credentialId = requiredStringMax(input.credentialId, "config.credentialId", 140);
+  const displayName = cleanString(input.displayName) ?? credentialId;
+  const credentialOperatorEmail = (
+    cleanString(input.credentialOperatorEmail) ?? operator.email
+  ).toLowerCase();
+  const state = parseCredentialState(input.state);
+  const tokenFingerprint = normalizeTokenFingerprint(
+    input.tokenFingerprint,
+    "config.tokenFingerprint",
+  );
+  const scope = credentialScopeObject({
+    allowedTenants: input.allowedTenants,
+    allowedWorkerRoles: input.allowedWorkerRoles,
+  });
+  const routes = listObject(input.allowedRoutes);
+  const access = listObject(input.allowedAccess);
+  const commands = listObject(input.allowedCommands);
+  const expiresAt = optionalDate(input.expiresAt, "config.expiresAt");
+  const evidence = jsonObject(input.evidence);
+
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${operator.tenantId}), hashtext(${`${controlPlaneSource}:${input.idempotencyKey}:credential`}))`,
+    );
+
+    const existingReplay = await existingCredentialAuditResult(
+      tx,
+      operator.tenantId,
+      input.idempotencyKey,
+      "credential_upserted",
+    );
+
+    if (existingReplay) {
+      return {
+        created: false,
+        updated: false,
+        controlPlaneCredentialId: existingReplay.credential.id,
+        credentialId: existingReplay.credential.credentialId,
+        eventId: existingReplay.eventId,
+        auditEventId: existingReplay.auditEventId,
+        credential: credentialView(existingReplay.credential),
+      };
+    }
+
+    const [existingCredential] = await tx
+      .select()
+      .from(controlPlaneCredentials)
+      .where(
+        and(
+          eq(controlPlaneCredentials.tenantId, operator.tenantId),
+          eq(controlPlaneCredentials.credentialId, credentialId),
+        ),
+      )
+      .limit(1);
+    const credentialAnchors = await resolveAuthAnchors({
+      db: tx,
+      tenantSlug: operator.tenantSlug,
+      operatorEmail: credentialOperatorEmail,
+    });
+    const now = new Date();
+    const [credential] = existingCredential
+      ? await tx
+          .update(controlPlaneCredentials)
+          .set({
+            userId: credentialAnchors.userId,
+            displayName,
+            operatorEmail: credentialOperatorEmail,
+            state,
+            tokenFingerprint,
+            scope,
+            routes,
+            access,
+            commands,
+            evidence,
+            expiresAt,
+            revokedAt: state === "revoked" ? (existingCredential.revokedAt ?? now) : null,
+            updatedAt: now,
+          })
+          .where(eq(controlPlaneCredentials.id, existingCredential.id))
+          .returning()
+      : await tx
+          .insert(controlPlaneCredentials)
+          .values({
+            tenantId: operator.tenantId,
+            userId: credentialAnchors.userId,
+            credentialId,
+            displayName,
+            operatorEmail: credentialOperatorEmail,
+            state,
+            tokenFingerprint,
+            scope,
+            routes,
+            access,
+            commands,
+            evidence,
+            expiresAt,
+            revokedAt: state === "revoked" ? now : null,
+            createdAt: now,
+            updatedAt: now,
+          })
+          .returning();
+    const eventType = existingCredential
+      ? "control_plane.credential.updated"
+      : "control_plane.credential.created";
+    const [event] = await tx
+      .insert(events)
+      .values({
+        tenantId: operator.tenantId,
+        type: eventType,
+        source: controlPlaneSource,
+        actorType: "user",
+        actorId: operator.userId,
+        actorRef: operator.actorRef,
+        idempotencyKey: `${input.idempotencyKey}:credential_upserted`,
+        data: {
+          controlPlaneCredentialId: credential.id,
+          credentialId,
+          state,
+          scope,
+          routes,
+          access,
+          commands,
+          hasTokenFingerprint: Boolean(tokenFingerprint),
+        },
+        occurredAt: now,
+      })
+      .returning({ id: events.id });
+    const [audit] = await tx
+      .insert(auditEvents)
+      .values({
+        tenantId: operator.tenantId,
+        type: eventType,
+        source: controlPlaneSource,
+        actorType: "user",
+        actorId: operator.userId,
+        actorRef: operator.actorRef,
+        targetType: "control_plane_credential",
+        targetId: credential.id,
+        eventId: event.id,
+        risk: state === "active" ? "medium" : "high",
+        idempotencyKey: `${input.idempotencyKey}:credential_upserted`,
+        data: {
+          controlPlaneCredentialId: credential.id,
+          credentialId,
+          state,
+          evidence,
+          rawTokenStored: false,
+        },
+      })
+      .returning({ id: auditEvents.id });
+
+    return {
+      created: !existingCredential,
+      updated: Boolean(existingCredential),
+      controlPlaneCredentialId: credential.id,
+      credentialId,
+      eventId: event.id,
+      auditEventId: audit.id,
+      credential: credentialView(credential),
+    };
+  });
+}
+
+export async function revokeControlPlaneCredential(input: ControlPlaneCredentialRevokeInput) {
+  const db = input.db ?? defaultDb;
+  const operator = await loadOperatorContext({
+    db,
+    operatorEmail: input.operatorEmail,
+    tenantSlug: input.tenantSlug,
+  });
+  const credentialId = requiredStringMax(input.credentialId, "config.credentialId", 140);
+  const reason = cleanString(input.reason) ?? "Control-plane credential revoked.";
+  const evidence = jsonObject(input.evidence);
+
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${operator.tenantId}), hashtext(${`${controlPlaneSource}:${input.idempotencyKey}:credential_revoke`}))`,
+    );
+
+    const existingReplay = await existingCredentialAuditResult(
+      tx,
+      operator.tenantId,
+      input.idempotencyKey,
+      "credential_revoked",
+    );
+
+    if (existingReplay) {
+      return {
+        revoked: false,
+        controlPlaneCredentialId: existingReplay.credential.id,
+        credentialId: existingReplay.credential.credentialId,
+        eventId: existingReplay.eventId,
+        auditEventId: existingReplay.auditEventId,
+        credential: credentialView(existingReplay.credential),
+      };
+    }
+
+    const [existingCredential] = await tx
+      .select()
+      .from(controlPlaneCredentials)
+      .where(
+        and(
+          eq(controlPlaneCredentials.tenantId, operator.tenantId),
+          eq(controlPlaneCredentials.credentialId, credentialId),
+        ),
+      )
+      .limit(1);
+
+    if (!existingCredential) {
+      throw new PlatformUnavailableError(
+        "control_plane_credential_not_found",
+        "config.credentialId does not match a managed control-plane credential.",
+        404,
+      );
+    }
+
+    const now = new Date();
+    const alreadyRevoked = existingCredential.state === "revoked" || Boolean(existingCredential.revokedAt);
+    const [credential] = await tx
+      .update(controlPlaneCredentials)
+      .set({
+        state: "revoked",
+        evidence: {
+          ...existingCredential.evidence,
+          revocation: {
+            reason,
+            evidence,
+            revokedBy: operator.actorRef,
+            revokedAt: now.toISOString(),
+          },
+        },
+        revokedAt: existingCredential.revokedAt ?? now,
+        updatedAt: now,
+      })
+      .where(eq(controlPlaneCredentials.id, existingCredential.id))
+      .returning();
+    const [event] = await tx
+      .insert(events)
+      .values({
+        tenantId: operator.tenantId,
+        type: "control_plane.credential.revoked",
+        source: controlPlaneSource,
+        actorType: "user",
+        actorId: operator.userId,
+        actorRef: operator.actorRef,
+        idempotencyKey: `${input.idempotencyKey}:credential_revoked`,
+        data: {
+          controlPlaneCredentialId: credential.id,
+          credentialId,
+          reason,
+          alreadyRevoked,
+        },
+        occurredAt: now,
+      })
+      .returning({ id: events.id });
+    const [audit] = await tx
+      .insert(auditEvents)
+      .values({
+        tenantId: operator.tenantId,
+        type: "control_plane.credential.revoked",
+        source: controlPlaneSource,
+        actorType: "user",
+        actorId: operator.userId,
+        actorRef: operator.actorRef,
+        targetType: "control_plane_credential",
+        targetId: credential.id,
+        eventId: event.id,
+        risk: "high",
+        idempotencyKey: `${input.idempotencyKey}:credential_revoked`,
+        data: {
+          controlPlaneCredentialId: credential.id,
+          credentialId,
+          reason,
+          evidence,
+          alreadyRevoked,
+        },
+      })
+      .returning({ id: auditEvents.id });
+
+    return {
+      revoked: !alreadyRevoked,
+      controlPlaneCredentialId: credential.id,
+      credentialId,
+      eventId: event.id,
+      auditEventId: audit.id,
+      credential: credentialView(credential),
+    };
+  });
+}
+
+export async function reviewControlPlaneSessions(input: ControlPlaneSessionReviewInput) {
+  const db = input.db ?? defaultDb;
+  const operator = await loadOperatorContext({
+    db,
+    operatorEmail: input.operatorEmail,
+    tenantSlug: input.tenantSlug,
+  });
+  const credentialId = cleanString(input.credentialId);
+  const outcome = cleanString(input.outcome);
+  const limit = parseSessionReviewLimit(input.limit);
+  const since = optionalDate(input.since, "config.since") ?? new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${operator.tenantId}), hashtext(${`${controlPlaneSource}:${input.idempotencyKey}:session_review`}))`,
+    );
+
+    const [existingAudit] = await tx
+      .select({
+        auditEventId: auditEvents.id,
+        eventId: auditEvents.eventId,
+        targetId: auditEvents.targetId,
+      })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.tenantId, operator.tenantId),
+          eq(auditEvents.source, controlPlaneSource),
+          eq(auditEvents.idempotencyKey, `${input.idempotencyKey}:session_reviewed`),
+          eq(auditEvents.targetType, "control_plane_session_review"),
+        ),
+      )
+      .limit(1);
+
+    if (existingAudit?.targetId) {
+      const [view] = await tx
+        .select()
+        .from(uiContracts)
+        .where(eq(uiContracts.id, existingAudit.targetId))
+        .limit(1);
+
+      if (view) {
+        return {
+          reviewed: false,
+          reviewViewId: view.id,
+          eventId: existingAudit.eventId,
+          auditEventId: existingAudit.auditEventId,
+          filters: jsonObject(view.data.filters),
+          counts: jsonObject(view.data.counts),
+          sessions: Array.isArray(view.data.sessions) ? view.data.sessions : [],
+        };
+      }
+    }
+
+    const conditions = [
+      eq(controlPlaneAuthSessions.tenantId, operator.tenantId),
+      gte(controlPlaneAuthSessions.createdAt, since),
+    ];
+
+    if (credentialId) {
+      conditions.push(eq(controlPlaneAuthSessions.credentialId, credentialId));
+    }
+
+    if (outcome) {
+      conditions.push(eq(controlPlaneAuthSessions.outcome, outcome));
+    }
+
+    const rows = await tx
+      .select()
+      .from(controlPlaneAuthSessions)
+      .where(and(...conditions))
+      .orderBy(desc(controlPlaneAuthSessions.createdAt))
+      .limit(limit);
+    const sessions = rows.map(sessionView);
+    const counts: JsonObject = {
+      total: rows.length,
+      allowed: rows.filter((row) => row.outcome === "allowed").length,
+      denied: rows.filter((row) => row.outcome === "denied").length,
+    };
+    const filters: JsonObject = {
+      credentialId: credentialId ?? null,
+      outcome: outcome ?? null,
+      since: since.toISOString(),
+      limit,
+    };
+    const now = new Date();
+    const view = await upsertSessionReviewView(tx, {
+      tenantId: operator.tenantId,
+      now,
+      contract: {
+        kind: "control_plane_session_review",
+        columns: ["createdAt", "credentialId", "route", "access", "command", "outcome", "reasonCode"],
+      },
+      actions: {
+        revokeCredential: {
+          command: "control_plane.credential.revoke",
+          requiresApproval: true,
+        },
+      },
+      data: {
+        filters,
+        counts,
+        sessions,
+      },
+    });
+    const [event] = await tx
+      .insert(events)
+      .values({
+        tenantId: operator.tenantId,
+        type: "control_plane.session_reviewed",
+        source: controlPlaneSource,
+        actorType: "user",
+        actorId: operator.userId,
+        actorRef: operator.actorRef,
+        idempotencyKey: `${input.idempotencyKey}:session_reviewed`,
+        data: {
+          reviewViewId: view.id,
+          filters,
+          counts,
+          authSessionIds: sessions.map((session) => session.id),
+        },
+        occurredAt: now,
+      })
+      .returning({ id: events.id });
+    const [audit] = await tx
+      .insert(auditEvents)
+      .values({
+        tenantId: operator.tenantId,
+        type: "control_plane.session_reviewed",
+        source: controlPlaneSource,
+        actorType: "user",
+        actorId: operator.userId,
+        actorRef: operator.actorRef,
+        targetType: "control_plane_session_review",
+        targetId: view.id,
+        eventId: event.id,
+        risk: counts.denied ? "high" : "medium",
+        idempotencyKey: `${input.idempotencyKey}:session_reviewed`,
+        data: {
+          reviewViewId: view.id,
+          filters,
+          counts,
+        },
+      })
+      .returning({ id: auditEvents.id });
+
+    return {
+      reviewed: true,
+      reviewViewId: view.id,
+      eventId: event.id,
+      auditEventId: audit.id,
+      filters,
+      counts,
+      sessions,
+    };
+  });
 }
 
 function normalizeTokenFingerprint(value: unknown, field: string, required: true): string;

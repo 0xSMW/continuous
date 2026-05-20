@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   attachCoreEvidence: vi.fn(),
+  authorizeManagedControlPlaneCredential: vi.fn(),
   attestControlPlaneTokenRotation: vi.fn(),
   chargeBudget: vi.fn(),
   createCoreDocument: vi.fn(),
@@ -20,10 +21,13 @@ const mocks = vi.hoisted(() => ({
   recordCoreDecision: vi.fn(),
   recordCustomerSignal: vi.fn(),
   recordRuleChange: vi.fn(),
+  reviewControlPlaneSessions: vi.fn(),
+  revokeControlPlaneCredential: vi.fn(),
   releaseBudget: vi.fn(),
   requestApproval: vi.fn(),
   reserveBudget: vi.fn(),
   transitionCoreTask: vi.fn(),
+  upsertControlPlaneCredential: vi.fn(),
   upsertCoreAdapter: vi.fn(),
   upsertCoreConnection: vi.fn(),
   upsertCoreObject: vi.fn(),
@@ -58,8 +62,12 @@ vi.mock("../../src/core/summary", () => ({
 }));
 
 vi.mock("../../src/core/control-plane-auth", () => ({
+  authorizeManagedControlPlaneCredential: mocks.authorizeManagedControlPlaneCredential,
   attestControlPlaneTokenRotation: mocks.attestControlPlaneTokenRotation,
   recordControlPlaneAuthAttempt: mocks.recordControlPlaneAuthAttempt,
+  reviewControlPlaneSessions: mocks.reviewControlPlaneSessions,
+  revokeControlPlaneCredential: mocks.revokeControlPlaneCredential,
+  upsertControlPlaneCredential: mocks.upsertControlPlaneCredential,
 }));
 
 vi.mock("../../src/core/primitives", () => ({
@@ -91,6 +99,7 @@ describe("POST /core", () => {
     vi.stubEnv("WORKER_RUN_ENABLED", "true");
     vi.stubEnv("WORKER_RUN_TOKEN", "test-token");
     vi.stubEnv("WORKER_OPERATOR_EMAIL", "operator@example.com");
+    mocks.authorizeManagedControlPlaneCredential.mockResolvedValue({ ok: true });
     mocks.recordControlPlaneAuthAttempt.mockResolvedValue({ id: "auth-session-1" });
   });
 
@@ -164,6 +173,204 @@ describe("POST /core", () => {
         report: "ops/rotation/2026-05-20",
       },
       authSessionId: "auth-session-1",
+    });
+  });
+
+  it("upserts managed control-plane credentials through the Core command envelope", async () => {
+    mocks.upsertControlPlaneCredential.mockResolvedValue({
+      created: true,
+      updated: false,
+      controlPlaneCredentialId: "credential-row-1",
+      credentialId: "bootstrap-operator",
+      eventId: "event-1",
+      auditEventId: "audit-1",
+      credential: {
+        credentialId: "bootstrap-operator",
+        state: "active",
+      },
+    });
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "control_plane.credential.upsert",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "credential-upsert-001",
+          config: {
+            credentialId: "bootstrap-operator",
+            displayName: "Bootstrap operator",
+            tokenFingerprint: "aabbccddeeff0011",
+            allowedTenants: ["continuous-demo"],
+            allowedWorkerRoles: ["revenue_operations"],
+            allowedRoutes: ["core", "worker"],
+            allowedAccess: ["read", "write"],
+            allowedCommands: ["core:*", "worker:run"],
+            evidence: {
+              owner: "ops",
+            },
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.command).toBe("control_plane.credential.upsert");
+    expect(body.data.result.controlPlaneCredentialId).toBe("credential-row-1");
+    expect(mocks.upsertControlPlaneCredential).toHaveBeenCalledWith({
+      operatorEmail: "operator@example.com",
+      idempotencyKey: "credential-upsert-001",
+      tenantSlug: "continuous-demo",
+      credentialId: "bootstrap-operator",
+      displayName: "Bootstrap operator",
+      credentialOperatorEmail: undefined,
+      state: undefined,
+      tokenFingerprint: "aabbccddeeff0011",
+      allowedTenants: ["continuous-demo"],
+      allowedWorkerRoles: ["revenue_operations"],
+      allowedRoutes: ["core", "worker"],
+      allowedAccess: ["read", "write"],
+      allowedCommands: ["core:*", "worker:run"],
+      expiresAt: undefined,
+      evidence: {
+        owner: "ops",
+      },
+    });
+  });
+
+  it("rejects raw token material in managed control-plane credential payloads", async () => {
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "control_plane.credential.upsert",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "credential-upsert-raw-token-001",
+          config: {
+            credentialId: "bootstrap-operator",
+            token: "x",
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error.code).toBe("invalid_control_plane_credential");
+    expect(mocks.upsertControlPlaneCredential).not.toHaveBeenCalled();
+  });
+
+  it("revokes managed control-plane credentials through the Core command envelope", async () => {
+    mocks.revokeControlPlaneCredential.mockResolvedValue({
+      revoked: true,
+      controlPlaneCredentialId: "credential-row-1",
+      credentialId: "bootstrap-operator",
+      eventId: "event-1",
+      auditEventId: "audit-1",
+    });
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "control_plane.credential.revoke",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "credential-revoke-001",
+          config: {
+            credentialId: "bootstrap-operator",
+            reason: "operator offboarding",
+            evidence: {
+              ticket: "SEC-100",
+            },
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.command).toBe("control_plane.credential.revoke");
+    expect(mocks.revokeControlPlaneCredential).toHaveBeenCalledWith({
+      operatorEmail: "operator@example.com",
+      idempotencyKey: "credential-revoke-001",
+      tenantSlug: "continuous-demo",
+      credentialId: "bootstrap-operator",
+      reason: "operator offboarding",
+      evidence: {
+        ticket: "SEC-100",
+      },
+    });
+  });
+
+  it("reviews control-plane auth sessions through the Core command envelope", async () => {
+    mocks.reviewControlPlaneSessions.mockResolvedValue({
+      reviewed: true,
+      reviewViewId: "view-1",
+      eventId: "event-1",
+      auditEventId: "audit-1",
+      counts: {
+        total: 1,
+        denied: 0,
+      },
+      sessions: [],
+    });
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "control_plane.session.review",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "session-review-001",
+          config: {
+            credentialId: "bootstrap-operator",
+            since: "2026-05-20T00:00:00.000Z",
+            limit: 25,
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.command).toBe("control_plane.session.review");
+    expect(mocks.reviewControlPlaneSessions).toHaveBeenCalledWith({
+      operatorEmail: "operator@example.com",
+      idempotencyKey: "session-review-001",
+      tenantSlug: "continuous-demo",
+      credentialId: "bootstrap-operator",
+      outcome: undefined,
+      since: "2026-05-20T00:00:00.000Z",
+      limit: 25,
     });
   });
 
