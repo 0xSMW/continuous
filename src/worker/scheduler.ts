@@ -56,6 +56,15 @@ export type ScheduledCommandResult = {
   result: unknown;
 };
 
+export type ScheduledRevenueRunResult = {
+  source: string;
+  sourceEventId: string;
+  idempotencyKey: string;
+  status: "succeeded" | "failed";
+  result?: unknown;
+  error?: { message: string };
+};
+
 export type LeadPollCommand = {
   connectionId: string;
   source: string;
@@ -75,6 +84,11 @@ export type ScheduledLeadPollResult = {
   attempted: number;
   succeeded: number;
   failed: number;
+  revenueRuns: {
+    attempted: number;
+    succeeded: number;
+    failed: number;
+  };
   commands: Array<{
     connectionId: string;
     source: string;
@@ -82,6 +96,7 @@ export type ScheduledLeadPollResult = {
     status: "succeeded" | "failed";
     result?: unknown;
     error?: { message: string };
+    revenueRuns: ScheduledRevenueRunResult[];
   }>;
 };
 
@@ -253,6 +268,39 @@ function leadPollCommandFromConnection(input: {
   };
 }
 
+function leadReadSelectors(result: unknown) {
+  const data = objectValue(result);
+  const output = objectValue(data.output);
+
+  if (Array.isArray(data.selectors)) {
+    return data.selectors;
+  }
+
+  return Array.isArray(output.selectors) ? output.selectors : [];
+}
+
+function revenueRunInput(selectorValue: unknown): {
+  source: string;
+  sourceEventId: string;
+  idempotencyKey: string;
+  intake: unknown;
+} | null {
+  const selector = objectValue(selectorValue);
+  const source = stringValue(selector.source);
+  const sourceEventId = stringValue(selector.sourceEventId);
+
+  if (!source || !sourceEventId) {
+    return null;
+  }
+
+  return {
+    source,
+    sourceEventId,
+    idempotencyKey: `scheduler-revenue-run:${source}:${sourceEventId}`,
+    intake: selector.intake || { source, sourceEventId },
+  };
+}
+
 function sleep(ms: number) {
   return new Promise<void>((resolve) => {
     setTimeout(resolve, ms);
@@ -378,6 +426,11 @@ async function runLeadPollCommands(input: {
     attempted: commands.length,
     succeeded: 0,
     failed: 0,
+    revenueRuns: {
+      attempted: 0,
+      succeeded: 0,
+      failed: 0,
+    },
     commands: [],
   };
 
@@ -397,6 +450,67 @@ async function runLeadPollCommands(input: {
           config: command.config,
         },
       });
+      const revenueRuns: ScheduledRevenueRunResult[] = [];
+
+      for (const selector of leadReadSelectors(response.result)) {
+        const runInput = revenueRunInput(selector);
+
+        if (!runInput) {
+          result.revenueRuns.attempted += 1;
+          result.revenueRuns.failed += 1;
+          revenueRuns.push({
+            source: "",
+            sourceEventId: "",
+            idempotencyKey: "",
+            status: "failed",
+            error: {
+              message: "lead.read selector must include source and sourceEventId.",
+            },
+          });
+          continue;
+        }
+
+        result.revenueRuns.attempted += 1;
+
+        try {
+          const runResponse = await input.postCommand({
+            baseUrl: input.config.baseUrl,
+            token: input.config.token ?? "",
+            endpoint: "/worker",
+            payload: {
+              command: "run",
+              worker: {
+                role: revenueWorkerRole,
+                tenantSlug: input.config.tenantSlug,
+              },
+              idempotencyKey: runInput.idempotencyKey,
+              config: {
+                intake: runInput.intake,
+              },
+            },
+          });
+
+          result.revenueRuns.succeeded += 1;
+          revenueRuns.push({
+            source: runInput.source,
+            sourceEventId: runInput.sourceEventId,
+            idempotencyKey: runInput.idempotencyKey,
+            status: "succeeded",
+            result: runResponse.result,
+          });
+        } catch (error) {
+          result.revenueRuns.failed += 1;
+          revenueRuns.push({
+            source: runInput.source,
+            sourceEventId: runInput.sourceEventId,
+            idempotencyKey: runInput.idempotencyKey,
+            status: "failed",
+            error: {
+              message: error instanceof Error ? error.message : "Unknown revenue run failure.",
+            },
+          });
+        }
+      }
 
       result.succeeded += 1;
       result.commands.push({
@@ -405,6 +519,7 @@ async function runLeadPollCommands(input: {
         idempotencyKey: command.idempotencyKey,
         status: "succeeded",
         result: response.result,
+        revenueRuns,
       });
     } catch (error) {
       result.failed += 1;
@@ -416,6 +531,7 @@ async function runLeadPollCommands(input: {
         error: {
           message: error instanceof Error ? error.message : "Unknown lead source poll failure.",
         },
+        revenueRuns: [],
       });
     }
   }

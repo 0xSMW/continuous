@@ -26,8 +26,8 @@ commands.
 
 `POST /core` is the operator-gated headless Core command surface. It
 supports `task.create`, `task.transition`, `object.upsert`, `object.link`,
-`adapter.upsert`, `connection.upsert`, `event.ingest`, `evidence.attach`,
-`document.create`, `packet.prepare`, `document.packet.prepare`,
+`adapter.upsert`, `connection.upsert`, `connection.health.record`,
+`event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`, `document.packet.prepare`,
 `decision.record`, `approval.request`, `capability.grant`, `budget.reserve`,
 `budget.charge`, `budget.release`, `view.publish`, `adapter.intent.record`,
 `rule.change.record`, `customer_signal.record`,
@@ -236,6 +236,34 @@ inline access tokens, passwords, and client secrets are rejected.
 }
 ```
 
+Record a readiness snapshot before relying on scheduler polling. The command
+does not make external API calls and does not expose credential values; it
+records whether the connection is active, scoped, source/provider configured,
+pollable, scheduler-observed, and backed by a managed credential ref.
+
+```json
+{
+  "command": "connection.health.record",
+  "core": {
+    "tenantSlug": "continuous-demo"
+  },
+  "idempotencyKey": "google-workspace-leads-health-001",
+  "config": {
+    "connectionId": "connection_uuid",
+    "checks": [
+      "state",
+      "adapter",
+      "external_execution",
+      "credential_ref",
+      "source_metadata",
+      "scopes",
+      "polling",
+      "scheduler"
+    ]
+  }
+}
+```
+
 ```json
 {
   "command": "run",
@@ -264,7 +292,8 @@ The deploy workflow smokes `lead.read`, the source-selector `run` path, adapter
 reconciliation, continuation, and `/core` task creation, task transition,
 approval request, capability grant, budget reserve/charge/release, object,
 object-link, event, evidence, document, packet, decision, generated-view,
-shared approval inbox route, payroll preview packet handoff, and payroll
+connector setup, connection health, shared approval inbox route, payroll
+preview packet handoff, and payroll
 approval handoff after each production rollout. It also runs the host
 observability check so production rollout fails if app/db/Caddy service state,
 public health, TLS freshness, disk usage, or Caddy access logging are broken.

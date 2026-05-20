@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   recordAdapterIntent: vi.fn(),
   prepareCorePacket: vi.fn(),
   publishCoreView: vi.fn(),
+  recordCoreConnectionHealth: vi.fn(),
   recordCoreDecision: vi.fn(),
   recordCustomerSignal: vi.fn(),
   recordRuleChange: vi.fn(),
@@ -62,6 +63,7 @@ vi.mock("../../src/core/primitives", () => ({
   prepareCorePacket: mocks.prepareCorePacket,
   publishCoreView: mocks.publishCoreView,
   recordAdapterIntent: mocks.recordAdapterIntent,
+  recordCoreConnectionHealth: mocks.recordCoreConnectionHealth,
   recordCoreDecision: mocks.recordCoreDecision,
   recordCustomerSignal: mocks.recordCustomerSignal,
   recordRuleChange: mocks.recordRuleChange,
@@ -478,6 +480,55 @@ describe("POST /core", () => {
         externalExecution: "blocked",
       },
       lastSyncAt: undefined,
+    });
+  });
+
+  it("dispatches connection.health.record with readiness checks in config", async () => {
+    mocks.recordCoreConnectionHealth.mockResolvedValue({
+      created: true,
+      connectionId: "99999999-9999-4999-8999-000000000022",
+      adapterId: "99999999-9999-4999-8999-000000000021",
+      eventId: "event-1",
+      evidenceId: "evidence-1",
+      auditEventId: "audit-1",
+      status: "needs_configuration",
+      externalExecution: "blocked",
+    });
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "connection.health.record",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "connection-health-route-test-001",
+          config: {
+            connectionId: "99999999-9999-4999-8999-000000000022",
+            checks: ["state", "credential_ref", "scheduler"],
+            observedAt: "2026-05-20T08:00:00.000Z",
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.command).toBe("connection.health.record");
+    expect(body.data.result.status).toBe("needs_configuration");
+    expect(mocks.recordCoreConnectionHealth).toHaveBeenCalledWith({
+      operatorEmail: "operator@example.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: "connection-health-route-test-001",
+      connectionId: "99999999-9999-4999-8999-000000000022",
+      checks: ["state", "credential_ref", "scheduler"],
+      observedAt: "2026-05-20T08:00:00.000Z",
     });
   });
 

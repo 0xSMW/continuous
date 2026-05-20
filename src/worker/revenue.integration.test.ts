@@ -17,6 +17,7 @@ import {
   prepareCorePacket,
   publishCoreView,
   recordAdapterIntent,
+  recordCoreConnectionHealth,
   recordCustomerSignal,
   recordCoreDecision,
   recordRuleChange,
@@ -982,6 +983,34 @@ maybeDescribe("Revenue Worker integration eval", () => {
       name: "Replay should return the first connection",
       db,
     });
+    const healthResult = await recordCoreConnectionHealth({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-core-connection-health-${runId}`,
+      connectionId: connectionResult.connectionId,
+      checks: [
+        "state",
+        "adapter",
+        "external_execution",
+        "credential_ref",
+        "source_metadata",
+        "scopes",
+        "polling",
+      ],
+      env: {
+        GOOGLE_WORKSPACE_TOKEN: "raw-ci-token-value",
+      },
+      db,
+    });
+    const healthReplay = await recordCoreConnectionHealth({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-core-connection-health-${runId}`,
+      connectionId: connectionResult.connectionId,
+      db,
+    });
+    const credentialCheck = healthResult.checks.find((check) => objectValue(check).key === "credential_ref");
+    const healthReport = objectValue(healthResult.report);
 
     expect(adapterResult.created).toBe(true);
     expect(adapter?.key).toBe(adapterKey);
@@ -995,6 +1024,18 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(polling.credentialRef).toBe("env:GOOGLE_WORKSPACE_TOKEN");
     expect(connectionReplay.created).toBe(false);
     expect(connectionReplay.connectionId).toBe(connectionResult.connectionId);
+    expect(healthResult.created).toBe(true);
+    expect(healthResult.status).toBe("ready");
+    expect(healthResult.externalExecution).toBe("blocked");
+    expect(healthResult.evidenceId).toBeTruthy();
+    expect(objectValue(credentialCheck).data).toMatchObject({
+      credentialRefState: "managed_ref_present",
+      credentialRefKind: "env",
+      envConfigured: true,
+    });
+    expect(JSON.stringify(healthReport)).not.toContain("raw-ci-token-value");
+    expect(healthReplay.created).toBe(false);
+    expect(healthReplay.status).toBe("ready");
 
     await expect(
       upsertCoreConnection({

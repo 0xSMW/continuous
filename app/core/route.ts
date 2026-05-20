@@ -12,6 +12,7 @@ import {
   linkCoreObjects,
   prepareCorePacket,
   publishCoreView,
+  recordCoreConnectionHealth,
   upsertCoreAdapter,
   upsertCoreConnection,
   recordAdapterIntent,
@@ -530,6 +531,54 @@ export async function POST(request: Request) {
       );
     } catch (error) {
       return coreErrorResponse(error, "core_connection_upsert_failed");
+    }
+  }
+
+  if (command === "connection.health.record") {
+    const idempotency = normalizeIdempotencyKey(
+      request.headers.get("idempotency-key") ?? body.idempotencyKey,
+    );
+
+    if (!idempotency.ok) {
+      return errorResponse(
+        {
+          code: "invalid_idempotency_key",
+          message: idempotency.message,
+        },
+        400,
+      );
+    }
+
+    try {
+      const result = await recordCoreConnectionHealth({
+        operatorEmail: auth.operatorEmail,
+        idempotencyKey: idempotency.key,
+        tenantSlug,
+        connectionId: optionalString(config.connectionId) ?? "",
+        checks: config.checks,
+        observedAt: optionalString(config.observedAt),
+      });
+
+      return Response.json(
+        {
+          api: apiVersion,
+          data: {
+            command,
+            core: {
+              tenantSlug: tenantSlug ?? null,
+            },
+            result,
+          },
+          error: null,
+        },
+        {
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    } catch (error) {
+      return coreErrorResponse(error, "core_connection_health_record_failed");
     }
   }
 
@@ -1470,7 +1519,7 @@ export async function POST(request: Request) {
     {
       code: "core_command_unsupported",
       message:
-        "Core command must be task.create, task.transition, object.upsert, adapter.upsert, connection.upsert, object.link, event.ingest, evidence.attach, document.create, packet.prepare, document.packet.prepare, decision.record, approval.request, adapter.intent.record, rule.change.record, capability.grant, budget.reserve, budget.charge, budget.release, view.publish, customer_signal.record, payroll.preview.record, or payroll.preview.packet.prepare.",
+        "Core command must be task.create, task.transition, object.upsert, adapter.upsert, connection.upsert, connection.health.record, object.link, event.ingest, evidence.attach, document.create, packet.prepare, document.packet.prepare, decision.record, approval.request, adapter.intent.record, rule.change.record, capability.grant, budget.reserve, budget.charge, budget.release, view.publish, customer_signal.record, payroll.preview.record, or payroll.preview.packet.prepare.",
     },
     400,
   );

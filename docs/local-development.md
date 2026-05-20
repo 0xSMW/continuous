@@ -97,17 +97,18 @@ curl -X POST http://localhost:3000/core \
 ```
 
 The additional Core write commands are `task.transition`, `object.link`,
-`adapter.upsert`, `connection.upsert`, `event.ingest`, `evidence.attach`,
-`document.create`, `decision.record`, `packet.prepare`,
+`adapter.upsert`, `connection.upsert`, `connection.health.record`,
+`event.ingest`, `evidence.attach`, `document.create`, `decision.record`, `packet.prepare`,
 `document.packet.prepare`, `approval.request`, `adapter.intent.record`,
 `rule.change.record`, `capability.grant`, `budget.reserve`, `budget.charge`,
 `budget.release`, `view.publish`, `customer_signal.record`, `payroll.preview.record`, and
 `payroll.preview.packet.prepare`. Each command writes audit proof and keeps
 external execution blocked.
 
-Use `adapter.upsert` and `connection.upsert` for headless connector setup. A
-pollable connection must keep source, provider, reader, and credential refs
-inside `config`; inline access tokens and passwords are rejected.
+Use `adapter.upsert`, `connection.upsert`, and `connection.health.record` for
+headless connector setup and readiness proof. A pollable connection must keep
+source, provider, reader, and credential refs inside `config`; inline access
+tokens and passwords are rejected.
 
 The shared approval inbox is `/approvals` in the browser and `/approval` for
 operator-gated JSON. Decisions use `POST /approval` with `command`,

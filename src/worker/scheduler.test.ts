@@ -8,14 +8,17 @@ import {
   type ScheduledCommandResult,
 } from "./scheduler";
 
-function scheduledResult(command: string): ScheduledCommandResult {
+function scheduledResult(
+  command: string,
+  result: unknown = {
+    processed: 0,
+  },
+): ScheduledCommandResult {
   return {
     endpoint: command === "steps.execute" ? "/workflow" : "/worker",
     command,
     api: command === "steps.execute" ? "continuous.workflow.v1" : "continuous.worker.v1",
-    result: {
-      processed: 0,
-    },
+    result,
   };
 }
 
@@ -174,6 +177,208 @@ describe("worker scheduler", () => {
         },
       },
     });
+  });
+
+  it("hands successful lead reads to revenue worker runs once per selector", async () => {
+    const postCommand = vi.fn(async ({ payload }) => {
+      if (payload.command === "lead.read") {
+        return scheduledResult("lead.read", {
+          selectors: [
+            {
+              source: "website_form",
+              sourceEventId: "website-lead-001",
+              intake: {
+                source: "website_form",
+                sourceEventId: "website-lead-001",
+                priority: "high",
+              },
+            },
+            {
+              source: "google_workspace_inbox",
+              sourceEventId: "gmail-msg-002",
+            },
+          ],
+        });
+      }
+
+      return scheduledResult(String(payload.command));
+    });
+
+    const result = await runSchedulerCycle(
+      {
+        enabled: true,
+        once: true,
+        baseUrl: "http://app:3000",
+        token: "test-token",
+        tenantSlug: "continuous-demo",
+        intervalMs: 60_000,
+        workflowLimit: 7,
+        adapterLimit: 11,
+        leadPollLimit: 5,
+        leaseMs: 120_000,
+        leaseOwner: "scheduler-test",
+      },
+      {
+        postCommand,
+        listLeadPollCommands: vi.fn(async () => [leadPollCommand()]),
+      },
+    );
+
+    expect(result.leadPolls).toMatchObject({
+      attempted: 1,
+      succeeded: 1,
+      failed: 0,
+      revenueRuns: {
+        attempted: 2,
+        succeeded: 2,
+        failed: 0,
+      },
+      commands: [
+        {
+          status: "succeeded",
+          revenueRuns: [
+            {
+              source: "website_form",
+              sourceEventId: "website-lead-001",
+              idempotencyKey: "scheduler-revenue-run:website_form:website-lead-001",
+              status: "succeeded",
+            },
+            {
+              source: "google_workspace_inbox",
+              sourceEventId: "gmail-msg-002",
+              idempotencyKey: "scheduler-revenue-run:google_workspace_inbox:gmail-msg-002",
+              status: "succeeded",
+            },
+          ],
+        },
+      ],
+    });
+    expect(postCommand).toHaveBeenCalledTimes(6);
+    expect(postCommand).toHaveBeenNthCalledWith(3, {
+      baseUrl: "http://app:3000",
+      token: "test-token",
+      endpoint: "/worker",
+      payload: {
+        command: "run",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "scheduler-revenue-run:website_form:website-lead-001",
+        config: {
+          intake: {
+            source: "website_form",
+            sourceEventId: "website-lead-001",
+            priority: "high",
+          },
+        },
+      },
+    });
+    expect(postCommand).toHaveBeenNthCalledWith(4, {
+      baseUrl: "http://app:3000",
+      token: "test-token",
+      endpoint: "/worker",
+      payload: {
+        command: "run",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "scheduler-revenue-run:google_workspace_inbox:gmail-msg-002",
+        config: {
+          intake: {
+            source: "google_workspace_inbox",
+            sourceEventId: "gmail-msg-002",
+          },
+        },
+      },
+    });
+  });
+
+  it("records revenue run failures without blocking other scheduler work", async () => {
+    const postCommand = vi.fn(async ({ payload }) => {
+      if (payload.command === "lead.read") {
+        return scheduledResult("lead.read", {
+          output: {
+            selectors: [
+              {
+                source: "website_form",
+                sourceEventId: "bad-lead-001",
+              },
+              {
+                source: "website_form",
+                sourceEventId: "good-lead-002",
+              },
+            ],
+          },
+        });
+      }
+
+      if (
+        payload.command === "run" &&
+        payload.idempotencyKey === "scheduler-revenue-run:website_form:bad-lead-001"
+      ) {
+        throw new Error("run failed");
+      }
+
+      return scheduledResult(String(payload.command));
+    });
+
+    const result = await runSchedulerCycle(
+      {
+        enabled: true,
+        once: true,
+        baseUrl: "http://app:3000",
+        token: "test-token",
+        tenantSlug: "continuous-demo",
+        intervalMs: 60_000,
+        workflowLimit: 7,
+        adapterLimit: 11,
+        leadPollLimit: 5,
+        leaseMs: 120_000,
+        leaseOwner: "scheduler-test",
+      },
+      {
+        postCommand,
+        listLeadPollCommands: vi.fn(async () => [leadPollCommand()]),
+      },
+    );
+
+    expect(result.leadPolls).toMatchObject({
+      attempted: 1,
+      succeeded: 1,
+      failed: 0,
+      revenueRuns: {
+        attempted: 2,
+        succeeded: 1,
+        failed: 1,
+      },
+      commands: [
+        {
+          status: "succeeded",
+          revenueRuns: [
+            {
+              source: "website_form",
+              sourceEventId: "bad-lead-001",
+              idempotencyKey: "scheduler-revenue-run:website_form:bad-lead-001",
+              status: "failed",
+              error: {
+                message: "run failed",
+              },
+            },
+            {
+              source: "website_form",
+              sourceEventId: "good-lead-002",
+              idempotencyKey: "scheduler-revenue-run:website_form:good-lead-002",
+              status: "succeeded",
+            },
+          ],
+        },
+      ],
+    });
+    expect(result.adapterRetry.command).toBe("adapters.retry");
+    expect(result.adapterReconcile.command).toBe("adapters.reconcile");
+    expect(postCommand).toHaveBeenCalledTimes(6);
   });
 
   it("isolates lead poll failures from workflow and adapter draining", async () => {

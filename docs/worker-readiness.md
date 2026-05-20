@@ -32,13 +32,13 @@ Status values:
 
 | Worker | Contract | Registry | Object Map | Workflow | Capabilities | Budget | Approval | Adapter | Eval | UI | Launch | Primary blocker | Next action |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| Revenue Operations | live | live | live | live | live | live | live | partial | live | partial | partial | Production connector credentials and approved external send remain blocked; scheduler polling needs real connection coverage | Provision production connector credentials, create pollable active connections through `/core connection.upsert`, then prove scoped adapter execution with receipt and rollback proof |
+| Revenue Operations | live | live | live | live | live | live | live | partial | live | partial | partial | Production connector credentials and approved external send remain blocked; scheduler polling needs real connection coverage | Provision production connector credentials, create pollable active connections through `/core connection.upsert`, record readiness through `/core connection.health.record`, then prove scoped adapter execution with receipt and rollback proof |
 | Owner Chief-of-Staff | live | live | live | live | live | live | live | blocked | partial | partial | partial | Read-only factuality and stale-source handling need broader evals | Expand owner brief eval cases and generated review views before mutation-capable commands |
 | Dispatch/Ops | planned | planned | planned | planned | planned | planned | planned | planned | planned | planned | planned | Needs Revenue-to-Dispatch job handoff fixture | Implement job/work-order object pack and calendar dry-run adapter fixture |
 | Finance | planned | planned | planned | planned | planned | planned | planned | planned | planned | planned | planned | Needs Dispatch closeout and Revenue invoice/payment handoff fixtures | Implement cash packet fixture, AR follow-up workflow, and money-movement dual-control gate |
 | Workforce | planned | planned | partial | partial | partial | partial | partial | planned | planned | planned | planned | Runtime is schema/seed backed only | Implement document packet fixture, payroll readiness workflow, and restricted-document proof |
 | Compliance | planned | planned | partial | partial | planned | planned | partial | planned | planned | planned | planned | Needs Workforce classification and rule-source handoff fixture | Implement obligation/notice intake fixture and rule-source evidence checks |
-| Systems | planned | planned | planned | planned | planned | planned | planned | partial | planned | planned | planned | Needs connector setup and sync repair runtime | Implement connection health snapshot, dry-run repair command, and permission grant evidence |
+| Systems | planned | planned | planned | planned | planned | planned | planned | partial | planned | planned | planned | Needs sync repair runtime and permission grant evidence; Core connection health snapshots now exist outside the Systems worker | Implement dry-run sync repair command and permission grant evidence |
 
 ## Promotion Rules
 

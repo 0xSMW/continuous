@@ -227,7 +227,7 @@ jobs:
           }
           set_control_plane_token_catalog() {
             token_hash="$(printf '%s' "$worker_token" | sha256sum | awk '{print $1}')"
-            allowed_commands='"core:view.summary","core:task.create","core:task.transition","core:object.upsert","core:adapter.upsert","core:connection.upsert","core:object.link","core:event.ingest","core:evidence.attach","core:document.create","core:packet.prepare","core:document.packet.prepare","core:decision.record","core:approval.request","core:adapter.intent.record","core:rule.change.record","core:capability.grant","core:budget.reserve","core:budget.charge","core:budget.release","core:view.publish","core:customer_signal.record","core:payroll.preview.record","core:payroll.preview.packet.prepare","worker:view.snapshot","worker:view.approvals","worker:view.briefs","worker:view.decisions","worker:run","worker:lead.read","worker:lead.classify","worker:response.draft","worker:continue","worker:approval.decide","worker:adapters.reconcile","worker:adapters.retry","worker:brief.generate","worker:decision_queue.prepare","worker:anomaly.triage","workflow:view.overview","workflow:view.approvals","workflow:start","workflow:transition","workflow:steps.execute","workflow:approval.decide","approval:view.inbox","approval:approval.decide"'
+            allowed_commands='"core:view.summary","core:task.create","core:task.transition","core:object.upsert","core:adapter.upsert","core:connection.upsert","core:connection.health.record","core:object.link","core:event.ingest","core:evidence.attach","core:document.create","core:packet.prepare","core:document.packet.prepare","core:decision.record","core:approval.request","core:adapter.intent.record","core:rule.change.record","core:capability.grant","core:budget.reserve","core:budget.charge","core:budget.release","core:view.publish","core:customer_signal.record","core:payroll.preview.record","core:payroll.preview.packet.prepare","worker:view.snapshot","worker:view.approvals","worker:view.briefs","worker:view.decisions","worker:run","worker:lead.read","worker:lead.classify","worker:response.draft","worker:continue","worker:approval.decide","worker:adapters.reconcile","worker:adapters.retry","worker:brief.generate","worker:decision_queue.prepare","worker:anomaly.triage","workflow:view.overview","workflow:view.approvals","workflow:start","workflow:transition","workflow:steps.execute","workflow:approval.decide","approval:view.inbox","approval:approval.decide"'
             catalog_json="$(
               printf '[{"id":"bootstrap-operator","tokenSha256":"%s","operatorEmail":"%s","allowedTenants":["continuous-demo"],"allowedWorkerRoles":["revenue_operations","owner_chief_of_staff"],"allowedRoutes":["core","worker","workflow","approval"],"allowedAccess":["read","write"],"allowedCommands":[%s]}]' \
                 "$token_hash" \
@@ -1791,6 +1791,31 @@ jobs:
             >/dev/null
 
           CORE_CONNECTION_ID="$(echo "$CORE_CONNECTION_UPSERT_RESPONSE" | /usr/bin/jq -r '.data.result.connectionId')"
+          CORE_CONNECTION_HEALTH_KEY="deploy-core-connection-health-$RUN_ID"
+          CORE_CONNECTION_HEALTH_PAYLOAD="$(
+            /usr/bin/jq -nc --arg key "$CORE_CONNECTION_HEALTH_KEY" --arg connectionId "$CORE_CONNECTION_ID" '{
+              command: "connection.health.record",
+              core: {tenantSlug: "continuous-demo"},
+              idempotencyKey: $key,
+              config: {
+                connectionId: $connectionId,
+                checks: ["state", "adapter", "external_execution", "credential_ref", "source_metadata", "scopes", "polling", "scheduler"]
+              }
+            }'
+          )"
+          CORE_CONNECTION_HEALTH_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/core \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$CORE_CONNECTION_HEALTH_PAYLOAD"
+          )"
+
+          echo "$CORE_CONNECTION_HEALTH_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,connectionId:.data.result.connectionId,status:.data.result.status,evidenceId:.data.result.evidenceId,externalExecution:.data.result.externalExecution}}'
+          echo "$CORE_CONNECTION_HEALTH_RESPONSE" | /usr/bin/jq -e \
+            '.error == null and .data.command == "connection.health.record" and .data.result.created == true and .data.result.connectionId == "'"$CORE_CONNECTION_ID"'" and .data.result.status == "needs_configuration" and (.data.result.evidenceId | length > 0) and .data.result.externalExecution == "blocked"' \
+            >/dev/null
+
           CORE_RULE_PACK_ID="$(psql_db -Atc "select id from rule_packs where active = true order by created_at limit 1;")"
 
           if [ -z "$CORE_RULE_PACK_ID" ]; then

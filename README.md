@@ -39,8 +39,9 @@ Then open `http://localhost:3000`.
 - `/api/health` reports Postgres-backed readiness checks.
 - `/core` returns persisted core counts, active tasks, and recent events for tokened operators;
   `POST /core` accepts structured core commands: `task.create`,
-  `task.transition`, `object.upsert`, `object.link`, `event.ingest`,
-  `evidence.attach`, `document.create`, `packet.prepare`,
+  `task.transition`, `object.upsert`, `adapter.upsert`,
+  `connection.upsert`, `connection.health.record`, `object.link`,
+  `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`,
   `document.packet.prepare`, `decision.record`,
   `approval.request`, `adapter.intent.record`, `rule.change.record`,
   `capability.grant`, `budget.reserve`, `budget.charge`, `budget.release`,

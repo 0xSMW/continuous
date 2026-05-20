@@ -35,6 +35,8 @@ type EvidenceKind = "snapshot" | "draft" | "approval" | "receipt" | "trace" | "e
 type RiskLevel = "low" | "medium" | "high" | "critical";
 type CoreTaskState = "draft" | "active" | "waiting" | "approval_required" | "blocked" | "done" | "canceled";
 type AdapterConnectionState = "draft" | "active" | "paused" | "error" | "archived";
+type ConnectionHealthStatus = "ready" | "needs_configuration" | "paused" | "error" | "archived";
+type ConnectionHealthCheckStatus = "pass" | "warn" | "fail" | "not_applicable";
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -63,6 +65,7 @@ const adapterIntentSource = "continuous.core.adapter_intents";
 const ruleChangeSource = "continuous.core.rule_changes";
 const adapterSource = "continuous.core.adapters";
 const connectionSource = "continuous.core.connections";
+const connectionHealthSource = "continuous.core.connection_health";
 const customerSignalTypes = new Set([
   "satisfaction_signal",
   "feedback_item",
@@ -308,6 +311,17 @@ export type CoreConnectionUpsertInput = {
   config?: JsonObject;
   lastSyncAt?: string;
   db?: Database;
+};
+
+export type CoreConnectionHealthRecordInput = {
+  operatorEmail: string;
+  idempotencyKey: string;
+  tenantSlug?: string;
+  connectionId: string;
+  checks?: unknown;
+  observedAt?: string;
+  db?: Database;
+  env?: Record<string, string | undefined>;
 };
 
 export type CoreAdapterIntentRecordInput = {
@@ -648,6 +662,36 @@ function credentialRefForConnection(config: JsonObject) {
   );
 }
 
+function credentialRefKind(value: string | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const separator = value.indexOf(":");
+
+  if (separator <= 0) {
+    return "unknown";
+  }
+
+  return value.slice(0, separator).toLowerCase();
+}
+
+function credentialRefEnvName(value: string | undefined) {
+  const match = value?.match(/^env:([A-Za-z_][A-Za-z0-9_]*)$/);
+
+  return match?.[1] ?? null;
+}
+
+function envCredentialResolved(value: string | undefined, env: Record<string, string | undefined>) {
+  const envName = credentialRefEnvName(value);
+
+  if (!envName) {
+    return null;
+  }
+
+  return Boolean(env[envName]);
+}
+
 function configuredSource(config: JsonObject) {
   const polling = pollConfigForConnection(config);
 
@@ -718,6 +762,277 @@ function assertConnectionSafety(input: {
       400,
     );
   }
+}
+
+const defaultConnectionHealthChecks = [
+  "state",
+  "adapter",
+  "external_execution",
+  "credential_ref",
+  "source_metadata",
+  "scopes",
+  "polling",
+  "scheduler",
+] as const;
+const connectionHealthCheckKeys = new Set(defaultConnectionHealthChecks);
+
+function connectionHealthChecks(value: unknown) {
+  if (value === undefined || value === null) {
+    return [...defaultConnectionHealthChecks];
+  }
+
+  const checks = stringList(value);
+
+  if (checks.length === 0) {
+    throw new PlatformUnavailableError(
+      "core_connection_health_checks_invalid",
+      "config.checks must be a non-empty string array when provided.",
+      400,
+    );
+  }
+
+  const unsupported = checks.filter((check) =>
+    !connectionHealthCheckKeys.has(check as (typeof defaultConnectionHealthChecks)[number])
+  );
+
+  if (unsupported.length > 0) {
+    throw new PlatformUnavailableError(
+      "core_connection_health_checks_invalid",
+      `config.checks contains unsupported checks: ${unsupported.join(", ")}.`,
+      400,
+    );
+  }
+
+  return checks as (typeof defaultConnectionHealthChecks)[number][];
+}
+
+function connectionHealthCheck(
+  key: string,
+  status: ConnectionHealthCheckStatus,
+  summary: string,
+  data: JsonObject = {},
+) {
+  return { key, status, summary, data };
+}
+
+function connectionHealthStatus(input: {
+  state: AdapterConnectionState;
+  checks: Array<{ status: ConnectionHealthCheckStatus }>;
+}): ConnectionHealthStatus {
+  if (input.state === "archived") {
+    return "archived";
+  }
+
+  if (input.state === "paused") {
+    return "paused";
+  }
+
+  if (input.state === "error") {
+    return "error";
+  }
+
+  const hasFailure = input.checks.some((check) => check.status === "fail");
+  const hasWarning = input.checks.some((check) => check.status === "warn");
+
+  if (hasFailure || hasWarning || input.state !== "active") {
+    return "needs_configuration";
+  }
+
+  return "ready";
+}
+
+function buildConnectionHealthReport(input: {
+  connection: typeof connections.$inferSelect;
+  adapter: typeof adapters.$inferSelect;
+  requestedChecks: string[];
+  observedAt: Date;
+  env: Record<string, string | undefined>;
+}) {
+  const config = jsonObject(input.connection.config);
+  const scopes = jsonObject(input.connection.scopes);
+  const polling = pollConfigForConnection(config);
+  const pollingEnabled = polling.enabled === true;
+  const credentialRef = credentialRefForConnection(config);
+  const credentialKind = credentialRefKind(credentialRef);
+  const envConfigured = envCredentialResolved(credentialRef, input.env);
+  const readScopeValues = readScopes(scopes);
+  const source = configuredSource(config);
+  const provider = configuredProvider(config);
+  const checks = input.requestedChecks.map((check) => {
+    if (check === "state") {
+      const state = input.connection.state as AdapterConnectionState;
+
+      if (state === "active") {
+        return connectionHealthCheck("state", "pass", "Connection is active.", {
+          state,
+        });
+      }
+
+      return connectionHealthCheck(
+        "state",
+        state === "draft" || state === "paused" ? "warn" : "fail",
+        state === "draft"
+          ? "Connection is draft and will not be polled by the scheduler."
+          : `Connection state is ${state}.`,
+        { state },
+      );
+    }
+
+    if (check === "adapter") {
+      return connectionHealthCheck(
+        "adapter",
+        input.adapter.active ? "pass" : "warn",
+        input.adapter.active ? "Adapter is active." : "Adapter is not active.",
+        {
+          adapterId: input.adapter.id,
+          adapterKey: input.adapter.key,
+          adapterKind: input.adapter.kind,
+          active: input.adapter.active,
+        },
+      );
+    }
+
+    if (check === "external_execution") {
+      const enabled = config.executable === true || config.externalExecution === "enabled";
+
+      return connectionHealthCheck(
+        "external_execution",
+        enabled ? "fail" : "pass",
+        enabled
+          ? "External execution is enabled; this is blocked until the live execution gate exists."
+          : "External execution is blocked.",
+        {
+          externalExecution: enabled ? "enabled" : "blocked",
+        },
+      );
+    }
+
+    if (check === "credential_ref") {
+      if (!credentialRef) {
+        return connectionHealthCheck(
+          "credential_ref",
+          pollingEnabled ? "fail" : "warn",
+          pollingEnabled
+            ? "Polling is enabled but no managed credential reference is configured."
+            : "No managed credential reference is configured.",
+          {
+            credentialRefState: "not_configured",
+            credentialRefKind: null,
+            envConfigured: null,
+          },
+        );
+      }
+
+      const isEnvRef = credentialKind === "env";
+      const envState = isEnvRef ? envConfigured === true : null;
+
+      return connectionHealthCheck(
+        "credential_ref",
+        pollingEnabled && isEnvRef && !envState ? "fail" : "pass",
+        pollingEnabled && isEnvRef && !envState
+          ? "Managed environment credential reference is configured but not present in the runtime environment."
+          : "Managed credential reference is configured.",
+        {
+          credentialRefState: "managed_ref_present",
+          credentialRefKind: credentialKind,
+          envConfigured: envState,
+        },
+      );
+    }
+
+    if (check === "source_metadata") {
+      const ready = Boolean(source && provider);
+
+      return connectionHealthCheck(
+        "source_metadata",
+        ready ? "pass" : "fail",
+        ready
+          ? "Connection source and provider metadata are configured."
+          : "Connection source and provider metadata are required for source polling.",
+        {
+          source: source ?? null,
+          provider: provider ?? null,
+        },
+      );
+    }
+
+    if (check === "scopes") {
+      return connectionHealthCheck(
+        "scopes",
+        readScopeValues.length > 0 ? "pass" : "fail",
+        readScopeValues.length > 0
+          ? "Connection has read scopes."
+          : "Connection needs at least one read scope before polling.",
+        {
+          readScopes: readScopeValues,
+        },
+      );
+    }
+
+    if (check === "polling") {
+      if (!pollingEnabled) {
+        return connectionHealthCheck("polling", "not_applicable", "Polling is not enabled.", {
+          pollingEnabled: false,
+        });
+      }
+
+      return connectionHealthCheck(
+        "polling",
+        input.connection.state === "active" ? "pass" : "warn",
+        input.connection.state === "active"
+          ? "Polling is enabled for an active connection."
+          : "Polling is enabled but the connection is not active.",
+        {
+          pollingEnabled: true,
+          intervalMs: typeof polling.intervalMs === "number" ? polling.intervalMs : null,
+          maxResults: typeof polling.maxResults === "number" ? polling.maxResults : null,
+        },
+      );
+    }
+
+    const lastLeadRead = jsonObject(config.lastLeadRead);
+    const readAt = cleanString(lastLeadRead.readAt);
+    const hasSchedulerCoverage = Boolean(input.connection.lastSyncAt || readAt);
+
+    if (!pollingEnabled || input.connection.state !== "active") {
+      return connectionHealthCheck(
+        "scheduler",
+        "not_applicable",
+        "Scheduler coverage starts after polling is enabled on an active connection.",
+        {
+          pollingEnabled,
+          state: input.connection.state,
+        },
+      );
+    }
+
+    return connectionHealthCheck(
+      "scheduler",
+      hasSchedulerCoverage ? "pass" : "warn",
+      hasSchedulerCoverage
+        ? "Connection has scheduler lead-read cursor proof."
+        : "Connection is ready for polling but has no scheduler lead-read proof yet.",
+      {
+        lastSyncAt: input.connection.lastSyncAt?.toISOString() ?? null,
+        lastLeadReadAt: readAt ?? null,
+      },
+    );
+  });
+  const status = connectionHealthStatus({
+    state: input.connection.state as AdapterConnectionState,
+    checks,
+  });
+
+  return {
+    status,
+    observedAt: input.observedAt.toISOString(),
+    connectionId: input.connection.id,
+    adapterId: input.connection.adapterId,
+    adapterKey: input.adapter.key,
+    pollingEnabled,
+    externalExecution: "blocked",
+    checks,
+  };
 }
 
 function parseTaskState(value: string | undefined) {
@@ -1675,6 +1990,172 @@ export async function upsertCoreConnection(input: CoreConnectionUpsertInput) {
         state: connection.state,
         externalAccountId: connection.externalAccountId,
       },
+    };
+  });
+}
+
+function connectionHealthRisk(status: ConnectionHealthStatus): RiskLevel {
+  if (status === "ready") {
+    return "low";
+  }
+
+  if (status === "needs_configuration" || status === "paused") {
+    return "medium";
+  }
+
+  return "high";
+}
+
+export async function recordCoreConnectionHealth(input: CoreConnectionHealthRecordInput) {
+  const db = input.db ?? defaultDb;
+  const connectionId = requiredUuid(input.connectionId, "config.connectionId");
+  const requestedChecks = connectionHealthChecks(input.checks);
+  const observedAt = optionalDate(input.observedAt, "config.observedAt") ?? new Date();
+  const operator = await loadOperatorContext({
+    db,
+    operatorEmail: input.operatorEmail,
+    tenantSlug: input.tenantSlug,
+  });
+
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${operator.tenantId}), hashtext(${`${connectionHealthSource}:${input.idempotencyKey}`}))`,
+    );
+
+    const [existingAudit] = await tx
+      .select({
+        auditEventId: auditEvents.id,
+        targetId: auditEvents.targetId,
+        eventId: auditEvents.eventId,
+        data: auditEvents.data,
+      })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.tenantId, operator.tenantId),
+          eq(auditEvents.source, connectionHealthSource),
+          eq(auditEvents.idempotencyKey, `${input.idempotencyKey}:connection_health_recorded`),
+          eq(auditEvents.targetType, "connection"),
+        ),
+      )
+      .limit(1);
+
+    if (existingAudit?.targetId) {
+      const report = jsonObject(jsonObject(existingAudit.data).report);
+
+      return {
+        created: false,
+        connectionId: existingAudit.targetId,
+        adapterId: cleanString(report.adapterId) ?? null,
+        eventId: existingAudit.eventId,
+        evidenceId: cleanString(jsonObject(existingAudit.data).evidenceId) ?? null,
+        auditEventId: existingAudit.auditEventId,
+        status: cleanString(report.status) ?? "needs_configuration",
+        checks: Array.isArray(report.checks) ? report.checks : [],
+        report,
+        externalExecution: "blocked",
+      };
+    }
+
+    const [connection] = await tx
+      .select({
+        connection: connections,
+        adapter: adapters,
+      })
+      .from(connections)
+      .innerJoin(adapters, eq(connections.adapterId, adapters.id))
+      .where(and(eq(connections.tenantId, operator.tenantId), eq(connections.id, connectionId)))
+      .limit(1);
+
+    if (!connection) {
+      throw new PlatformUnavailableError(
+        "core_connection_not_found",
+        "config.connectionId does not match a connection in this tenant.",
+        404,
+      );
+    }
+
+    const report = buildConnectionHealthReport({
+      connection: connection.connection,
+      adapter: connection.adapter,
+      requestedChecks,
+      observedAt,
+      env: input.env ?? process.env,
+    });
+    const [event] = await tx
+      .insert(events)
+      .values({
+        tenantId: operator.tenantId,
+        type: "connection.health.recorded",
+        source: connectionHealthSource,
+        actorType: "user",
+        actorId: operator.userId,
+        actorRef: operator.actorRef,
+        adapterId: connection.adapter.id,
+        connectionId: connection.connection.id,
+        idempotencyKey: `${input.idempotencyKey}:connection_health_recorded`,
+        data: {
+          report,
+          externalExecution: "blocked",
+        },
+        occurredAt: observedAt,
+      })
+      .returning({ id: events.id });
+    const [snapshot] = await tx
+      .insert(evidence)
+      .values({
+        tenantId: operator.tenantId,
+        kind: "snapshot",
+        name: "Connection health snapshot",
+        eventId: event.id,
+        actorType: "user",
+        actorId: operator.userId,
+        hash: `${connectionHealthSource}:${connection.connection.id}:${observedAt.toISOString()}`,
+        data: {
+          report,
+          externalExecution: "blocked",
+        },
+        redaction: {
+          credentialValues: "omitted",
+          credentialRefs: "kind_only",
+          externalExecution: "blocked",
+        },
+        createdAt: observedAt,
+      })
+      .returning({ id: evidence.id });
+    const [audit] = await tx
+      .insert(auditEvents)
+      .values({
+        tenantId: operator.tenantId,
+        type: "connection.health.recorded",
+        source: connectionHealthSource,
+        actorType: "user",
+        actorId: operator.userId,
+        actorRef: operator.actorRef,
+        targetType: "connection",
+        targetId: connection.connection.id,
+        eventId: event.id,
+        risk: connectionHealthRisk(report.status),
+        idempotencyKey: `${input.idempotencyKey}:connection_health_recorded`,
+        data: {
+          report,
+          evidenceId: snapshot.id,
+          externalExecution: "blocked",
+        },
+      })
+      .returning({ id: auditEvents.id });
+
+    return {
+      created: true,
+      connectionId: connection.connection.id,
+      adapterId: connection.adapter.id,
+      eventId: event.id,
+      evidenceId: snapshot.id,
+      auditEventId: audit.id,
+      status: report.status,
+      checks: report.checks,
+      report,
+      externalExecution: "blocked",
     };
   });
 }
