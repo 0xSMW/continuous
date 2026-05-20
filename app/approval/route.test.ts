@@ -228,6 +228,32 @@ describe("/approval route", () => {
     });
   });
 
+  it("rejects unauthorized approval commands before reading the request body", async () => {
+    const getReader = vi.fn(() => {
+      throw new Error("Body should not be read before auth succeeds.");
+    });
+    const { POST } = await import("./route");
+    const response = await POST({
+      url: "http://localhost/approval",
+      headers: new Headers({
+        authorization: "Bearer wrong-token",
+        "content-type": "application/json",
+      }),
+      body: {
+        getReader,
+      },
+    } as unknown as Request);
+    const body = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(body.error).toEqual({
+      code: "control_plane_unauthorized",
+      message: "Control-plane token is invalid.",
+    });
+    expect(getReader).not.toHaveBeenCalled();
+    expect(mocks.decideApproval).not.toHaveBeenCalled();
+  });
+
   it("rejects invalid approval command bodies before dispatch", async () => {
     const { POST } = await import("./route");
 
@@ -322,6 +348,52 @@ describe("/approval route", () => {
     expect(jsonpContentType.status).toBe(415);
     expect(malformedJson.status).toBe(400);
     expect(arrayBody.status).toBe(400);
+    expect(mocks.decideApproval).not.toHaveBeenCalled();
+  });
+
+  it("rejects oversized approval command bodies before JSON parsing", async () => {
+    const { POST } = await import("./route");
+    const byContentLength = await POST(
+      new Request("http://localhost/approval", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+          "content-length": "1048577",
+        },
+        body: JSON.stringify({
+          command: "approval.decide",
+          approval: {
+            id: "77777777-7777-4777-8777-000000000001",
+            tenantSlug: "continuous-demo",
+            subject: "core",
+          },
+          config: {
+            action: "approved",
+          },
+        }),
+      }),
+    );
+    const byStream = await POST(
+      new Request("http://localhost/approval", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: "x".repeat(1_048_577),
+      }),
+    );
+
+    for (const response of [byContentLength, byStream]) {
+      const body = await response.json();
+
+      expect(response.status).toBe(413);
+      expect(body.error).toEqual({
+        code: "approval_command_body_too_large",
+        message: "Approval command body must be at most 1048576 bytes.",
+      });
+    }
     expect(mocks.decideApproval).not.toHaveBeenCalled();
   });
 

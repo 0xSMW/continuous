@@ -136,6 +136,34 @@ describe("/workflow route scope", () => {
     expect(mocks.startWorkflowRun).not.toHaveBeenCalled();
   });
 
+  it("rejects unauthorized workflow commands before reading the request body", async () => {
+    const getReader = vi.fn(() => {
+      throw new Error("Body should not be read before auth succeeds.");
+    });
+    const { POST } = await import("./route");
+    const response = await POST({
+      url: "http://localhost/workflow",
+      headers: new Headers({
+        authorization: "Bearer wrong-token",
+        "content-type": "application/json",
+      }),
+      body: {
+        getReader,
+      },
+    } as unknown as Request);
+    const body = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(body.error).toEqual({
+      code: "control_plane_unauthorized",
+      message: "Control-plane token is invalid.",
+    });
+    expect(getReader).not.toHaveBeenCalled();
+    expect(mocks.startWorkflowRun).not.toHaveBeenCalled();
+    expect(mocks.transitionWorkflowRun).not.toHaveBeenCalled();
+    expect(mocks.executeWorkflowSteps).not.toHaveBeenCalled();
+  });
+
   it("allows scoped workflow reads for an allowed tenant", async () => {
     mocks.env.CONTROL_PLANE_ALLOWED_TENANTS = "continuous-demo";
     mocks.listWorkflows.mockResolvedValue({
@@ -307,6 +335,51 @@ describe("/workflow route scope", () => {
     expect(jsonpContentType.status).toBe(415);
     expect(malformedJson.status).toBe(400);
     expect(arrayBody.status).toBe(400);
+    expect(mocks.startWorkflowRun).not.toHaveBeenCalled();
+    expect(mocks.transitionWorkflowRun).not.toHaveBeenCalled();
+    expect(mocks.executeWorkflowSteps).not.toHaveBeenCalled();
+  });
+
+  it("rejects oversized workflow command bodies before JSON parsing", async () => {
+    const { POST } = await import("./route");
+    const byContentLength = await POST(
+      new Request("http://localhost/workflow", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+          "content-length": "1048577",
+        },
+        body: JSON.stringify({
+          command: "steps.execute",
+          workflow: {
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "oversized-workflow-body-001",
+          config: {},
+        }),
+      }),
+    );
+    const byStream = await POST(
+      new Request("http://localhost/workflow", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: "x".repeat(1_048_577),
+      }),
+    );
+
+    for (const response of [byContentLength, byStream]) {
+      const body = await response.json();
+
+      expect(response.status).toBe(413);
+      expect(body.error).toEqual({
+        code: "workflow_command_body_too_large",
+        message: "Workflow command body must be at most 1048576 bytes.",
+      });
+    }
     expect(mocks.startWorkflowRun).not.toHaveBeenCalled();
     expect(mocks.transitionWorkflowRun).not.toHaveBeenCalled();
     expect(mocks.executeWorkflowSteps).not.toHaveBeenCalled();

@@ -14,7 +14,7 @@ import {
   authorizeManagedControlPlaneCredential,
   recordControlPlaneAuthAttempt,
 } from "../../src/core/control-plane-auth";
-import { isJsonContentType } from "../../src/http/content";
+import { defaultMaxJsonBodyBytes, readJsonObjectBody } from "../../src/http/body";
 import {
   unexpectedEnvelopeFields,
   validateWorkerTargetEnvelope,
@@ -55,115 +55,31 @@ function configObject(value: unknown):
   };
 }
 
-const maxWorkerCommandBodyBytes = 1_048_576;
-
-function bodyTooLargeError() {
-  return {
-    ok: false,
-    status: 413,
-    error: {
-      code: "worker_command_body_too_large",
-      message: `Worker command body must be at most ${maxWorkerCommandBodyBytes} bytes.`,
-    },
-  } as const;
-}
-
-async function readBoundedBodyText(
-  request: Request,
-): Promise<
-    | { ok: true; value: string }
-    | { ok: false; status: number; error: { code: string; message: string } }
-  > {
-  const contentLength = Number(request.headers.get("content-length") ?? 0);
-
-  if (Number.isFinite(contentLength) && contentLength > maxWorkerCommandBodyBytes) {
-    return bodyTooLargeError();
-  }
-
-  if (!request.body) {
-    return { ok: true, value: "" };
-  }
-
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let totalBytes = 0;
-
-  while (true) {
-    const { done, value } = await reader.read();
-
-    if (done) {
-      break;
-    }
-
-    totalBytes += value.byteLength;
-
-    if (totalBytes > maxWorkerCommandBodyBytes) {
-      await reader.cancel();
-      return bodyTooLargeError();
-    }
-
-    chunks.push(value);
-  }
-
-  const bodyBytes = new Uint8Array(totalBytes);
-  let offset = 0;
-
-  for (const chunk of chunks) {
-    bodyBytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-
-  return { ok: true, value: new TextDecoder().decode(bodyBytes) };
-}
-
 async function readBody(
   request: Request,
 ): Promise<
   | { ok: true; value: Record<string, unknown> }
   | { ok: false; status: number; error: { code: string; message: string } }
 > {
-  if (!isJsonContentType(request.headers.get("content-type"))) {
-    return {
-      ok: false,
-      status: 415,
-      error: {
+  return readJsonObjectBody(request, {
+    invalidContentType: {
         code: "invalid_worker_command_body",
         message: "POST /worker requires an application/json request body.",
-      },
-    };
-  }
-
-  try {
-    const bodyText = await readBoundedBodyText(request);
-
-    if (!bodyText.ok) {
-      return bodyText;
-    }
-
-    const value = JSON.parse(bodyText.value) as unknown;
-
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
-      return {
-        ok: false,
-        status: 400,
-        error: {
-          code: "invalid_worker_command_body",
-          message: "Worker command body must be a JSON object.",
-        },
-      };
-    }
-
-    return { ok: true, value: value as Record<string, unknown> };
-  } catch {
-    return {
-      ok: false,
-      status: 400,
-      error: {
+    },
+    invalidJson: {
         code: "invalid_worker_command_body",
         message: "Worker command body must be valid JSON.",
-      },
-    };
-  }
+    },
+    invalidObject: {
+      code: "invalid_worker_command_body",
+      message: "Worker command body must be a JSON object.",
+    },
+    tooLarge: (maxBytes) => ({
+      code: "worker_command_body_too_large",
+      message: `Worker command body must be at most ${maxBytes} bytes.`,
+    }),
+    maxBytes: defaultMaxJsonBodyBytes,
+  });
 }
 
 function targetFrom(value: unknown): WorkerTargetInput {

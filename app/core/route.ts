@@ -32,7 +32,7 @@ import {
 } from "../../src/core/primitives";
 import { createCoreTask, transitionCoreTask } from "../../src/core/tasks";
 import { PlatformUnavailableError } from "../../src/core/errors";
-import { isJsonContentType } from "../../src/http/content";
+import { defaultMaxJsonBodyBytes, readJsonObjectBody } from "../../src/http/body";
 import {
   authorizeControlPlaneAccess,
   authorizeControlPlaneScope,
@@ -111,42 +111,25 @@ async function readBody(
   | { ok: true; value: Record<string, unknown> }
   | { ok: false; status: number; error: { code: string; message: string } }
 > {
-  if (!isJsonContentType(request.headers.get("content-type"))) {
-    return {
-      ok: false,
-      status: 415,
-      error: {
+  return readJsonObjectBody(request, {
+    invalidContentType: {
         code: "invalid_core_command_body",
         message: "POST /core requires an application/json request body.",
-      },
-    };
-  }
-
-  try {
-    const value = await request.json();
-
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
-      return {
-        ok: false,
-        status: 400,
-        error: {
-          code: "invalid_core_command_body",
-          message: "Core command body must be a JSON object.",
-        },
-      };
-    }
-
-    return { ok: true, value: value as Record<string, unknown> };
-  } catch {
-    return {
-      ok: false,
-      status: 400,
-      error: {
+    },
+    invalidJson: {
         code: "invalid_core_command_body",
         message: "Core command body must be valid JSON.",
-      },
-    };
-  }
+    },
+    invalidObject: {
+      code: "invalid_core_command_body",
+      message: "Core command body must be a JSON object.",
+    },
+    tooLarge: (maxBytes) => ({
+      code: "core_command_body_too_large",
+      message: `Core command body must be at most ${maxBytes} bytes.`,
+    }),
+    maxBytes: defaultMaxJsonBodyBytes,
+  });
 }
 
 function errorResponse(error: { code: string; message: string }, status: number) {
@@ -330,8 +313,44 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const preAuth = authorizeControlPlaneAccess({
+    enabled: env.WORKER_RUN_ENABLED,
+    appEnv: env.APP_ENV,
+    expectedToken: env.WORKER_RUN_TOKEN,
+    operatorEmail: env.WORKER_OPERATOR_EMAIL,
+    authorization: request.headers.get("authorization"),
+    headerToken: request.headers.get("x-worker-run-token"),
+    allowedTenants: env.CONTROL_PLANE_ALLOWED_TENANTS,
+    allowedWorkerRoles: env.CONTROL_PLANE_ALLOWED_WORKER_ROLES,
+    tokenCatalogJson: env.CONTROL_PLANE_TOKENS_JSON,
+    tokenCatalogB64: env.CONTROL_PLANE_TOKEN_CATALOG_B64,
+    route: "core",
+    access: "write",
+  });
+
+  if (!preAuth.ok) {
+    await recordControlPlaneAuthAttempt({
+      request,
+      route: "core",
+      access: "write",
+      auth: preAuth,
+    });
+    return guardErrorResponse(preAuth);
+  }
+
   const bodyResult = await readBody(request);
-  const body = bodyResult.ok ? bodyResult.value : {};
+
+  if (!bodyResult.ok) {
+    await recordControlPlaneAuthAttempt({
+      request,
+      route: "core",
+      access: "write",
+      auth: preAuth,
+    });
+    return errorResponse(bodyResult.error, bodyResult.status);
+  }
+
+  const body = bodyResult.value;
   const unexpectedFields = unexpectedCorePayloadFields(body);
   const command = optionalString(body.command);
   const core = bodyObject(body.core);
@@ -364,10 +383,6 @@ export async function POST(request: Request) {
       auth,
     });
     return guardErrorResponse(auth);
-  }
-
-  if (!bodyResult.ok) {
-    return errorResponse(bodyResult.error, bodyResult.status);
   }
 
   if (unexpectedFields.length > 0) {

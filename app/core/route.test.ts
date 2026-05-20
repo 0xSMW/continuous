@@ -240,6 +240,77 @@ describe("POST /core", () => {
     expect(mocks.createCoreTask).not.toHaveBeenCalled();
   });
 
+  it("rejects unauthorized Core commands before reading the request body", async () => {
+    const getReader = vi.fn(() => {
+      throw new Error("Body should not be read before auth succeeds.");
+    });
+    const { POST } = await import("./route");
+    const response = await POST({
+      url: "http://localhost/core",
+      headers: new Headers({
+        authorization: "Bearer wrong-token",
+        "content-type": "application/json",
+      }),
+      body: {
+        getReader,
+      },
+    } as unknown as Request);
+    const body = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(body.error).toEqual({
+      code: "control_plane_unauthorized",
+      message: "Control-plane token is invalid.",
+    });
+    expect(getReader).not.toHaveBeenCalled();
+    expect(mocks.createCoreTask).not.toHaveBeenCalled();
+    expect(mocks.executeAiInference).not.toHaveBeenCalled();
+  });
+
+  it("rejects oversized Core command bodies before JSON parsing", async () => {
+    const { POST } = await import("./route");
+    const byContentLength = await POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+          "content-length": "1048577",
+        },
+        body: JSON.stringify({
+          command: "task.create",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "oversized-core-body-001",
+          config: {},
+        }),
+      }),
+    );
+    const byStream = await POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: "x".repeat(1_048_577),
+      }),
+    );
+
+    for (const response of [byContentLength, byStream]) {
+      const body = await response.json();
+
+      expect(response.status).toBe(413);
+      expect(body.error).toEqual({
+        code: "core_command_body_too_large",
+        message: "Core command body must be at most 1048576 bytes.",
+      });
+    }
+    expect(mocks.createCoreTask).not.toHaveBeenCalled();
+    expect(mocks.executeAiInference).not.toHaveBeenCalled();
+  });
+
   it("attests control-plane token rotation through the Core command envelope", async () => {
     const previousFingerprint = ["1111", "2222", "3333", "4444"].join("");
     const nextFingerprint = ["5555", "6666", "7777", "8888"].join("");
