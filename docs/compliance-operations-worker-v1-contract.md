@@ -28,7 +28,9 @@ All commands use `POST /worker`; no compliance-specific route is added.
   "config": {
     "filingRequirementId": "filing_requirement_object_uuid",
     "period": "2026-Q2",
-    "sourceRefs": ["payroll_run_object_uuid"]
+    "sourceRefs": {
+      "payrollRunId": "payroll_run_object_uuid"
+    }
   }
 }
 ```
