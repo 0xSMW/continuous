@@ -15,6 +15,13 @@ import {
   recordControlPlaneAuthAttempt,
 } from "../../src/core/control-plane-auth";
 import { isJsonContentType } from "../../src/http/content";
+import {
+  unexpectedEnvelopeFields,
+  validateWorkerTargetEnvelope,
+  workerCommandEnvelopeDescription,
+  workerCommandEnvelopeFieldSet,
+  workerEnvelopeFieldError,
+} from "../../src/worker/envelope";
 
 export const dynamic = "force-dynamic";
 
@@ -48,8 +55,6 @@ function configObject(value: unknown):
   };
 }
 
-const workerCommandEnvelopeFields = new Set(["command", "worker", "idempotencyKey", "config"]);
-const workerTargetEnvelopeFields = new Set(["role", "id", "tenantSlug"]);
 const maxWorkerCommandBodyBytes = 1_048_576;
 
 function bodyTooLargeError() {
@@ -173,30 +178,14 @@ function targetFrom(value: unknown): WorkerTargetInput {
 function validateWorkerTarget(value: unknown):
   | { ok: true }
   | { ok: false; error: { code: string; message: string } } {
-  if (value === undefined || value === null) {
-    return { ok: true };
-  }
+  const result = validateWorkerTargetEnvelope(value);
 
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
+  if (!result.ok) {
     return {
       ok: false,
       error: {
         code: "invalid_worker_target",
-        message: "worker must be an object with role, id, and tenantSlug selectors.",
-      },
-    };
-  }
-
-  const unexpectedFields = Object.keys(value as Record<string, unknown>).filter(
-    (field) => !workerTargetEnvelopeFields.has(field),
-  );
-
-  if (unexpectedFields.length > 0) {
-    return {
-      ok: false,
-      error: {
-        code: "invalid_worker_target",
-        message: `worker target fields must be role, id, and tenantSlug. Move operation inputs into config. Unexpected fields: ${unexpectedFields.join(", ")}.`,
+        message: result.message,
       },
     };
   }
@@ -213,7 +202,7 @@ function idempotencyKeyFrom(body: Record<string, unknown>, request: Request) {
 }
 
 function unexpectedWorkerPayloadFields(body: Record<string, unknown>) {
-  return Object.keys(body).filter((field) => !workerCommandEnvelopeFields.has(field));
+  return unexpectedEnvelopeFields(body, workerCommandEnvelopeFieldSet);
 }
 
 function targetFromUrl(request: Request): WorkerTargetInput {
@@ -457,7 +446,11 @@ export async function POST(request: Request) {
     return errorResponse(
       {
         code: "invalid_worker_command_envelope",
-        message: `Worker command payload fields must be command, worker, idempotencyKey, and config. Move operation inputs into config. Unexpected fields: ${unexpectedFields.join(", ")}.`,
+        message: workerEnvelopeFieldError(
+          "Worker command payload",
+          workerCommandEnvelopeDescription,
+          unexpectedFields,
+        ),
       },
       400,
     );

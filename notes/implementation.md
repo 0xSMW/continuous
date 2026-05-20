@@ -23,6 +23,7 @@
 | Normalized worker role naming | Strategy examples and contract guardrails now use role-based names such as `revenue_operations` instead of `_worker` identifiers, so future workers extend the same `/worker` command envelope |
 | Added worker command registry | `/worker` and `bun run worker:tool` now share registered command metadata, role allowlisting, config validation, idempotency rules, tenant requirements, and external-execution posture |
 | Hardened the worker API contract | Route-level tests now assert the generic `/worker` payload envelope, body `idempotencyKey` precedence, GET selector mapping, and malformed command config rejection |
+| Shared the worker envelope guard | `/worker`, `worker.command`, `worker.view`, and `continuous.worker.command` now use one `command`/`worker`/`idempotencyKey`/`config` envelope helper so future worker families cannot drift into route-specific or tool-specific payload shapes |
 | Removed worker-specific local shortcuts | `worker:tool` is the only local mutation entrypoint; Revenue Operations runs now use the same `worker`, `command`, `idempotencyKey`, and `config` envelope as `/worker` |
 | Collapsed local worker aliases | `worker:tool` now exposes only `worker.command` and `worker.view`; command/view names live on the payload, and docs/tests reject worker-family-specific local tool names |
 | Added canonical workflow API | `/workflow` validates definition-backed `start` and `transition` commands and records workflow events, audit events, and evidence |

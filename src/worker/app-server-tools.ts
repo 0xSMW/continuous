@@ -1,6 +1,13 @@
 import type { JsonObject } from "../db/schema";
 import { executeWorkerCommand, type WorkerTargetInput } from "./registry";
 import { assertTrustedLocalWorkerMutation, workerToolSchema } from "./tools";
+import {
+  unexpectedEnvelopeFields,
+  validateWorkerTargetEnvelope,
+  workerCommandEnvelopeDescription,
+  workerCommandEnvelopeFieldSet,
+  workerEnvelopeFieldError,
+} from "./envelope";
 
 export type AppServerDynamicToolSpec = {
   name: string;
@@ -86,41 +93,23 @@ function targetFrom(args: JsonObject): WorkerTargetInput {
   };
 }
 
-const appServerWorkerCommandEnvelopeFields = new Set([
-  "command",
-  "worker",
-  "idempotencyKey",
-  "config",
-]);
-const workerTargetEnvelopeFields = new Set(["role", "id", "tenantSlug"]);
-
 function assertAppServerWorkerCommandEnvelope(args: JsonObject) {
-  const unexpectedFields = Object.keys(args).filter((field) => !appServerWorkerCommandEnvelopeFields.has(field));
+  const unexpectedFields = unexpectedEnvelopeFields(args, workerCommandEnvelopeFieldSet);
 
   if (unexpectedFields.length > 0) {
     throw new Error(
-      `continuous.worker.command payload fields must be command, worker, idempotencyKey, and config. Move operation inputs into config. Unexpected fields: ${unexpectedFields.join(", ")}.`,
+      workerEnvelopeFieldError(
+        "continuous.worker.command payload",
+        workerCommandEnvelopeDescription,
+        unexpectedFields,
+      ),
     );
   }
 
-  const worker = args.worker;
+  const targetResult = validateWorkerTargetEnvelope(args.worker);
 
-  if (worker === undefined || worker === null) {
-    return;
-  }
-
-  if (!worker || typeof worker !== "object" || Array.isArray(worker)) {
-    throw new Error("worker must be an object with role, id, and tenantSlug selectors.");
-  }
-
-  const unexpectedWorkerFields = Object.keys(worker as Record<string, unknown>).filter(
-    (field) => !workerTargetEnvelopeFields.has(field),
-  );
-
-  if (unexpectedWorkerFields.length > 0) {
-    throw new Error(
-      `worker target fields must be role, id, and tenantSlug. Move operation inputs into config. Unexpected fields: ${unexpectedWorkerFields.join(", ")}.`,
-    );
+  if (!targetResult.ok) {
+    throw new Error(targetResult.message);
   }
 }
 

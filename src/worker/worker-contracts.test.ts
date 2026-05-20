@@ -159,6 +159,30 @@ describe("future worker contracts", () => {
     expect(source).not.toMatch(/\/api\/[a-z0-9-]+-worker/);
   });
 
+  it("uses one shared worker envelope guard across HTTP and tool surfaces", () => {
+    const surfaces = [
+      "app/worker/route.ts",
+      "src/worker/tools.ts",
+      "src/worker/app-server-tools.ts",
+    ];
+
+    for (const path of surfaces) {
+      const source = read(path);
+
+      expect(source).toContain(path.startsWith("app/") ? "src/worker/envelope" : "./envelope");
+      expect(source).toContain("workerCommandEnvelope");
+      expect(source).not.toMatch(/new Set\(\[\s*["']command["']/);
+      expect(source).not.toMatch(/new Set\(\[\s*["']role["']/);
+    }
+
+    expect(read("src/worker/envelope.ts")).toContain(
+      'export const workerCommandEnvelopeFields = ["command", "worker", "idempotencyKey", "config"] as const;',
+    );
+    expect(read("src/worker/envelope.ts")).toContain(
+      'export const workerTargetEnvelopeFields = ["role", "id", "tenantSlug"] as const;',
+    );
+  });
+
   it("has implementation-grade contracts for every worker", () => {
     const requiredSections = [
       "## Header",

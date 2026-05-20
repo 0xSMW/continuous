@@ -1,0 +1,63 @@
+export const workerCommandEnvelopeFields = ["command", "worker", "idempotencyKey", "config"] as const;
+export const workerViewEnvelopeFields = ["view", "worker", "config"] as const;
+export const workerTargetEnvelopeFields = ["role", "id", "tenantSlug"] as const;
+
+export const workerCommandEnvelopeFieldSet = new Set<string>(workerCommandEnvelopeFields);
+export const workerViewEnvelopeFieldSet = new Set<string>(workerViewEnvelopeFields);
+export const workerTargetEnvelopeFieldSet = new Set<string>(workerTargetEnvelopeFields);
+
+export const workerCommandEnvelopeDescription = describeEnvelopeFields(workerCommandEnvelopeFields);
+export const workerViewEnvelopeDescription = describeEnvelopeFields(workerViewEnvelopeFields);
+export const workerTargetEnvelopeDescription = describeEnvelopeFields(workerTargetEnvelopeFields);
+
+function describeEnvelopeFields(fields: readonly string[]) {
+  if (fields.length === 1) {
+    return fields[0] ?? "";
+  }
+
+  return `${fields.slice(0, -1).join(", ")}, and ${fields[fields.length - 1]}`;
+}
+
+export function unexpectedEnvelopeFields(
+  payload: Record<string, unknown>,
+  allowedFields: ReadonlySet<string>,
+) {
+  return Object.keys(payload).filter((field) => !allowedFields.has(field));
+}
+
+export function workerEnvelopeFieldError(subject: string, allowedDescription: string, unexpectedFields: string[]) {
+  return `${subject} fields must be ${allowedDescription}. Move operation inputs into config. Unexpected fields: ${unexpectedFields.join(", ")}.`;
+}
+
+export function validateWorkerTargetEnvelope(value: unknown):
+  | { ok: true }
+  | { ok: false; message: string } {
+  if (value === undefined || value === null) {
+    return { ok: true };
+  }
+
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {
+      ok: false,
+      message: "worker must be an object with role, id, and tenantSlug selectors.",
+    };
+  }
+
+  const unexpectedFields = unexpectedEnvelopeFields(
+    value as Record<string, unknown>,
+    workerTargetEnvelopeFieldSet,
+  );
+
+  if (unexpectedFields.length > 0) {
+    return {
+      ok: false,
+      message: workerEnvelopeFieldError(
+        "worker target",
+        workerTargetEnvelopeDescription,
+        unexpectedFields,
+      ),
+    };
+  }
+
+  return { ok: true };
+}

@@ -11,6 +11,15 @@ import {
   plannedWorkerContracts,
   plannedWorkerViews,
 } from "./planned-workers";
+import {
+  unexpectedEnvelopeFields,
+  validateWorkerTargetEnvelope,
+  workerCommandEnvelopeDescription,
+  workerCommandEnvelopeFieldSet,
+  workerEnvelopeFieldError,
+  workerViewEnvelopeDescription,
+  workerViewEnvelopeFieldSet,
+} from "./envelope";
 
 export const workerTools = [
   {
@@ -251,16 +260,6 @@ function targetFrom(payload: JsonObject): WorkerTargetInput {
   };
 }
 
-const workerCommandToolEnvelopeFields = new Set([
-  "command",
-  "worker",
-  "idempotencyKey",
-  "config",
-]);
-
-const workerViewToolEnvelopeFields = new Set(["view", "worker", "config"]);
-const workerTargetEnvelopeFields = new Set(["role", "id", "tenantSlug"]);
-
 export function assertTrustedLocalWorkerMutation(surface: string) {
   if (
     process.env.APP_ENV === "production" &&
@@ -275,15 +274,15 @@ export function assertTrustedLocalWorkerMutation(surface: string) {
 function workerToolEnvelope(name: string) {
   if (name === "worker.command") {
     return {
-      fields: workerCommandToolEnvelopeFields,
-      description: "command, worker, idempotencyKey, and config",
+      fields: workerCommandEnvelopeFieldSet,
+      description: workerCommandEnvelopeDescription,
     };
   }
 
   if (name === "worker.view") {
     return {
-      fields: workerViewToolEnvelopeFields,
-      description: "view, worker, and config",
+      fields: workerViewEnvelopeFieldSet,
+      description: workerViewEnvelopeDescription,
     };
   }
 
@@ -297,32 +296,17 @@ function assertWorkerToolEnvelope(name: string, payload: JsonObject) {
     throw new Error(`Unknown worker tool: ${name}`);
   }
 
-  const unexpectedFields = Object.keys(payload).filter((field) => !envelope.fields.has(field));
+  const unexpectedFields = unexpectedEnvelopeFields(payload, envelope.fields);
 
   if (unexpectedFields.length > 0) {
-    throw new Error(
-      `Worker tool payload fields must be ${envelope.description}. Move operation inputs into config. Unexpected fields: ${unexpectedFields.join(", ")}.`,
-    );
+    throw new Error(workerEnvelopeFieldError("Worker tool payload", envelope.description, unexpectedFields));
   }
 
   const worker = payload.worker;
+  const targetResult = validateWorkerTargetEnvelope(worker);
 
-  if (worker === undefined || worker === null) {
-    return;
-  }
-
-  if (!worker || typeof worker !== "object" || Array.isArray(worker)) {
-    throw new Error("worker must be an object with role, id, and tenantSlug selectors.");
-  }
-
-  const unexpectedWorkerFields = Object.keys(worker as Record<string, unknown>).filter(
-    (field) => !workerTargetEnvelopeFields.has(field),
-  );
-
-  if (unexpectedWorkerFields.length > 0) {
-    throw new Error(
-      `worker target fields must be role, id, and tenantSlug. Move operation inputs into config. Unexpected fields: ${unexpectedWorkerFields.join(", ")}.`,
-    );
+  if (!targetResult.ok) {
+    throw new Error(targetResult.message);
   }
 }
 
