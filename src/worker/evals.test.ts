@@ -2,13 +2,19 @@ import { describe, expect, it } from "vitest";
 
 import {
   ownerBriefEvalCases,
+  revenueWorkerActionEvalCases,
   revenueWorkerBlockedEvalCases,
   revenueWorkerEvalCases,
   scoreOwnerBriefRun,
+  scoreRevenueWorkerAction,
   scoreRevenueWorkerRun,
 } from "./evals";
 import type { OwnerBriefRunResult, OwnerWorkerSnapshot } from "./owner";
-import type { RevenueWorkerRunResult, RevenueWorkerSnapshot } from "./revenue";
+import type {
+  RevenueWorkerActionResult,
+  RevenueWorkerRunResult,
+  RevenueWorkerSnapshot,
+} from "./revenue";
 
 function objectValue(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -110,9 +116,97 @@ const completeResult: RevenueWorkerRunResult = {
   snapshot,
 };
 
+const completeClassifyActionResult: RevenueWorkerActionResult = {
+  created: true,
+  idempotencyKey: "eval-revenue-lead-classify-missing-facts-trace",
+  workerRunId: "worker_run_classify_1",
+  eventId: "event_classify_1",
+  reservationId: "reservation_classify_1",
+  inferenceId: "inference_classify_1",
+  usageEventId: "usage_classify_1",
+  evidenceId: "evidence_classify_1",
+  auditEventId: "audit_classify_1",
+  output: {
+    command: "lead.classify",
+    source: "website_form",
+    sourceEventId: "eval-form-action-classify",
+    customerName: "Circuit City But Not That One",
+    customerIntent: "panel upgrade estimate",
+    serviceArea: "electrical",
+    urgency: "normal",
+    missingFacts: ["panel_amperage", "permit_jurisdiction", "photos"],
+    classification: "quote_needs_facts_for_owner_review",
+    expectedAction: "draft_customer_response",
+    externalExecution: "blocked",
+    externalSend: false,
+    reason: "Lead needs owner-visible missing-fact review before any external send.",
+  },
+  snapshot: {
+    ...snapshot,
+    latestRun: {
+      id: "event_classify_1",
+      workerRunId: "worker_run_classify_1",
+      eventId: "event_classify_1",
+      idempotencyKey: "eval-revenue-lead-classify-missing-facts-trace",
+      occurredAt: new Date("2026-05-19T00:01:00.000Z").toISOString(),
+      state: "done",
+      mode: "classification",
+    },
+  },
+};
+
+const completeDraftActionResult: RevenueWorkerActionResult = {
+  created: true,
+  idempotencyKey: "eval-revenue-response-draft-owner-review-packet",
+  workerRunId: "worker_run_draft_1",
+  eventId: "event_draft_1",
+  reservationId: "reservation_draft_1",
+  inferenceId: "inference_draft_1",
+  usageEventId: "usage_draft_1",
+  evidenceId: "evidence_draft_1",
+  auditEventId: "audit_draft_1",
+  output: {
+    command: "response.draft",
+    source: "website_form",
+    sourceEventId: "eval-form-action-draft",
+    customerName: "Mario's Midnight Plumbing",
+    customerIntent: "burst pipe repair",
+    serviceArea: "plumbing",
+    urgency: "high",
+    missingFacts: [],
+    classification: "quote_ready_for_owner_approval",
+    expectedAction: "draft_customer_response",
+    externalExecution: "blocked",
+    externalSend: false,
+    draftResponse:
+      "Hi Mario's, we can help with burst pipe repair. I prepared a $184.00 plumbing quote packet for owner review.",
+    quote: {
+      totalCents: 18400,
+      currency: "USD",
+      policy: {
+        approvalRequired: true,
+        externalSend: false,
+        moneyMovement: "blocked",
+      },
+    },
+  },
+  snapshot: {
+    ...snapshot,
+    latestRun: {
+      id: "event_draft_1",
+      workerRunId: "worker_run_draft_1",
+      eventId: "event_draft_1",
+      idempotencyKey: "eval-revenue-response-draft-owner-review-packet",
+      occurredAt: new Date("2026-05-19T00:02:00.000Z").toISOString(),
+      state: "done",
+      mode: "draft",
+    },
+  },
+};
+
 const ownerSnapshot: OwnerWorkerSnapshot = {
   worker: {
-    id: "owner_worker_1",
+    id: "owner_chief_of_staff_1",
     name: "Owner Chief-of-Staff Worker",
     role: "owner_chief_of_staff",
     state: "active",
@@ -253,6 +347,29 @@ describe("Revenue Worker evals", () => {
     expect(leadPacket.externalSend).toBe(true);
   });
 
+  it("covers split classify and draft command eval fixtures", () => {
+    expect(revenueWorkerActionEvalCases).toEqual([
+      expect.objectContaining({
+        id: "revenue.lead_classify.missing_facts_trace",
+        command: "lead.classify",
+        expected: expect.objectContaining({
+          classification: "quote_needs_facts_for_owner_review",
+          runMode: "classification",
+          missingFact: "panel_amperage",
+        }),
+      }),
+      expect.objectContaining({
+        id: "revenue.response_draft.owner_review_packet",
+        command: "response.draft",
+        expected: expect.objectContaining({
+          classification: "quote_ready_for_owner_approval",
+          runMode: "draft",
+          quoteTotalCents: 18400,
+        }),
+      }),
+    ]);
+  });
+
   it("passes a run that links ledgers, blocks external execution, and requests approval", () => {
     const result = scoreRevenueWorkerRun(completeResult, revenueWorkerEvalCases[0]);
 
@@ -261,6 +378,51 @@ describe("Revenue Worker evals", () => {
     expect(result.dimensions.every((dimension) => dimension.passed)).toBe(true);
     expect(result.dimensions.find((dimension) => dimension.id === "policy_guardrails")?.passed).toBe(
       true,
+    );
+  });
+
+  it("passes split command runs that link ledgers and block external execution", () => {
+    const classifyScore = scoreRevenueWorkerAction(
+      completeClassifyActionResult,
+      revenueWorkerActionEvalCases[0],
+    );
+    const draftScore = scoreRevenueWorkerAction(
+      completeDraftActionResult,
+      revenueWorkerActionEvalCases[1],
+    );
+
+    expect(classifyScore.passed).toBe(true);
+    expect(classifyScore.score).toBe(1);
+    expect(classifyScore.dimensions.every((dimension) => dimension.passed)).toBe(true);
+    expect(draftScore.passed).toBe(true);
+    expect(draftScore.score).toBe(1);
+    expect(draftScore.dimensions.every((dimension) => dimension.passed)).toBe(true);
+  });
+
+  it("keeps split command score tolerant when snapshot ordering points at another run", () => {
+    const result = scoreRevenueWorkerAction(
+      {
+        ...completeClassifyActionResult,
+        snapshot: {
+          ...completeClassifyActionResult.snapshot,
+          latestRun: {
+            id: "event_old",
+            workerRunId: "worker_run_old",
+            eventId: "event_old",
+            idempotencyKey: "stale-run",
+            occurredAt: new Date("2026-05-18T00:00:00.000Z").toISOString(),
+            state: "done",
+            mode: "simulation",
+          },
+        },
+      },
+      revenueWorkerActionEvalCases[0],
+    );
+
+    expect(result.passed).toBe(true);
+    expect(result.score).toBeGreaterThanOrEqual(revenueWorkerActionEvalCases[0].expected.minScore);
+    expect(result.dimensions.find((dimension) => dimension.id === "snapshot_run")?.passed).toBe(
+      false,
     );
   });
 

@@ -83,14 +83,21 @@ import {
 } from "../db/schema";
 import {
   ownerBriefEvalCases,
+  revenueWorkerActionEvalCases,
   revenueWorkerBlockedEvalCases,
   revenueWorkerEvalCases,
   scoreOwnerBriefRun,
+  scoreRevenueWorkerAction,
   scoreRevenueWorkerRun,
 } from "./evals";
 import { executeAppServerWorkerTool } from "./app-server-tools";
 import { executeWorkerCommand } from "./registry";
-import { continueRevenueWorker, runRevenueWorker } from "./revenue";
+import {
+  classifyRevenueLead,
+  continueRevenueWorker,
+  draftRevenueResponse,
+  runRevenueWorker,
+} from "./revenue";
 
 const runIntegration = Boolean(process.env.CI && process.env.DATABASE_URL);
 const maybeDescribe = runIntegration ? describe : describe.skip;
@@ -2244,6 +2251,55 @@ maybeDescribe("Revenue Worker integration eval", () => {
     }
   }, 120_000);
 
+  it("scores split Revenue classify and draft command eval cases", async () => {
+    const classifyCase = revenueWorkerActionEvalCases.find(
+      (item) => item.command === "lead.classify",
+    );
+    const draftCase = revenueWorkerActionEvalCases.find((item) => item.command === "response.draft");
+
+    expect(classifyCase).toBeDefined();
+    expect(draftCase).toBeDefined();
+    if (!classifyCase || !draftCase) {
+      throw new Error("Missing split Revenue command eval cases.");
+    }
+
+    const classify = await classifyRevenueLead({
+      idempotencyKey: classifyCase.idempotencyKey,
+      tenantSlug: classifyCase.worker.tenantSlug,
+      operatorEmail: "owner@continuoushq.com",
+      config: classifyCase.config,
+    });
+    const classifyScore = scoreRevenueWorkerAction(classify, classifyCase);
+
+    expect(classify.created).toBe(true);
+    expect(classifyScore.passed).toBe(true);
+    expect(classifyScore.dimensions.filter((dimension) => !dimension.passed)).toEqual([]);
+    expect(objectValue(classify.output).command).toBe("lead.classify");
+
+    const draft = await draftRevenueResponse({
+      idempotencyKey: draftCase.idempotencyKey,
+      tenantSlug: draftCase.worker.tenantSlug,
+      operatorEmail: "owner@continuoushq.com",
+      config: draftCase.config,
+    });
+    const draftScore = scoreRevenueWorkerAction(draft, draftCase);
+
+    expect(draft.created).toBe(true);
+    expect(draftScore.dimensions.filter((dimension) => !dimension.passed)).toEqual([]);
+    expect(draftScore.passed).toBe(true);
+    expect(objectValue(draft.output).command).toBe("response.draft");
+
+    const draftReplay = await draftRevenueResponse({
+      idempotencyKey: draftCase.idempotencyKey,
+      tenantSlug: draftCase.worker.tenantSlug,
+      operatorEmail: "owner@continuoushq.com",
+      config: draftCase.config,
+    });
+
+    expect(draftReplay.created).toBe(false);
+    expect(draftReplay.workerRunId).toBe(draft.workerRunId);
+  }, 120_000);
+
   it("rejects policy-risk Revenue eval cases before worker ledgers are written", async () => {
     const evalCase = revenueWorkerBlockedEvalCases.find(
       (item) => item.id === "revenue.policy_risk.external_send_blocked",
@@ -2681,7 +2737,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(reclaimedStep?.leaseOwner).toBeNull();
 
     const [revenueWorker] = await db
-      .select({ id: workers.id })
+      .select({ id: workers.id, tenantId: workers.tenantId })
       .from(workers)
       .where(eq(workers.role, "revenue_operations"))
       .limit(1);
@@ -4401,9 +4457,9 @@ maybeDescribe("Revenue Worker integration eval", () => {
 
     expect(classifyRun?.mode).toBe("classification");
     expect(objectValue(objectValue(classifyRun?.data).input).command).toBe("lead.classify");
-    expect(classifyEvent?.type).toBe("worker.lead_classify.completed");
+    expect(classifyEvent?.type).toBe("worker.revenue_operations.lead_classify.completed");
     expect(classifyEvidence?.kind).toBe("trace");
-    expect(classifyAudit?.type).toBe("worker.lead_classify.completed");
+    expect(classifyAudit?.type).toBe("worker.revenue_operations.lead_classify.completed");
     expect(classifyUsage?.units).toBeGreaterThan(0);
 
     const [draftRun] = await db
@@ -4434,9 +4490,9 @@ maybeDescribe("Revenue Worker integration eval", () => {
 
     expect(draftRun?.mode).toBe("draft");
     expect(objectValue(objectValue(draftRun?.data).input).command).toBe("response.draft");
-    expect(draftEvent?.type).toBe("worker.response_draft.completed");
+    expect(draftEvent?.type).toBe("worker.revenue_operations.response_draft.completed");
     expect(draftEvidence?.kind).toBe("draft");
-    expect(draftAudit?.type).toBe("worker.response_draft.completed");
+    expect(draftAudit?.type).toBe("worker.revenue_operations.response_draft.completed");
     expect(draftUsage?.units).toBeGreaterThan(0);
 
     const run = await runRevenueWorker({
@@ -4560,6 +4616,49 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(objectValue(objectValue(runRow?.data).input).inputHash).toBeTruthy();
     expect(approval?.state).toBe("pending");
     expect(approval?.kind).toBe("quote_approval");
+  }, 120_000);
+
+  it("executes split Revenue action commands through the app-server worker command surface", async () => {
+    for (const evalCase of revenueWorkerActionEvalCases) {
+      const runId = randomUUID();
+      const response = await executeAppServerWorkerTool("continuous.worker.command", {
+        command: evalCase.command,
+        worker: evalCase.worker,
+        idempotencyKey: `${evalCase.idempotencyKey}-${runId}`,
+        config: evalCase.config,
+      });
+      const responseEnvelope = objectValue(response);
+      const result = responseEnvelope.result as Awaited<
+        ReturnType<typeof import("./revenue").classifyRevenueLead>
+      >;
+      const score = scoreRevenueWorkerAction(result, evalCase);
+      const [run] = await db
+        .select()
+        .from(workerRuns)
+        .where(eq(workerRuns.id, result.workerRunId ?? ""))
+        .limit(1);
+      const [event] = await db
+        .select()
+        .from(events)
+        .where(eq(events.id, result.eventId ?? ""))
+        .limit(1);
+      const [audit] = await db
+        .select()
+        .from(auditEvents)
+        .where(eq(auditEvents.id, result.auditEventId ?? ""))
+        .limit(1);
+
+      expect(responseEnvelope.command).toBe(evalCase.command);
+      expect(objectValue(responseEnvelope.worker).role).toBe("revenue_operations");
+      expect(score.dimensions.filter((dimension) => !dimension.passed)).toEqual([]);
+      expect(score.passed).toBe(true);
+      expect(score.score).toBeGreaterThanOrEqual(evalCase.expected.minScore);
+      expect(run?.source).toBe("continuous.worker");
+      expect(run?.mode).toBe(evalCase.expected.runMode);
+      expect(run?.state).toBe(evalCase.expected.runState);
+      expect(event?.type).toBe(`worker.revenue_operations.${evalCase.command.replace(".", "_")}.completed`);
+      expect(audit?.type).toBe(event?.type);
+    }
   }, 120_000);
 
   it("normalizes inbox and CRM source readers into persisted lead intake selectors", async () => {
@@ -4930,6 +5029,31 @@ maybeDescribe("Revenue Worker integration eval", () => {
 
       expect(objectValue(liveReplay.result).created).toBe(false);
       expect(apiHitCount).toBe(apiHitsAfterFirstRead);
+
+      await expect(
+        executeWorkerCommand({
+          command: "lead.read",
+          target: {
+            role: "revenue_operations",
+            tenantSlug: "continuous-demo",
+          },
+          operatorEmail: "owner@continuoushq.com",
+          idempotencyKey: `ci-worker-connection-api-read-${runId}`,
+          config: {
+            source: "google_workspace_inbox",
+            reader: {
+              kind: "inbox",
+              provider: "google_workspace",
+              credentialRef: `connection:${liveConnection.id}`,
+              mode: "snapshot",
+            },
+          },
+        }),
+      ).rejects.toMatchObject({
+        code: "worker_idempotency_conflict",
+        status: 409,
+      });
+      expect(apiHitCount).toBe(apiHitsAfterFirstRead);
     } finally {
       await new Promise<void>((resolve, reject) => {
         apiServer.close((error) => (error ? reject(error) : resolve()));
@@ -5091,6 +5215,109 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .where(eq(workerRuns.idempotencyKey, idempotencyKey));
 
     expect(workerRunCount.count).toBe(0);
+  }, 120_000);
+
+  it("rejects empty Revenue run, classify, and draft configs before synthetic lead defaults", async () => {
+    const runId = randomUUID();
+
+    await expect(
+      runRevenueWorker({
+        idempotencyKey: `ci-worker-empty-run-${runId}`,
+        tenantSlug: "continuous-demo",
+        operatorEmail: "owner@continuoushq.com",
+        config: {},
+      }),
+    ).rejects.toMatchObject({
+      code: "worker_intake_required",
+      status: 400,
+    });
+
+    await expect(
+      classifyRevenueLead({
+        idempotencyKey: `ci-worker-empty-classify-${runId}`,
+        tenantSlug: "continuous-demo",
+        operatorEmail: "owner@continuoushq.com",
+        config: {},
+      }),
+    ).rejects.toMatchObject({
+      code: "worker_intake_required",
+      status: 400,
+    });
+
+    await expect(
+      draftRevenueResponse({
+        idempotencyKey: `ci-worker-empty-draft-${runId}`,
+        tenantSlug: "continuous-demo",
+        operatorEmail: "owner@continuoushq.com",
+        config: {},
+      }),
+    ).rejects.toMatchObject({
+      code: "worker_intake_required",
+      status: 400,
+    });
+
+    const [matchingRuns] = await db
+      .select({ value: count() })
+      .from(workerRuns)
+      .where(sql`${workerRuns.idempotencyKey} like ${`ci-worker-empty-%-${runId}`}`);
+
+    expect(matchingRuns.value).toBe(0);
+  }, 120_000);
+
+  it("applies budget capacity guardrails to split Revenue commands", async () => {
+    const runId = randomUUID();
+    const [revenueWorker] = await db
+      .select({ id: workers.id, tenantId: workers.tenantId })
+      .from(workers)
+      .where(eq(workers.role, "revenue_operations"))
+      .limit(1);
+    const [budgetAccount] = await db
+      .select({ id: budgetAccounts.id })
+      .from(budgetAccounts)
+      .where(
+        and(
+          eq(budgetAccounts.target, "worker"),
+          eq(budgetAccounts.targetId, revenueWorker?.id ?? ""),
+          eq(budgetAccounts.active, true),
+        ),
+      )
+      .limit(1);
+
+    expect(budgetAccount?.id).toBeTruthy();
+
+    const [held] = await db
+      .insert(budgetReservations)
+      .values({
+        tenantId: revenueWorker?.tenantId ?? "",
+        accountId: budgetAccount?.id ?? "",
+        units: 10_000_000,
+        state: "held",
+        expiresAt: new Date(Date.now() + 60_000),
+      })
+      .returning({ id: budgetReservations.id });
+
+    try {
+      await expect(
+        classifyRevenueLead({
+          idempotencyKey: `ci-worker-budget-classify-${runId}`,
+          tenantSlug: "continuous-demo",
+          operatorEmail: "owner@continuoushq.com",
+          config: {
+            leadPacket: {
+              source: "website_form",
+              sourceEventId: `budget-classify:${runId}`,
+              customerName: "Budget Guard Electric",
+              customerIntent: "panel inspection",
+              serviceArea: "electrical",
+            },
+          },
+        }),
+      ).rejects.toMatchObject({
+        code: "worker_budget_exceeded",
+      });
+    } finally {
+      await db.delete(budgetReservations).where(eq(budgetReservations.id, held.id));
+    }
   }, 120_000);
 
   it("keeps first-pass adapter reconciliation from advancing Revenue workflows past approval", async () => {
@@ -6354,7 +6581,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .where(and(eq(generatedViews.tenantId, tenantId), eq(generatedViews.key, "dispatch.schedule.review")))
       .limit(1);
 
-    expect(run?.source).toBe("continuous.dispatch_worker");
+    expect(run?.source).toBe("continuous.worker");
     expect(run?.state).toBe("done");
     expect(appointment?.type).toBe("appointment");
     expect(appointment?.state).toBe("approval_required");
@@ -6461,7 +6688,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(customerUpdateOutput.jobObjectId).toBe(jobObjectId);
     expect(customerUpdateOutput.customerUpdateObjectId).toBe(customerUpdateResult.customerUpdateObjectId);
     expect(objectValue(customerUpdateOutput.draft).body).toContain("proposed service window");
-    expect(customerUpdateRun?.source).toBe("continuous.dispatch_worker");
+    expect(customerUpdateRun?.source).toBe("continuous.worker");
     expect(customerUpdateRun?.state).toBe("done");
     expect(customerUpdateObject?.type).toBe("customer_update");
     expect(customerUpdateObject?.state).toBe("approval_required");
@@ -6577,7 +6804,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(closeoutOutput.invoiceReady).toBe(true);
     expect(stringList(closeoutOutput.blockers)).toHaveLength(0);
     expect(objectValue(closeoutOutput.financeHandoff).name).toBe("dispatch.closeout_to_finance");
-    expect(closeoutRun?.source).toBe("continuous.dispatch_worker");
+    expect(closeoutRun?.source).toBe("continuous.worker");
     expect(closeoutRun?.state).toBe("done");
     expect(closeoutObject?.type).toBe("closeout");
     expect(closeoutObject?.state).toBe("review_ready");
@@ -6712,7 +6939,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(financeOutput.totalCents).toBe(24900);
     expect(financeOutput.closeoutObjectId).toBe(closeoutResult.closeoutObjectId);
     expect(objectValue(financeOutput.financeHandoff).name).toBe("finance.invoice_to_owner_review");
-    expect(financeRun?.source).toBe("continuous.finance_worker");
+    expect(financeRun?.source).toBe("continuous.worker");
     expect(financeRun?.state).toBe("done");
     expect(financeInvoiceObject?.type).toBe("invoice");
     expect(financeInvoiceObject?.state).toBe("approval_required");
@@ -6827,7 +7054,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(arFollowupOutput.moneyMovement).toBe("blocked");
     expect(arFollowupOutput.requiresApproval).toBe(true);
     expect(arFollowupOutput.invoiceId).toBe(financeResult.invoiceId);
-    expect(arFollowupRun?.source).toBe("continuous.finance_worker");
+    expect(arFollowupRun?.source).toBe("continuous.worker");
     expect(arFollowupRun?.state).toBe("done");
     expect(arFollowupObject?.type).toBe("ar_followup");
     expect(arFollowupObject?.state).toBe("approval_required");
@@ -6946,7 +7173,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(cashForecastOutput.expectedInflowCents).toBe(24900);
     expect(cashForecastOutput.expectedOutflowCents).toBe(336000);
     expect(cashForecastOutput.endingBalanceCents).toBe(188900);
-    expect(cashForecastRun?.source).toBe("continuous.finance_worker");
+    expect(cashForecastRun?.source).toBe("continuous.worker");
     expect(cashForecastRun?.state).toBe("done");
     expect(cashForecastObject?.type).toBe("cash_forecast");
     expect(cashForecastObject?.state).toBe("review_ready");
@@ -7079,7 +7306,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .where(
         and(
           eq(auditEvents.workerRunId, paymentDraftResult.workerRunId),
-          eq(auditEvents.type, "finance_worker.payment_draft_prepare.completed"),
+          eq(auditEvents.type, "worker.finance_operations.payment_draft_prepare.completed"),
         ),
       )
       .limit(1);
@@ -7096,7 +7323,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(paymentDraftOutput.requiresApproval).toBe(true);
     expect(paymentDraftOutput.requiresDualControl).toBe(true);
     expect(paymentDraftOutput.paymentInstructionId).toBe(paymentDraftResult.paymentInstructionId);
-    expect(paymentDraftRun?.source).toBe("continuous.finance_worker");
+    expect(paymentDraftRun?.source).toBe("continuous.worker");
     expect(paymentDraftRun?.state).toBe("done");
     expect(paymentDraftObject?.type).toBe("payment");
     expect(paymentDraftObject?.state).toBe("dual_control_pending");
@@ -7220,7 +7447,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(exceptionOutput.severity).toBe("high");
     expect(exceptionOutput.taskId).toBe(exceptionResult.taskId);
     expect(exceptionOutput.decisionId).toBe(exceptionResult.decisionId);
-    expect(exceptionRun?.source).toBe("continuous.dispatch_worker");
+    expect(exceptionRun?.source).toBe("continuous.worker");
     expect(exceptionRun?.state).toBe("done");
     expect(exceptionTask?.state).toBe("blocked");
     expect(exceptionTask?.priority).toBe("high");

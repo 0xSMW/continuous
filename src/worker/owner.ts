@@ -34,7 +34,7 @@ type Database = typeof defaultDb;
 
 export const ownerWorkerRole = "owner_chief_of_staff";
 
-const ownerSource = "continuous.owner_worker";
+const ownerSource = "continuous.worker";
 const dailyBriefWorkflowKey = "daily_owner_brief";
 const ownerRunUnits = 4000;
 const defaultBriefScopes = ["tasks", "approvals", "cash", "capacity", "obligations", "workers"];
@@ -475,7 +475,7 @@ async function loadOwnerContext(input: {
 
   if (!worker) {
     throw new PlatformUnavailableError(
-      "owner_worker_not_found",
+      "worker_not_found",
       "No active Owner Chief-of-Staff Worker matches this selector.",
       404,
     );
@@ -1436,7 +1436,7 @@ export async function generateOwnerBrief(input: {
       .insert(events)
       .values({
         tenantId: context.worker.tenantId,
-        type: "owner_worker.brief.generated",
+        type: "worker.owner_chief_of_staff.brief.generated",
         source: ownerSource,
         actorType: "worker",
         actorId: context.worker.id,
@@ -2075,7 +2075,7 @@ export async function continueOwnerWorker(input: {
       .insert(events)
       .values({
         tenantId: context.worker.tenantId,
-        type: "owner_worker.brief.continued",
+        type: "worker.owner_chief_of_staff.brief.continued",
         source: ownerSource,
         actorType: "worker",
         actorId: context.worker.id,
@@ -2561,7 +2561,7 @@ export async function prepareOwnerDecisionQueue(input: {
       .insert(events)
       .values({
         tenantId: context.worker.tenantId,
-        type: "owner_worker.decision_queue.prepared",
+        type: "worker.owner_chief_of_staff.decision_queue.prepared",
         source: ownerSource,
         actorType: "worker",
         actorId: context.worker.id,
@@ -2839,7 +2839,7 @@ export async function triageOwnerAnomalies(input: {
       .insert(events)
       .values({
         tenantId: context.worker.tenantId,
-        type: "owner_worker.anomaly.triaged",
+        type: "worker.owner_chief_of_staff.anomaly.triaged",
         source: ownerSource,
         actorType: "worker",
         actorId: context.worker.id,

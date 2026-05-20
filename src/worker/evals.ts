@@ -1,6 +1,6 @@
 import type { JsonObject } from "../db/schema";
 import type { OwnerBriefRunResult } from "./owner";
-import type { RevenueWorkerRunResult } from "./revenue";
+import type { RevenueWorkerActionResult, RevenueWorkerRunResult } from "./revenue";
 
 export type RevenueWorkerEvalCase = {
   id: string;
@@ -37,6 +37,28 @@ export type RevenueWorkerBlockedEvalCase = {
     errorCode: string;
     status: number;
     messageIncludes: string;
+  };
+};
+
+export type RevenueWorkerActionEvalCase = {
+  id: string;
+  name: string;
+  command: "lead.classify" | "response.draft";
+  idempotencyKey: string;
+  worker: {
+    role: "revenue_operations";
+    tenantSlug: string;
+  };
+  config: JsonObject;
+  expected: {
+    classification: string;
+    runState: string;
+    runMode: "classification" | "draft";
+    externalExecution: "disabled";
+    quoteTotalCents?: number;
+    draftIncludes?: string;
+    missingFact?: string;
+    minScore: number;
   };
 };
 
@@ -87,6 +109,16 @@ const requiredIds: Array<keyof RevenueWorkerRunResult> = [
   "quoteApprovalViewId",
   "auditEventId",
   "workflowRunId",
+];
+
+const actionRequiredIds: Array<keyof RevenueWorkerActionResult> = [
+  "workerRunId",
+  "eventId",
+  "reservationId",
+  "inferenceId",
+  "usageEventId",
+  "evidenceId",
+  "auditEventId",
 ];
 
 export const revenueWorkerEvalCases: RevenueWorkerEvalCase[] = [
@@ -348,6 +380,72 @@ export const revenueWorkerBlockedEvalCases: RevenueWorkerBlockedEvalCase[] = [
   },
 ];
 
+export const revenueWorkerActionEvalCases: RevenueWorkerActionEvalCase[] = [
+  {
+    id: "revenue.lead_classify.missing_facts_trace",
+    name: "Lead classify records a trace and keeps missing-fact review blocked",
+    command: "lead.classify",
+    idempotencyKey: "eval-revenue-lead-classify-missing-facts-trace",
+    worker: {
+      role: "revenue_operations",
+      tenantSlug: "continuous-demo",
+    },
+    config: {
+      leadPacket: {
+        source: "website_form",
+        sourceEventId: "eval-form-action-classify",
+        customerName: "Circuit City But Not That One",
+        customerIntent: "panel upgrade estimate",
+        urgency: "normal",
+        serviceArea: "electrical",
+        missingFacts: ["panel_amperage", "permit_jurisdiction", "photos"],
+      },
+      expectedAction: "draft_customer_response",
+      externalSend: false,
+    },
+    expected: {
+      classification: "quote_needs_facts_for_owner_review",
+      runState: "done",
+      runMode: "classification",
+      externalExecution: "disabled",
+      missingFact: "panel_amperage",
+      minScore: 0.9,
+    },
+  },
+  {
+    id: "revenue.response_draft.owner_review_packet",
+    name: "Response draft records a no-send customer draft with quote guardrails",
+    command: "response.draft",
+    idempotencyKey: "eval-revenue-response-draft-owner-review-packet",
+    worker: {
+      role: "revenue_operations",
+      tenantSlug: "continuous-demo",
+    },
+    config: {
+      leadPacket: {
+        source: "website_form",
+        sourceEventId: "eval-form-action-draft",
+        customerName: "Mario's Midnight Plumbing",
+        customerIntent: "burst pipe repair",
+        urgency: "high",
+        serviceArea: "plumbing",
+        missingFacts: [],
+      },
+      expectedAction: "draft_customer_response",
+      externalSend: false,
+    },
+    expected: {
+      classification: "quote_ready_for_owner_approval",
+      runState: "done",
+      runMode: "draft",
+      externalExecution: "disabled",
+      quoteTotalCents: 18400,
+      draftIncludes: "burst pipe repair",
+      minScore: 0.9,
+    },
+  },
+];
+
 export const ownerBriefEvalCases: OwnerBriefEvalCase[] = [
   {
     id: "owner.daily_brief.review_ready",
@@ -534,6 +632,110 @@ export function scoreRevenueWorkerRun(
     caseId: evalCase.id,
     score,
     passed: score >= evalCase.expected.minScore && dimensions.every((dimension) => dimension.passed),
+    dimensions,
+  };
+}
+
+export function scoreRevenueWorkerAction(
+  result: RevenueWorkerActionResult,
+  evalCase: RevenueWorkerActionEvalCase,
+): RevenueWorkerEvalResult {
+  const dimensions: RevenueWorkerEvalDimension[] = [];
+  const missingIds = actionRequiredIds.filter((key) => !result[key]);
+  const output = objectValue(result.output);
+  const quote = objectValue(output.quote);
+  const quotePolicy = objectValue(quote.policy);
+  const missingFacts = Array.isArray(output.missingFacts)
+    ? output.missingFacts.filter((fact): fact is string => typeof fact === "string")
+    : [];
+  const latestRun = result.snapshot.latestRun;
+  const latestRunMatches =
+    latestRun?.workerRunId === result.workerRunId &&
+    latestRun.state === evalCase.expected.runState &&
+    latestRun.mode === evalCase.expected.runMode;
+  const snapshotHasActionEvent = result.snapshot.recentEvents.some(
+    (event) => event.id === result.eventId,
+  );
+
+  addDimension(
+    dimensions,
+    "ledger_links",
+    missingIds.length === 0,
+    2,
+    missingIds.length === 0
+      ? "action run links budget, inference, usage, evidence, event, and audit ledgers"
+      : `missing ${missingIds.join(", ")}`,
+  );
+
+  addDimension(
+    dimensions,
+    "command_output",
+    stringValue(output.command) === evalCase.command &&
+      stringValue(output.classification) === evalCase.expected.classification,
+    2,
+    `command ${stringValue(output.command)} classified ${stringValue(output.classification)}`,
+  );
+
+  addDimension(
+    dimensions,
+    "snapshot_run",
+    latestRunMatches || snapshotHasActionEvent,
+    1,
+    latestRunMatches
+      ? `latest run is ${latestRun?.state}/${latestRun?.mode}`
+      : snapshotHasActionEvent
+        ? "action event is present in recent worker events"
+        : "action run is missing from latest run and recent events",
+  );
+
+  addDimension(
+    dimensions,
+    "external_execution",
+    result.snapshot.controls.externalExecution === evalCase.expected.externalExecution &&
+      output.externalExecution === "blocked" &&
+      output.externalSend === false,
+    2,
+    `snapshot=${result.snapshot.controls.externalExecution} output=${stringValue(output.externalExecution)}`,
+  );
+
+  addDimension(
+    dimensions,
+    "input_specific_output",
+    (!evalCase.expected.missingFact || missingFacts.includes(evalCase.expected.missingFact)) &&
+      (!evalCase.expected.draftIncludes ||
+        stringValue(output.draftResponse).includes(evalCase.expected.draftIncludes)) &&
+      (evalCase.expected.quoteTotalCents === undefined ||
+        numberValue(quote.totalCents) === evalCase.expected.quoteTotalCents),
+    2,
+    evalCase.command === "lead.classify"
+      ? `missing facts ${missingFacts.join(", ") || "none"}`
+      : `draft quote ${numberValue(quote.totalCents)}`,
+  );
+
+  addDimension(
+    dimensions,
+    "policy_guardrails",
+    evalCase.command === "lead.classify" ||
+      (quotePolicy.approvalRequired === true &&
+        quotePolicy.externalSend === false &&
+        quotePolicy.moneyMovement === "blocked"),
+    2,
+    evalCase.command === "lead.classify"
+      ? "classification has no external action surface"
+      : "draft quote policy blocks external send and money movement",
+  );
+
+  const totalWeight = dimensions.reduce((sum, dimension) => sum + dimension.weight, 0);
+  const passedWeight = dimensions.reduce(
+    (sum, dimension) => sum + (dimension.passed ? dimension.weight : 0),
+    0,
+  );
+  const score = totalWeight > 0 ? Number((passedWeight / totalWeight).toFixed(3)) : 0;
+
+  return {
+    caseId: evalCase.id,
+    score,
+    passed: score >= evalCase.expected.minScore,
     dimensions,
   };
 }

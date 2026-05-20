@@ -45,7 +45,7 @@ type Database = typeof defaultDb;
 
 export const financeWorkerRole = "finance_operations";
 
-const financeSource = "continuous.finance_worker";
+const financeSource = "continuous.worker";
 const invoicePrepareCapabilityKey = "invoice.prepare";
 const arFollowupDraftCapabilityKey = "payment_link.prepare";
 const cashForecastGenerateCapabilityKey = "cash_forecast.generate";
@@ -431,7 +431,7 @@ async function loadFinanceContext(input: {
 
   if (!worker) {
     throw new PlatformUnavailableError(
-      "finance_worker_not_found",
+      "worker_not_found",
       "No active Finance Operations Worker matches this selector.",
       404,
     );
@@ -1927,7 +1927,7 @@ export async function prepareFinanceInvoice(input: {
       .insert(events)
       .values({
         tenantId: context.worker.tenantId,
-        type: "finance_worker.invoice_prepare.completed",
+        type: "worker.finance_operations.invoice_prepare.completed",
         source: financeSource,
         actorType: "worker",
         actorId: context.worker.id,
@@ -2322,7 +2322,7 @@ export async function prepareFinanceInvoice(input: {
 
     await tx.insert(auditEvents).values({
       tenantId: context.worker.tenantId,
-      type: "finance_worker.invoice_prepare.completed",
+      type: "worker.finance_operations.invoice_prepare.completed",
       source: financeSource,
       actorType: "worker",
       actorId: context.worker.id,
@@ -2840,7 +2840,7 @@ export async function draftFinanceArFollowup(input: {
       .insert(events)
       .values({
         tenantId: context.worker.tenantId,
-        type: "finance_worker.ar_followup_draft.completed",
+        type: "worker.finance_operations.ar_followup_draft.completed",
         source: financeSource,
         actorType: "worker",
         actorId: context.worker.id,
@@ -3197,7 +3197,7 @@ export async function draftFinanceArFollowup(input: {
 
     await tx.insert(auditEvents).values({
       tenantId: context.worker.tenantId,
-      type: "finance_worker.ar_followup_draft.completed",
+      type: "worker.finance_operations.ar_followup_draft.completed",
       source: financeSource,
       actorType: "worker",
       actorId: context.worker.id,
@@ -3687,7 +3687,7 @@ export async function generateFinanceCashForecast(input: {
       .insert(events)
       .values({
         tenantId: context.worker.tenantId,
-        type: "finance_worker.cash_forecast_generate.completed",
+        type: "worker.finance_operations.cash_forecast_generate.completed",
         source: financeSource,
         actorType: "worker",
         actorId: context.worker.id,
@@ -4045,7 +4045,7 @@ export async function generateFinanceCashForecast(input: {
 
     await tx.insert(auditEvents).values({
       tenantId: context.worker.tenantId,
-      type: "finance_worker.cash_forecast_generate.completed",
+      type: "worker.finance_operations.cash_forecast_generate.completed",
       source: financeSource,
       actorType: "worker",
       actorId: context.worker.id,
@@ -4576,7 +4576,7 @@ export async function prepareFinancePaymentDraft(input: {
       .insert(events)
       .values({
         tenantId: context.worker.tenantId,
-        type: "finance_worker.payment_draft_prepare.completed",
+        type: "worker.finance_operations.payment_draft_prepare.completed",
         source: financeSource,
         actorType: "worker",
         actorId: context.worker.id,
@@ -4968,7 +4968,7 @@ export async function prepareFinancePaymentDraft(input: {
 
     await tx.insert(auditEvents).values({
       tenantId: context.worker.tenantId,
-      type: "finance_worker.payment_draft_prepare.completed",
+      type: "worker.finance_operations.payment_draft_prepare.completed",
       source: financeSource,
       actorType: "worker",
       actorId: context.worker.id,
@@ -5143,7 +5143,7 @@ export async function getFinanceWorkerSnapshot(
 
   if (!worker) {
     throw new PlatformUnavailableError(
-      "finance_worker_not_found",
+      "worker_not_found",
       "No active Finance Operations Worker matches this selector.",
       404,
     );

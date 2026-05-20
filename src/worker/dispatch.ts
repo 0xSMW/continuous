@@ -42,7 +42,7 @@ type Database = typeof defaultDb;
 
 export const dispatchWorkerRole = "dispatch_operations";
 
-const dispatchSource = "continuous.dispatch_worker";
+const dispatchSource = "continuous.worker";
 const scheduleCapabilityKey = "schedule.propose";
 const customerUpdateCapabilityKey = "response.draft";
 const closeoutCapabilityKey = "document_packet.prepare";
@@ -1680,7 +1680,7 @@ export async function proposeDispatchSchedule(input: {
       .insert(events)
       .values({
         tenantId: context.worker.tenantId,
-        type: "dispatch_worker.schedule_propose.completed",
+        type: "worker.dispatch_operations.schedule_propose.completed",
         source: dispatchSource,
         actorType: "worker",
         actorId: context.worker.id,
@@ -2081,7 +2081,7 @@ export async function proposeDispatchSchedule(input: {
 
     await tx.insert(auditEvents).values({
       tenantId: context.worker.tenantId,
-      type: "dispatch_worker.schedule_propose.completed",
+      type: "worker.dispatch_operations.schedule_propose.completed",
       source: dispatchSource,
       actorType: "worker",
       actorId: context.worker.id,
@@ -2552,7 +2552,7 @@ export async function draftDispatchCustomerUpdate(input: {
       .insert(events)
       .values({
         tenantId: context.worker.tenantId,
-        type: "dispatch_worker.customer_update_draft.completed",
+        type: "worker.dispatch_operations.customer_update_draft.completed",
         source: dispatchSource,
         actorType: "worker",
         actorId: context.worker.id,
@@ -2907,7 +2907,7 @@ export async function draftDispatchCustomerUpdate(input: {
 
     await tx.insert(auditEvents).values({
       tenantId: context.worker.tenantId,
-      type: "dispatch_worker.customer_update_draft.completed",
+      type: "worker.dispatch_operations.customer_update_draft.completed",
       source: dispatchSource,
       actorType: "worker",
       actorId: context.worker.id,
@@ -3416,7 +3416,7 @@ export async function prepareDispatchCloseout(input: {
       .insert(events)
       .values({
         tenantId: context.worker.tenantId,
-        type: "dispatch_worker.closeout_prepare.completed",
+        type: "worker.dispatch_operations.closeout_prepare.completed",
         source: dispatchSource,
         actorType: "worker",
         actorId: context.worker.id,
@@ -3810,7 +3810,7 @@ export async function prepareDispatchCloseout(input: {
 
     await tx.insert(auditEvents).values({
       tenantId: context.worker.tenantId,
-      type: "dispatch_worker.closeout_prepare.completed",
+      type: "worker.dispatch_operations.closeout_prepare.completed",
       source: dispatchSource,
       actorType: "worker",
       actorId: context.worker.id,
@@ -4216,7 +4216,7 @@ export async function routeDispatchException(input: {
       .insert(events)
       .values({
         tenantId: context.worker.tenantId,
-        type: "dispatch_worker.exception_route.completed",
+        type: "worker.dispatch_operations.exception_route.completed",
         source: dispatchSource,
         actorType: "worker",
         actorId: context.worker.id,
@@ -4441,7 +4441,7 @@ export async function routeDispatchException(input: {
 
     await tx.insert(auditEvents).values({
       tenantId: context.worker.tenantId,
-      type: "dispatch_worker.exception_route.completed",
+      type: "worker.dispatch_operations.exception_route.completed",
       source: dispatchSource,
       actorType: "worker",
       actorId: context.worker.id,

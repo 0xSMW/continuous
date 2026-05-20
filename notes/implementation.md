@@ -102,6 +102,7 @@
 | Added production scheduler handoff proof | The deploy smoke now creates an active buffered connection through `/core adapter.upsert` and `/core connection.upsert`, records connection health, runs the scheduler once, and verifies scheduled `lead.read` cursor proof plus the scheduled Revenue `run` approval workflow |
 | Split Revenue classify and draft commands | `POST /worker` now exposes `command=lead.classify` and `command=response.draft` as explicit tenant-scoped Revenue commands that consume `config.intake` or direct fallback `config.leadPacket`, write worker run, inference, usage, event, evidence, audit, and budget proof, and keep external sends blocked |
 | Added deploy smoke for split Revenue commands | The production deploy workflow now exercises `lead.read` followed by `lead.classify` and `response.draft` through `/worker`, then checks persisted worker run, event, evidence, audit, and usage rows before the full `run` smoke |
+| Hardened split Revenue command guardrails | `lead.classify` and `response.draft` now have first-class eval cases and scoring; direct runtime calls reject empty config before synthetic lead defaults, `lead.read`/`lead.classify`/`response.draft` enforce budget policy and capacity, and connection-backed `lead.read` persists request hashes for replay-conflict detection |
 | Protected operational artifacts during deploy sync | Deploy rsync still deletes stale source files, but now excludes `backups/`, `logs/`, and `reports/recovery-drills/` so local database dumps, Caddy/observability logs, and recovery evidence are not removed during a release |
 | Added expansion readiness and handoff contracts | `docs/worker-readiness.md` tracks each worker against shared launch gates, and `docs/worker-handoffs.md` defines Core-record handoffs from Revenue into Owner, Dispatch, Finance, Workforce, Compliance, and Systems expansion paths |
 | Rejected mixed worker intake sources | Revenue Worker now treats persisted `config.intake` Core row references as authoritative and rejects requests that also include direct `config.leadPacket` or `config.lead` payloads |
@@ -128,6 +129,9 @@
 | Redacted scheduler cycle logs | Scheduler cycle logs now record command status, errors, and counts without raw worker/workflow result payloads that may contain customer or tenant data |
 | Hardened route-scoped control-plane auth | The legacy `WORKER_RUN_TOKEN` fallback is now worker-route-only, non-worker routes use explicit catalog tokens in tests/docs, and all control-plane mutation routes require an exact `application/json` media type instead of substring content-type matching |
 | Completed Core route dispatch proof | `app/core/route.test.ts` now proves successful `GET /core` summary plus `/core` dispatch for task, object, graph-link, event, evidence, document, packet, decision, approval, capability, budget, and generated-view commands through the canonical `command`/`core`/`idempotencyKey`/`config` envelope |
+| Normalized worker ledger namespaces | Revenue, Owner, Dispatch, and Finance worker sources now write through `continuous.worker`, with event/schema names role-qualified under `worker.<role>.*` instead of worker-family-specific namespaces |
+| Expanded app-server Revenue proof | The CI integration suite now runs Revenue `lead.classify` and `response.draft` through `continuous.worker.command`, scores the split-command eval fixtures, and verifies generic worker ledger records in addition to the existing app-server `lead.read -> run` proof |
+| Hardened split Revenue actions | `lead.read`, `lead.classify`, and `response.draft` now check worker budget capacity before reserving units, and empty run/classify/draft configs fail before any synthetic lead defaults or worker-run records are written |
 
 ### Tradeoffs
 
@@ -153,6 +157,7 @@
 | Worker selector boundary | `/worker`, `worker.command`, and `continuous.worker.command` now treat `worker` as a strict selector object with only `role`, `id`, and `tenantSlug`; every operation-specific field must live under `config` |
 | Command body boundary | `/core`, `/worker`, `/workflow`, and `/approval` reject non-JSON, malformed JSON, and non-object command bodies after authentication instead of collapsing them into empty envelopes |
 | Local mutation trust boundary | `worker.command` and `continuous.worker.command` are disabled under `APP_ENV=production` unless `CONTINUOUS_TRUSTED_LOCAL_WORKER_TOOLS=true`; their payloads mirror `/worker`, and production automation should prefer the authenticated `/worker` route |
+| Worker ledger namespace boundary | Role-specific worker behavior is carried by `worker.role`, event type suffixes, command names, and persisted payloads; sources stay generic as `continuous.worker` so new worker families do not require new source namespaces |
 
 ### Current State
 

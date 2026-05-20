@@ -116,6 +116,34 @@ describe("future worker contracts", () => {
     expect(offenders).toEqual([]);
   });
 
+  it("keeps persisted worker source and event names role-qualified under the generic worker namespace", () => {
+    const forbiddenNamespacePattern =
+      /continuous\.(?:revenue|dispatch|finance|owner|workforce|compliance|systems)_worker|(?:revenue|dispatch|finance|owner|workforce|compliance|systems)_worker\./;
+    const files = trackedTextFiles([
+      "app",
+      "docs",
+      "notes",
+      "scripts",
+      "src",
+      ".github/workflows",
+      "README.md",
+      "package.json",
+    ]);
+    const offenders = files.filter((path) => forbiddenNamespacePattern.test(read(path)));
+
+    expect(offenders).toEqual([]);
+    expect(read("src/worker/revenue.ts")).toContain("worker.revenue_operations.run.completed");
+    expect(read("src/worker/dispatch.ts")).toContain(
+      "worker.dispatch_operations.schedule_propose.completed",
+    );
+    expect(read("src/worker/finance.ts")).toContain(
+      "worker.finance_operations.invoice_prepare.completed",
+    );
+    expect(read("src/worker/owner.ts")).toContain(
+      "worker.owner_chief_of_staff.brief.generated",
+    );
+  });
+
   it("keeps the current revenue contract on the generic worker API", () => {
     const source = read("docs/revenue-operations-worker-v1-contract.md");
 

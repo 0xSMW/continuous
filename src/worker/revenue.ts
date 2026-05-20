@@ -41,6 +41,7 @@ import {
 import { pollLeadSourceConnection, type LeadSourcePollResult } from "./lead-source-connectors";
 
 type Database = typeof defaultDb;
+type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
 const revenueWorkerRole = "revenue_operations";
 const revenueWorkflowKey = "lead_to_cash";
@@ -335,24 +336,132 @@ function normalizedUrgency(value: unknown) {
 
 function centsForIntent(intent: string, serviceArea: string) {
   const text = `${intent} ${serviceArea}`.toLowerCase();
+  const terms = new Set(text.split(/[^a-z0-9]+/).filter(Boolean));
 
-  if (text.includes("roof") || text.includes("leak")) {
+  if (terms.has("roof") || terms.has("roofing") || terms.has("leak") || terms.has("leakage")) {
     return 24900;
   }
 
-  if (text.includes("gutter")) {
+  if (terms.has("gutter") || terms.has("gutters")) {
     return 12900;
   }
 
-  if (text.includes("window")) {
+  if (terms.has("window") || terms.has("windows")) {
     return 18900;
   }
 
-  if (text.includes("hvac") || text.includes("heat") || text.includes("air")) {
+  if (
+    terms.has("hvac") ||
+    terms.has("heat") ||
+    terms.has("heating") ||
+    terms.has("cooling") ||
+    terms.has("ac") ||
+    terms.has("air")
+  ) {
     return 21900;
   }
 
   return 15900;
+}
+
+async function assertWorkerBudgetCapacity(
+  tx: Transaction,
+  params: {
+    budgetAccountId: string;
+    units: number;
+    label: string;
+  },
+) {
+  const now = new Date();
+
+  await tx.execute(sql`select id from budget_accounts where id = ${params.budgetAccountId} for update`);
+
+  const [budgetState] = await tx
+    .select({
+      policyId: budgetAccounts.policyId,
+      policyActive: budgetPolicies.active,
+      monthlyUnits: budgetPolicies.monthlyUnits,
+      perTaskUnits: budgetPolicies.perTaskUnits,
+      hardLimit: budgetPolicies.hardLimit,
+    })
+    .from(budgetAccounts)
+    .leftJoin(budgetPolicies, eq(budgetAccounts.policyId, budgetPolicies.id))
+    .where(and(eq(budgetAccounts.id, params.budgetAccountId), eq(budgetAccounts.active, true)))
+    .limit(1);
+
+  if (!budgetState?.policyId || !budgetState.policyActive) {
+    throw new RevenueWorkerUnavailableError(
+      "worker_budget_policy_missing",
+      "Revenue Worker budget account has no active policy.",
+    );
+  }
+
+  const perTaskUnits =
+    budgetState.perTaskUnits === null ? null : numberValue(budgetState.perTaskUnits);
+
+  if (perTaskUnits !== null && params.units > perTaskUnits) {
+    throw new RevenueWorkerUnavailableError(
+      "worker_budget_per_task_exceeded",
+      `Revenue Worker ${params.label} requires ${params.units} units, above the per-task limit of ${perTaskUnits}.`,
+    );
+  }
+
+  const [allocation] = await tx
+    .select({
+      units: sql<number>`coalesce(sum(${budgetAllocations.units}), 0)`,
+      startsAt: sql<Date | null>`min(${budgetAllocations.startsAt})`,
+      endsAt: sql<Date | null>`max(${budgetAllocations.endsAt})`,
+    })
+    .from(budgetAllocations)
+    .where(
+      and(
+        eq(budgetAllocations.accountId, params.budgetAccountId),
+        sql`${budgetAllocations.startsAt} <= ${now}`,
+        sql`${budgetAllocations.endsAt} > ${now}`,
+      ),
+    );
+
+  const usageConditions = [eq(usageEvents.accountId, params.budgetAccountId)];
+
+  if (allocation?.startsAt && allocation.endsAt) {
+    usageConditions.push(sql`${usageEvents.createdAt} >= ${allocation.startsAt}`);
+    usageConditions.push(sql`${usageEvents.createdAt} < ${allocation.endsAt}`);
+  }
+
+  const [used] = await tx
+    .select({ units: sql<number>`coalesce(sum(${usageEvents.units}), 0)` })
+    .from(usageEvents)
+    .where(and(...usageConditions));
+
+  const [held] = await tx
+    .select({ units: sql<number>`coalesce(sum(${budgetReservations.units}), 0)` })
+    .from(budgetReservations)
+    .where(
+      and(
+        eq(budgetReservations.accountId, params.budgetAccountId),
+        eq(budgetReservations.state, "held"),
+        sql`(${budgetReservations.expiresAt} is null or ${budgetReservations.expiresAt} > ${now})`,
+      ),
+    );
+
+  const monthlyUnits = numberValue(budgetState.monthlyUnits);
+  const allocatedUnits = numberValue(allocation?.units);
+  const allowanceUnits =
+    allocatedUnits > 0 && monthlyUnits > 0
+      ? Math.min(allocatedUnits, monthlyUnits)
+      : allocatedUnits > 0
+        ? allocatedUnits
+        : monthlyUnits;
+  const hardLimit = numberValue(budgetState.hardLimit) || 100;
+  const maxUnits = Math.floor((allowanceUnits * hardLimit) / 100);
+  const committedUnits = numberValue(used?.units) + numberValue(held?.units);
+
+  if (maxUnits <= 0 || committedUnits + params.units > maxUnits) {
+    throw new RevenueWorkerUnavailableError(
+      "worker_budget_exceeded",
+      `Revenue Worker ${params.label} requires ${params.units} units, with ${Math.max(maxUnits - committedUnits, 0)} units available.`,
+    );
+  }
 }
 
 function formatUsd(cents: number) {
@@ -551,6 +660,14 @@ async function resolveLeadIntake(
     throw new RevenueWorkerUnavailableError(
       "worker_intake_conflict",
       "config.intake Core references cannot be combined with config.leadPacket or config.lead; send one authoritative intake source.",
+      400,
+    );
+  }
+
+  if (!hasDirectLeadPayload && !hasExplicitCoreIntake && !hasSourceSelector) {
+    throw new RevenueWorkerUnavailableError(
+      "worker_intake_required",
+      "Revenue Worker commands require config.intake, config.leadPacket, or config.lead.",
       400,
     );
   }
@@ -1538,7 +1655,7 @@ function revisedPacketFromOriginal(params: {
   };
 
   return {
-    schemaVersion: "worker.revised_packet.v1",
+    schemaVersion: "worker.revenue_operations.revised_packet.v1",
     status: "revised_packet_ready_for_owner_approval",
     revision,
     revisionHistory: [...previousHistory, revision],
@@ -1589,7 +1706,7 @@ function approvedExecutionPacketFromOriginal(params: {
   const approvedAt = params.now.toISOString();
 
   return {
-    schemaVersion: "worker.approved_execution_packet.v1",
+    schemaVersion: "worker.revenue_operations.approved_execution_packet.v1",
     status: "approved_execution_blocked",
     approval: {
       approvalRequestId: params.approvalRequestId,
@@ -1641,7 +1758,7 @@ function rejectedPacketFromOriginal(params: {
   const rejectedAt = params.now.toISOString();
 
   return {
-    schemaVersion: "worker.rejected_packet.v1",
+    schemaVersion: "worker.revenue_operations.rejected_packet.v1",
     status: "rejected_closed",
     rejection: {
       approvalRequestId: params.approvalRequestId,
@@ -2045,7 +2162,7 @@ export async function getRevenueWorkerSnapshot(
         and(
           eq(events.tenantId, workerRow.tenantId),
           eq(events.source, source),
-          eq(events.type, "worker.run.completed"),
+          eq(events.type, "worker.revenue_operations.run.completed"),
         ),
       )
       .orderBy(desc(events.occurredAt))
@@ -2196,7 +2313,7 @@ export async function readRevenueLeads(input: {
   }
 
   const requestHash = hashObject({
-    schemaVersion: "worker.lead_read.request.v1",
+    schemaVersion: "worker.revenue_operations.lead_read.request.v1",
     idempotencyKey: input.idempotencyKey,
     tenantId: context.worker.tenantId,
     workerId: context.worker.id,
@@ -2262,7 +2379,7 @@ export async function readRevenueLeads(input: {
   );
 
   const inputHash = hashObject({
-    schemaVersion: "worker.lead_read.v1",
+    schemaVersion: "worker.revenue_operations.lead_read.v1",
     requestHash,
     idempotencyKey: input.idempotencyKey,
     tenantId: context.worker.tenantId,
@@ -2320,6 +2437,12 @@ export async function readRevenueLeads(input: {
     }
 
     const now = new Date();
+    await assertWorkerBudgetCapacity(tx, {
+      budgetAccountId: context.budgetAccountId,
+      units: leadReadUnits,
+      label: "lead.read",
+    });
+
     const [grant] = await tx
       .select({ id: capabilityGrants.id })
       .from(capabilityGrants)
@@ -2633,7 +2756,7 @@ export async function readRevenueLeads(input: {
       .insert(events)
       .values({
         tenantId: context.worker.tenantId,
-        type: "worker.lead_read.completed",
+        type: "worker.revenue_operations.lead_read.completed",
         source,
         actorType: "worker",
         actorId: context.worker.id,
@@ -2653,7 +2776,7 @@ export async function readRevenueLeads(input: {
       .insert(auditEvents)
       .values({
         tenantId: context.worker.tenantId,
-        type: "worker.lead_read.completed",
+        type: "worker.revenue_operations.lead_read.completed",
         source,
         actorType: "worker",
         actorId: context.worker.id,
@@ -2686,6 +2809,7 @@ export async function readRevenueLeads(input: {
         data: {
           input: {
             command: "lead.read",
+            requestHash,
             inputHash,
             config: requestConfig,
             source: sourceName,
@@ -2863,14 +2987,14 @@ async function runRevenueActionCommand(input: {
   const mode = input.command === "lead.classify" ? "classification" : "draft";
   const eventType =
     input.command === "lead.classify"
-      ? "worker.lead_classify.completed"
-      : "worker.response_draft.completed";
+      ? "worker.revenue_operations.lead_classify.completed"
+      : "worker.revenue_operations.response_draft.completed";
   const evidenceName =
     input.command === "lead.classify"
       ? "Revenue lead classification trace"
       : "Revenue response draft";
   const inputHash = hashObject({
-    schemaVersion: `worker.${input.command}.v1`,
+    schemaVersion: `worker.revenue_operations.${input.command}.v1`,
     command: input.command,
     idempotencyKey: input.idempotencyKey,
     tenantId: context.worker.tenantId,
@@ -2918,6 +3042,12 @@ async function runRevenueActionCommand(input: {
     }
 
     const now = new Date();
+    await assertWorkerBudgetCapacity(tx, {
+      budgetAccountId: context.budgetAccountId,
+      units,
+      label: input.command,
+    });
+
     const [grant] = await tx
       .select({ id: capabilityGrants.id })
       .from(capabilityGrants)
@@ -3296,7 +3426,7 @@ export async function runRevenueWorker(input: {
   };
   const runObjectId = task?.objectId ?? sourceObjectId;
   const inputHash = hashObject({
-    schemaVersion: "worker.lead_packet.v1",
+    schemaVersion: "worker.revenue_operations.lead_packet.v1",
     mode: "simulation",
     idempotencyKey: input.idempotencyKey,
     tenantId: context.worker.tenantId,
@@ -3728,7 +3858,7 @@ export async function runRevenueWorker(input: {
       .insert(auditEvents)
       .values({
         tenantId: context.worker.tenantId,
-        type: "worker.run.requested",
+        type: "worker.revenue_operations.run.requested",
         source,
         actorType: "user",
         actorId: operator.id,
@@ -3865,7 +3995,7 @@ export async function runRevenueWorker(input: {
       .insert(events)
       .values({
         tenantId: context.worker.tenantId,
-        type: "worker.run.completed",
+        type: "worker.revenue_operations.run.completed",
         source,
         actorType: "worker",
         actorId: context.worker.id,
@@ -5049,7 +5179,7 @@ export async function continueRevenueWorker(input: {
         .insert(events)
         .values({
           tenantId: context.worker.tenantId,
-          type: "worker.approved_execution.blocked",
+          type: "worker.revenue_operations.approved_execution.blocked",
           source,
           actorType: "worker",
           actorId: context.worker.id,
@@ -5084,7 +5214,7 @@ export async function continueRevenueWorker(input: {
         .insert(auditEvents)
         .values({
           tenantId: context.worker.tenantId,
-          type: "worker.continuation.completed",
+          type: "worker.revenue_operations.continuation.completed",
           source,
           actorType: "worker",
           actorId: context.worker.id,
@@ -5555,7 +5685,7 @@ export async function continueRevenueWorker(input: {
         .insert(events)
         .values({
           tenantId: context.worker.tenantId,
-          type: "worker.rejection.closed",
+          type: "worker.revenue_operations.rejection.closed",
           source,
           actorType: "worker",
           actorId: context.worker.id,
@@ -5590,7 +5720,7 @@ export async function continueRevenueWorker(input: {
         .insert(auditEvents)
         .values({
           tenantId: context.worker.tenantId,
-          type: "worker.continuation.completed",
+          type: "worker.revenue_operations.continuation.completed",
           source,
           actorType: "worker",
           actorId: context.worker.id,
@@ -6053,7 +6183,7 @@ export async function continueRevenueWorker(input: {
       .insert(events)
       .values({
         tenantId: context.worker.tenantId,
-        type: "worker.revision.prepared",
+        type: "worker.revenue_operations.revision.prepared",
         source,
         actorType: "worker",
         actorId: context.worker.id,
@@ -6086,7 +6216,7 @@ export async function continueRevenueWorker(input: {
       .insert(auditEvents)
       .values({
         tenantId: context.worker.tenantId,
-        type: "worker.continuation.completed",
+        type: "worker.revenue_operations.continuation.completed",
         source,
         actorType: "worker",
         actorId: context.worker.id,
