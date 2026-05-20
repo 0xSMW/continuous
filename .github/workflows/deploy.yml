@@ -1714,11 +1714,87 @@ jobs:
             >/dev/null
 
           CORE_DECISION_ID="$(echo "$CORE_DECISION_RESPONSE" | /usr/bin/jq -r '.data.result.decisionId')"
-          CORE_CONNECTION_ID="$(psql_db -Atc "select c.id from connections c inner join tenants t on t.id = c.tenant_id where t.slug = 'continuous-demo' order by c.created_at limit 1;")"
+          CORE_ADAPTER_UPSERT_KEY="deploy-core-adapter-upsert-$RUN_ID"
+          CORE_ADAPTER_UPSERT_PAYLOAD="$(
+            /usr/bin/jq -nc --arg key "$CORE_ADAPTER_UPSERT_KEY" '{
+              command: "adapter.upsert",
+              core: {tenantSlug: "continuous-demo"},
+              idempotencyKey: $key,
+              config: {
+                key: "deploy_smoke_connector",
+                name: "Deploy smoke connector",
+                kind: "inbox",
+                auth: "managed_ref",
+                capabilities: {
+                  read: ["lead.read"],
+                  sources: ["deploy_smoke_inbox"],
+                  providers: ["deploy_smoke"],
+                  readerKinds: ["inbox"]
+                }
+              }
+            }'
+          )"
+          CORE_ADAPTER_UPSERT_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/core \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$CORE_ADAPTER_UPSERT_PAYLOAD"
+          )"
+
+          echo "$CORE_ADAPTER_UPSERT_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,updated:.data.result.updated,adapterId:.data.result.adapterId,key:.data.result.adapter.key}}'
+          echo "$CORE_ADAPTER_UPSERT_RESPONSE" | /usr/bin/jq -e \
+            '.error == null and .data.command == "adapter.upsert" and (.data.result.adapterId | length > 0) and .data.result.adapter.key == "deploy_smoke_connector"' \
+            >/dev/null
+
+          CORE_ADAPTER_ID="$(echo "$CORE_ADAPTER_UPSERT_RESPONSE" | /usr/bin/jq -r '.data.result.adapterId')"
+          CORE_CONNECTION_UPSERT_KEY="deploy-core-connection-upsert-$RUN_ID"
+          CORE_CONNECTION_UPSERT_PAYLOAD="$(
+            /usr/bin/jq -nc --arg key "$CORE_CONNECTION_UPSERT_KEY" --arg externalAccountId "deploy-smoke-$RUN_ID" '{
+              command: "connection.upsert",
+              core: {tenantSlug: "continuous-demo"},
+              idempotencyKey: $key,
+              config: {
+                adapterKey: "deploy_smoke_connector",
+                name: "Deploy smoke read-only connection",
+                state: "draft",
+                externalAccountId: $externalAccountId,
+                scopes: {
+                  reads: ["lead.read"]
+                },
+                config: {
+                  sources: ["deploy_smoke_inbox"],
+                  providers: ["deploy_smoke"],
+                  readerKinds: ["inbox"],
+                  polling: {
+                    enabled: true,
+                    source: "deploy_smoke_inbox",
+                    provider: "deploy_smoke",
+                    credentialRef: "env:DEPLOY_SMOKE_CONNECTOR_TOKEN"
+                  },
+                  externalExecution: "blocked"
+                }
+              }
+            }'
+          )"
+          CORE_CONNECTION_UPSERT_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/core \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$CORE_CONNECTION_UPSERT_PAYLOAD"
+          )"
+
+          echo "$CORE_CONNECTION_UPSERT_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,connectionId:.data.result.connectionId,adapterId:.data.result.adapterId,state:.data.result.connection.state,pollingEnabled:.data.result.pollingEnabled,externalExecution:.data.result.externalExecution}}'
+          echo "$CORE_CONNECTION_UPSERT_RESPONSE" | /usr/bin/jq -e \
+            '.error == null and .data.command == "connection.upsert" and .data.result.created == true and (.data.result.connectionId | length > 0) and .data.result.adapterId == "'"$CORE_ADAPTER_ID"'" and .data.result.connection.state == "draft" and .data.result.pollingEnabled == true and .data.result.externalExecution == "blocked"' \
+            >/dev/null
+
+          CORE_CONNECTION_ID="$(echo "$CORE_CONNECTION_UPSERT_RESPONSE" | /usr/bin/jq -r '.data.result.connectionId')"
           CORE_RULE_PACK_ID="$(psql_db -Atc "select id from rule_packs where active = true order by created_at limit 1;")"
 
-          if [ -z "$CORE_CONNECTION_ID" ] || [ -z "$CORE_RULE_PACK_ID" ]; then
-            echo "Missing connection or rule pack for Core adapter/rule smoke." >&2
+          if [ -z "$CORE_RULE_PACK_ID" ]; then
+            echo "Missing rule pack for Core rule smoke." >&2
             exit 1
           fi
 
