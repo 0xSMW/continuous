@@ -119,6 +119,7 @@ describe("worker tool contract", () => {
       "worker.response.draft",
       "worker.dispatch.schedule.propose",
       "worker.dispatch.customer_update.draft",
+      "worker.dispatch.closeout.prepare",
       "worker.continue",
       "worker.approvals.list",
       "worker.approvals.decide",
@@ -229,6 +230,13 @@ describe("worker tool contract", () => {
           requiresTenant: true,
           externalExecution: "blocked",
         }),
+        expect.objectContaining({
+          role: "dispatch_operations",
+          name: "closeout.prepare",
+          idempotency: "required",
+          requiresTenant: true,
+          externalExecution: "blocked",
+        }),
       ]),
     );
     expect(workerToolSchema.registry.commands).toEqual(
@@ -272,6 +280,17 @@ describe("worker tool contract", () => {
             required: ["jobId", "updateKind"],
             properties: expect.objectContaining({
               messageContext: expect.objectContaining({ type: "object" }),
+            }),
+          }),
+        }),
+        expect.objectContaining({
+          role: "dispatch_operations",
+          name: "closeout.prepare",
+          configSchema: expect.objectContaining({
+            required: ["workOrderId"],
+            properties: expect.objectContaining({
+              sourceRefs: expect.objectContaining({ type: "object" }),
+              qaChecklist: expect.objectContaining({ type: "object" }),
             }),
           }),
         }),
@@ -581,6 +600,38 @@ describe("worker tool contract", () => {
         },
       }),
     ).rejects.toThrow("config.updateKind is required for customer_update.draft.");
+  });
+
+  it("validates dispatch closeout prepare envelopes before invoking the worker", async () => {
+    await expect(
+      executeWorkerTool("worker.dispatch.closeout.prepare", {
+        worker: {
+          role: "dispatch_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "bad key!",
+        config: {
+          workOrderId: "work_order_uuid",
+        },
+      }),
+    ).rejects.toThrow(
+      "Idempotency key may only contain letters, numbers, dot, underscore, colon, or dash.",
+    );
+
+    await expect(
+      executeWorkerTool("worker.dispatch.closeout.prepare", {
+        worker: {
+          role: "dispatch_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "dispatch-closeout-schema-001",
+        config: {
+          sourceRefs: {
+            jobObjectId: "job_object_uuid",
+          },
+        },
+      }),
+    ).rejects.toThrow("config.workOrderId is required for closeout.prepare.");
   });
 
   it("requires tenant scope for adapter reconciliation", async () => {

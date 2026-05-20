@@ -9,7 +9,7 @@ tasks. V1 prepares internal records and dry-run adapter actions only.
 | Field | Value |
 |---|---|
 | Worker role | `dispatch_operations` |
-| First outcome | Job schedule proposal and customer update packet |
+| First outcome | Job schedule proposal, customer update packet, and closeout packet |
 | Autonomy level | `2` |
 | External execution | `dry_run` for scheduling, `blocked` for customer sends |
 
@@ -42,9 +42,9 @@ All commands use `POST /worker`; no dispatch-specific route is added.
 }
 ```
 
-The first executable slices are `schedule.propose` and
-`customer_update.draft`; later commands in the table remain contract entries
-until their handlers are registered.
+The first executable slices are `schedule.propose`, `customer_update.draft`,
+and `closeout.prepare`; `exception.route` remains a contract entry until its
+handler is registered.
 
 ## Registry Entries
 
@@ -53,7 +53,7 @@ until their handlers are registered.
 | `GET view=snapshot` | `worker.snapshot` | `worker.role` | None | Read-only | Blocked |
 | `schedule.propose` | `worker.dispatch.schedule.propose` | `jobId` or `sourceRefs`, plus `constraints` | Required | Appointment draft, adapter dry-run, approval request | Dry-run |
 | `customer_update.draft` | `worker.dispatch.customer_update.draft` | `jobId`, `updateKind` | Required | Draft message, evidence packet, approval request | Blocked |
-| `closeout.prepare` | `worker.dispatch.closeout.prepare` | `workOrderId`, `sourceRefs[]` | Required | Closeout document, QA checklist, evidence packet | Blocked |
+| `closeout.prepare` | `worker.dispatch.closeout.prepare` | `workOrderId`, optional keyed `sourceRefs` | Required | Closeout document, QA checklist, evidence packet, approval request, Finance handoff refs | Blocked |
 | `exception.route` | `worker.dispatch.exception.route` | `jobId`, `reason`, `severity` | Required | Task and decision record | Blocked |
 | `approval.decide` | `worker.approvals.decide` | `approvalId`, `action`, optional `note` | None | Approval/task/workflow evidence only | Blocked |
 
@@ -111,7 +111,7 @@ unless the operator has reveal approval.
 |---|---|---|---|
 | `dispatch.schedule.review` | `appointment` | `approve_schedule`, `request_revision`, `route_exception` | `no_slots`, `calendar_unavailable`, `crew_missing` |
 | `dispatch.customer_update.review` | `customer_update` | `approve_send`, `edit_message`, `request_revision` | `missing_customer_contact`, `source_partial` |
-| `dispatch.closeout.review` | `closeout` | `accept_closeout`, `request_rework`, `prepare_invoice` | `missing_photos`, `qa_incomplete` |
+| `dispatch.closeout.review` | `closeout` | `accept_closeout`, `request_rework`, `prepare_invoice` | `missing_photos`, `qa_incomplete`, `customer_signoff_missing` |
 
 ## Evals
 

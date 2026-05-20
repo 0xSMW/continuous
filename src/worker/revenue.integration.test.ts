@@ -5661,9 +5661,11 @@ maybeDescribe("Revenue Worker integration eval", () => {
     const customerObjectId = randomUUID();
     const quoteObjectId = randomUUID();
     const jobObjectId = randomUUID();
+    const workOrderObjectId = randomUUID();
     const jobRowId = randomUUID();
     const approvalRequestId = randomUUID();
     const adapterReceiptEvidenceId = randomUUID();
+    const completionEvidenceId = randomUUID();
     const tenantId = "11111111-1111-4111-8111-111111111111";
     const [scheduleCapability] = await db
       .select({ id: capabilities.id })
@@ -5719,6 +5721,22 @@ maybeDescribe("Revenue Worker integration eval", () => {
           status: "ready_to_schedule",
         },
       },
+      {
+        id: workOrderObjectId,
+        tenantId,
+        type: "work_order",
+        name: "Approved dispatch handoff work order",
+        state: "closeout_ready",
+        source: "test",
+        externalId: `ci-dispatch-work-order-${runId}`,
+        data: {
+          jobObjectId,
+          customerObjectId,
+          scope: "Inspection completed and ready for closeout packet review.",
+          crewRequirements: ["roofing"],
+          riskFlags: [],
+        },
+      },
     ]);
 
     await db.insert(jobs).values({
@@ -5744,6 +5762,18 @@ maybeDescribe("Revenue Worker integration eval", () => {
           fromId: jobObjectId,
           toId: quoteObjectId,
           type: "from_quote",
+        },
+        {
+          tenantId,
+          fromId: jobObjectId,
+          toId: workOrderObjectId,
+          type: "has_work_order",
+        },
+        {
+          tenantId,
+          fromId: workOrderObjectId,
+          toId: jobObjectId,
+          type: "fulfills_job",
         },
       ])
       .onConflictDoNothing();
@@ -5773,23 +5803,42 @@ maybeDescribe("Revenue Worker integration eval", () => {
       decidedAt: new Date(),
     });
 
-    await db.insert(evidence).values({
-      id: adapterReceiptEvidenceId,
-      tenantId,
-      kind: "receipt",
-      name: "Revenue quote no-send receipt",
-      objectId: quoteObjectId,
-      capabilityId: quoteCapability?.id ?? scheduleCapability?.id ?? null,
-      actorType: "adapter",
-      hash: `ci-dispatch-receipt-${runId}`,
-      data: {
-        mode: "dry_run",
-        quoteObjectId,
-        jobObjectId,
-        externalMutation: false,
-        externalSend: false,
+    await db.insert(evidence).values([
+      {
+        id: adapterReceiptEvidenceId,
+        tenantId,
+        kind: "receipt",
+        name: "Revenue quote no-send receipt",
+        objectId: quoteObjectId,
+        capabilityId: quoteCapability?.id ?? scheduleCapability?.id ?? null,
+        actorType: "adapter",
+        hash: `ci-dispatch-receipt-${runId}`,
+        data: {
+          mode: "dry_run",
+          quoteObjectId,
+          jobObjectId,
+          externalMutation: false,
+          externalSend: false,
+        },
       },
-    });
+      {
+        id: completionEvidenceId,
+        tenantId,
+        kind: "snapshot",
+        name: "Work order completion proof",
+        objectId: workOrderObjectId,
+        capabilityId: scheduleCapability?.id ?? null,
+        actorType: "worker",
+        hash: `ci-dispatch-completion-${runId}`,
+        data: {
+          workOrderObjectId,
+          jobObjectId,
+          photosAttached: true,
+          externalMutation: false,
+          externalSend: false,
+        },
+      },
+    ]);
 
     const response = await executeWorkerCommand({
       command: "schedule.propose",
@@ -6005,5 +6054,134 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(customerUpdateReplayResult.created).toBe(false);
     expect(customerUpdateReplayResult.workerRunId).toBe(customerUpdateResult.workerRunId);
     expect(customerUpdateReplayResult.customerUpdateObjectId).toBe(customerUpdateResult.customerUpdateObjectId);
+
+    const closeoutResponse = await executeWorkerCommand({
+      command: "closeout.prepare",
+      target: {
+        role: "dispatch_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: `ci-dispatch-closeout-${runId}`,
+      config: {
+        workOrderId: workOrderObjectId,
+        sourceRefs: {
+          jobObjectId,
+          customerObjectId,
+          appointmentObjectId,
+          customerUpdateObjectId: customerUpdateResult.customerUpdateObjectId,
+          evidenceIds: [completionEvidenceId],
+        },
+        qaChecklist: {
+          scopeCompleted: true,
+          photosAttached: true,
+          customerSignoff: true,
+          safetyReviewed: true,
+          blockers: [],
+        },
+        completionNotes: "Inspection work is complete and ready for owner closeout review.",
+        invoiceReady: true,
+        billableLines: [
+          {
+            description: "Roof leak inspection",
+            amountCents: 24900,
+            currency: "USD",
+          },
+        ],
+      },
+    });
+    const closeoutResult = closeoutResponse.result as Awaited<
+      ReturnType<typeof import("./dispatch").prepareDispatchCloseout>
+    >;
+    const closeoutOutput = objectValue(closeoutResult.output);
+    const [closeoutRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(eq(workerRuns.id, closeoutResult.workerRunId))
+      .limit(1);
+    const [closeoutObject] = await db
+      .select()
+      .from(objects)
+      .where(eq(objects.id, closeoutResult.closeoutObjectId ?? ""))
+      .limit(1);
+    const [closeoutApproval] = await db
+      .select()
+      .from(approvalRequests)
+      .where(eq(approvalRequests.id, closeoutResult.approvalRequestId ?? ""))
+      .limit(1);
+    const [closeoutPacket] = await db
+      .select()
+      .from(evidencePackets)
+      .where(eq(evidencePackets.id, closeoutResult.packetId ?? ""))
+      .limit(1);
+    const [closeoutView] = await db
+      .select()
+      .from(generatedViews)
+      .where(and(eq(generatedViews.tenantId, tenantId), eq(generatedViews.key, "dispatch.closeout.review")))
+      .limit(1);
+
+    expect(closeoutResponse.command).toBe("closeout.prepare");
+    expect(closeoutResponse.worker.role).toBe("dispatch_operations");
+    expect(closeoutResult.created).toBe(true);
+    expect(closeoutResult.workflowStepIds).toHaveLength(4);
+    expect(closeoutOutput.externalExecution).toBe("blocked");
+    expect(closeoutOutput.externalSend).toBe(false);
+    expect(closeoutOutput.workOrderObjectId).toBe(workOrderObjectId);
+    expect(closeoutOutput.closeoutObjectId).toBe(closeoutResult.closeoutObjectId);
+    expect(closeoutOutput.invoiceReady).toBe(true);
+    expect(stringList(closeoutOutput.blockers)).toHaveLength(0);
+    expect(objectValue(closeoutOutput.financeHandoff).name).toBe("dispatch.closeout_to_finance");
+    expect(closeoutRun?.source).toBe("continuous.dispatch_worker");
+    expect(closeoutRun?.state).toBe("done");
+    expect(closeoutObject?.type).toBe("closeout");
+    expect(closeoutObject?.state).toBe("review_ready");
+    expect(objectValue(closeoutObject?.data).externalExecution).toBe("blocked");
+    expect(closeoutApproval?.state).toBe("pending");
+    expect(closeoutApproval?.kind).toBe("dispatch_closeout_approval");
+    expect(closeoutPacket?.kind).toBe("dispatch_closeout_packet");
+    expect(closeoutView?.key).toBe("dispatch.closeout.review");
+
+    const closeoutReplay = await executeWorkerCommand({
+      command: "closeout.prepare",
+      target: {
+        role: "dispatch_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: `ci-dispatch-closeout-${runId}`,
+      config: {
+        workOrderId: workOrderObjectId,
+        sourceRefs: {
+          jobObjectId,
+          customerObjectId,
+          appointmentObjectId,
+          customerUpdateObjectId: customerUpdateResult.customerUpdateObjectId,
+          evidenceIds: [completionEvidenceId],
+        },
+        qaChecklist: {
+          scopeCompleted: true,
+          photosAttached: true,
+          customerSignoff: true,
+          safetyReviewed: true,
+          blockers: [],
+        },
+        completionNotes: "Inspection work is complete and ready for owner closeout review.",
+        invoiceReady: true,
+        billableLines: [
+          {
+            description: "Roof leak inspection",
+            amountCents: 24900,
+            currency: "USD",
+          },
+        ],
+      },
+    });
+    const closeoutReplayResult = closeoutReplay.result as Awaited<
+      ReturnType<typeof import("./dispatch").prepareDispatchCloseout>
+    >;
+
+    expect(closeoutReplayResult.created).toBe(false);
+    expect(closeoutReplayResult.workerRunId).toBe(closeoutResult.workerRunId);
+    expect(closeoutReplayResult.closeoutObjectId).toBe(closeoutResult.closeoutObjectId);
   }, 120_000);
 });

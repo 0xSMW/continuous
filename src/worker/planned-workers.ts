@@ -236,7 +236,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
     role: "dispatch_operations",
     name: "Dispatch Operations Worker",
     contractPath: "docs/dispatch-operations-worker-v1-contract.md",
-    firstOutcome: "Job schedule proposal and customer update packet",
+    firstOutcome: "Job schedule proposal, customer update packet, and closeout packet",
     autonomyLevel: 2,
     externalExecution: "dry_run",
     evidencePacket: "dispatch_packet",
@@ -272,7 +272,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
         sideEffects: "internal",
         externalExecution: "blocked",
         requiresTenant: true,
-        requiredConfig: ["workOrderId", "sourceRefs"],
+        requiredConfig: ["workOrderId"],
       },
       {
         role: "dispatch_operations",

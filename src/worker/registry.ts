@@ -29,6 +29,7 @@ import {
   dispatchWorkerRole,
   draftDispatchCustomerUpdate,
   getDispatchWorkerSnapshotSafe,
+  prepareDispatchCloseout,
   proposeDispatchSchedule,
 } from "./dispatch";
 import { plannedWorkerContractForRole } from "./planned-workers";
@@ -421,6 +422,34 @@ const dispatchCustomerUpdateConfig: WorkerConfigSchema = {
     channel: { type: "string" },
     sourceRefs: jsonObjectConfig,
     messageContext: jsonObjectConfig,
+  },
+  additionalProperties: true,
+};
+const dispatchCloseoutConfig: WorkerConfigSchema = {
+  type: "object",
+  required: ["workOrderId"],
+  properties: {
+    workOrderId: { type: "string" },
+    sourceRefs: jsonObjectConfig,
+    photoEvidenceIds: {
+      type: "array",
+      items: { type: "string" },
+    },
+    evidenceIds: {
+      type: "array",
+      items: { type: "string" },
+    },
+    completionEvidenceIds: {
+      type: "array",
+      items: { type: "string" },
+    },
+    qaChecklist: jsonObjectConfig,
+    completionNotes: { type: "string" },
+    invoiceReady: { type: "boolean" },
+    billableLines: {
+      type: "array",
+      items: jsonObjectConfig,
+    },
   },
   additionalProperties: true,
 };
@@ -998,6 +1027,32 @@ const workerDefinitions: Record<string, WorkerDefinition> = {
           }
 
           return draftDispatchCustomerUpdate({
+            idempotencyKey: context.idempotencyKey,
+            tenantSlug: context.target.tenantSlug,
+            workerId: context.target.workerId,
+            operatorEmail: context.operatorEmail,
+            config: context.config,
+          });
+        },
+      },
+      "closeout.prepare": {
+        name: "closeout.prepare",
+        description: "Prepare a closeout packet and QA checklist without external invoice or customer send.",
+        idempotency: "required",
+        sideEffects: "internal",
+        externalExecution: "blocked",
+        requiresTenant: true,
+        configSchema: dispatchCloseoutConfig,
+        async handle(context) {
+          if (!context.idempotencyKey) {
+            throw new PlatformUnavailableError(
+              "invalid_idempotency_key",
+              "A string idempotency key is required.",
+              400,
+            );
+          }
+
+          return prepareDispatchCloseout({
             idempotencyKey: context.idempotencyKey,
             tenantSlug: context.target.tenantSlug,
             workerId: context.target.workerId,

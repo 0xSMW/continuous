@@ -12,7 +12,7 @@
 - Wire implementation handlers, retries, and generated views into the expanded operating workflow catalog; queued approval and packet handoffs now execute through `/workflow`.
 - Extend adapter-intent, rule-change, capability-backed, approval-backed, and packet-backed workflow execution into additional domain-specific handlers; scheduled command drain now covers workflow steps, Revenue lead polling, and Revenue adapter retry/reconciliation.
 - Extend Core adapter intent and rule-change workflow handlers into future worker contract fixtures.
-- Extend Dispatch beyond the registered `schedule.propose` slice into customer update drafts, closeout packets, and exception routing; implement runtime handlers and CI evals for Finance, Workforce, Compliance, and Systems from their registered contract metadata.
+- Extend Dispatch beyond the registered `schedule.propose`, `customer_update.draft`, and `closeout.prepare` slices into exception routing; implement runtime handlers and CI evals for Finance, Workforce, Compliance, and Systems from their registered contract metadata.
 - Extend the Owner Chief-of-Staff Worker beyond approval/revision continuations into stale-source handling and broader factuality evals.
 - Keep all worker-family HTTP controls on `/worker` with registered `worker`, `command`, `idempotencyKey`, and `config` fields; do not add worker-family-specific URL shapes.
 - Keep local worker mutation controls on `worker:tool` or `continuous.worker.command`; do not add worker-family-specific package scripts or app-server tools that bypass the command registry.
@@ -24,6 +24,6 @@
 - Extend Revenue `lead.classify` and `response.draft` eval scoring now that they are explicit persisted command surfaces.
 - Use `docs/revenue-operations-worker-expansion.md` as the expansion gate list for the next worker iteration.
 - Use `docs/revenue-operations-worker-v1-contract.md` as the machine-actionable contract for run and approval effects.
-- Keep `docs/worker-readiness.md` and `docs/worker-handoffs.md` updated in the same change as any worker promotion or new cross-worker fixture; Dispatch now has schedule proposal plus customer update draft proof, so next runtime slices are closeout packets and exception routing.
+- Keep `docs/worker-readiness.md` and `docs/worker-handoffs.md` updated in the same change as any worker promotion or new cross-worker fixture; Dispatch now has schedule proposal, customer update draft, and closeout packet proof, so the next runtime slice is exception routing.
 - Keep Core HTTP controls on `/core` with registered `command`, `core`, `idempotencyKey`, and `config` fields; do not add `/api/*` command paths or command-specific URLs.
 - Keep Next MCP for Next.js diagnostics; keep app-server worker tooling registry-backed and free of production-token plumbing; CI now proves `continuous.worker.command` can execute real Revenue commands, so extend that proof to Dispatch/Owner as their runtime surfaces mature.

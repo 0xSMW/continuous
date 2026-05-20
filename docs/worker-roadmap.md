@@ -56,15 +56,19 @@ before promotion.
 ## Phase 3: Dispatch/Ops Worker
 
 Status: first runtime slices are registered on `/worker` for
-`schedule.propose` and `customer_update.draft`. The schedule command consumes a
-Revenue `revenue.quote_to_dispatch` handoff from `config.sourceRefs`, writes an
-appointment object, promise-to-delivery workflow run/steps, dry-run calendar
-adapter receipt, approval request, dispatch packet, and
-`dispatch.schedule.review` generated view. The customer update command consumes
-`config.jobId` plus `config.updateKind`, writes a blocked no-send draft,
-evidence packet, approval request, and `dispatch.customer_update.review` view.
-Remaining work is closeout packets, exception routing, and live calendar/send
-credentials.
+`schedule.propose`, `customer_update.draft`, and `closeout.prepare`. The
+schedule command consumes a Revenue `revenue.quote_to_dispatch` handoff from
+`config.sourceRefs`, writes an appointment object, promise-to-delivery workflow
+run/steps, dry-run calendar adapter receipt, approval request, dispatch packet,
+and `dispatch.schedule.review` generated view. The customer update command
+consumes `config.jobId` plus `config.updateKind`, writes a blocked no-send
+draft, evidence packet, approval request, and
+`dispatch.customer_update.review` view. The closeout command consumes
+`config.workOrderId` and keyed `config.sourceRefs`, writes a closeout object,
+QA checklist, evidence packet, approval request, `dispatch.closeout.review`
+view, and `dispatch.closeout_to_finance` handoff refs while invoice/payment
+execution stays blocked. Remaining work is exception routing and live
+calendar/send credentials.
 
 | Dependency | Implementation target |
 |---|---|

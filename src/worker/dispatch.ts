@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { and, count, desc, eq, sql } from "drizzle-orm";
+import { and, count, desc, eq, inArray, sql } from "drizzle-orm";
 
 import { db as defaultDb } from "../db/client";
 import {
@@ -44,9 +44,11 @@ export const dispatchWorkerRole = "dispatch_operations";
 const dispatchSource = "continuous.dispatch_worker";
 const scheduleCapabilityKey = "schedule.propose";
 const customerUpdateCapabilityKey = "response.draft";
+const closeoutCapabilityKey = "document_packet.prepare";
 const workflowKey = "promise_to_delivery";
 const scheduleProposalUnits = 6000;
 const customerUpdateDraftUnits = 2500;
+const closeoutPrepareUnits = 4500;
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -118,6 +120,25 @@ export type DispatchCustomerUpdateDraftResult = {
   snapshot: DispatchWorkerSnapshot;
 };
 
+export type DispatchCloseoutPrepareResult = {
+  created: boolean;
+  idempotencyKey: string;
+  workerRunId: string;
+  taskId: string | null;
+  eventId: string | null;
+  closeoutObjectId: string | null;
+  approvalRequestId: string | null;
+  evidenceId: string | null;
+  qaEvidenceId: string | null;
+  packetId: string | null;
+  documentId: string | null;
+  workflowRunId: string | null;
+  workflowStepIds: string[];
+  dispatchCloseoutViewId: string | null;
+  output: JsonObject;
+  snapshot: DispatchWorkerSnapshot;
+};
+
 export type DispatchWorkerSnapshot = {
   worker: {
     id: string;
@@ -185,6 +206,10 @@ function optionalString(value: unknown) {
 
 function numberValue(value: unknown, fallback = 0) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function booleanValue(value: unknown, fallback = false) {
+  return typeof value === "boolean" ? value : fallback;
 }
 
 function stringList(value: unknown) {
@@ -826,6 +851,235 @@ async function replayedCustomerUpdateDraft(
       optionalString(data.dispatchCustomerUpdateViewId) ??
       optionalString(output.dispatchCustomerUpdateViewId) ??
       null,
+    output,
+    snapshot: await getDispatchWorkerSnapshot(db, {
+      role: dispatchWorkerRole,
+      tenantSlug: context.worker.tenantSlug,
+      workerId: context.worker.id,
+    }),
+  };
+}
+
+async function loadEvidenceRefs(db: Database, tenantId: string, ids: string[], label: string) {
+  const uniqueIds = Array.from(new Set(ids.filter((id) => id.length > 0)));
+
+  if (uniqueIds.length === 0) {
+    return [];
+  }
+
+  const invalid = uniqueIds.find((id) => !uuidPattern.test(id));
+
+  if (invalid) {
+    throw new PlatformUnavailableError(
+      "invalid_worker_command_config",
+      `${label} must contain tenant-scoped evidence UUIDs.`,
+      400,
+    );
+  }
+
+  const rows = await db
+    .select({ id: evidence.id })
+    .from(evidence)
+    .where(and(eq(evidence.tenantId, tenantId), inArray(evidence.id, uniqueIds)));
+  const found = new Set(rows.map((row) => row.id));
+  const missing = uniqueIds.filter((id) => !found.has(id));
+
+  if (missing.length > 0) {
+    throw new PlatformUnavailableError(
+      "dispatch_evidence_not_found",
+      `${label} contains evidence that does not exist for this tenant.`,
+      404,
+    );
+  }
+
+  return rows;
+}
+
+async function loadCloseoutRefs(db: Database, tenantId: string, config: JsonObject) {
+  const sourceRefs = objectValue(config.sourceRefs);
+  const workOrderRef =
+    optionalString(config.workOrderId) ??
+    optionalString(sourceRefs.workOrderObjectId) ??
+    optionalString(sourceRefs.workOrderId);
+
+  if (!workOrderRef) {
+    throw new PlatformUnavailableError(
+      "invalid_worker_command_config",
+      "config.workOrderId is required for closeout.prepare.",
+      400,
+    );
+  }
+
+  const workOrderObject = await getObjectById(db, tenantId, workOrderRef);
+
+  if (workOrderObject?.type !== "work_order") {
+    throw new PlatformUnavailableError(
+      "dispatch_work_order_not_found",
+      "Dispatch closeout prepare requires a tenant-scoped work_order object.",
+      404,
+    );
+  }
+
+  if (workOrderObject.state === "closed" || workOrderObject.state === "canceled") {
+    throw new PlatformUnavailableError(
+      "dispatch_work_order_not_closeable",
+      `Dispatch closeout prepare requires an open work order. Current state is ${workOrderObject.state}.`,
+      409,
+    );
+  }
+
+  const workOrderData = objectValue(workOrderObject.data);
+  const requestedJobObjectId =
+    optionalString(sourceRefs.jobObjectId) ??
+    optionalString(sourceRefs.jobId) ??
+    optionalString(workOrderData.jobObjectId) ??
+    optionalString(workOrderData.jobId);
+  const jobObject = requestedJobObjectId ? await getObjectById(db, tenantId, requestedJobObjectId) : null;
+
+  if (jobObject?.type !== "job") {
+    throw new PlatformUnavailableError(
+      "dispatch_job_not_found",
+      "Dispatch closeout prepare requires a tenant-scoped job object through config.sourceRefs.jobObjectId or work order data.",
+      404,
+    );
+  }
+
+  const requestedCustomerObjectId =
+    optionalString(sourceRefs.customerObjectId) ??
+    optionalString(workOrderData.customerObjectId) ??
+    optionalString(workOrderData.customerId);
+  const customerObject = requestedCustomerObjectId ? await getObjectById(db, tenantId, requestedCustomerObjectId) : null;
+
+  if (requestedCustomerObjectId && customerObject?.type !== "customer") {
+    throw new PlatformUnavailableError(
+      "dispatch_customer_not_found",
+      "Dispatch closeout prepare requires a tenant-scoped customer object when config.sourceRefs.customerObjectId is provided.",
+      404,
+    );
+  }
+
+  const requestedAppointmentObjectId =
+    optionalString(sourceRefs.appointmentObjectId) ?? optionalString(workOrderData.appointmentObjectId);
+  const appointmentObject = requestedAppointmentObjectId
+    ? await getObjectById(db, tenantId, requestedAppointmentObjectId)
+    : null;
+
+  if (requestedAppointmentObjectId && appointmentObject?.type !== "appointment") {
+    throw new PlatformUnavailableError(
+      "dispatch_appointment_not_found",
+      "Dispatch closeout prepare requires a tenant-scoped appointment object when config.sourceRefs.appointmentObjectId is provided.",
+      404,
+    );
+  }
+
+  const requestedCustomerUpdateObjectId =
+    optionalString(sourceRefs.customerUpdateObjectId) ?? optionalString(workOrderData.customerUpdateObjectId);
+  const customerUpdateObject = requestedCustomerUpdateObjectId
+    ? await getObjectById(db, tenantId, requestedCustomerUpdateObjectId)
+    : null;
+
+  if (requestedCustomerUpdateObjectId && customerUpdateObject?.type !== "customer_update") {
+    throw new PlatformUnavailableError(
+      "dispatch_customer_update_not_found",
+      "Dispatch closeout prepare requires a tenant-scoped customer_update object when config.sourceRefs.customerUpdateObjectId is provided.",
+      404,
+    );
+  }
+
+  const photoEvidenceIds = Array.from(
+    new Set([...stringList(config.photoEvidenceIds), ...stringList(sourceRefs.photoEvidenceIds)]),
+  );
+  const sourceEvidenceIds = Array.from(
+    new Set([
+      ...photoEvidenceIds,
+      ...stringList(config.evidenceIds),
+      ...stringList(sourceRefs.evidenceIds),
+      ...stringList(config.completionEvidenceIds),
+      ...stringList(sourceRefs.completionEvidenceIds),
+    ]),
+  );
+  const sourceEvidence = await loadEvidenceRefs(db, tenantId, sourceEvidenceIds, "config.sourceRefs.evidenceIds");
+
+  return {
+    sourceRefs,
+    workOrderObject,
+    workOrderData,
+    jobObject,
+    customerObject,
+    appointmentObject,
+    customerUpdateObject,
+    photoEvidenceIds,
+    sourceEvidenceIds: sourceEvidence.map((row) => row.id),
+  };
+}
+
+function normalizeCloseoutQuality(config: JsonObject, photoEvidenceIds: string[]) {
+  const qaInput = objectValue(config.qaChecklist ?? config.qualityChecklist);
+  const completionNotes = stringValue(
+    config.completionNotes,
+    stringValue(qaInput.completionNotes, "Work is ready for closeout review."),
+  );
+  const scopeCompleted = booleanValue(qaInput.scopeCompleted, booleanValue(config.scopeCompleted, true));
+  const photosAttached = booleanValue(
+    qaInput.photosAttached,
+    booleanValue(config.photosAttached, photoEvidenceIds.length > 0),
+  );
+  const customerSignoff = booleanValue(
+    qaInput.customerSignoff,
+    booleanValue(config.customerSignoff, false),
+  );
+  const safetyReviewed = booleanValue(qaInput.safetyReviewed, booleanValue(config.safetyReviewed, true));
+  const blockers = Array.from(
+    new Set([
+      ...stringList(config.blockers),
+      ...stringList(qaInput.blockers),
+      ...(scopeCompleted ? [] : ["qa_incomplete"]),
+      ...(photosAttached ? [] : ["missing_photos"]),
+      ...(customerSignoff ? [] : ["customer_signoff_missing"]),
+      ...(safetyReviewed ? [] : ["safety_review_incomplete"]),
+    ]),
+  );
+  const invoiceReady = blockers.length === 0 && booleanValue(config.invoiceReady, true);
+
+  return {
+    completionNotes,
+    blockers,
+    invoiceReady,
+    qaChecklist: {
+      scopeCompleted,
+      photosAttached,
+      customerSignoff,
+      safetyReviewed,
+      invoiceReady,
+      blockers,
+    } satisfies JsonObject,
+  };
+}
+
+async function replayedCloseoutPrepare(
+  db: Database,
+  context: DispatchContext,
+  run: typeof workerRuns.$inferSelect,
+): Promise<DispatchCloseoutPrepareResult> {
+  const data = objectValue(run.data);
+  const output = outputData(data);
+
+  return {
+    created: false,
+    idempotencyKey: run.idempotencyKey,
+    workerRunId: run.id,
+    taskId: run.taskId,
+    eventId: run.eventId ?? optionalString(data.eventId) ?? null,
+    closeoutObjectId: optionalString(output.closeoutObjectId) ?? null,
+    approvalRequestId: optionalString(data.approvalRequestId) ?? optionalString(output.approvalRequestId) ?? null,
+    evidenceId: optionalString(data.evidenceId) ?? optionalString(output.evidenceId) ?? null,
+    qaEvidenceId: optionalString(data.qaEvidenceId) ?? optionalString(output.qaEvidenceId) ?? null,
+    packetId: optionalString(data.packetId) ?? optionalString(output.packetId) ?? null,
+    documentId: optionalString(data.documentId) ?? optionalString(output.documentId) ?? null,
+    workflowRunId: optionalString(data.workflowRunId) ?? optionalString(output.workflowRunId) ?? null,
+    workflowStepIds: getWorkflowStepIds(data),
+    dispatchCloseoutViewId:
+      optionalString(data.dispatchCloseoutViewId) ?? optionalString(output.dispatchCloseoutViewId) ?? null,
     output,
     snapshot: await getDispatchWorkerSnapshot(db, {
       role: dispatchWorkerRole,
@@ -2586,6 +2840,920 @@ export async function draftDispatchCustomerUpdate(input: {
     workflowRunId: result.workflowRunId,
     workflowStepIds: result.workflowStepIds,
     dispatchCustomerUpdateViewId: result.dispatchCustomerUpdateViewId,
+    output: result.output,
+    snapshot: await getDispatchWorkerSnapshot(db, {
+      role: dispatchWorkerRole,
+      tenantSlug: context.worker.tenantSlug,
+      workerId: context.worker.id,
+    }),
+  };
+}
+
+export async function prepareDispatchCloseout(input: {
+  idempotencyKey: string;
+  tenantSlug?: string;
+  workerId?: string;
+  operatorEmail: string;
+  config?: JsonObject;
+  db?: Database;
+}): Promise<DispatchCloseoutPrepareResult> {
+  const db = input.db ?? defaultDb;
+  const context = await loadDispatchContext({
+    db,
+    selector: { role: dispatchWorkerRole, tenantSlug: input.tenantSlug, workerId: input.workerId },
+    operatorEmail: input.operatorEmail,
+    capabilityKey: closeoutCapabilityKey,
+    capabilityLabel: "document_packet.prepare",
+  });
+  const config = input.config ?? {};
+  const handoff = await loadCloseoutRefs(db, context.worker.tenantId, config);
+  const quality = normalizeCloseoutQuality(config, handoff.photoEvidenceIds);
+  const billableLines = Array.isArray(config.billableLines)
+    ? config.billableLines
+        .filter((line) => line && typeof line === "object" && !Array.isArray(line))
+        .map((line) => objectValue(line))
+    : [];
+  const closeoutState = quality.blockers.length > 0 ? "rework_required" : "review_ready";
+  const inputHash = hashObject({
+    schemaVersion: "dispatch.closeout.prepare.v1",
+    tenantId: context.worker.tenantId,
+    workerId: context.worker.id,
+    idempotencyKey: input.idempotencyKey,
+    config,
+    workOrderObjectId: handoff.workOrderObject.id,
+    jobObjectId: handoff.jobObject.id,
+    customerObjectId: handoff.customerObject?.id ?? null,
+    appointmentObjectId: handoff.appointmentObject?.id ?? null,
+    customerUpdateObjectId: handoff.customerUpdateObject?.id ?? null,
+    sourceEvidenceIds: handoff.sourceEvidenceIds,
+    closeoutState,
+  });
+  const now = new Date();
+
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${dispatchSource}:${input.idempotencyKey}`}))`,
+    );
+
+    const [existingRun] = await tx
+      .select()
+      .from(workerRuns)
+      .where(
+        and(
+          eq(workerRuns.tenantId, context.worker.tenantId),
+          eq(workerRuns.source, dispatchSource),
+          eq(workerRuns.idempotencyKey, input.idempotencyKey),
+        ),
+      )
+      .limit(1);
+
+    if (existingRun) {
+      const existingInput = objectValue(objectValue(existingRun.data).input);
+      const existingHash = optionalString(existingInput.inputHash);
+
+      if (existingHash && existingHash !== inputHash) {
+        throw new PlatformUnavailableError(
+          "worker_idempotency_conflict",
+          "A Dispatch closeout packet already exists for this idempotency key with different input.",
+          409,
+        );
+      }
+
+      return { replay: existingRun };
+    }
+
+    const [definition] = await tx
+      .select({ id: workflowDefinitions.id })
+      .from(workflowDefinitions)
+      .where(and(eq(workflowDefinitions.key, workflowKey), eq(workflowDefinitions.active, true)))
+      .orderBy(desc(workflowDefinitions.createdAt))
+      .limit(1);
+
+    if (!definition) {
+      throw new PlatformUnavailableError(
+        "worker_workflow_definition_missing",
+        "Dispatch Operations Worker requires the promise_to_delivery workflow definition.",
+        409,
+      );
+    }
+
+    const [task] = await tx
+      .insert(tasks)
+      .values({
+        tenantId: context.worker.tenantId,
+        objectId: handoff.workOrderObject.id,
+        capabilityId: context.capabilityId,
+        title: `Review closeout packet for ${handoff.workOrderObject.name}`,
+        state: "approval_required",
+        priority: quality.blockers.length > 0 ? "high" : "normal",
+        ownerType: "worker",
+        ownerId: context.worker.id,
+        ownerRef: `worker:${context.worker.id}`,
+        reviewerUserId: context.reviewerUserId,
+        evidence: {
+          required: ["work_order_snapshot", "qa_checklist", "dispatch_closeout_packet"],
+          blockers: quality.blockers,
+        },
+        outcome: {
+          status: quality.blockers.length > 0 ? "closeout_rework_needed" : "closeout_approval_needed",
+        },
+        cost: { units: closeoutPrepareUnits },
+        kpi: { closeouts_prepared: 1 },
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: tasks.id });
+
+    const runInput = {
+      command: "closeout.prepare",
+      inputHash,
+      config,
+      workOrderObjectId: handoff.workOrderObject.id,
+      jobObjectId: handoff.jobObject.id,
+      customerObjectId: handoff.customerObject?.id ?? null,
+      appointmentObjectId: handoff.appointmentObject?.id ?? null,
+      customerUpdateObjectId: handoff.customerUpdateObject?.id ?? null,
+      sourceEvidenceIds: handoff.sourceEvidenceIds,
+    } satisfies JsonObject;
+
+    const [workerRun] = await tx
+      .insert(workerRuns)
+      .values({
+        tenantId: context.worker.tenantId,
+        workerId: context.worker.id,
+        taskId: task.id,
+        capabilityId: context.capabilityId,
+        budgetAccountId: context.budgetAccountId,
+        source: dispatchSource,
+        idempotencyKey: input.idempotencyKey,
+        state: "running",
+        mode: "simulation",
+        data: {
+          input: runInput,
+          output: {},
+        },
+        startedAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: workerRuns.id });
+
+    const closeoutData = {
+      workOrderObjectId: handoff.workOrderObject.id,
+      jobObjectId: handoff.jobObject.id,
+      customerObjectId: handoff.customerObject?.id ?? null,
+      appointmentObjectId: handoff.appointmentObject?.id ?? null,
+      customerUpdateObjectId: handoff.customerUpdateObject?.id ?? null,
+      sourceRefs: handoff.sourceRefs,
+      sourceEvidenceIds: handoff.sourceEvidenceIds,
+      photoEvidenceIds: handoff.photoEvidenceIds,
+      completionNotes: quality.completionNotes,
+      qaChecklist: quality.qaChecklist,
+      billableLines,
+      invoiceReady: quality.invoiceReady,
+      financeHandoff: {
+        handoff: "dispatch.closeout_to_finance",
+        status: quality.invoiceReady ? "ready_for_invoice_draft" : "blocked_for_rework",
+        invoiceExecution: "blocked",
+        paymentExecution: "blocked",
+      },
+      externalExecution: "blocked",
+      externalMutation: false,
+      externalSend: false,
+    } satisfies JsonObject;
+
+    const [closeout] = await tx
+      .insert(objects)
+      .values({
+        tenantId: context.worker.tenantId,
+        type: "closeout",
+        name: `Closeout packet for ${handoff.workOrderObject.name}`,
+        state: closeoutState,
+        source: dispatchSource,
+        externalId: `dispatch-closeout:${input.idempotencyKey}`,
+        data: closeoutData,
+        createdByUserId: context.operator.id,
+        createdByWorkerId: context.worker.id,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: objects.id });
+
+    await tx.insert(objectVersions).values({
+      tenantId: context.worker.tenantId,
+      objectId: closeout.id,
+      version: 1,
+      data: closeoutData,
+      changedByType: "worker",
+      changedById: context.worker.id,
+      reason: "dispatch closeout packet",
+      createdAt: now,
+    });
+
+    await tx
+      .insert(objectLinks)
+      .values([
+        {
+          tenantId: context.worker.tenantId,
+          fromId: closeout.id,
+          toId: handoff.workOrderObject.id,
+          type: "closes_work_order",
+          data: { source: dispatchSource },
+          effectiveAt: now,
+        },
+        {
+          tenantId: context.worker.tenantId,
+          fromId: closeout.id,
+          toId: handoff.jobObject.id,
+          type: "supports_job",
+          data: { source: dispatchSource },
+          effectiveAt: now,
+        },
+        ...(handoff.customerObject
+          ? [
+              {
+                tenantId: context.worker.tenantId,
+                fromId: closeout.id,
+                toId: handoff.customerObject.id,
+                type: "for_customer",
+                data: { source: dispatchSource },
+                effectiveAt: now,
+              },
+            ]
+          : []),
+        ...(handoff.appointmentObject
+          ? [
+              {
+                tenantId: context.worker.tenantId,
+                fromId: closeout.id,
+                toId: handoff.appointmentObject.id,
+                type: "about_appointment",
+                data: { source: dispatchSource },
+                effectiveAt: now,
+              },
+            ]
+          : []),
+        ...(handoff.customerUpdateObject
+          ? [
+              {
+                tenantId: context.worker.tenantId,
+                fromId: closeout.id,
+                toId: handoff.customerUpdateObject.id,
+                type: "includes_customer_update",
+                data: { source: dispatchSource },
+                effectiveAt: now,
+              },
+            ]
+          : []),
+      ])
+      .onConflictDoNothing();
+
+    const [workflowRun] = await tx
+      .insert(workflowRuns)
+      .values({
+        tenantId: context.worker.tenantId,
+        definitionId: definition.id,
+        objectId: handoff.jobObject.id,
+        workerId: context.worker.id,
+        state: "approval_pending",
+        idempotencyKey: input.idempotencyKey,
+        data: {
+          workerRunId: workerRun.id,
+          closeoutObjectId: closeout.id,
+          workOrderObjectId: handoff.workOrderObject.id,
+          jobObjectId: handoff.jobObject.id,
+          sourceRefs: handoff.sourceRefs,
+          inputHash,
+          externalExecution: "blocked",
+        },
+        blockers: {
+          open: [
+            "closeout_approval_required",
+            "external_invoice_handoff_blocked",
+            ...quality.blockers,
+          ],
+        },
+        metrics: {
+          budgetUnits: closeoutPrepareUnits,
+          closeoutsPrepared: 1,
+          blockerCount: quality.blockers.length,
+          billableLineCount: billableLines.length,
+        },
+        startedAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: workflowRuns.id });
+
+    const [reservation] = await tx
+      .insert(budgetReservations)
+      .values({
+        tenantId: context.worker.tenantId,
+        accountId: context.budgetAccountId,
+        taskId: task.id,
+        units: closeoutPrepareUnits,
+        state: "used",
+        expiresAt: new Date(now.getTime() + 15 * 60 * 1000),
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: budgetReservations.id });
+
+    const [inference] = await tx
+      .insert(inferences)
+      .values({
+        tenantId: context.worker.tenantId,
+        budgetAccountId: context.budgetAccountId,
+        taskId: task.id,
+        capabilityId: context.capabilityId,
+        actorType: "worker",
+        actorId: context.worker.id,
+        promptHash: traceHash(input.idempotencyKey, "dispatch-closeout"),
+        request: {
+          mode: "deterministic",
+          objective: "Prepare a closeout packet and QA checklist from tenant-scoped work order evidence.",
+          workOrderObjectId: handoff.workOrderObject.id,
+          jobObjectId: handoff.jobObject.id,
+          sourceEvidenceIds: handoff.sourceEvidenceIds,
+          inputHash,
+        },
+        result: {
+          closeoutObjectId: closeout.id,
+          closeoutState,
+          qaChecklist: quality.qaChecklist,
+          blockers: quality.blockers,
+          requiresApproval: true,
+          externalExecution: "blocked",
+        },
+        safety: {
+          externalExecution: "blocked",
+          externalMutation: false,
+          financeHandoff: "blocked",
+        },
+        promptTokens: 320,
+        completionTokens: 140,
+        units: closeoutPrepareUnits,
+        costUsd: "0.000000",
+        latencyMs: 100,
+        createdAt: now,
+      })
+      .returning({ id: inferences.id });
+
+    const [usage] = await tx
+      .insert(usageEvents)
+      .values({
+        tenantId: context.worker.tenantId,
+        accountId: context.budgetAccountId,
+        reservationId: reservation.id,
+        inferenceId: inference.id,
+        taskId: task.id,
+        capabilityId: context.capabilityId,
+        actorType: "worker",
+        actorId: context.worker.id,
+        units: closeoutPrepareUnits,
+        costUsd: "0.000000",
+        data: {
+          mode: "deterministic",
+          workerRunId: workerRun.id,
+          workflowRunId: workflowRun.id,
+          closeoutObjectId: closeout.id,
+        },
+        createdAt: now,
+      })
+      .returning({ id: usageEvents.id });
+
+    const [event] = await tx
+      .insert(events)
+      .values({
+        tenantId: context.worker.tenantId,
+        type: "dispatch_worker.closeout_prepare.completed",
+        source: dispatchSource,
+        actorType: "worker",
+        actorId: context.worker.id,
+        actorRef: `worker:${context.worker.id}`,
+        objectId: closeout.id,
+        taskId: task.id,
+        capabilityId: context.capabilityId,
+        idempotencyKey: input.idempotencyKey,
+        data: {
+          workerRunId: workerRun.id,
+          workflowRunId: workflowRun.id,
+          workOrderObjectId: handoff.workOrderObject.id,
+          jobObjectId: handoff.jobObject.id,
+          closeoutObjectId: closeout.id,
+          closeoutState,
+          blockers: quality.blockers,
+          externalExecution: "blocked",
+          externalMutation: false,
+          externalSend: false,
+          inputHash,
+        },
+        occurredAt: now,
+        createdAt: now,
+      })
+      .returning({ id: events.id });
+
+    await tx
+      .update(workerRuns)
+      .set({ eventId: event.id, updatedAt: now })
+      .where(eq(workerRuns.id, workerRun.id));
+
+    const [traceEvidence] = await tx
+      .insert(evidence)
+      .values({
+        tenantId: context.worker.tenantId,
+        kind: "trace",
+        name: "Dispatch closeout trace",
+        objectId: closeout.id,
+        taskId: task.id,
+        eventId: event.id,
+        capabilityId: context.capabilityId,
+        actorType: "worker",
+        actorId: context.worker.id,
+        hash: inputHash,
+        data: {
+          inputHash,
+          workOrderObjectId: handoff.workOrderObject.id,
+          jobObjectId: handoff.jobObject.id,
+          closeoutObjectId: closeout.id,
+          sourceEvidenceIds: handoff.sourceEvidenceIds,
+          externalExecution: "blocked",
+        },
+        createdAt: now,
+      })
+      .returning({ id: evidence.id });
+
+    const [qaEvidence] = await tx
+      .insert(evidence)
+      .values({
+        tenantId: context.worker.tenantId,
+        kind: "snapshot",
+        name: "Closeout QA checklist",
+        objectId: closeout.id,
+        taskId: task.id,
+        eventId: event.id,
+        capabilityId: context.capabilityId,
+        actorType: "worker",
+        actorId: context.worker.id,
+        hash: traceHash(input.idempotencyKey, "closeout_qa"),
+        data: {
+          closeoutObjectId: closeout.id,
+          workOrderObjectId: handoff.workOrderObject.id,
+          qaChecklist: quality.qaChecklist,
+          completionNotes: quality.completionNotes,
+          billableLines,
+          externalExecution: "blocked",
+        },
+        createdAt: now,
+      })
+      .returning({ id: evidence.id });
+
+    const [document] = await tx
+      .insert(documents)
+      .values({
+        tenantId: context.worker.tenantId,
+        objectId: closeout.id,
+        workflowRunId: workflowRun.id,
+        kind: "dispatch_closeout_packet",
+        name: `Dispatch closeout packet for ${handoff.workOrderObject.name}`,
+        state: closeoutState,
+        sensitivity: "medium",
+        hash: traceHash(input.idempotencyKey, "document"),
+        data: {
+          workOrderObjectId: handoff.workOrderObject.id,
+          jobObjectId: handoff.jobObject.id,
+          closeoutObjectId: closeout.id,
+          qaChecklist: quality.qaChecklist,
+          billableLines,
+          invoiceReady: quality.invoiceReady,
+          sourceEvidenceIds: handoff.sourceEvidenceIds,
+          financeHandoff: closeoutData.financeHandoff,
+          externalExecution: "blocked",
+        },
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: documents.id });
+
+    const [packet] = await tx
+      .insert(evidencePackets)
+      .values({
+        tenantId: context.worker.tenantId,
+        documentId: document.id,
+        objectId: closeout.id,
+        taskId: task.id,
+        workflowRunId: workflowRun.id,
+        eventId: event.id,
+        capabilityId: context.capabilityId,
+        kind: "dispatch_closeout_packet",
+        name: "Dispatch closeout evidence packet",
+        state: "review_ready",
+        sensitivity: "medium",
+        evidenceIds: { ids: [traceEvidence.id, qaEvidence.id, ...handoff.sourceEvidenceIds] },
+        documentIds: { ids: [document.id] },
+        data: {
+          workOrderObjectId: handoff.workOrderObject.id,
+          jobObjectId: handoff.jobObject.id,
+          closeoutObjectId: closeout.id,
+          customerObjectId: handoff.customerObject?.id ?? null,
+          invoiceReady: quality.invoiceReady,
+          blockers: quality.blockers,
+          workflowRunId: workflowRun.id,
+          externalExecution: "blocked",
+          externalMutation: false,
+          externalSend: false,
+        },
+        hash: traceHash(input.idempotencyKey, "dispatch_closeout_packet"),
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: evidencePackets.id });
+
+    const [approval] = await tx
+      .insert(approvalRequests)
+      .values({
+        tenantId: context.worker.tenantId,
+        taskId: task.id,
+        workerRunId: workerRun.id,
+        workflowRunId: workflowRun.id,
+        eventId: event.id,
+        objectId: closeout.id,
+        capabilityId: context.capabilityId,
+        requesterType: "worker",
+        requesterId: context.worker.id,
+        requesterRef: `worker:${context.worker.id}`,
+        reviewerUserId: context.reviewerUserId,
+        kind: "dispatch_closeout_approval",
+        state: "pending",
+        priority: quality.blockers.length > 0 ? "high" : "normal",
+        risk: quality.blockers.length > 0 ? "high" : "medium",
+        title: `Approve closeout for ${handoff.workOrderObject.name}`,
+        summary:
+          "Dispatch Operations Worker prepared a closeout packet and QA checklist; invoice preparation and external sends remain blocked.",
+        requestedAction: {
+          action: quality.blockers.length > 0 ? "request_rework" : "accept_closeout",
+          closeoutObjectId: closeout.id,
+          workOrderObjectId: handoff.workOrderObject.id,
+          jobObjectId: handoff.jobObject.id,
+          invoiceReady: quality.invoiceReady,
+          blockers: quality.blockers,
+          financeHandoff: "dispatch.closeout_to_finance",
+          externalExecution: "blocked",
+        },
+        evidence: {
+          packetId: packet.id,
+          documentId: document.id,
+          traceEvidenceId: traceEvidence.id,
+          qaEvidenceId: qaEvidence.id,
+          sourceEvidenceIds: handoff.sourceEvidenceIds,
+        },
+        policy: {
+          closeoutAcceptance: "approval_required",
+          invoicePreparation: "blocked_until_finance_worker",
+          externalExecution: "blocked",
+        },
+        data: {
+          workerRunId: workerRun.id,
+          workflowRunId: workflowRun.id,
+          closeoutObjectId: closeout.id,
+          financeHandoff: "dispatch.closeout_to_finance",
+        },
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: approvalRequests.id });
+
+    const stepRows = await tx
+      .insert(workflowSteps)
+      .values([
+        {
+          tenantId: context.worker.tenantId,
+          definitionId: definition.id,
+          workflowRunId: workflowRun.id,
+          eventId: event.id,
+          objectId: handoff.workOrderObject.id,
+          workerId: context.worker.id,
+          capabilityId: context.capabilityId,
+          kind: "handoff",
+          name: "Work order context accepted",
+          state: "done",
+          fromState: "in_progress",
+          toState: "closeout_ready",
+          idempotencyKey: `${input.idempotencyKey}:work_order_context`,
+          input: { sourceRefs: handoff.sourceRefs },
+          output: {
+            workOrderObjectId: handoff.workOrderObject.id,
+            jobObjectId: handoff.jobObject.id,
+          },
+          startedAt: now,
+          completedAt: now,
+          updatedAt: now,
+        },
+        {
+          tenantId: context.worker.tenantId,
+          definitionId: definition.id,
+          workflowRunId: workflowRun.id,
+          eventId: event.id,
+          objectId: closeout.id,
+          workerId: context.worker.id,
+          capabilityId: context.capabilityId,
+          kind: "worker_action",
+          name: "Closeout packet prepared",
+          state: "done",
+          fromState: "closeout_ready",
+          toState: closeoutState,
+          idempotencyKey: `${input.idempotencyKey}:closeout_prepared`,
+          input: { workOrderObjectId: handoff.workOrderObject.id },
+          output: { closeoutObjectId: closeout.id, documentId: document.id },
+          startedAt: now,
+          completedAt: now,
+          updatedAt: now,
+        },
+        {
+          tenantId: context.worker.tenantId,
+          definitionId: definition.id,
+          workflowRunId: workflowRun.id,
+          eventId: event.id,
+          objectId: closeout.id,
+          workerId: context.worker.id,
+          capabilityId: context.capabilityId,
+          kind: "worker_action",
+          name: "QA checklist recorded",
+          state: "done",
+          fromState: closeoutState,
+          toState: closeoutState,
+          idempotencyKey: `${input.idempotencyKey}:qa_checklist`,
+          input: { sourceEvidenceIds: handoff.sourceEvidenceIds },
+          output: { qaEvidenceId: qaEvidence.id, blockers: quality.blockers },
+          startedAt: now,
+          completedAt: now,
+          updatedAt: now,
+        },
+        {
+          tenantId: context.worker.tenantId,
+          definitionId: definition.id,
+          workflowRunId: workflowRun.id,
+          eventId: event.id,
+          approvalRequestId: approval.id,
+          objectId: closeout.id,
+          workerId: context.worker.id,
+          capabilityId: context.capabilityId,
+          kind: "approval_request",
+          name: "Closeout approval requested",
+          state: "done",
+          fromState: closeoutState,
+          toState: "approval_pending",
+          idempotencyKey: `${input.idempotencyKey}:approval_requested`,
+          input: { approvalRequestId: approval.id },
+          output: { packetId: packet.id, documentId: document.id },
+          startedAt: now,
+          completedAt: now,
+          updatedAt: now,
+        },
+      ])
+      .returning({ id: workflowSteps.id });
+
+    const workflowStepIds = stepRows.map((step) => step.id);
+    const viewKey = "dispatch.closeout.review";
+    const viewVersion = "1.0.0";
+    const viewValues = {
+      capabilityId: context.capabilityId,
+      key: viewKey,
+      version: viewVersion,
+      name: "Dispatch closeout review",
+      purpose: "Let an operator review a closeout packet, QA checklist, and Finance handoff readiness.",
+      surface: "web",
+      objectType: "closeout",
+      taskState: "approval_required" as const,
+      contract: {
+        sections: ["WorkOrderSummary", "QAChecklist", "EvidenceTimeline", "FinanceHandoff", "ActionBar"],
+        externalExecution: "blocked",
+      } as JsonObject,
+      actions: {
+        decisionSurface: "/approval",
+        decisionCommand: "approval.decide",
+        postDecisionSurface: "/worker",
+        postDecisionCommand: "continue",
+        valid: ["approved", "revision_requested", "rejected"],
+        closeoutActions: ["accept_closeout", "request_rework", "prepare_invoice"],
+        externalExecution: "blocked",
+      } as JsonObject,
+      data: {
+        latest: {
+          approvalRequestId: approval.id,
+          workerRunId: workerRun.id,
+          workflowRunId: workflowRun.id,
+          taskId: task.id,
+          workOrderObjectId: handoff.workOrderObject.id,
+          jobObjectId: handoff.jobObject.id,
+          customerObjectId: handoff.customerObject?.id ?? null,
+          closeoutObjectId: closeout.id,
+          closeoutState,
+          packetId: packet.id,
+          documentId: document.id,
+          traceEvidenceId: traceEvidence.id,
+          qaEvidenceId: qaEvidence.id,
+          sourceEvidenceIds: handoff.sourceEvidenceIds,
+          invoiceReady: quality.invoiceReady,
+          blockers: quality.blockers,
+          financeHandoff: "dispatch.closeout_to_finance",
+          externalExecution: "blocked",
+          externalMutation: false,
+          externalSend: false,
+        },
+      } as JsonObject,
+      mask: {
+        customer_contact: "redacted_by_default",
+        site_notes: "redacted_by_default",
+        externalExecution: "blocked",
+      } as JsonObject,
+      active: true,
+      updatedAt: now,
+    };
+    const [existingView] = await tx
+      .select({ id: generatedViews.id })
+      .from(generatedViews)
+      .where(
+        and(
+          eq(generatedViews.tenantId, context.worker.tenantId),
+          eq(generatedViews.key, viewKey),
+          eq(generatedViews.version, viewVersion),
+        ),
+      )
+      .limit(1);
+    const [view] = existingView
+      ? await tx
+          .update(generatedViews)
+          .set(viewValues)
+          .where(eq(generatedViews.id, existingView.id))
+          .returning({ id: generatedViews.id })
+      : await tx
+          .insert(generatedViews)
+          .values({
+            tenantId: context.worker.tenantId,
+            ...viewValues,
+            createdAt: now,
+          })
+          .returning({ id: generatedViews.id });
+
+    await tx.insert(events).values({
+      tenantId: context.worker.tenantId,
+      type: existingView ? "view.updated" : "view.published",
+      source: dispatchSource,
+      actorType: "worker",
+      actorId: context.worker.id,
+      actorRef: `worker:${context.worker.id}`,
+      objectId: closeout.id,
+      taskId: task.id,
+      capabilityId: context.capabilityId,
+      idempotencyKey: `${input.idempotencyKey}:dispatch_closeout_view`,
+      data: {
+        key: viewKey,
+        version: viewVersion,
+        viewId: view.id,
+        workerRunId: workerRun.id,
+        workflowRunId: workflowRun.id,
+      },
+      occurredAt: now,
+      createdAt: now,
+    });
+
+    await tx.insert(auditEvents).values({
+      tenantId: context.worker.tenantId,
+      type: "dispatch_worker.closeout_prepare.completed",
+      source: dispatchSource,
+      actorType: "worker",
+      actorId: context.worker.id,
+      actorRef: `worker:${context.worker.id}`,
+      targetType: "worker_run",
+      targetId: workerRun.id,
+      taskId: task.id,
+      workerRunId: workerRun.id,
+      approvalRequestId: approval.id,
+      eventId: event.id,
+      objectId: closeout.id,
+      capabilityId: context.capabilityId,
+      risk: quality.blockers.length > 0 ? "high" : "medium",
+      idempotencyKey: `${input.idempotencyKey}:audit`,
+      data: {
+        operatorEmail: context.operator.email,
+        inputHash,
+        closeoutState,
+        externalExecution: "blocked",
+        externalMutation: false,
+        externalSend: false,
+      },
+      createdAt: now,
+    });
+
+    const output = {
+      workOrderObjectId: handoff.workOrderObject.id,
+      jobObjectId: handoff.jobObject.id,
+      customerObjectId: handoff.customerObject?.id ?? null,
+      appointmentObjectId: handoff.appointmentObject?.id ?? null,
+      customerUpdateObjectId: handoff.customerUpdateObject?.id ?? null,
+      closeoutObjectId: closeout.id,
+      closeoutState,
+      approvalRequestId: approval.id,
+      evidenceId: traceEvidence.id,
+      qaEvidenceId: qaEvidence.id,
+      packetId: packet.id,
+      documentId: document.id,
+      workflowRunId: workflowRun.id,
+      workflowStepIds,
+      dispatchCloseoutViewId: view.id,
+      qaChecklist: quality.qaChecklist,
+      billableLines,
+      invoiceReady: quality.invoiceReady,
+      blockers: quality.blockers,
+      sourceRefs: handoff.sourceRefs,
+      sourceEvidenceIds: handoff.sourceEvidenceIds,
+      financeHandoff: {
+        name: "dispatch.closeout_to_finance",
+        status: quality.invoiceReady ? "ready_for_invoice_draft" : "blocked_for_rework",
+        externalExecution: "blocked",
+      },
+      externalExecution: "blocked",
+      externalMutation: false,
+      externalSend: false,
+      requiresApproval: true,
+    } satisfies JsonObject;
+
+    await tx
+      .update(workerRuns)
+      .set({
+        state: "done",
+        eventId: event.id,
+        data: {
+          input: runInput,
+          output,
+          eventId: event.id,
+          taskId: task.id,
+          closeoutObjectId: closeout.id,
+          approvalRequestId: approval.id,
+          evidenceId: traceEvidence.id,
+          qaEvidenceId: qaEvidence.id,
+          packetId: packet.id,
+          documentId: document.id,
+          workflowRunId: workflowRun.id,
+          workflowStepIds,
+          dispatchCloseoutViewId: view.id,
+          reservationId: reservation.id,
+          inferenceId: inference.id,
+          usageEventId: usage.id,
+        },
+        endedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(workerRuns.id, workerRun.id));
+
+    await tx
+      .update(workers)
+      .set({
+        kpis: {
+          ...context.worker.kpis,
+          closeouts_prepared: numberValue(context.worker.kpis.closeouts_prepared) + 1,
+          approval_requests_created: numberValue(context.worker.kpis.approval_requests_created) + 1,
+        },
+        updatedAt: now,
+      })
+      .where(eq(workers.id, context.worker.id));
+
+    return {
+      replay: null,
+      workerRunId: workerRun.id,
+      taskId: task.id,
+      eventId: event.id,
+      closeoutObjectId: closeout.id,
+      approvalRequestId: approval.id,
+      evidenceId: traceEvidence.id,
+      qaEvidenceId: qaEvidence.id,
+      packetId: packet.id,
+      documentId: document.id,
+      workflowRunId: workflowRun.id,
+      workflowStepIds,
+      dispatchCloseoutViewId: view.id,
+      output,
+    };
+  });
+
+  if (result.replay) {
+    return replayedCloseoutPrepare(db, context, result.replay);
+  }
+
+  return {
+    created: true,
+    idempotencyKey: input.idempotencyKey,
+    workerRunId: result.workerRunId,
+    taskId: result.taskId,
+    eventId: result.eventId,
+    closeoutObjectId: result.closeoutObjectId,
+    approvalRequestId: result.approvalRequestId,
+    evidenceId: result.evidenceId,
+    qaEvidenceId: result.qaEvidenceId,
+    packetId: result.packetId,
+    documentId: result.documentId,
+    workflowRunId: result.workflowRunId,
+    workflowStepIds: result.workflowStepIds,
+    dispatchCloseoutViewId: result.dispatchCloseoutViewId,
     output: result.output,
     snapshot: await getDispatchWorkerSnapshot(db, {
       role: dispatchWorkerRole,

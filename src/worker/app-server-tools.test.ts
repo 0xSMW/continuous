@@ -31,6 +31,11 @@ describe("app-server worker tools", () => {
         (command) => command.role === "dispatch_operations" && command.name === "customer_update.draft",
       ),
     ).toBe(true);
+    expect(
+      schema.registry.commands.some(
+        (command) => command.role === "dispatch_operations" && command.name === "closeout.prepare",
+      ),
+    ).toBe(true);
   });
 
   it("requires a clean canonical command envelope before dispatch", async () => {
@@ -131,5 +136,22 @@ describe("app-server worker tools", () => {
         },
       }),
     ).rejects.toThrow("config.updateKind is required for customer_update.draft.");
+
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.command", {
+        command: "closeout.prepare",
+        operatorEmail: "owner@continuoushq.com",
+        worker: {
+          role: "dispatch_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "app-server-dispatch-closeout-schema",
+        config: {
+          sourceRefs: {
+            jobObjectId: "job_object_uuid",
+          },
+        },
+      }),
+    ).rejects.toThrow("config.workOrderId is required for closeout.prepare.");
   });
 });
