@@ -19,6 +19,7 @@
     "ops:backup-schedule": "./scripts/install-backup-timer.sh",
     "ops:observability-check": "./scripts/check-observability.sh",
     "ops:observability-schedule": "./scripts/install-observability-timer.sh",
+    "ops:production-readiness-check": "./scripts/check-production-readiness.sh",
     "ops:recovery-drill": "./scripts/recovery-drill.sh",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "bun src/db/migrate.ts",

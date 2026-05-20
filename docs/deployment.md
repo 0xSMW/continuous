@@ -217,6 +217,48 @@ Control-plane token catalog entries have this shape when provided directly via
 route wildcards such as `worker:*`. GET views are authorized as
 `<route>:view.<view>`, for example `worker:view.snapshot`.
 
+## Production Readiness Gate
+
+Normal deploys run the production smoke suite plus the non-strict host
+observability check. Before the droplet is used for customer data, run the
+strict readiness gate from the operator shell:
+
+```sh
+HOST=45.55.53.92 ./scripts/check-production-readiness.sh
+```
+
+The gate runs on the droplet and requires:
+
+- the Postgres backup timer to be enabled and active;
+- `/etc/continuous/postgres-backup.env` to contain object-storage backup
+  settings without printing secret values;
+- the latest local dump and object-storage manifest to be fresh;
+- the observability timer to be enabled and active with
+  `REQUIRE_BACKUP_FRESH=true`, `CHECK_SYSTEMD_FAILED=true`, and a non-empty
+  `ALERT_WEBHOOK_URL`;
+- strict host observability to pass, including failed systemd unit checks;
+- `/etc/continuous/production-readiness.env` to attest the completed recovery
+  drill, token rotation, and non-root access work.
+
+The readiness attestation file is deliberately operator-owned. It should be
+created only after the underlying work is done and should not contain secrets:
+
+```sh
+install -m 0700 -d /etc/continuous
+cat >/etc/continuous/production-readiness.env <<'ENV'
+RECOVERY_DRILL_ATTESTED_AT=2026-05-20T00:00:00Z
+RECOVERY_DRILL_REPORT=reports/recovery-drills/continuous-recovery-YYYYMMDDTHHMMSSZ.md
+TOKEN_ROTATION_ATTESTED_AT=2026-05-20T00:00:00Z
+NON_ROOT_ACCESS_ATTESTED_AT=2026-05-20T00:00:00Z
+ENV
+chmod 0600 /etc/continuous/production-readiness.env
+```
+
+You can also make the manual deploy workflow enforce the same strict gate by
+dispatching it with `require_production_readiness=true`. Keep the default
+`false` while backup credentials, alerting, drill evidence, token rotation, and
+non-root host access are still being provisioned.
+
 ## Observability
 
 Run the host observability check from the operator shell:
@@ -386,6 +428,9 @@ compatible with the chosen app tag because migrations are forward-only.
 - Install `scripts/install-observability-timer.sh` with `ALERT_WEBHOOK_URL`
   after choosing an alert destination; deploy smoke already verifies the same
   host checks without requiring a webhook.
+- Run `scripts/check-production-readiness.sh` successfully, or dispatch the
+  deploy workflow with `require_production_readiness=true`, before treating the
+  droplet as customer-data ready.
 - Add managed token rotation, credential inventory, and request/session audit
   records before adding multiple real operators or customer data.
 - Replace root SSH deployment with a dedicated deploy user and least-privilege

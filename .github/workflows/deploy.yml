@@ -19,6 +19,10 @@ on:
         description: "Existing image tag to roll app services back to without running migrations"
         required: false
         default: ""
+      require_production_readiness:
+        description: "Run the strict customer-data readiness gate after deploy smoke"
+        required: false
+        default: "false"
 
 permissions:
   contents: read
@@ -42,6 +46,7 @@ jobs:
       APP_URL: ${{ inputs.app_url }}
       APP_TAG_INPUT: ${{ inputs.app_tag }}
       ROLLBACK_APP_TAG: ${{ inputs.rollback_app_tag }}
+      REQUIRE_PRODUCTION_READINESS: ${{ inputs.require_production_readiness }}
       WORKER_OPERATOR_EMAIL: ${{ secrets.WORKER_OPERATOR_EMAIL || 'owner@continuoushq.com' }}
       DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
       DO_API_TOKEN: ${{ secrets.DO_API_TOKEN }}
@@ -86,6 +91,10 @@ jobs:
           fi
           if [[ -n "${ROLLBACK_APP_TAG:-}" && ! "$ROLLBACK_APP_TAG" =~ ^[A-Za-z0-9._-]+$ ]]; then
             echo "::error::rollback_app_tag may only contain letters, numbers, dot, underscore, or dash."
+            exit 1
+          fi
+          if [[ "$REQUIRE_PRODUCTION_READINESS" != "true" && "$REQUIRE_PRODUCTION_READINESS" != "false" ]]; then
+            echo "::error::require_production_readiness must be true or false."
             exit 1
           fi
 
@@ -1603,6 +1612,14 @@ jobs:
           SQL
           CHECK_SYSTEMD_FAILED=false REQUIRE_BACKUP_FRESH=false ./scripts/check-observability-on-host.sh
           REMOTE
+
+      - name: Production readiness gate
+        if: ${{ inputs.require_production_readiness == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" \
+            "cd '$DEPLOY_PATH' && ./scripts/check-production-readiness-on-host.sh"
 
       - name: Close runner SSH access
         if: always()

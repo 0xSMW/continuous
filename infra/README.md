@@ -72,6 +72,18 @@ The timer stores its private environment in
 checksum sidecar, and `latest.json` manifest. `scripts/check-backup-age.sh`
 checks the object manifest when `BACKUP_OBJECT_STORAGE_ENABLED=true`.
 
+After backup scheduling, alerting, recovery-drill evidence, token rotation, and
+non-root access are in place, run the strict production readiness gate:
+
+```sh
+HOST=your-droplet-ip ./scripts/check-production-readiness.sh
+```
+
+The same gate can be enforced from the manual deploy workflow with
+`require_production_readiness=true`. Leave it off until the required
+`/etc/continuous/*` env files and readiness attestations are actually present
+on the host.
+
 ## Domain DNS
 
 The live domains use registrar DNS, not DigitalOcean DNS zones. Point these

@@ -87,6 +87,7 @@
 | Added recovery drill harness | `scripts/recovery-drill.sh` composes tag-based app rollback and confirmation-gated database restore into one measured disposable-host drill, refuses known production hosts by default, and writes a local timing/compatibility report |
 | Added production observability checks | Caddy now writes retained JSON access logs, deploy creates log directories, and `scripts/check-observability-on-host.sh` verifies Compose service state, public health, TLS freshness, disk usage, Caddy logs, and optional backup/systemd checks with webhook failure alerts |
 | Tightened control-plane config envelopes | `/core`, `/workflow`, and `/approval` now reject non-object `config` values instead of silently normalizing them to `{}`, matching the stricter `/worker` command-envelope behavior |
+| Added production readiness gate | `scripts/check-production-readiness.sh` and the optional deploy workflow gate now compose strict observability, scheduled off-host backup freshness, object-storage backup manifests, alerting, recovery-drill attestation, token-rotation attestation, and non-root access attestation into one customer-data readiness check |
 
 ### Tradeoffs
 
@@ -107,6 +108,7 @@
 | Recovery boundary | App-only rollback is tag-based and destructive database restore is dump-backed; the new drill harness makes the app/database compatibility procedure repeatable, but it still must be run on a disposable droplet before customer data |
 | Operator-token scope | The current production token now has hashed catalog metadata and per-command scope enforcement, but this is still env-backed operator auth; broad use still needs managed rotation and request/session audit records tied to credential ids |
 | Alerting boundary | Deploy smoke now proves the host observability check, but recurring alerts are not active until `scripts/install-observability-timer.sh` is run with a real `ALERT_WEBHOOK_URL` |
+| Readiness boundary | The production readiness gate is strict and opt-in; it is expected to fail until object-storage credentials, backup and observability timers, alert webhook, recovery drill report, token rotation, and non-root host access are all actually provisioned and attested |
 
 ### Current State
 
