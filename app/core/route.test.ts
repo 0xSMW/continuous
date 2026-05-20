@@ -22,6 +22,8 @@ const mocks = vi.hoisted(() => ({
   requestApproval: vi.fn(),
   reserveBudget: vi.fn(),
   transitionCoreTask: vi.fn(),
+  upsertCoreAdapter: vi.fn(),
+  upsertCoreConnection: vi.fn(),
   upsertCoreObject: vi.fn(),
 }));
 
@@ -63,6 +65,8 @@ vi.mock("../../src/core/primitives", () => ({
   recordCoreDecision: mocks.recordCoreDecision,
   recordCustomerSignal: mocks.recordCustomerSignal,
   recordRuleChange: mocks.recordRuleChange,
+  upsertCoreAdapter: mocks.upsertCoreAdapter,
+  upsertCoreConnection: mocks.upsertCoreConnection,
   upsertCoreObject: mocks.upsertCoreObject,
 }));
 
@@ -329,6 +333,151 @@ describe("POST /core", () => {
       data: {
         source: "route-test",
       },
+    });
+  });
+
+  it("dispatches adapter.upsert with catalog config payload", async () => {
+    mocks.upsertCoreAdapter.mockResolvedValue({
+      created: true,
+      adapterId: "99999999-9999-4999-8999-000000000021",
+      eventId: "event-1",
+      auditEventId: "audit-1",
+      adapter: {
+        key: "google_workspace",
+      },
+    });
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "adapter.upsert",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "adapter-upsert-route-test-001",
+          config: {
+            key: "google_workspace",
+            name: "Google Workspace",
+            kind: "inbox",
+            auth: "oauth",
+            capabilities: {
+              read: ["lead.read"],
+              sources: ["google_workspace_inbox"],
+            },
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.command).toBe("adapter.upsert");
+    expect(body.data.result.adapterId).toBe("99999999-9999-4999-8999-000000000021");
+    expect(mocks.upsertCoreAdapter).toHaveBeenCalledWith({
+      operatorEmail: "operator@example.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: "adapter-upsert-route-test-001",
+      adapterId: undefined,
+      key: "google_workspace",
+      name: "Google Workspace",
+      kind: "inbox",
+      auth: "oauth",
+      configSchema: {},
+      eventSchema: {},
+      capabilities: {
+        read: ["lead.read"],
+        sources: ["google_workspace_inbox"],
+      },
+      active: undefined,
+    });
+  });
+
+  it("dispatches connection.upsert with read-only polling config payload", async () => {
+    mocks.upsertCoreConnection.mockResolvedValue({
+      created: true,
+      connectionId: "99999999-9999-4999-8999-000000000022",
+      adapterId: "99999999-9999-4999-8999-000000000021",
+      eventId: "event-1",
+      auditEventId: "audit-1",
+      externalExecution: "blocked",
+      pollingEnabled: true,
+    });
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "connection.upsert",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "connection-upsert-route-test-001",
+          config: {
+            adapterKey: "google_workspace",
+            name: "Google Workspace Leads",
+            state: "active",
+            externalAccountId: "leads@continuoushq.com",
+            scopes: {
+              reads: ["lead.read"],
+            },
+            config: {
+              sources: ["google_workspace_inbox"],
+              providers: ["google_workspace"],
+              readerKinds: ["inbox"],
+              polling: {
+                enabled: true,
+                source: "google_workspace_inbox",
+                provider: "google_workspace",
+                credentialRef: "env:GOOGLE_WORKSPACE_TOKEN",
+              },
+              externalExecution: "blocked",
+            },
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.command).toBe("connection.upsert");
+    expect(body.data.result.connectionId).toBe("99999999-9999-4999-8999-000000000022");
+    expect(mocks.upsertCoreConnection).toHaveBeenCalledWith({
+      operatorEmail: "operator@example.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: "connection-upsert-route-test-001",
+      connectionId: undefined,
+      adapterId: undefined,
+      adapterKey: "google_workspace",
+      name: "Google Workspace Leads",
+      state: "active",
+      externalAccountId: "leads@continuoushq.com",
+      scopes: {
+        reads: ["lead.read"],
+      },
+      config: {
+        sources: ["google_workspace_inbox"],
+        providers: ["google_workspace"],
+        readerKinds: ["inbox"],
+        polling: {
+          enabled: true,
+          source: "google_workspace_inbox",
+          provider: "google_workspace",
+          credentialRef: "env:GOOGLE_WORKSPACE_TOKEN",
+        },
+        externalExecution: "blocked",
+      },
+      lastSyncAt: undefined,
     });
   });
 

@@ -26,10 +26,11 @@ commands.
 
 `POST /core` is the operator-gated headless Core command surface. It
 supports `task.create`, `task.transition`, `object.upsert`, `object.link`,
-`event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`,
-`document.packet.prepare`, `decision.record`, `approval.request`,
-`capability.grant`, `budget.reserve`, `budget.charge`,
-`budget.release`, `view.publish`, `adapter.intent.record`, `rule.change.record`, `customer_signal.record`,
+`adapter.upsert`, `connection.upsert`, `event.ingest`, `evidence.attach`,
+`document.create`, `packet.prepare`, `document.packet.prepare`,
+`decision.record`, `approval.request`, `capability.grant`, `budget.reserve`,
+`budget.charge`, `budget.release`, `view.publish`, `adapter.intent.record`,
+`rule.change.record`, `customer_signal.record`,
 `payroll.preview.record`, and `payroll.preview.packet.prepare`, all with the
 same bearer token used by worker and workflow commands.
 
@@ -175,6 +176,65 @@ records, or a read-only polling config with an environment-backed credential
 reference on the server. Provider tokens are never sent in the request payload;
 the response records `connectionId`, `cursor`, `sourceMode`, and a redacted
 polling receipt when the read came from an API poll.
+
+Create the adapter and connection through `/core` before enabling scheduled
+polling. `adapter.upsert` owns the reusable connector catalog row, and
+`connection.upsert` owns the tenant-scoped account, scopes, and polling config.
+Managed credential refs such as `env:GOOGLE_WORKSPACE_TOKEN` are allowed;
+inline access tokens, passwords, and client secrets are rejected.
+
+```json
+{
+  "command": "adapter.upsert",
+  "core": {
+    "tenantSlug": "continuous-demo"
+  },
+  "idempotencyKey": "google-workspace-adapter-001",
+  "config": {
+    "key": "google_workspace",
+    "name": "Google Workspace",
+    "kind": "inbox",
+    "auth": "oauth",
+    "capabilities": {
+      "read": ["lead.read"],
+      "sources": ["google_workspace_inbox"],
+      "providers": ["google_workspace"],
+      "readerKinds": ["inbox"]
+    }
+  }
+}
+```
+
+```json
+{
+  "command": "connection.upsert",
+  "core": {
+    "tenantSlug": "continuous-demo"
+  },
+  "idempotencyKey": "google-workspace-leads-connection-001",
+  "config": {
+    "adapterKey": "google_workspace",
+    "name": "Google Workspace lead inbox",
+    "state": "active",
+    "externalAccountId": "leads@continuoushq.com",
+    "scopes": {
+      "reads": ["lead.read"]
+    },
+    "config": {
+      "sources": ["google_workspace_inbox"],
+      "providers": ["google_workspace"],
+      "readerKinds": ["inbox"],
+      "polling": {
+        "enabled": true,
+        "source": "google_workspace_inbox",
+        "provider": "google_workspace",
+        "credentialRef": "env:GOOGLE_WORKSPACE_TOKEN"
+      },
+      "externalExecution": "blocked"
+    }
+  }
+}
+```
 
 ```json
 {

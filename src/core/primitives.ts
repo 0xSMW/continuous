@@ -34,6 +34,7 @@ type ActorType = "user" | "worker" | "adapter" | "system";
 type EvidenceKind = "snapshot" | "draft" | "approval" | "receipt" | "trace" | "export" | "note";
 type RiskLevel = "low" | "medium" | "high" | "critical";
 type CoreTaskState = "draft" | "active" | "waiting" | "approval_required" | "blocked" | "done" | "canceled";
+type AdapterConnectionState = "draft" | "active" | "paused" | "error" | "archived";
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -60,6 +61,8 @@ const customerSignalSource = "continuous.core.customer_signals";
 const viewSource = "continuous.core.views";
 const adapterIntentSource = "continuous.core.adapter_intents";
 const ruleChangeSource = "continuous.core.rule_changes";
+const adapterSource = "continuous.core.adapters";
+const connectionSource = "continuous.core.connections";
 const customerSignalTypes = new Set([
   "satisfaction_signal",
   "feedback_item",
@@ -67,6 +70,33 @@ const customerSignalTypes = new Set([
   "testimonial",
   "review",
 ]);
+const adapterConnectionStates = new Set<AdapterConnectionState>([
+  "draft",
+  "active",
+  "paused",
+  "error",
+  "archived",
+]);
+const credentialRefKeys = new Set([
+  "credentialref",
+  "secretref",
+  "tokenref",
+  "vaultref",
+  "accesstokenref",
+  "refreshtokenref",
+]);
+const credentialRefPrefixes = [
+  "env:",
+  "vault:",
+  "secret:",
+  "ssm:",
+  "doppler:",
+  "op:",
+  "onepassword:",
+  "1password:",
+  "aws-sm:",
+  "gcp-sm:",
+];
 
 export type ActorInput = {
   type?: string;
@@ -245,6 +275,38 @@ export type CoreViewPublishInput = {
   data?: JsonObject;
   mask?: JsonObject;
   active?: boolean;
+  db?: Database;
+};
+
+export type CoreAdapterUpsertInput = {
+  operatorEmail: string;
+  idempotencyKey: string;
+  tenantSlug?: string;
+  adapterId?: string;
+  key: string;
+  name: string;
+  kind: string;
+  auth?: string;
+  configSchema?: JsonObject;
+  eventSchema?: JsonObject;
+  capabilities?: JsonObject;
+  active?: boolean;
+  db?: Database;
+};
+
+export type CoreConnectionUpsertInput = {
+  operatorEmail: string;
+  idempotencyKey: string;
+  tenantSlug?: string;
+  connectionId?: string;
+  adapterId?: string;
+  adapterKey?: string;
+  name: string;
+  state?: string;
+  externalAccountId?: string;
+  scopes?: JsonObject;
+  config?: JsonObject;
+  lastSyncAt?: string;
   db?: Database;
 };
 
@@ -461,6 +523,201 @@ function boundedInteger(value: unknown, field: string, fallback: number, min: nu
   }
 
   return numericValue;
+}
+
+function stringList(value: unknown) {
+  return Array.isArray(value)
+    ? value
+        .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+        .map((item) => item.trim())
+    : [];
+}
+
+function firstStringValue(...values: unknown[]) {
+  for (const value of values) {
+    const output = cleanString(value);
+
+    if (output) {
+      return output;
+    }
+  }
+
+  return undefined;
+}
+
+function parseAdapterConnectionState(value: string | undefined) {
+  if (!value) {
+    return "draft" as const;
+  }
+
+  if (adapterConnectionStates.has(value as AdapterConnectionState)) {
+    return value as AdapterConnectionState;
+  }
+
+  throw new PlatformUnavailableError(
+    "core_connection_state_invalid",
+    "config.state must be draft, active, paused, error, or archived.",
+    400,
+  );
+}
+
+function isCredentialRefKey(key: string) {
+  return credentialRefKeys.has(key.toLowerCase().replace(/[^a-z0-9]/g, ""));
+}
+
+function credentialRefLooksManaged(value: string) {
+  const normalized = value.toLowerCase();
+
+  return credentialRefPrefixes.some((prefix) => normalized.startsWith(prefix));
+}
+
+function assertManagedCredentialRef(value: unknown, field: string) {
+  if (typeof value !== "string" || !value.trim() || !credentialRefLooksManaged(value.trim())) {
+    throw new PlatformUnavailableError(
+      "core_credential_reference_invalid",
+      `${field} must reference a managed secret such as env:NAME, vault:NAME, or secret:NAME.`,
+      400,
+    );
+  }
+}
+
+function assertNoInlineSecretMaterial(value: unknown, path = "config") {
+  if (value === undefined || value === null) {
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => assertNoInlineSecretMaterial(item, `${path}[${index}]`));
+    return;
+  }
+
+  if (!value || typeof value !== "object") {
+    return;
+  }
+
+  const rawSecretKeys = new Set([
+    "accesstoken",
+    "refreshtoken",
+    "idtoken",
+    "bearertoken",
+    "authorization",
+    "password",
+    "secret",
+    "clientsecret",
+    "apikey",
+    "privatekey",
+    "token",
+  ]);
+
+  for (const [key, nestedValue] of Object.entries(value as Record<string, unknown>)) {
+    const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const nestedPath = `${path}.${key}`;
+
+    if (isCredentialRefKey(key)) {
+      assertManagedCredentialRef(nestedValue, nestedPath);
+      continue;
+    }
+
+    if (rawSecretKeys.has(normalizedKey)) {
+      throw new PlatformUnavailableError(
+        "core_inline_secret_blocked",
+        `${nestedPath} must not contain credential material. Store secrets outside Continuous and pass a managed credential reference instead.`,
+        400,
+      );
+    }
+
+    assertNoInlineSecretMaterial(nestedValue, nestedPath);
+  }
+}
+
+function pollConfigForConnection(config: JsonObject) {
+  return jsonObject(config.polling ?? config.liveRead ?? config.apiRead);
+}
+
+function credentialRefForConnection(config: JsonObject) {
+  const polling = pollConfigForConnection(config);
+  const auth = jsonObject(config.auth);
+
+  return firstStringValue(
+    polling.credentialRef,
+    polling.accessTokenRef,
+    auth.credentialRef,
+    auth.accessTokenRef,
+    config.credentialRef,
+    config.accessTokenRef,
+  );
+}
+
+function configuredSource(config: JsonObject) {
+  const polling = pollConfigForConnection(config);
+
+  return firstStringValue(polling.source, stringList(config.sources)[0], config.source);
+}
+
+function configuredProvider(config: JsonObject) {
+  const polling = pollConfigForConnection(config);
+
+  return firstStringValue(polling.provider, stringList(config.providers)[0], config.provider);
+}
+
+function readScopes(scopes: JsonObject) {
+  return Array.from(
+    new Set([
+      ...stringList(scopes.read),
+      ...stringList(scopes.reads),
+      ...stringList(scopes.lead),
+      ...stringList(scopes.leads),
+    ]),
+  );
+}
+
+function assertConnectionSafety(input: {
+  state: AdapterConnectionState;
+  scopes: JsonObject;
+  config: JsonObject;
+}) {
+  assertNoInlineSecretMaterial(input.scopes, "config.scopes");
+  assertNoInlineSecretMaterial(input.config, "config.config");
+
+  if (input.config.executable === true || input.config.externalExecution === "enabled") {
+    throw new PlatformUnavailableError(
+      "core_connection_external_execution_blocked",
+      "connection.upsert cannot enable external execution. Use blocked read-only connections until a live execution gate exists.",
+      400,
+    );
+  }
+
+  const polling = pollConfigForConnection(input.config);
+
+  if (polling.enabled !== true || input.state !== "active") {
+    return;
+  }
+
+  const credentialRef = credentialRefForConnection(input.config);
+
+  if (!credentialRef || !credentialRef.toLowerCase().startsWith("env:")) {
+    throw new PlatformUnavailableError(
+      "core_connection_polling_credential_required",
+      "Active pollable connections require an environment-backed credential reference such as config.config.polling.credentialRef=env:NAME.",
+      400,
+    );
+  }
+
+  if (!configuredSource(input.config) || !configuredProvider(input.config)) {
+    throw new PlatformUnavailableError(
+      "core_connection_polling_source_required",
+      "Active pollable connections require source and provider metadata under config.config or config.config.polling.",
+      400,
+    );
+  }
+
+  if (readScopes(input.scopes).length === 0) {
+    throw new PlatformUnavailableError(
+      "core_connection_read_scope_required",
+      "Active pollable connections require at least one read scope under config.scopes.",
+      400,
+    );
+  }
 }
 
 function parseTaskState(value: string | undefined) {
@@ -966,6 +1223,457 @@ export async function upsertCoreObject(input: CoreObjectUpsertInput) {
         state: object.state,
         source: object.source,
         externalId: object.externalId,
+      },
+    };
+  });
+}
+
+export async function upsertCoreAdapter(input: CoreAdapterUpsertInput) {
+  const db = input.db ?? defaultDb;
+  const adapterId = optionalUuid(input.adapterId, "config.adapterId");
+  const key = requiredStringMax(input.key, "config.key", 120);
+  const name = requiredString(input.name, "config.name");
+  const kind = requiredStringMax(input.kind, "config.kind", 120);
+  const auth = requiredStringMax(input.auth, "config.auth", 120);
+  const configSchema = jsonObject(input.configSchema);
+  const eventSchema = jsonObject(input.eventSchema);
+  const adapterCapabilities = jsonObject(input.capabilities);
+  const active = input.active ?? true;
+  const operator = await loadOperatorContext({
+    db,
+    operatorEmail: input.operatorEmail,
+    tenantSlug: input.tenantSlug,
+  });
+
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${operator.tenantId}), hashtext(${`${adapterSource}:${input.idempotencyKey}`}))`,
+    );
+
+    const [existingAudit] = await tx
+      .select({
+        auditEventId: auditEvents.id,
+        targetId: auditEvents.targetId,
+        eventId: auditEvents.eventId,
+      })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.tenantId, operator.tenantId),
+          eq(auditEvents.source, adapterSource),
+          eq(auditEvents.idempotencyKey, `${input.idempotencyKey}:adapter_upserted`),
+          eq(auditEvents.targetType, "adapter"),
+        ),
+      )
+      .limit(1);
+
+    if (existingAudit?.targetId) {
+      const [adapter] = await tx.select().from(adapters).where(eq(adapters.id, existingAudit.targetId)).limit(1);
+
+      if (adapter) {
+        return {
+          created: false,
+          updated: false,
+          adapterId: adapter.id,
+          eventId: existingAudit.eventId,
+          auditEventId: existingAudit.auditEventId,
+          adapter: {
+            id: adapter.id,
+            key: adapter.key,
+            name: adapter.name,
+            kind: adapter.kind,
+            auth: adapter.auth,
+            active: adapter.active,
+          },
+        };
+      }
+    }
+
+    let existingAdapter = null as typeof adapters.$inferSelect | null;
+
+    if (adapterId) {
+      const [adapter] = await tx.select().from(adapters).where(eq(adapters.id, adapterId)).limit(1);
+      existingAdapter = adapter ?? null;
+
+      if (!existingAdapter) {
+        throw new PlatformUnavailableError(
+          "core_adapter_not_found",
+          "config.adapterId does not match an adapter.",
+          404,
+        );
+      }
+    }
+
+    const [adapterForKey] = await tx.select().from(adapters).where(eq(adapters.key, key)).limit(1);
+
+    if (adapterForKey && existingAdapter && adapterForKey.id !== existingAdapter.id) {
+      throw new PlatformUnavailableError(
+        "core_adapter_identity_conflict",
+        "config.adapterId and config.key refer to different adapters.",
+        409,
+      );
+    }
+
+    existingAdapter = existingAdapter ?? adapterForKey ?? null;
+
+    const now = new Date();
+    const [adapter] = existingAdapter
+      ? await tx
+          .update(adapters)
+          .set({
+            key,
+            name,
+            kind,
+            auth,
+            configSchema,
+            eventSchema,
+            capabilities: adapterCapabilities,
+            active,
+            updatedAt: now,
+          })
+          .where(eq(adapters.id, existingAdapter.id))
+          .returning()
+      : await tx
+          .insert(adapters)
+          .values({
+            key,
+            name,
+            kind,
+            auth,
+            configSchema,
+            eventSchema,
+            capabilities: adapterCapabilities,
+            active,
+            createdAt: now,
+            updatedAt: now,
+          })
+          .returning();
+    const [event] = await tx
+      .insert(events)
+      .values({
+        tenantId: operator.tenantId,
+        type: existingAdapter ? "adapter.updated" : "adapter.created",
+        source: adapterSource,
+        actorType: "user",
+        actorId: operator.userId,
+        actorRef: operator.actorRef,
+        adapterId: adapter.id,
+        idempotencyKey: `${input.idempotencyKey}:adapter_upserted`,
+        data: {
+          adapterId: adapter.id,
+          key,
+          kind,
+          auth,
+          active,
+          externalExecution: "blocked",
+        },
+        occurredAt: now,
+      })
+      .returning({ id: events.id });
+    const [audit] = await tx
+      .insert(auditEvents)
+      .values({
+        tenantId: operator.tenantId,
+        type: existingAdapter ? "adapter.updated" : "adapter.created",
+        source: adapterSource,
+        actorType: "user",
+        actorId: operator.userId,
+        actorRef: operator.actorRef,
+        targetType: "adapter",
+        targetId: adapter.id,
+        eventId: event.id,
+        risk: "medium",
+        idempotencyKey: `${input.idempotencyKey}:adapter_upserted`,
+        data: {
+          adapterId: adapter.id,
+          key,
+          kind,
+          auth,
+          active,
+          externalExecution: "blocked",
+        },
+      })
+      .returning({ id: auditEvents.id });
+
+    return {
+      created: !existingAdapter,
+      updated: Boolean(existingAdapter),
+      adapterId: adapter.id,
+      eventId: event.id,
+      auditEventId: audit.id,
+      adapter: {
+        id: adapter.id,
+        key: adapter.key,
+        name: adapter.name,
+        kind: adapter.kind,
+        auth: adapter.auth,
+        active: adapter.active,
+      },
+    };
+  });
+}
+
+export async function upsertCoreConnection(input: CoreConnectionUpsertInput) {
+  const db = input.db ?? defaultDb;
+  const connectionId = optionalUuid(input.connectionId, "config.connectionId");
+  const adapterId = optionalUuid(input.adapterId, "config.adapterId");
+  const adapterKey = cleanString(input.adapterKey);
+  const name = requiredString(input.name, "config.name");
+  const state = parseAdapterConnectionState(cleanString(input.state));
+  const externalAccountId = cleanString(input.externalAccountId);
+  const scopes = jsonObject(input.scopes);
+  const connectionConfig = jsonObject(input.config);
+  const lastSyncAt = optionalDate(input.lastSyncAt, "config.lastSyncAt");
+  const operator = await loadOperatorContext({
+    db,
+    operatorEmail: input.operatorEmail,
+    tenantSlug: input.tenantSlug,
+  });
+
+  assertConnectionSafety({ state, scopes, config: connectionConfig });
+
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${operator.tenantId}), hashtext(${`${connectionSource}:${input.idempotencyKey}`}))`,
+    );
+
+    const [existingAudit] = await tx
+      .select({
+        auditEventId: auditEvents.id,
+        targetId: auditEvents.targetId,
+        eventId: auditEvents.eventId,
+      })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.tenantId, operator.tenantId),
+          eq(auditEvents.source, connectionSource),
+          eq(auditEvents.idempotencyKey, `${input.idempotencyKey}:connection_upserted`),
+          eq(auditEvents.targetType, "connection"),
+        ),
+      )
+      .limit(1);
+
+    if (existingAudit?.targetId) {
+      const [connection] = await tx
+        .select()
+        .from(connections)
+        .where(and(eq(connections.tenantId, operator.tenantId), eq(connections.id, existingAudit.targetId)))
+        .limit(1);
+
+      if (connection) {
+        return {
+          created: false,
+          updated: false,
+          connectionId: connection.id,
+          adapterId: connection.adapterId,
+          eventId: existingAudit.eventId,
+          auditEventId: existingAudit.auditEventId,
+          externalExecution: "blocked",
+          pollingEnabled: pollConfigForConnection(jsonObject(connection.config)).enabled === true,
+          connection: {
+            id: connection.id,
+            name: connection.name,
+            state: connection.state,
+            externalAccountId: connection.externalAccountId,
+          },
+        };
+      }
+    }
+
+    let selectedAdapter = null as typeof adapters.$inferSelect | null;
+
+    if (adapterId) {
+      const [adapter] = await tx.select().from(adapters).where(eq(adapters.id, adapterId)).limit(1);
+      selectedAdapter = adapter ?? null;
+
+      if (!selectedAdapter) {
+        throw new PlatformUnavailableError(
+          "core_adapter_not_found",
+          "config.adapterId does not match an adapter.",
+          404,
+        );
+      }
+    }
+
+    if (adapterKey) {
+      const [adapter] = await tx.select().from(adapters).where(eq(adapters.key, adapterKey)).limit(1);
+
+      if (!adapter) {
+        throw new PlatformUnavailableError(
+          "core_adapter_not_found",
+          "config.adapterKey does not match an adapter.",
+          404,
+        );
+      }
+
+      if (selectedAdapter && selectedAdapter.id !== adapter.id) {
+        throw new PlatformUnavailableError(
+          "core_adapter_identity_conflict",
+          "config.adapterId and config.adapterKey refer to different adapters.",
+          409,
+        );
+      }
+
+      selectedAdapter = selectedAdapter ?? adapter;
+    }
+
+    if (!selectedAdapter) {
+      throw new PlatformUnavailableError(
+        "core_adapter_required",
+        "config.adapterId or config.adapterKey is required for connection.upsert.",
+        400,
+      );
+    }
+
+    let existingConnection = null as typeof connections.$inferSelect | null;
+
+    if (connectionId) {
+      const [connection] = await tx
+        .select()
+        .from(connections)
+        .where(and(eq(connections.tenantId, operator.tenantId), eq(connections.id, connectionId)))
+        .limit(1);
+      existingConnection = connection ?? null;
+
+      if (!existingConnection) {
+        throw new PlatformUnavailableError(
+          "core_connection_not_found",
+          "config.connectionId does not match a connection in this tenant.",
+          404,
+        );
+      }
+    }
+
+    if (externalAccountId) {
+      const [connection] = await tx
+        .select()
+        .from(connections)
+        .where(
+          and(
+            eq(connections.tenantId, operator.tenantId),
+            eq(connections.adapterId, selectedAdapter.id),
+            eq(connections.externalAccountId, externalAccountId),
+          ),
+        )
+        .limit(1);
+
+      if (connection && existingConnection && connection.id !== existingConnection.id) {
+        throw new PlatformUnavailableError(
+          "core_connection_identity_conflict",
+          "config.connectionId and config.externalAccountId refer to different connections.",
+          409,
+        );
+      }
+
+      existingConnection = existingConnection ?? connection ?? null;
+    }
+
+    if (existingConnection && existingConnection.adapterId !== selectedAdapter.id) {
+      throw new PlatformUnavailableError(
+        "core_connection_adapter_conflict",
+        "Existing connections cannot be moved to a different adapter.",
+        409,
+      );
+    }
+
+    const now = new Date();
+    const [connection] = existingConnection
+      ? await tx
+          .update(connections)
+          .set({
+            name,
+            state,
+            externalAccountId,
+            scopes,
+            config: connectionConfig,
+            lastSyncAt,
+            updatedAt: now,
+          })
+          .where(eq(connections.id, existingConnection.id))
+          .returning()
+      : await tx
+          .insert(connections)
+          .values({
+            tenantId: operator.tenantId,
+            adapterId: selectedAdapter.id,
+            name,
+            state,
+            externalAccountId,
+            scopes,
+            config: connectionConfig,
+            lastSyncAt,
+            createdByUserId: operator.userId,
+            createdAt: now,
+            updatedAt: now,
+          })
+          .returning();
+    const pollingEnabled = pollConfigForConnection(connectionConfig).enabled === true;
+    const [event] = await tx
+      .insert(events)
+      .values({
+        tenantId: operator.tenantId,
+        type: existingConnection ? "connection.updated" : "connection.created",
+        source: connectionSource,
+        actorType: "user",
+        actorId: operator.userId,
+        actorRef: operator.actorRef,
+        adapterId: selectedAdapter.id,
+        connectionId: connection.id,
+        idempotencyKey: `${input.idempotencyKey}:connection_upserted`,
+        data: {
+          connectionId: connection.id,
+          adapterId: selectedAdapter.id,
+          adapterKey: selectedAdapter.key,
+          state,
+          externalAccountId: externalAccountId ?? null,
+          pollingEnabled,
+          externalExecution: "blocked",
+        },
+        occurredAt: now,
+      })
+      .returning({ id: events.id });
+    const [audit] = await tx
+      .insert(auditEvents)
+      .values({
+        tenantId: operator.tenantId,
+        type: existingConnection ? "connection.updated" : "connection.created",
+        source: connectionSource,
+        actorType: "user",
+        actorId: operator.userId,
+        actorRef: operator.actorRef,
+        targetType: "connection",
+        targetId: connection.id,
+        eventId: event.id,
+        risk: pollingEnabled ? "medium" : "low",
+        idempotencyKey: `${input.idempotencyKey}:connection_upserted`,
+        data: {
+          connectionId: connection.id,
+          adapterId: selectedAdapter.id,
+          adapterKey: selectedAdapter.key,
+          state,
+          externalAccountId: externalAccountId ?? null,
+          pollingEnabled,
+          credentialRefState: credentialRefForConnection(connectionConfig) ? "managed_ref_present" : "not_configured",
+          externalExecution: "blocked",
+        },
+      })
+      .returning({ id: auditEvents.id });
+
+    return {
+      created: !existingConnection,
+      updated: Boolean(existingConnection),
+      connectionId: connection.id,
+      adapterId: selectedAdapter.id,
+      eventId: event.id,
+      auditEventId: audit.id,
+      externalExecution: "blocked",
+      pollingEnabled,
+      connection: {
+        id: connection.id,
+        name: connection.name,
+        state: connection.state,
+        externalAccountId: connection.externalAccountId,
       },
     };
   });

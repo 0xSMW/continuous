@@ -20,6 +20,8 @@ import {
   recordCustomerSignal,
   recordCoreDecision,
   recordRuleChange,
+  upsertCoreAdapter,
+  upsertCoreConnection,
   upsertCoreObject,
 } from "../core/primitives";
 import { preparePayrollPreviewPacket, recordPayrollPreview } from "../core/payroll";
@@ -918,6 +920,106 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(chargeReplay.usageEventId).toBe(chargeResult.usageEventId);
     expect(releaseReplay.released).toBe(false);
     expect(releaseReplay.reservationId).toBe(releaseReserve.reservationId);
+  }, 120_000);
+
+  it("upserts adapters and pollable read-only connections through headless core primitives", async () => {
+    const runId = randomUUID();
+    const adapterKey = `google_workspace_ci_${runId}`;
+    const adapterResult = await upsertCoreAdapter({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-core-adapter-upsert-${runId}`,
+      key: adapterKey,
+      name: "Google Workspace CI",
+      kind: "inbox",
+      auth: "oauth",
+      capabilities: {
+        read: ["lead.read"],
+        sources: ["google_workspace_inbox"],
+        providers: ["google_workspace"],
+        readerKinds: ["inbox"],
+      },
+      db,
+    });
+    const connectionResult = await upsertCoreConnection({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-core-connection-upsert-${runId}`,
+      adapterKey,
+      name: "Google Workspace lead inbox CI",
+      state: "active",
+      externalAccountId: `leads-${runId}@continuoushq.com`,
+      scopes: {
+        reads: ["lead.read"],
+      },
+      config: {
+        sources: ["google_workspace_inbox"],
+        providers: ["google_workspace"],
+        readerKinds: ["inbox"],
+        polling: {
+          enabled: true,
+          source: "google_workspace_inbox",
+          provider: "google_workspace",
+          credentialRef: "env:GOOGLE_WORKSPACE_TOKEN",
+        },
+        externalExecution: "blocked",
+      },
+      db,
+    });
+    const [adapter] = await db.select().from(adapters).where(eq(adapters.id, adapterResult.adapterId)).limit(1);
+    const [connection] = await db
+      .select()
+      .from(connections)
+      .where(eq(connections.id, connectionResult.connectionId))
+      .limit(1);
+    const connectionConfig = objectValue(connection?.config);
+    const polling = objectValue(connectionConfig.polling);
+    const connectionReplay = await upsertCoreConnection({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-core-connection-upsert-${runId}`,
+      adapterKey,
+      name: "Replay should return the first connection",
+      db,
+    });
+
+    expect(adapterResult.created).toBe(true);
+    expect(adapter?.key).toBe(adapterKey);
+    expect(objectValue(adapter?.capabilities).sources).toEqual(["google_workspace_inbox"]);
+    expect(connectionResult.created).toBe(true);
+    expect(connectionResult.externalExecution).toBe("blocked");
+    expect(connectionResult.pollingEnabled).toBe(true);
+    expect(connection?.state).toBe("active");
+    expect(connection?.adapterId).toBe(adapterResult.adapterId);
+    expect(objectValue(connection?.scopes).reads).toEqual(["lead.read"]);
+    expect(polling.credentialRef).toBe("env:GOOGLE_WORKSPACE_TOKEN");
+    expect(connectionReplay.created).toBe(false);
+    expect(connectionReplay.connectionId).toBe(connectionResult.connectionId);
+
+    await expect(
+      upsertCoreConnection({
+        operatorEmail: "owner@continuoushq.com",
+        tenantSlug: "continuous-demo",
+        idempotencyKey: `ci-core-connection-secret-block-${runId}`,
+        adapterKey,
+        name: "Unsafe connection",
+        state: "active",
+        scopes: {
+          reads: ["lead.read"],
+        },
+        config: {
+          polling: {
+            enabled: true,
+            source: "google_workspace_inbox",
+            provider: "google_workspace",
+            accessToken: "raw-token",
+          },
+        },
+        db,
+      }),
+    ).rejects.toMatchObject({
+      code: "core_inline_secret_blocked",
+    });
   }, 120_000);
 
   it("persists headless core objects, events, evidence, documents, and decisions", async () => {
