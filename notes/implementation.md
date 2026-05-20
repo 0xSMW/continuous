@@ -32,7 +32,7 @@
 | Added adapter and rule-change workflow execution | `adapter_intent_record` and `rule_change_record` workflow steps now reuse Core adapter-intent and rule-change primitives from queued workflow execution while keeping external execution blocked |
 | Added packet-backed workflow execution | `packet_prepare`, `document_packet_prepare`, and `evidence_packet_prepare` steps now reuse Core packet creation from the workflow executor and write packet/document/event/audit/evidence/task proof |
 | Expanded packet-backed workflow coverage | CI now proves generic workflow packet steps can prepare new-hire, contractor, payroll, filing, termination, AI-action, and rule-change packets without worker-specific routes |
-| Added scheduled internal command drain | The `worker-scheduler` Compose service posts the canonical `/workflow` and `/worker` command envelopes for workflow step execution plus Revenue adapter retry/reconciliation work |
+| Added scheduled internal command drain | The `worker-scheduler` Compose service posts the canonical `/workflow` and `/worker` command envelopes for workflow step execution, Revenue lead source polling, and Revenue adapter retry/reconciliation work |
 | Added shared approval service | Worker and workflow approvals now use a neutral approval service over `approval_requests`, with subject-scoped listing and decisions |
 | Seeded the first open-workflow set | Entity setup, hire employee, contractor engagement, termination, payroll preview, AI budget cycle, and synthetic-worker lifecycle now all have persisted definitions, runs, and steps |
 | Seeded the expanded operating workflow catalog | Open-state, compensation-change, location-change, payroll-run, off-cycle payroll, quarter-close, year-end, leave, incident, benefits-renewal, agency-notice, and filing-draft workflows now have persisted definitions, runs, and seed steps |
@@ -76,6 +76,7 @@
 | Added inbox and CRM lead source readers | `lead.read` now accepts read-only `config.reader` metadata for inbox and CRM records, requires credential references instead of embedded credential material, normalizes message/deal fields, and persists source-reader proof without external execution |
 | Added connection-backed lead reads | `lead.read` can now omit direct records when `config.reader` references an active tenant connection; it reads buffered source records from connection config, persists the same Core intake selectors, updates `connections.lastSyncAt`, and records `lastLeadRead` cursor proof without embedding credentials |
 | Added read-only lead source API polling | Connection-backed `lead.read` can now use `connection.config.polling.enabled=true` to poll supported inbox/CRM APIs with environment-backed credential references, normalize the returned records into Core intake selectors, and persist redacted polling receipts while external sends remain blocked |
+| Added scheduled lead source polling | `worker-scheduler` now discovers active pollable connections and posts canonical `/worker` `command=lead.read` payloads with connection reader config, isolating per-connection failures from workflow and adapter drain work |
 | Split Revenue classify and draft commands | `POST /worker` now exposes `command=lead.classify` and `command=response.draft` as explicit tenant-scoped Revenue commands that consume `config.intake` or direct fallback `config.leadPacket`, write worker run, inference, usage, event, evidence, audit, and budget proof, and keep external sends blocked |
 | Added deploy smoke for split Revenue commands | The production deploy workflow now exercises `lead.read` followed by `lead.classify` and `response.draft` through `/worker`, then checks persisted worker run, event, evidence, audit, and usage rows before the full `run` smoke |
 | Protected operational artifacts during deploy sync | Deploy rsync still deletes stale source files, but now excludes `backups/`, `logs/`, and `reports/recovery-drills/` so local database dumps, Caddy/observability logs, and recovery evidence are not removed during a release |
@@ -189,5 +190,6 @@ Workflow approvals are listed with `GET /workflow?view=approvals` and decided
 with `POST /workflow` using `command=approval.decide`.
 Production deploys also run the internal `worker-scheduler` sidecar. It calls
 `/workflow` with `command=steps.execute`, then `/worker` with
-`command=adapters.retry` and `command=adapters.reconcile`, using the same
-tenant-scoped bearer-token envelope as operator calls.
+`command=lead.read`, `command=adapters.retry`, and
+`command=adapters.reconcile`, using the same tenant-scoped bearer-token
+envelope as operator calls.

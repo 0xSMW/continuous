@@ -247,7 +247,9 @@ outcome without adding a packet-specific route.
 Production deploys run the internal `worker-scheduler` service, which posts the
 same canonical command envelope to `/workflow` on a cadence so queued,
 retryable, or expired workflow steps continue moving without a worker-family
-URL.
+URL. The same service posts `/worker` envelopes for scheduled lead source reads
+and adapter drain commands; source-specific inputs stay in `config`, while
+route names stay generic.
 `GET /workflow` returns active definitions, runs, and the recent step ledger;
 `POST /workflow` returns the result for the requested command. Do not add
 workflow-specific URL paths for individual business processes.

@@ -1,7 +1,14 @@
 import { pathToFileURL } from "node:url";
 
+import { and, eq } from "drizzle-orm";
+
+import { db as defaultDb } from "../db/client";
+import { connections, tenants, type JsonObject } from "../db/schema";
+
 const schedulerSource = "continuous.worker_scheduler";
 const revenueWorkerRole = "revenue_operations";
+
+type SchedulerDatabase = typeof defaultDb;
 
 export type SchedulerConfig = {
   enabled: boolean;
@@ -12,12 +19,14 @@ export type SchedulerConfig = {
   intervalMs: number;
   workflowLimit: number;
   adapterLimit: number;
+  leadPollLimit: number;
   leaseMs: number;
   leaseOwner: string;
 };
 
 type SchedulerDependencies = {
   postCommand: typeof postCommand;
+  listLeadPollCommands: typeof listLeadPollCommands;
   sleep: (ms: number) => Promise<void>;
   log: (event: SchedulerLogEvent) => void;
 };
@@ -47,14 +56,72 @@ export type ScheduledCommandResult = {
   result: unknown;
 };
 
+export type LeadPollCommand = {
+  connectionId: string;
+  source: string;
+  idempotencyKey: string;
+  config: {
+    source: string;
+    reader: {
+      kind: string;
+      provider: string;
+      credentialRef: string;
+      mode: "read_only";
+    };
+  };
+};
+
+export type ScheduledLeadPollResult = {
+  attempted: number;
+  succeeded: number;
+  failed: number;
+  commands: Array<{
+    connectionId: string;
+    source: string;
+    idempotencyKey: string;
+    status: "succeeded" | "failed";
+    result?: unknown;
+    error?: { message: string };
+  }>;
+};
+
 export type SchedulerCycleResult = {
   workflow: ScheduledCommandResult;
+  leadPolls: ScheduledLeadPollResult;
   adapterRetry: ScheduledCommandResult;
   adapterReconcile: ScheduledCommandResult;
 };
 
 function optionalString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function objectValue(value: unknown): JsonObject {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonObject) : {};
+}
+
+function stringValue(value: unknown, fallback = "") {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function stringList(value: unknown) {
+  return Array.isArray(value)
+    ? value
+        .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+        .map((item) => item.trim())
+    : [];
+}
+
+function firstStringValue(...values: unknown[]) {
+  for (const value of values) {
+    const output = stringValue(value);
+
+    if (output) {
+      return output;
+    }
+  }
+
+  return "";
 }
 
 function booleanEnv(value: unknown, fallback: boolean) {
@@ -90,6 +157,100 @@ function boundedInteger(
 
 function normalizeBaseUrl(value: string) {
   return value.replace(/\/+$/, "");
+}
+
+function firstConfiguredStringList(config: JsonObject, key: string) {
+  const direct = stringList(config[key]);
+
+  if (direct.length > 0) {
+    return direct;
+  }
+
+  return stringList(config[`supported${key[0].toUpperCase()}${key.slice(1)}`]);
+}
+
+function inferredPollKind(source: string, provider: string) {
+  const normalized = `${source} ${provider}`.toLowerCase();
+
+  if (normalized.includes("inbox") || normalized.includes("gmail") || normalized.includes("google")) {
+    return "inbox";
+  }
+
+  if (normalized.includes("crm") || normalized.includes("hubspot") || normalized.includes("salesforce")) {
+    return "crm";
+  }
+
+  return "source_record";
+}
+
+function sourcePollingConfig(config: JsonObject) {
+  return objectValue(config.polling ?? config.liveRead ?? config.apiRead);
+}
+
+function latestPollDate(config: JsonObject, lastSyncAt: Date | null) {
+  const lastLeadRead = objectValue(config.lastLeadRead);
+  const rawDate = firstStringValue(lastLeadRead.readAt, lastLeadRead.checkedAt);
+  const date = rawDate ? new Date(rawDate) : lastSyncAt;
+
+  return date && !Number.isNaN(date.getTime()) ? date : null;
+}
+
+function pollIntervalMs(pollingConfig: JsonObject) {
+  return boundedInteger(
+    pollingConfig.intervalMs ?? pollingConfig.pollIntervalMs,
+    5 * 60_000,
+    60_000,
+    24 * 60 * 60_000,
+  );
+}
+
+function pollWindow(now: Date, intervalMs: number) {
+  return Math.floor(now.getTime() / intervalMs);
+}
+
+function leadPollCommandFromConnection(input: {
+  connection: typeof connections.$inferSelect;
+  now: Date;
+}) {
+  const config = objectValue(input.connection.config);
+  const polling = sourcePollingConfig(config);
+
+  if (polling.enabled !== true) {
+    return null;
+  }
+
+  const intervalMs = pollIntervalMs(polling);
+  const latestPoll = latestPollDate(config, input.connection.lastSyncAt);
+
+  if (latestPoll && input.now.getTime() - latestPoll.getTime() < intervalMs) {
+    return null;
+  }
+
+  const sources = firstConfiguredStringList(config, "sources");
+  const providers = firstConfiguredStringList(config, "providers");
+  const readerKinds = firstConfiguredStringList(config, "readerKinds");
+  const source = firstStringValue(polling.source, sources[0], config.source);
+  const provider = firstStringValue(polling.provider, providers[0], config.provider, source);
+  const kind = firstStringValue(polling.kind, polling.readerKind, readerKinds[0], inferredPollKind(source, provider));
+
+  if (!source || !provider) {
+    return null;
+  }
+
+  return {
+    connectionId: input.connection.id,
+    source,
+    idempotencyKey: `scheduler-lead-read:${input.connection.id}:${pollWindow(input.now, intervalMs)}`,
+    config: {
+      source,
+      reader: {
+        kind,
+        provider,
+        credentialRef: `connection:${input.connection.id}`,
+        mode: "read_only" as const,
+      },
+    },
+  };
 }
 
 function sleep(ms: number) {
@@ -179,6 +340,89 @@ export async function postCommand(input: {
   };
 }
 
+export async function listLeadPollCommands(input: {
+  tenantSlug: string;
+  limit: number;
+  now?: Date;
+  db?: SchedulerDatabase;
+}): Promise<LeadPollCommand[]> {
+  if (input.limit <= 0) {
+    return [];
+  }
+
+  const database = input.db ?? defaultDb;
+  const now = input.now ?? new Date();
+  const rows = await database
+    .select({ connection: connections })
+    .from(connections)
+    .innerJoin(tenants, eq(connections.tenantId, tenants.id))
+    .where(and(eq(tenants.slug, input.tenantSlug), eq(connections.state, "active")))
+    .orderBy(connections.updatedAt);
+
+  return rows
+    .map((row) => leadPollCommandFromConnection({ connection: row.connection, now }))
+    .filter((command): command is LeadPollCommand => Boolean(command))
+    .slice(0, input.limit);
+}
+
+async function runLeadPollCommands(input: {
+  config: SchedulerConfig;
+  postCommand: typeof postCommand;
+  listCommands: typeof listLeadPollCommands;
+}) {
+  const commands = await input.listCommands({
+    tenantSlug: input.config.tenantSlug,
+    limit: input.config.leadPollLimit,
+  });
+  const result: ScheduledLeadPollResult = {
+    attempted: commands.length,
+    succeeded: 0,
+    failed: 0,
+    commands: [],
+  };
+
+  for (const command of commands) {
+    try {
+      const response = await input.postCommand({
+        baseUrl: input.config.baseUrl,
+        token: input.config.token ?? "",
+        endpoint: "/worker",
+        payload: {
+          command: "lead.read",
+          worker: {
+            role: revenueWorkerRole,
+            tenantSlug: input.config.tenantSlug,
+          },
+          idempotencyKey: command.idempotencyKey,
+          config: command.config,
+        },
+      });
+
+      result.succeeded += 1;
+      result.commands.push({
+        connectionId: command.connectionId,
+        source: command.source,
+        idempotencyKey: command.idempotencyKey,
+        status: "succeeded",
+        result: response.result,
+      });
+    } catch (error) {
+      result.failed += 1;
+      result.commands.push({
+        connectionId: command.connectionId,
+        source: command.source,
+        idempotencyKey: command.idempotencyKey,
+        status: "failed",
+        error: {
+          message: error instanceof Error ? error.message : "Unknown lead source poll failure.",
+        },
+      });
+    }
+  }
+
+  return result;
+}
+
 export function parseSchedulerConfig(input: {
   env?: Record<string, string | undefined>;
   argv?: string[];
@@ -203,6 +447,7 @@ export function parseSchedulerConfig(input: {
     intervalMs: boundedInteger(runtimeEnv.WORKER_SCHEDULER_INTERVAL_MS, 60_000, 5_000, 3_600_000),
     workflowLimit: boundedInteger(runtimeEnv.WORKER_SCHEDULER_WORKFLOW_LIMIT, 10, 1, 50),
     adapterLimit: boundedInteger(runtimeEnv.WORKER_SCHEDULER_ADAPTER_LIMIT, 25, 1, 100),
+    leadPollLimit: boundedInteger(runtimeEnv.WORKER_SCHEDULER_LEAD_POLL_LIMIT, 5, 0, 50),
     leaseMs: boundedInteger(runtimeEnv.WORKER_SCHEDULER_WORKFLOW_LEASE_MS, 5 * 60_000, 30_000, 15 * 60_000),
     leaseOwner:
       optionalString(runtimeEnv.WORKER_SCHEDULER_LEASE_OWNER) ??
@@ -215,6 +460,7 @@ export async function runSchedulerCycle(
   dependencies: Partial<SchedulerDependencies> = {},
 ): Promise<SchedulerCycleResult> {
   const post = dependencies.postCommand ?? postCommand;
+  const listCommands = dependencies.listLeadPollCommands ?? listLeadPollCommands;
 
   if (!config.token) {
     throw new Error("WORKER_RUN_TOKEN is required when the worker scheduler is enabled.");
@@ -235,6 +481,11 @@ export async function runSchedulerCycle(
         leaseOwner: config.leaseOwner,
       },
     },
+  });
+  const leadPolls = await runLeadPollCommands({
+    config,
+    postCommand: post,
+    listCommands,
   });
   const adapterRetry = await post({
     baseUrl: config.baseUrl,
@@ -269,6 +520,7 @@ export async function runSchedulerCycle(
 
   return {
     workflow,
+    leadPolls,
     adapterRetry,
     adapterReconcile,
   };
@@ -313,6 +565,7 @@ export async function runScheduler(
         event: "scheduler_cycle_completed",
         tenantSlug: config.tenantSlug,
         workflow: result.workflow.result,
+        leadPolls: result.leadPolls,
         adapterRetry: result.adapterRetry.result,
         adapterReconcile: result.adapterReconcile.result,
       });

@@ -168,7 +168,9 @@ describe("future worker contracts", () => {
       expect(readiness).toContain(`| ${role} |`);
     }
 
-    expect(readiness).toContain("Production connector credentials, scheduled polling, and approved external send remain blocked");
+    expect(readiness).toContain(
+      "Production connector credentials and approved external send remain blocked; scheduler polling needs real connection coverage",
+    );
     expect(readiness).toContain("Every promotion must update this matrix");
   });
 

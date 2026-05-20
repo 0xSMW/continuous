@@ -186,7 +186,7 @@ policy-bound:
 | `/approval` | Shared operator approval inbox and decision surface across Core, workflow, and worker subjects |
 | `/workflow` | Canonical workflow command surface for listing definitions/runs/steps and executing validated `start` / `transition` / `steps.execute` / `approval.decide` commands |
 | `/workflow?view=approvals` | Operator-only approval queue for workflow decisions backed by the shared approval service |
-| `worker-scheduler` | Internal production runner that calls the same `/workflow` and `/worker` command envelopes to drain workflow steps and Revenue adapter retry/reconciliation work |
+| `worker-scheduler` | Internal production runner that calls the same `/workflow` and `/worker` command envelopes to drain workflow steps, poll Revenue lead sources through `command=lead.read`, and run Revenue adapter retry/reconciliation work |
 | `bun run worker:tool worker.lead.read` / `worker.run` | Canonical local command surfaces using the same worker/config payload shape |
 
 Worker-specific HTTP paths are not part of the public API. New worker families
@@ -200,9 +200,11 @@ workflow approvals share `approval_requests`, `audit_events`, and evidence;
 and `config` payloads.
 
 `command=lead.read` accepts direct source records or a read-only active
-connection reference, stores Core lead object/event/evidence rows, writes a
-read-only worker run, attributes budget/usage, records connection cursor proof,
-and returns stable `config.intake` selectors. `command=lead.classify` and
+connection reference, including scheduler-triggered API polling when the
+connection config opts in. It stores Core lead object/event/evidence rows,
+writes a read-only worker run, attributes budget/usage, records connection
+cursor proof, and returns stable `config.intake` selectors.
+`command=lead.classify` and
 `command=response.draft` can consume those selectors as explicit persisted
 substeps, writing worker run, inference, usage, event, evidence, and audit proof
 while external send remains blocked. One full `command=run` then accepts the

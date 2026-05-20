@@ -12,7 +12,7 @@ raising autonomy or permitting external sends.
 | `worker.role` | Yes | Explicit worker family selector; no default role is assumed |
 | `worker.tenantSlug` | No | Required when an operator email spans tenants |
 | `worker.id` | No | Required when multiple Revenue Workers match |
-| `config.source` plus direct `config.records[]` / `config.record` or `config.reader` | Required for `lead.read` | Reads direct or connection-buffered website-form, inbox, or CRM lead records into persisted Core source object/event/evidence rows |
+| `config.source` plus direct `config.records[]` / `config.record` or `config.reader` | Required for `lead.read` | Reads direct, connection-buffered, or read-only API-polled website-form, inbox, or CRM lead records into persisted Core source object/event/evidence rows |
 | `config.intake` | Preferred for useful runs | References persisted Core lead source identity or object/event/evidence rows used to derive classification, draft, quote, evidence, and approval packet |
 | `config.leadPacket` | Fallback only | Direct source payload for operator tests and controlled evals |
 
@@ -244,7 +244,7 @@ For `command=lead.read`, use:
 
 | Field | Required | Notes |
 |---|---:|---|
-| `source` | Yes | Source system name, for example `website_form` or later `gmail` |
+| `source` | Yes | Source system name, for example `website_form`, `google_workspace_inbox`, or `hubspot_crm` |
 | `reader.kind` | For inbox/CRM readers | `inbox` or `crm`; defaults are inferred for website-form and generic source records |
 | `reader.provider` | No | External source family, such as `google_workspace` or `hubspot`; stored as source-reader metadata |
 | `reader.credentialRef` | Required for inbox/CRM readers | Opaque credential or `connection:<id>` reference; never embed credential material in `config.reader` |

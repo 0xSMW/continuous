@@ -206,6 +206,7 @@ jobs:
               printf 'WORKER_SCHEDULER_ENABLED=true\n'
               printf 'WORKER_SCHEDULER_BASE_URL=http://app:3000\n'
               printf 'WORKER_SCHEDULER_TENANT_SLUG=continuous-demo\n'
+              printf 'WORKER_SCHEDULER_LEAD_POLL_LIMIT=5\n'
             } > .env
           fi
           set_env() {
@@ -270,6 +271,7 @@ jobs:
           set_env WORKER_SCHEDULER_ENABLED true
           set_env WORKER_SCHEDULER_BASE_URL "http://app:3000"
           set_env WORKER_SCHEDULER_TENANT_SLUG "continuous-demo"
+          set_env WORKER_SCHEDULER_LEAD_POLL_LIMIT 5
           current_app_tag="$(grep '^APP_TAG=' .env | cut -d= -f2- || true)"
           set_env APP_IMAGE "$APP_IMAGE"
           if [ -n "$current_app_tag" ] && [ "$current_app_tag" != "$APP_TAG" ]; then

@@ -19,7 +19,7 @@ commands.
 | Service | Purpose |
 |---|---|
 | `app` | Next.js server for the core dashboard and APIs |
-| `worker-scheduler` | Internal scheduler that posts canonical `/workflow` and `/worker` command envelopes to drain workflow steps and Revenue adapter retry/reconciliation work |
+| `worker-scheduler` | Internal scheduler that posts canonical `/workflow` and `/worker` command envelopes to drain workflow steps, poll Revenue lead sources, and run Revenue adapter retry/reconciliation work |
 | `db` | Postgres for graph, task, capability, evidence, budget, adapter, event, and UI-contract records |
 | `migrate` | Drizzle migration/seed runner |
 | `caddy` | Automatic HTTPS, HTTP redirects, and certificate renewal |
@@ -132,10 +132,15 @@ ssh root@45.55.53.92 'cd /opt/continuous && docker compose --profile tools run -
 The deploy path also starts the `worker-scheduler` profile. The scheduler uses
 `WORKER_SCHEDULER_BASE_URL=http://app:3000`, the generated worker token, and
 tenant `continuous-demo` to call the same production APIs an operator would
-call: `/workflow` with `command=steps.execute`, then `/worker` with
-`command=adapters.retry` and `command=adapters.reconcile`. It does not execute
-external sends or money movement; it only drains queued internal work already
-covered by the command registry and workflow step ledger.
+call: `/workflow` with `command=steps.execute`, `/worker` with
+`command=lead.read` for active connections whose `config.polling.enabled` is
+true, then `/worker` with `command=adapters.retry` and
+`command=adapters.reconcile`. Lead source, reader kind, provider, and
+connection credential references live under the `config` payload, not in the
+route name. `WORKER_SCHEDULER_LEAD_POLL_LIMIT` caps poll attempts per cycle and
+defaults to `5`. The scheduler does not execute external sends or money
+movement; it only drains queued internal work already covered by the command
+registry and workflow step ledger.
 
 For the HTTPS worker API path, call `POST /worker` with `command`, `worker`,
 `config`, and `idempotencyKey` fields as required by the command plus the bearer
