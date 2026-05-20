@@ -82,6 +82,16 @@ if [ -d /etc/continuous ]; then
   chmod 0755 /etc/continuous
 fi
 
+delegate_readiness_file() {
+  readiness_dir="$(dirname "$READINESS_ENV_FILE")"
+  install -m 0755 -d "$readiness_dir"
+  touch "$READINESS_ENV_FILE"
+  chown "$DEPLOY_USER_NAME:$DEPLOY_USER_NAME" "$READINESS_ENV_FILE"
+  chmod 0600 "$READINESS_ENV_FILE"
+}
+
+delegate_readiness_file
+
 runuser -u "$DEPLOY_USER_NAME" -- test -w "$APP_DIR"
 runuser -u "$DEPLOY_USER_NAME" -- docker compose version >/dev/null
 
@@ -95,6 +105,7 @@ if [ "$ATTEST_AFTER_INSTALL" = "true" ]; then
     DEPLOY_USER_NAME="$DEPLOY_USER_NAME" \
     READINESS_ENV_FILE="$READINESS_ENV_FILE" \
     "$APP_DIR/scripts/attest-non-root-access-on-host.sh"
+  delegate_readiness_file
 else
   echo "Installed non-root deploy user $DEPLOY_USER_NAME; attestation skipped."
 fi

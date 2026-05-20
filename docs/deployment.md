@@ -369,7 +369,10 @@ By default this creates `continuous-deploy`, copies the root authorized keys
 when `DEPLOY_PUBLIC_KEY` is not supplied, adds the user to the `docker` group,
 transfers ownership of `/opt/continuous`, verifies Docker Compose and app-dir
 write access as that user, and writes non-secret non-root evidence into
-`/etc/continuous/production-readiness.env`. To provide a dedicated key instead:
+`/etc/continuous/production-readiness.env`. It also delegates ownership of that
+non-secret readiness file to the deploy user so deploy smokes can refresh
+control-plane attestation ids without granting root. To provide a dedicated key
+instead:
 
 ```sh
 HOST=45.55.53.92 \
@@ -390,8 +393,8 @@ For GitHub Actions, set the production `DEPLOY_USER` secret to
 that account. The strict readiness gate re-runs a live non-root check using the
 attested user; it no longer accepts a timestamp-only assertion.
 
-The readiness attestation file is deliberately operator-owned. It should be
-created only after the underlying work is done and should not contain secrets.
+The readiness attestation file is deliberately non-secret and deploy-writable.
+It should be created only after the underlying work is done and should not contain secrets.
 For token rotation and operator access review, the timestamp is only the
 operator acknowledgement layer: the durable source of truth is the
 `control_plane_token_rotation_attestations` row, the managed
