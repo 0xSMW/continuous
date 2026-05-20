@@ -3,6 +3,9 @@
 This deploys one Ubuntu droplet on DigitalOcean running Docker Compose:
 
 - `app`: Next.js container built from this repo.
+- `worker-scheduler`: internal sidecar that posts canonical `/workflow` and
+  `/worker` command envelopes for scheduled workflow step and adapter retry
+  drain.
 - `db`: private Postgres container with a persistent volume.
 - `caddy`: public HTTP/HTTPS reverse proxy.
 

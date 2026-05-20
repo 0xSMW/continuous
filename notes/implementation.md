@@ -28,6 +28,7 @@
 | Added workflow step ledger | Workflow starts and transitions now write durable step records with lease, retry, input, output, state-transition, event, evidence, and approval links |
 | Added workflow step execution | `/workflow` now supports `command=steps.execute`, claiming queued or retryable steps, running generic transition handlers, and writing completion or retry state without workflow-specific URLs |
 | Added capability-backed workflow execution | `capability_execution` workflow steps now require an active capability and actor grant, record worker/task capability proof, and keep external execution blocked |
+| Added scheduled internal command drain | The `worker-scheduler` Compose service posts the canonical `/workflow` and `/worker` command envelopes for workflow step execution plus Revenue adapter retry/reconciliation work |
 | Added shared approval service | Worker and workflow approvals now use a neutral approval service over `approval_requests`, with subject-scoped listing and decisions |
 | Seeded the first open-workflow set | Entity setup, hire employee, contractor engagement, termination, payroll preview, AI budget cycle, and synthetic-worker lifecycle now all have persisted definitions, runs, and steps |
 | Seeded the expanded operating workflow catalog | Open-state, compensation-change, location-change, payroll-run, off-cycle payroll, quarter-close, year-end, leave, incident, benefits-renewal, agency-notice, and filing-draft workflows now have persisted definitions, runs, and seed steps |
@@ -155,3 +156,7 @@ write the grant, actor, task, and blocked external-execution posture into
 workflow output and task outcome.
 Workflow approvals are listed with `GET /workflow?view=approvals` and decided
 with `POST /workflow` using `command=approval.decide`.
+Production deploys also run the internal `worker-scheduler` sidecar. It calls
+`/workflow` with `command=steps.execute`, then `/worker` with
+`command=adapters.retry` and `command=adapters.reconcile`, using the same
+tenant-scoped bearer-token envelope as operator calls.

@@ -70,6 +70,10 @@ Then open `http://localhost:3000`.
   for definitions/runs/steps, `GET /workflow?view=approvals` for workflow
   approvals, and `POST /workflow` with `command=start`, `command=transition`,
   `command=steps.execute`, or `command=approval.decide`.
+- `worker-scheduler` is the internal production drain for queued platform work.
+  It posts the same `/workflow` `steps.execute` envelope and `/worker`
+  `adapters.retry` / `adapters.reconcile` envelopes on a cadence; it does not
+  introduce worker-family URLs or enable external execution.
 Worker-specific HTTP routes and local mutation shortcuts are intentionally
 absent; new worker families extend `/worker` and `worker:tool` by registering
 commands and structured payload fields.

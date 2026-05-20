@@ -224,6 +224,10 @@ completion, and leaves failed work on the same step ledger with retry metadata.
 an active grant for the worker or task owner actor before they can complete; the
 executor records the capability key, grant, actor, task, and blocked external
 execution posture in the step output and task outcome.
+Production deploys run the internal `worker-scheduler` service, which posts the
+same canonical command envelope to `/workflow` on a cadence so queued,
+retryable, or expired workflow steps continue moving without a worker-family
+URL.
 `GET /workflow` returns active definitions, runs, and the recent step ledger;
 `POST /workflow` returns the result for the requested command. Do not add
 workflow-specific URL paths for individual business processes.

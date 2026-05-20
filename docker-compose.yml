@@ -56,6 +56,38 @@ services:
     profiles:
       - tools
 
+  worker-scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: migrate
+    image: ${APP_IMAGE:-continuous-app}:${APP_TAG:-local}-scheduler
+    restart: unless-stopped
+    command: ["bun", "src/worker/scheduler.ts"]
+    environment:
+      APP_ENV: production
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      WORKER_RUN_ENABLED: ${WORKER_RUN_ENABLED:-${REVENUE_WORKER_RUN_ENABLED:-false}}
+      WORKER_RUN_TOKEN: ${WORKER_RUN_TOKEN:-${REVENUE_WORKER_RUN_TOKEN:-}}
+      WORKER_OPERATOR_EMAIL: ${WORKER_OPERATOR_EMAIL:-${REVENUE_WORKER_OPERATOR_EMAIL:-owner@continuoushq.com}}
+      CONTROL_PLANE_ALLOWED_TENANTS: ${CONTROL_PLANE_ALLOWED_TENANTS:-}
+      CONTROL_PLANE_ALLOWED_WORKER_ROLES: ${CONTROL_PLANE_ALLOWED_WORKER_ROLES:-}
+      WORKER_SCHEDULER_ENABLED: ${WORKER_SCHEDULER_ENABLED:-false}
+      WORKER_SCHEDULER_BASE_URL: ${WORKER_SCHEDULER_BASE_URL:-http://app:3000}
+      WORKER_SCHEDULER_TENANT_SLUG: ${WORKER_SCHEDULER_TENANT_SLUG:-continuous-demo}
+      WORKER_SCHEDULER_INTERVAL_MS: ${WORKER_SCHEDULER_INTERVAL_MS:-60000}
+      WORKER_SCHEDULER_WORKFLOW_LIMIT: ${WORKER_SCHEDULER_WORKFLOW_LIMIT:-10}
+      WORKER_SCHEDULER_ADAPTER_LIMIT: ${WORKER_SCHEDULER_ADAPTER_LIMIT:-25}
+      WORKER_SCHEDULER_WORKFLOW_LEASE_MS: ${WORKER_SCHEDULER_WORKFLOW_LEASE_MS:-300000}
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - internal
+    profiles:
+      - scheduler
+
   db:
     image: postgres:17-alpine
     restart: unless-stopped

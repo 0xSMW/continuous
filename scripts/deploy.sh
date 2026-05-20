@@ -86,6 +86,9 @@ if [ ! -f .env ]; then
     printf 'WORKER_OPERATOR_EMAIL=%s\n' "$WORKER_OPERATOR_EMAIL"
     printf 'CONTROL_PLANE_ALLOWED_TENANTS=continuous-demo\n'
     printf 'CONTROL_PLANE_ALLOWED_WORKER_ROLES=revenue_operations,owner_chief_of_staff\n'
+    printf 'WORKER_SCHEDULER_ENABLED=true\n'
+    printf 'WORKER_SCHEDULER_BASE_URL=http://app:3000\n'
+    printf 'WORKER_SCHEDULER_TENANT_SLUG=continuous-demo\n'
   } > .env
   echo "Created $APP_DIR/.env"
 else
@@ -117,6 +120,9 @@ set_env ACME_EMAIL "$ACME_EMAIL"
 set_env WORKER_OPERATOR_EMAIL "$WORKER_OPERATOR_EMAIL"
 set_env CONTROL_PLANE_ALLOWED_TENANTS "continuous-demo"
 set_env CONTROL_PLANE_ALLOWED_WORKER_ROLES "revenue_operations,owner_chief_of_staff"
+set_env WORKER_SCHEDULER_ENABLED true
+set_env WORKER_SCHEDULER_BASE_URL "http://app:3000"
+set_env WORKER_SCHEDULER_TENANT_SLUG "continuous-demo"
 
 worker_token="$(grep '^WORKER_RUN_TOKEN=' .env | cut -d= -f2- || true)"
 if [ -z "$worker_token" ]; then
@@ -139,6 +145,7 @@ fi
 
 docker compose --profile tools run --rm --build migrate bun run db:migrate </dev/null
 docker compose --profile tools run --rm --build migrate bun run db:seed </dev/null
-docker compose up -d --build --remove-orphans app caddy
+docker compose --profile scheduler up -d --build --remove-orphans app caddy worker-scheduler
+docker compose --profile scheduler ps --status running worker-scheduler | grep -q worker-scheduler
 docker compose ps
 REMOTE_SCRIPT

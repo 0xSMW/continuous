@@ -186,6 +186,7 @@ policy-bound:
 | `/approval` | Shared operator approval inbox and decision surface across Core, workflow, and worker subjects |
 | `/workflow` | Canonical workflow command surface for listing definitions/runs/steps and executing validated `start` / `transition` / `steps.execute` / `approval.decide` commands |
 | `/workflow?view=approvals` | Operator-only approval queue for workflow decisions backed by the shared approval service |
+| `worker-scheduler` | Internal production runner that calls the same `/workflow` and `/worker` command envelopes to drain workflow steps and Revenue adapter retry/reconciliation work |
 | `bun run worker:tool worker.lead.read` / `worker.run` | Canonical local command surfaces using the same worker/config payload shape |
 
 Worker-specific HTTP paths are not part of the public API. New worker families
