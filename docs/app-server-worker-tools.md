@@ -27,6 +27,10 @@ bun run app-server:worker-tools continuous.worker.schema
 bun run app-server:worker-tools continuous.worker.command --payload='{"command":"lead.read","operatorEmail":"owner@continuoushq.com","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-app-server-lead-001","config":{"source":"website_form","records":[{"sourceEventId":"form-001","customerName":"Acme Roof Repair","customerIntent":"roof leak inspection","serviceArea":"roofing","urgency":"high"}]}}'
 ```
 
+Inbox and CRM lead intake use the same command surface with source-reader
+metadata inside `config.reader`; the tool forwards that payload through the
+registry without loading production tokens or executing external reads.
+
 ## Boundary
 
 The app-server command tool is intentionally narrow:

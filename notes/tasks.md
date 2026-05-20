@@ -20,7 +20,7 @@
 - Complete production hardening with tag-based deploy rollback, observability/alerts, scoped tokens, non-root host access, and a restore drill before using the droplet for real customer data.
 - Replace the bootstrap shared operator token with first-class operator auth, per-command scopes, token rotation, and session-level audit trails before broad customer use.
 - Provision scoped adapter credentials, tested rollback playbooks, and a first controlled send only after retry readiness evidence stays green.
-- Expand read-only real lead intake from website-form `lead.read` records into authenticated inbox and CRM source readers.
+- Provision actual inbox and CRM connector polling behind the persisted `lead.read` source-reader shape.
 - Use `docs/revenue-operations-worker-expansion.md` as the expansion gate list for the next worker iteration.
 - Use `docs/revenue-operations-worker-v1-contract.md` as the machine-actionable contract for run and approval effects.
 - Keep Core HTTP controls on `/core` with registered `command`, `core`, `idempotencyKey`, and `config` fields; do not add `/api/*` command paths or command-specific URLs.

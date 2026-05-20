@@ -25,7 +25,7 @@ adapters, generated UI, evidence, and evals.
 
 | Step | Exit condition |
 |---|---|
-| Lead source intake | `lead.read` persists website-form source records as Core object/event/evidence rows and returns stable selectors for `run` |
+| Lead source intake | `lead.read` persists website-form, authenticated-inbox, and CRM-style source records as Core object/event/evidence rows and returns stable selectors for `run` |
 | Lead-to-cash simulation | Run creates task, worker run, workflow run/steps, budget reservation, inference, usage, adapter dry-run, approval, audit, evidence, object version |
 | Approval execution | Approval decision uses shared approval service, advances the allowed workflow state, and leaves external execution blocked |
 | Adapter hardening | Reconciliation writes audit/evidence records and retry/review system tasks; due dry-run retries execute with blocked receipts, live-credential readiness checks, and rollback plans; live execution remains gated |

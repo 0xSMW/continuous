@@ -854,6 +854,217 @@ type ParsedLeadSourceRecord = {
   leadPacket: JsonObject;
 };
 
+function inferredSourceReaderKind(sourceName: string) {
+  const source = sourceName.toLowerCase();
+
+  if (source.includes("inbox") || source.includes("gmail") || source.includes("email")) {
+    return "inbox";
+  }
+
+  if (source.includes("crm") || source.includes("hubspot") || source.includes("salesforce")) {
+    return "crm";
+  }
+
+  if (source.includes("form")) {
+    return "website_form";
+  }
+
+  return "source_record";
+}
+
+function rejectEmbeddedReaderCredentials(reader: JsonObject) {
+  const forbiddenFields = ["token", "apiKey", "password", "secret", "accessToken", "refreshToken"];
+  const embedded = forbiddenFields.filter((field) => reader[field] !== undefined);
+
+  if (embedded.length > 0) {
+    throw new RevenueWorkerUnavailableError(
+      "worker_lead_read_embedded_credentials",
+      "config.reader must reference credentials by credentialRef instead of embedding credential material.",
+      400,
+    );
+  }
+}
+
+function parseSourceReader(config: JsonObject, sourceName: string) {
+  const reader = objectValue(config.reader ?? config.sourceReader);
+  rejectEmbeddedReaderCredentials(reader);
+
+  const kind = firstStringValue(reader.kind, reader.type, config.sourceKind, inferredSourceReaderKind(sourceName))
+    .toLowerCase()
+    .replace(/[^a-z0-9_:-]/g, "_");
+  const provider = firstStringValue(reader.provider, reader.adapter, reader.system, sourceName);
+  const credentialRef = firstStringValue(reader.credentialRef, reader.connectionRef);
+  const connectionRef = firstStringValue(reader.connectionRef, reader.connectionId);
+  const cursor = firstStringValue(reader.cursor, reader.syncCursor);
+  const requiresCredential = kind === "inbox" || kind === "crm";
+  const readerMode = firstStringValue(reader.mode, "read_only");
+
+  if (booleanValue(config.externalSend) || booleanValue(config.externalExecution)) {
+    throw new RevenueWorkerUnavailableError(
+      "worker_external_send_blocked",
+      "Revenue Worker lead.read cannot execute external actions.",
+      403,
+    );
+  }
+
+  if (
+    booleanValue(reader.externalSend) ||
+    booleanValue(reader.externalExecution) ||
+    !["read_only", "read", "snapshot"].includes(readerMode)
+  ) {
+    throw new RevenueWorkerUnavailableError(
+      "worker_external_send_blocked",
+      "Revenue Worker source readers must be read-only.",
+      403,
+    );
+  }
+
+  if (requiresCredential && !credentialRef) {
+    throw new RevenueWorkerUnavailableError(
+      "worker_lead_read_credential_ref_missing",
+      "config.reader.credentialRef is required for inbox and CRM lead readers.",
+      400,
+    );
+  }
+
+  return {
+    kind,
+    source: sourceName,
+    provider,
+    credentialRef: credentialRef || null,
+    connectionRef: connectionRef || null,
+    cursor: cursor || null,
+    authState: requiresCredential ? "credential_ref_present" : "not_required",
+    readOnly: true,
+    externalExecution: "blocked",
+    externalSend: false,
+  };
+}
+
+function displayNameFromAddress(value: unknown) {
+  const address = stringValue(value);
+
+  if (!address) {
+    return "";
+  }
+
+  const match = address.match(/^"?([^"<]+?)"?\s*<[^>]+>$/);
+  return stringValue(match?.[1], address).replace(/\s+/g, " ").trim();
+}
+
+function textExcerpt(value: unknown) {
+  return stringValue(value).replace(/\s+/g, " ").trim().slice(0, 220);
+}
+
+function inboxRecordDetails(record: JsonObject, payload: JsonObject) {
+  return {
+    messageId: firstStringValue(record.messageId, payload.messageId, record.externalId, record.id),
+    threadId: firstStringValue(record.threadId, payload.threadId),
+    from: firstStringValue(record.from, payload.from, record.sender, payload.sender),
+    subject: firstStringValue(record.subject, payload.subject),
+    snippet: textExcerpt(record.snippet ?? payload.snippet ?? record.bodyText ?? payload.bodyText),
+    receivedAt: firstStringValue(record.receivedAt, payload.receivedAt, record.occurredAt, payload.occurredAt),
+  };
+}
+
+function crmRecordDetails(record: JsonObject, payload: JsonObject) {
+  return {
+    externalId: firstStringValue(record.externalId, payload.externalId, record.dealId, payload.dealId, record.id),
+    accountName: firstStringValue(record.accountName, payload.accountName, record.companyName, payload.companyName),
+    contactName: firstStringValue(record.contactName, payload.contactName, record.customerName, payload.customerName),
+    opportunityName: firstStringValue(
+      record.opportunityName,
+      payload.opportunityName,
+      record.dealName,
+      payload.dealName,
+      record.name,
+      payload.name,
+    ),
+    stage: firstStringValue(record.stage, payload.stage, record.pipelineStage, payload.pipelineStage),
+    ownerRef: firstStringValue(record.ownerRef, payload.ownerRef, record.owner, payload.owner),
+    updatedAt: firstStringValue(record.updatedAt, payload.updatedAt, record.occurredAt, payload.occurredAt),
+  };
+}
+
+function sourceRecordDetails(readerKind: string, record: JsonObject, payload: JsonObject) {
+  if (readerKind === "inbox") {
+    return inboxRecordDetails(record, payload);
+  }
+
+  if (readerKind === "crm") {
+    return crmRecordDetails(record, payload);
+  }
+
+  return {};
+}
+
+function sourceEventIdFor(readerKind: string, record: JsonObject, lead: JsonObject, payload: JsonObject) {
+  const inbox = inboxRecordDetails(record, payload);
+  const crm = crmRecordDetails(record, payload);
+
+  return firstStringValue(
+    record.sourceEventId,
+    record.externalId,
+    readerKind === "inbox" ? inbox.messageId : "",
+    readerKind === "crm" ? crm.externalId : "",
+    record.messageId,
+    record.id,
+    lead.sourceEventId,
+    payload.sourceEventId,
+  );
+}
+
+function customerNameFor(readerKind: string, record: JsonObject, lead: JsonObject, payload: JsonObject) {
+  const inbox = inboxRecordDetails(record, payload);
+  const crm = crmRecordDetails(record, payload);
+
+  return firstStringValue(
+    lead.customerName,
+    lead.name,
+    record.customerName,
+    record.name,
+    payload.customerName,
+    payload.name,
+    readerKind === "crm" ? crm.contactName : "",
+    readerKind === "crm" ? crm.accountName : "",
+    readerKind === "crm" ? crm.opportunityName : "",
+    readerKind === "inbox" ? displayNameFromAddress(inbox.from) : "",
+    "Customer",
+  );
+}
+
+function customerIntentFor(readerKind: string, record: JsonObject, lead: JsonObject, payload: JsonObject) {
+  const inbox = inboxRecordDetails(record, payload);
+  const crm = crmRecordDetails(record, payload);
+
+  return firstStringValue(
+    lead.customerIntent,
+    lead.intent,
+    record.customerIntent,
+    record.intent,
+    payload.customerIntent,
+    payload.intent,
+    readerKind === "crm" ? crm.opportunityName : "",
+    readerKind === "crm" ? crm.stage : "",
+    readerKind === "inbox" ? inbox.subject : "",
+    readerKind === "inbox" ? inbox.snippet : "",
+    "service request",
+  );
+}
+
+function occurredAtFor(readerKind: string, record: JsonObject, payload: JsonObject, index: number) {
+  const inbox = inboxRecordDetails(record, payload);
+  const crm = crmRecordDetails(record, payload);
+
+  return optionalRecordDate(
+    record.occurredAt ??
+      payload.occurredAt ??
+      (readerKind === "inbox" ? inbox.receivedAt : undefined) ??
+      (readerKind === "crm" ? crm.updatedAt : undefined),
+    `config.records[${index}].occurredAt`,
+  );
+}
+
 function configRecords(config: JsonObject) {
   const record = objectValue(config.record);
 
@@ -921,25 +1132,13 @@ function parseLeadSourceRecords(config: JsonObject) {
     );
   }
 
-  if (booleanValue(config.externalSend) || booleanValue(config.externalExecution)) {
-    throw new RevenueWorkerUnavailableError(
-      "worker_external_send_blocked",
-      "Revenue Worker lead.read cannot execute external actions.",
-      403,
-    );
-  }
+  const sourceReader = parseSourceReader(config, sourceName);
 
   const records = configRecords(config).map((record, index): ParsedLeadSourceRecord => {
     const payload = objectValue(record.payload ?? record.data ?? record.raw);
     const lead = objectValue(record.leadPacket ?? record.lead);
-    const sourceEventId = firstStringValue(
-      record.sourceEventId,
-      record.externalId,
-      record.messageId,
-      record.id,
-      lead.sourceEventId,
-      payload.sourceEventId,
-    );
+    const readerKind = stringValue(sourceReader.kind, "source_record");
+    const sourceEventId = sourceEventIdFor(readerKind, record, lead, payload);
 
     if (!sourceEventId) {
       throw new RevenueWorkerUnavailableError(
@@ -949,24 +1148,8 @@ function parseLeadSourceRecords(config: JsonObject) {
       );
     }
 
-    const customerName = firstStringValue(
-      lead.customerName,
-      lead.name,
-      record.customerName,
-      record.name,
-      payload.customerName,
-      payload.name,
-      "Customer",
-    );
-    const customerIntent = firstStringValue(
-      lead.customerIntent,
-      lead.intent,
-      record.customerIntent,
-      record.intent,
-      payload.customerIntent,
-      payload.intent,
-      "service request",
-    );
+    const customerName = customerNameFor(readerKind, record, lead, payload);
+    const customerIntent = customerIntentFor(readerKind, record, lead, payload);
     const serviceArea = firstStringValue(
       lead.serviceArea,
       record.serviceArea,
@@ -974,13 +1157,16 @@ function parseLeadSourceRecords(config: JsonObject) {
       "field service",
     );
     const missingFacts = firstStringList(lead.missingFacts, record.missingFacts, payload.missingFacts);
+    const sourceRecord = sourceRecordDetails(readerKind, record, payload);
 
     return {
       sourceEventId,
-      occurredAt: optionalRecordDate(record.occurredAt ?? payload.occurredAt, `config.records[${index}].occurredAt`),
+      occurredAt: occurredAtFor(readerKind, record, payload, index),
       leadPacket: {
         source: sourceName,
         sourceEventId,
+        sourceReader,
+        sourceRecord,
         customerName,
         customerIntent,
         serviceArea,
@@ -994,7 +1180,7 @@ function parseLeadSourceRecords(config: JsonObject) {
     };
   });
 
-  return { sourceName, records };
+  return { sourceName, sourceReader, records };
 }
 
 function revisedPacketFromOriginal(params: {
@@ -1658,7 +1844,7 @@ export async function readRevenueLeads(input: {
 }): Promise<RevenueLeadReadResult> {
   const db = input.db ?? defaultDb;
   const requestConfig = input.config ?? {};
-  const { sourceName, records } = parseLeadSourceRecords(requestConfig);
+  const { sourceName, sourceReader, records } = parseLeadSourceRecords(requestConfig);
   const context = await loadWorkerContext(db, {
     tenantSlug: input.tenantSlug,
     workerId: input.workerId,
@@ -1777,6 +1963,7 @@ export async function readRevenueLeads(input: {
         data: {
           command: "lead.read",
           source: sourceName,
+          sourceReader,
           readCount: records.length,
           externalExecution: "blocked",
         },
@@ -1800,6 +1987,7 @@ export async function readRevenueLeads(input: {
             inputHash,
             config: requestConfig,
             source: sourceName,
+            sourceReader,
             operator: {
               userId: operator.id,
               email: operator.email,
@@ -1827,6 +2015,7 @@ export async function readRevenueLeads(input: {
           workerRunId: run.id,
           idempotencyKey: input.idempotencyKey,
           command: "lead.read",
+          sourceReader,
           readAt: now.toISOString(),
         },
         externalExecution: "blocked",
@@ -1895,6 +2084,7 @@ export async function readRevenueLeads(input: {
         sourceRead: {
           workerRunId: run.id,
           command: "lead.read",
+          sourceReader,
           readAt: now.toISOString(),
         },
         externalExecution: "blocked",
@@ -1950,6 +2140,7 @@ export async function readRevenueLeads(input: {
             sourceObjectId: object.id,
             sourceEventRowId: eventId,
             source: sourceName,
+            sourceReader,
             sourceEventId,
             workerRunId: run.id,
             externalExecution: "blocked",
@@ -1966,6 +2157,7 @@ export async function readRevenueLeads(input: {
       selectors.push({
         source: sourceName,
         sourceEventId,
+        sourceReader,
         objectId: object.id,
         eventId,
         evidenceId: sourceSnapshot.id,
@@ -1979,6 +2171,7 @@ export async function readRevenueLeads(input: {
     const output = {
       command: "lead.read",
       source: sourceName,
+      sourceReader,
       readCount: records.length,
       selectors,
       objectIds: selectors.map((selector) => selector.objectId),
@@ -2027,6 +2220,7 @@ export async function readRevenueLeads(input: {
         idempotencyKey: `${input.idempotencyKey}:lead_read_completed`,
         data: {
           source: sourceName,
+          sourceReader,
           readCount: records.length,
           selectors,
           reservationId: reservation.id,
@@ -2048,6 +2242,7 @@ export async function readRevenueLeads(input: {
             inputHash,
             config: requestConfig,
             source: sourceName,
+            sourceReader,
             operator: {
               userId: operator.id,
               email: operator.email,

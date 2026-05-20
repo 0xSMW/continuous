@@ -179,6 +179,15 @@ bun run worker:tool worker.adapters.reconcile --payload='{"worker":{"role":"reve
 bun run worker:tool worker.adapters.retry --payload='{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{"limit":25}}'
 ```
 
+Inbox and CRM source readers use the same `lead.read` command. They store
+read-only source-reader metadata and credential references; they do not fetch
+from external systems or write back:
+
+```sh
+bun run worker:tool worker.lead.read --payload='{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-inbox-read-001","config":{"source":"google_workspace_inbox","reader":{"kind":"inbox","provider":"google_workspace","credentialRef":"connection:google-workspace-demo","mode":"read_only"},"records":[{"messageId":"message-local-001","from":"Buyer <buyer@example.com>","subject":"Need roof leak inspection"}]}}'
+bun run worker:tool worker.lead.read --payload='{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-crm-read-001","config":{"source":"hubspot_crm","reader":{"kind":"crm","provider":"hubspot","credentialRef":"connection:hubspot-demo","mode":"read_only"},"records":[{"externalId":"deal-local-001","companyName":"Acme Roof Repair","dealName":"Window replacement quote","stage":"qualified"}]}}'
+```
+
 `worker:tool schema` is registry-backed. It exposes registered commands, local
 tool aliases, idempotency policy, tenant requirements, and external-execution
 status before a command is invoked.

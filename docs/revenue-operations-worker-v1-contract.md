@@ -12,7 +12,7 @@ raising autonomy or permitting external sends.
 | `worker.role` | Yes | Explicit worker family selector; no default role is assumed |
 | `worker.tenantSlug` | No | Required when an operator email spans tenants |
 | `worker.id` | No | Required when multiple Revenue Workers match |
-| `config.source` + `config.records[]` | Required for `lead.read` | Reads inbound lead records into persisted Core source object/event/evidence rows |
+| `config.source` + optional `config.reader` + `config.records[]` | Required for `lead.read` | Reads website-form, inbox, or CRM lead records into persisted Core source object/event/evidence rows |
 | `config.intake` | Preferred for useful runs | References persisted Core lead source identity or object/event/evidence rows used to derive classification, draft, quote, evidence, and approval packet |
 | `config.leadPacket` | Fallback only | Direct source payload for operator tests and controlled evals |
 
@@ -205,7 +205,12 @@ For `command=lead.read`, use:
 | Field | Required | Notes |
 |---|---:|---|
 | `source` | Yes | Source system name, for example `website_form` or later `gmail` |
-| `records[].sourceEventId` | Yes | Stable external source event, form, message, or row id |
+| `reader.kind` | For inbox/CRM readers | `inbox` or `crm`; defaults are inferred for website-form and generic source records |
+| `reader.provider` | No | External source family, such as `google_workspace` or `hubspot`; stored as source-reader metadata |
+| `reader.credentialRef` | Required for inbox/CRM readers | Opaque credential or connection reference; never embed credential material in `config.reader` |
+| `records[].sourceEventId` | One stable id is required | Stable external source event, form, message, deal, or row id; inbox readers may provide `messageId`, and CRM readers may provide `externalId` |
+| `records[].messageId`, `threadId`, `from`, `subject`, `snippet`, `receivedAt` | Inbox readers | Used to normalize inbox messages into lead source snapshots |
+| `records[].externalId`, `companyName`, `contactName`, `dealName`, `stage`, `updatedAt` | CRM readers | Used to normalize CRM lead or deal rows into lead source snapshots |
 | `records[].customerName` | No | Used to name the Core lead object; defaults to `Customer` |
 | `records[].customerIntent` | No | Used for downstream classification; defaults to `service request` |
 | `records[].serviceArea` | No | Used for quote defaults; defaults to `field service` |
@@ -240,6 +245,7 @@ whose `result.output.selectors[]` contains:
 |---|---|
 | `source` | Source system name used for lookup |
 | `sourceEventId` | External source id used as the stable selector |
+| `sourceReader` | Read-only reader metadata, including kind, provider, credential reference, and blocked external-execution state |
 | `objectId` | Core lead object row persisted from the source record |
 | `eventId` | Core `lead.received` event row persisted or reused for the source record |
 | `evidenceId` | Source snapshot evidence row |

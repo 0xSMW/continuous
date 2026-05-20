@@ -58,4 +58,32 @@ describe("app-server worker tools", () => {
       }),
     ).rejects.toThrow("planned but not available yet");
   });
+
+  it("forwards nested lead reader config through the registry-backed command envelope", async () => {
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.command", {
+        command: "lead.read",
+        operatorEmail: "owner@continuoushq.com",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "app-server-inbox-reader-test",
+        config: {
+          source: "google_workspace_inbox",
+          reader: {
+            kind: "inbox",
+            provider: "google_workspace",
+          },
+          records: [
+            {
+              messageId: "message-001",
+              from: "Buyer One <buyer@example.com>",
+              subject: "Need roof leak inspection",
+            },
+          ],
+        },
+      }),
+    ).rejects.toThrow("config.reader.credentialRef is required for inbox and CRM lead readers.");
+  });
 });

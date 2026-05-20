@@ -316,6 +316,9 @@ const leadReadConfig: WorkerConfigSchema = {
   oneRequired: ["record", "records", "items", "leads"],
   properties: {
     source: { type: "string" },
+    sourceKind: { type: "string" },
+    reader: jsonObjectConfig,
+    sourceReader: jsonObjectConfig,
     record: jsonObjectConfig,
     records: { type: "array", minItems: 1, maxItems: 25, items: jsonObjectConfig },
     items: { type: "array", minItems: 1, maxItems: 25, items: jsonObjectConfig },

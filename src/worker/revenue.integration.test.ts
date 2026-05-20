@@ -3691,6 +3691,129 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(objectValue(readRunData.output).readCount).toBe(1);
   }, 120_000);
 
+  it("normalizes inbox and CRM source readers into persisted lead intake selectors", async () => {
+    const runId = randomUUID();
+    const inboxMessageId = `gmail:message:${runId}`;
+    const inboxRead = await executeWorkerCommand({
+      command: "lead.read",
+      target: {
+        role: "revenue_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: `ci-worker-inbox-read-${runId}`,
+      config: {
+        source: "google_workspace_inbox",
+        reader: {
+          kind: "inbox",
+          provider: "google_workspace",
+          credentialRef: "connection:google-workspace-demo",
+          mode: "read_only",
+        },
+        records: [
+          {
+            messageId: inboxMessageId,
+            threadId: `thread:${runId}`,
+            from: "Northwind Buyer <buyer@example.com>",
+            subject: "Need emergency roof leak inspection",
+            snippet: "Water is coming through the ceiling after the storm.",
+            receivedAt: "2026-05-19T02:00:00.000Z",
+          },
+        ],
+      },
+    });
+    const inboxResult = objectValue(inboxRead.result);
+    const inboxReader = objectValue(objectValue(inboxResult.output).sourceReader);
+    const inboxSelector = objectValue(
+      Array.isArray(inboxResult.selectors) ? inboxResult.selectors[0] : null,
+    );
+
+    expect(inboxResult.readCount).toBe(1);
+    expect(inboxReader.kind).toBe("inbox");
+    expect(inboxReader.authState).toBe("credential_ref_present");
+    expect(inboxSelector.source).toBe("google_workspace_inbox");
+    expect(inboxSelector.sourceEventId).toBe(inboxMessageId);
+
+    const [inboxObject] = await db
+      .select()
+      .from(objects)
+      .where(eq(objects.id, stringList([inboxSelector.objectId])[0] ?? ""))
+      .limit(1);
+    const inboxLeadPacket = objectValue(objectValue(inboxObject?.data).leadPacket);
+
+    expect(inboxObject?.source).toBe("google_workspace_inbox");
+    expect(inboxLeadPacket.customerName).toBe("Northwind Buyer");
+    expect(inboxLeadPacket.customerIntent).toBe("Need emergency roof leak inspection");
+    expect(objectValue(inboxLeadPacket.sourceReader).kind).toBe("inbox");
+    expect(objectValue(inboxLeadPacket.sourceRecord).messageId).toBe(inboxMessageId);
+
+    const inboxRun = await runRevenueWorker({
+      idempotencyKey: `ci-worker-run-from-inbox-read-${runId}`,
+      tenantSlug: "continuous-demo",
+      operatorEmail: "owner@continuoushq.com",
+      config: {
+        intake: objectValue(inboxSelector.intake),
+      },
+    });
+    const inboxOutput = objectValue(inboxRun.output);
+
+    expect(inboxOutput.source).toBe("google_workspace_inbox");
+    expect(inboxOutput.sourceEventId).toBe(inboxMessageId);
+    expect(inboxOutput.externalSend).toBe(false);
+
+    const crmExternalId = `hubspot:deal:${runId}`;
+    const crmRead = await executeWorkerCommand({
+      command: "lead.read",
+      target: {
+        role: "revenue_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: `ci-worker-crm-read-${runId}`,
+      config: {
+        source: "hubspot_crm",
+        reader: {
+          kind: "crm",
+          provider: "hubspot",
+          credentialRef: "connection:hubspot-demo",
+          mode: "read_only",
+        },
+        records: [
+          {
+            externalId: crmExternalId,
+            companyName: "CRM Expansion Co",
+            contactName: "Casey Buyer",
+            dealName: "Window replacement quote",
+            stage: "qualified",
+            serviceArea: "windows",
+            updatedAt: "2026-05-19T03:00:00.000Z",
+          },
+        ],
+      },
+    });
+    const crmResult = objectValue(crmRead.result);
+    const crmReader = objectValue(objectValue(crmResult.output).sourceReader);
+    const crmSelector = objectValue(Array.isArray(crmResult.selectors) ? crmResult.selectors[0] : null);
+    const [crmEvidence] = await db
+      .select()
+      .from(evidence)
+      .where(eq(evidence.id, stringList([crmSelector.evidenceId])[0] ?? ""))
+      .limit(1);
+    const crmEvidenceData = objectValue(crmEvidence?.data);
+    const crmLeadPacket = objectValue(crmEvidenceData.leadPacket);
+
+    expect(crmResult.readCount).toBe(1);
+    expect(crmReader.kind).toBe("crm");
+    expect(crmReader.authState).toBe("credential_ref_present");
+    expect(crmSelector.source).toBe("hubspot_crm");
+    expect(crmSelector.sourceEventId).toBe(crmExternalId);
+    expect(crmLeadPacket.customerName).toBe("Casey Buyer");
+    expect(crmLeadPacket.customerIntent).toBe("Window replacement quote");
+    expect(objectValue(crmLeadPacket.sourceReader).kind).toBe("crm");
+    expect(objectValue(crmLeadPacket.sourceRecord).externalId).toBe(crmExternalId);
+    expect(crmEvidenceData.externalSend).toBe(false);
+  }, 120_000);
+
   it("rejects mixed persisted intake and direct lead payloads through the worker registry", async () => {
     const runId = randomUUID();
     const leadPacket = {

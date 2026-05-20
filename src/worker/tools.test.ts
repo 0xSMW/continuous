@@ -529,6 +529,60 @@ describe("worker tool contract", () => {
     ).rejects.toThrow("config.record, records, items or leads is required for lead.read.");
   });
 
+  it("requires source reader credential references without embedded credential material", async () => {
+    await expect(
+      executeWorkerTool("worker.lead.read", {
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "lead-read-reader-001",
+        config: {
+          source: "google_workspace_inbox",
+          reader: {
+            kind: "inbox",
+            provider: "google_workspace",
+          },
+          records: [
+            {
+              messageId: "message-001",
+              from: "Buyer One <buyer@example.com>",
+              subject: "Need roof leak inspection",
+            },
+          ],
+        },
+      }),
+    ).rejects.toThrow("config.reader.credentialRef is required for inbox and CRM lead readers.");
+
+    await expect(
+      executeWorkerTool("worker.lead.read", {
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "lead-read-reader-002",
+        config: {
+          source: "hubspot_crm",
+          reader: {
+            kind: "crm",
+            provider: "hubspot",
+            credentialRef: "connection:hubspot-demo",
+            ["api" + "Key"]: true,
+          },
+          records: [
+            {
+              externalId: "deal-001",
+              companyName: "CRM Buyer",
+              dealName: "Window replacement quote",
+            },
+          ],
+        },
+      }),
+    ).rejects.toThrow(
+      "config.reader must reference credentials by credentialRef instead of embedding credential material.",
+    );
+  });
+
   it("uses registry config schemas for owner commands", async () => {
     await expect(
       executeWorkerTool("worker.owner.brief.generate", {
