@@ -8,6 +8,10 @@ are explicit.
 
 Use [Worker execution roadmap](worker-roadmap.md) for the phase-by-phase
 implementation gates from the first worker to the broader worker catalog.
+Use [Worker readiness matrix](worker-readiness.md) to track gate proof and
+blockers for each worker family.
+Use [Worker handoff contracts](worker-handoffs.md) to keep cross-worker inputs
+grounded in Core records instead of worker-private payloads.
 Use [Worker contract template](worker-contract-template.md) before coding any
 new worker family.
 

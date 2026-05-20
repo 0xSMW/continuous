@@ -131,6 +131,76 @@ describe("future worker contracts", () => {
 
       expect(expansion).toContain(filename);
     }
+
+    expect(expansion).toContain("worker-readiness.md");
+    expect(expansion).toContain("worker-handoffs.md");
+  });
+
+  it("tracks worker expansion readiness against shared launch gates", () => {
+    const readiness = read("docs/worker-readiness.md");
+    const gateNames = [
+      "Contract",
+      "Registry",
+      "Object Map",
+      "Workflow",
+      "Capabilities",
+      "Budget",
+      "Approval",
+      "Adapter",
+      "Eval",
+      "UI",
+      "Launch",
+    ];
+
+    for (const gate of gateNames) {
+      expect(readiness).toContain(`| ${gate} |`);
+    }
+
+    for (const role of [
+      "Revenue Operations",
+      "Owner Chief-of-Staff",
+      "Dispatch/Ops",
+      "Finance",
+      "Workforce",
+      "Compliance",
+      "Systems",
+    ]) {
+      expect(readiness).toContain(`| ${role} |`);
+    }
+
+    expect(readiness).toContain("Real connector polling and approved external send remain blocked");
+    expect(readiness).toContain("Every promotion must update this matrix");
+  });
+
+  it("defines Core-record handoffs for planned worker expansion", () => {
+    const handoffs = read("docs/worker-handoffs.md");
+    const requiredHandoffs = [
+      "revenue.lead_to_owner_review",
+      "revenue.quote_to_dispatch",
+      "dispatch.closeout_to_finance",
+      "finance.invoice_to_owner_review",
+      "workforce.payroll_to_compliance",
+      "compliance.obligation_to_owner_review",
+      "systems.sync_issue_to_worker",
+    ];
+
+    for (const handoff of requiredHandoffs) {
+      expect(handoffs).toContain(handoff);
+    }
+
+    for (const role of [
+      "Owner Chief-of-Staff",
+      "Dispatch/Ops",
+      "Finance",
+      "Workforce",
+      "Compliance",
+      "Systems",
+    ]) {
+      expect(handoffs).toContain(`| ${role} |`);
+    }
+
+    expect(handoffs).toContain("Consumers must resolve handoffs from Core records");
+    expect(handoffs).toContain("config.sourceRefs");
   });
 
   it("has planned command metadata for every future contract without registered runtime", () => {

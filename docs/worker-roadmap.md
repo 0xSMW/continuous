@@ -5,6 +5,10 @@ worker must reuse Continuous Core primitives before it gets a new runtime path:
 business graph, workflow runs and steps, approvals, capabilities, budget,
 adapters, generated UI, evidence, and evals.
 
+Use [Worker readiness matrix](worker-readiness.md) for the gate status and
+[Worker handoff contracts](worker-handoffs.md) for the Core records that move
+work from one worker family to the next.
+
 ## Shared Gates
 
 | Gate | Required proof |

@@ -24,5 +24,6 @@
 - Extend Revenue `lead.classify` and `response.draft` eval scoring now that they are explicit persisted command surfaces.
 - Use `docs/revenue-operations-worker-expansion.md` as the expansion gate list for the next worker iteration.
 - Use `docs/revenue-operations-worker-v1-contract.md` as the machine-actionable contract for run and approval effects.
+- Keep `docs/worker-readiness.md` and `docs/worker-handoffs.md` updated in the same change as any worker promotion or new cross-worker fixture.
 - Keep Core HTTP controls on `/core` with registered `command`, `core`, `idempotencyKey`, and `config` fields; do not add `/api/*` command paths or command-specific URLs.
 - Keep Next MCP for Next.js diagnostics; keep app-server worker tooling registry-backed and free of production-token plumbing.
