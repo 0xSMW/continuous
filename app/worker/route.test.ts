@@ -131,6 +131,16 @@ describe("/worker route", () => {
       idempotencyKey: "body-key-001",
       operatorEmail: "operator@example.com",
     });
+    expect(mocks.authorizeManagedControlPlaneCredential).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: "worker",
+        access: "write",
+        command: "brief.generate",
+        tenantSlug: "continuous-demo",
+        workerRole: "owner_chief_of_staff",
+        requireManagedCredential: true,
+      }),
+    );
   });
 
   it("rejects unauthorized POST commands before reading the request body", async () => {
@@ -275,6 +285,28 @@ describe("/worker route", () => {
           idempotencyKey: "oversized-body-001",
           config: {},
         }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(413);
+    expect(body.error).toEqual({
+      code: "worker_command_body_too_large",
+      message: "Worker command body must be at most 1048576 bytes.",
+    });
+    expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
+  });
+
+  it("rejects oversized streamed worker command bodies without trusting content-length", async () => {
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/worker", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: "x".repeat(1_048_577),
       }),
     );
     const body = await response.json();
@@ -762,6 +794,16 @@ describe("/worker route", () => {
       view: "briefs",
       state: "review_ready",
     });
+    expect(mocks.authorizeManagedControlPlaneCredential).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: "worker",
+        access: "read",
+        command: "view.briefs",
+        tenantSlug: "continuous-demo",
+        workerRole: "owner_chief_of_staff",
+        requireManagedCredential: true,
+      }),
+    );
   });
 
   it("preserves mapped worker view errors", async () => {

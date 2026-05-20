@@ -68,6 +68,7 @@ export type ManagedControlPlaneCredentialInput = {
   route: ControlPlaneRoute;
   access: ControlPlaneAccess;
   command?: string | null;
+  requireManagedCredential?: boolean;
   db?: Database;
 };
 
@@ -621,8 +622,18 @@ export async function authorizeManagedControlPlaneCredential(
 
   const db = input.db ?? defaultDb;
   const tenantSlug = cleanString(input.tenantSlug);
+  const requireManagedCredential = input.requireManagedCredential === true;
 
   if (!tenantSlug) {
+    if (requireManagedCredential) {
+      return {
+        ok: false,
+        status: 403,
+        code: "control_plane_tenant_required",
+        message: "tenantSlug is required for managed control-plane credential checks.",
+      };
+    }
+
     return { ok: true };
   }
 
@@ -633,6 +644,15 @@ export async function authorizeManagedControlPlaneCredential(
     .limit(1);
 
   if (!tenant) {
+    if (requireManagedCredential) {
+      return {
+        ok: false,
+        status: 403,
+        code: "control_plane_tenant_forbidden",
+        message: "Managed control-plane credential checks require a known tenant.",
+      };
+    }
+
     return { ok: true };
   }
 
@@ -648,10 +668,28 @@ export async function authorizeManagedControlPlaneCredential(
     .limit(1);
 
   if (!credential) {
+    if (requireManagedCredential) {
+      return {
+        ok: false,
+        status: 403,
+        code: "control_plane_credential_required",
+        message: "Managed control-plane credential inventory is required for this control-plane route.",
+      };
+    }
+
     return { ok: true };
   }
 
   const requestFingerprint = controlPlaneRequestTokenFingerprint(input.request);
+
+  if (requireManagedCredential && !credential.tokenFingerprint) {
+    return {
+      ok: false,
+      status: 403,
+      code: "control_plane_credential_fingerprint_required",
+      message: "Managed control-plane credential inventory requires a token fingerprint.",
+    };
+  }
 
   if (credential.tokenFingerprint && credential.tokenFingerprint !== requestFingerprint) {
     const [rotationBridge] = requestFingerprint

@@ -325,6 +325,7 @@ export async function GET(request: Request) {
     tenantSlug: target.tenantSlug,
     workerRole: target.role,
     auth,
+    requireManagedCredential: true,
   });
 
   if (!managedCredential.ok) {
@@ -500,6 +501,7 @@ export async function POST(request: Request) {
     tenantSlug: target.tenantSlug,
     workerRole: target.role,
     auth,
+    requireManagedCredential: true,
   });
 
   if (!managedCredential.ok) {

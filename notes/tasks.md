@@ -23,7 +23,7 @@
 - Provision scoped adapter credentials, tested rollback playbooks, and a first controlled send only after retry readiness evidence stays green.
 - Provision production inbox and CRM managed credential refs, create pollable active live-provider connections through `/core connection.upsert`, record readiness through `/core connection.health.record`, and monitor scheduler coverage behind the persisted connection-backed `lead.read` source-reader shape.
 - Harden Core command idempotency, managed control-plane credential authority, authenticated malformed-request audit logging, and adapter auth redaction before broad operator use.
-- Finish managed credential fail-closed behavior for `/worker` after the explicit bootstrap path is defined; `POST /worker` now rejects invalid bearer credentials before reading the body and bounds command bodies at 1 MiB.
+- Extend managed credential fail-closed behavior beyond `/worker` to Core, Workflow, and Approval after defining a bootstrap-compatible credential-upsert path; `/worker` now rejects invalid bearer credentials before reading the body, bounds command bodies at 1 MiB, and requires persisted managed credential inventory with token fingerprints.
 - Align worker contract metadata so Revenue uses the same implementation-grade contract shape as the future workers and runtime-worker planned follow-up commands remain visible in app-server schema.
 - Build a DigitalOcean release gate that deploys a CI-built image digest, runs Postgres 17 parity smoke, and reuses a parameterized host smoke script before customer-data mode.
 - Use `docs/revenue-operations-worker-expansion.md` as the expansion gate list for the next worker iteration.

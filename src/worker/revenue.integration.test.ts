@@ -134,6 +134,119 @@ maybeDescribe("Revenue Worker integration eval", () => {
     await pool.end();
   });
 
+  it("fails closed when required managed worker credential inventory is absent or incomplete", async () => {
+    const token = `ci-managed-token-${randomUUID()}`;
+    const request = new Request("http://localhost/worker", {
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+    });
+    const missingCredentialAuth = {
+      ok: true as const,
+      operatorEmail: "owner@continuoushq.com",
+      credentialId: `ci-managed-missing-${randomUUID()}`,
+      scope: {
+        tenantSlugs: ["continuous-demo"],
+        workerRoles: ["revenue_operations"],
+      },
+    };
+
+    const missingTenantSlug = await authorizeManagedControlPlaneCredential({
+      request,
+      auth: missingCredentialAuth,
+      route: "worker",
+      access: "write",
+      command: "run",
+      requireManagedCredential: true,
+      db,
+    });
+
+    expect(missingTenantSlug).toEqual({
+      ok: false,
+      status: 403,
+      code: "control_plane_tenant_required",
+      message: "tenantSlug is required for managed control-plane credential checks.",
+    });
+
+    const unknownTenant = await authorizeManagedControlPlaneCredential({
+      request,
+      auth: missingCredentialAuth,
+      tenantSlug: `missing-tenant-${randomUUID()}`,
+      workerRole: "revenue_operations",
+      route: "worker",
+      access: "write",
+      command: "run",
+      requireManagedCredential: true,
+      db,
+    });
+
+    expect(unknownTenant).toEqual({
+      ok: false,
+      status: 403,
+      code: "control_plane_tenant_forbidden",
+      message: "Managed control-plane credential checks require a known tenant.",
+    });
+
+    const missingRow = await authorizeManagedControlPlaneCredential({
+      request,
+      auth: missingCredentialAuth,
+      tenantSlug: "continuous-demo",
+      workerRole: "revenue_operations",
+      route: "worker",
+      access: "write",
+      command: "run",
+      requireManagedCredential: true,
+      db,
+    });
+
+    expect(missingRow).toEqual({
+      ok: false,
+      status: 403,
+      code: "control_plane_credential_required",
+      message: "Managed control-plane credential inventory is required for this control-plane route.",
+    });
+
+    const noFingerprintCredentialId = `ci-managed-no-fingerprint-${randomUUID()}`;
+    await upsertControlPlaneCredential({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-credential-upsert-no-fingerprint-${randomUUID()}`,
+      credentialId: noFingerprintCredentialId,
+      displayName: "CI managed operator without fingerprint",
+      allowedTenants: ["continuous-demo"],
+      allowedWorkerRoles: ["revenue_operations"],
+      allowedRoutes: ["worker"],
+      allowedAccess: ["write"],
+      allowedCommands: ["worker:run"],
+      evidence: {
+        source: "ci",
+      },
+      db,
+    });
+
+    const noFingerprint = await authorizeManagedControlPlaneCredential({
+      request,
+      auth: {
+        ...missingCredentialAuth,
+        credentialId: noFingerprintCredentialId,
+      },
+      tenantSlug: "continuous-demo",
+      workerRole: "revenue_operations",
+      route: "worker",
+      access: "write",
+      command: "run",
+      requireManagedCredential: true,
+      db,
+    });
+
+    expect(noFingerprint).toEqual({
+      ok: false,
+      status: 403,
+      code: "control_plane_credential_fingerprint_required",
+      message: "Managed control-plane credential inventory requires a token fingerprint.",
+    });
+  });
+
   it("enforces managed control-plane credential revocation after catalog auth succeeds", async () => {
     const credentialId = `ci-managed-${randomUUID()}`;
     const token = `ci-managed-token-${randomUUID()}`;
@@ -189,6 +302,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
       route: "worker",
       access: "write",
       command: "run",
+      requireManagedCredential: true,
       db,
     });
 
@@ -234,6 +348,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
       route: "worker",
       access: "write",
       command: "run",
+      requireManagedCredential: true,
       db,
     });
 
@@ -266,6 +381,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
       route: "worker",
       access: "write",
       command: "run",
+      requireManagedCredential: true,
       db,
     });
 
@@ -298,6 +414,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
       route: "worker",
       access: "write",
       command: "run",
+      requireManagedCredential: true,
       db,
     });
 
