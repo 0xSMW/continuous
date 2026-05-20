@@ -2129,7 +2129,7 @@ export async function runRevenueWorker(input: {
   };
   const context = await loadWorkerContext(db, selector);
   const operator = await loadOperator(db, context.worker.tenantId, input.operatorEmail);
-  const task = context.task;
+  let task = context.task;
   const capabilityId = task?.capabilityId ?? context.quoteCapabilityId ?? context.briefCapabilityId;
 
   if (!capabilityId) {
@@ -2444,6 +2444,48 @@ export async function runRevenueWorker(input: {
         "Revenue Worker is not actively granted the capability required for this run.",
         403,
       );
+    }
+
+    if (!task) {
+      const taskPriority =
+        leadPacket.urgency === "urgent" ? "urgent" : leadPacket.urgency === "high" ? "high" : "normal";
+      const [createdTask] = await tx
+        .insert(tasks)
+        .values({
+          tenantId: context.worker.tenantId,
+          objectId: runObjectId,
+          capabilityId,
+          triggerEventId: sourceEventRowId,
+          title: `Review quote for ${leadPacket.customerName}`,
+          state: "active",
+          priority: taskPriority,
+          ownerType: "worker",
+          ownerId: context.worker.id,
+          ownerRef: `worker:${context.worker.id}`,
+          reviewerUserId: operator.id,
+          evidence: {
+            required: ["source_snapshot", "quote_packet", "owner_approval"],
+            ...intakeTrace,
+            externalExecution: "blocked",
+          },
+          outcome: {
+            status: "intake_ready",
+            classification: leadPacket.classification,
+            externalExecution: "blocked",
+          },
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning({
+          id: tasks.id,
+          objectId: tasks.objectId,
+          triggerEventId: tasks.triggerEventId,
+          capabilityId: tasks.capabilityId,
+          priority: tasks.priority,
+          reviewerUserId: tasks.reviewerUserId,
+        });
+
+      task = createdTask;
     }
 
     const runInput = {
