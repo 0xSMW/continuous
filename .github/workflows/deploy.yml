@@ -506,7 +506,7 @@ jobs:
             >/dev/null
 
           SCHEMA="$(docker compose --profile tools run --rm migrate bun run worker:tool schema </dev/null)"
-          echo "$SCHEMA" | /usr/bin/jq -c '{commands:.registry.commands, views:.registry.views, planned:[.registry.plannedContracts[].role], plannedCommandCount:(.registry.plannedCommands|length), plannedViewCount:(.registry.plannedViews|length), tools:[.tools[].name]}'
+          echo "$SCHEMA" | /usr/bin/jq -c '{commands:.registry.commands, views:.registry.views, contracts:[.registry.contracts[].role], runtime:[.registry.runtimeContracts[].role], planned:[.registry.plannedContracts[].role], followUpCommandCount:(.registry.followUpCommands|length), followUpViewCount:(.registry.followUpViews|length), tools:[.tools[].name]}'
           echo "$SCHEMA" | /usr/bin/jq -e '
             (.registry.commands | map(.name) | index("run")) != null and
             (.registry.commands | any(.role == "revenue_operations" and .name == "lead.read" and .idempotency == "required" and .requiresTenant == true)) and
@@ -532,9 +532,17 @@ jobs:
             (.registry.views | any(.role == "dispatch_operations" and .name == "board")) and
             (.registry.views | any(.role == "dispatch_operations" and .name == "exceptions")) and
             (.registry.views | any(.role == "finance_operations" and .name == "approvals")) and
+            (.registry.contracts | map(.role) == ["revenue_operations","owner_chief_of_staff","dispatch_operations","finance_operations","workforce_operations","compliance_operations","systems_operations"]) and
+            (.registry.runtimeContracts | map(.role) == ["revenue_operations","owner_chief_of_staff","dispatch_operations","finance_operations"]) and
             (.registry.plannedContracts | map(.role) == ["workforce_operations","compliance_operations","systems_operations"]) and
-            (.registry.plannedCommands | length) == 18 and
-            (.registry.plannedViews | length) == 8 and
+            (.registry.plannedCommands == .registry.followUpCommands) and
+            (.registry.plannedViews == .registry.followUpViews) and
+            (.registry.followUpCommands | length) == 21 and
+            (.registry.followUpViews | length) == 9 and
+            (.registry.followUpCommands | any(.role == "revenue_operations" and .name == "quote.prepare" and .configSchema.oneRequired == ["intake","leadPacket","lead"])) and
+            (.registry.followUpCommands | any(.role == "revenue_operations" and .name == "payment_link.prepare" and .configSchema.properties.sourceRefs.type == "object")) and
+            (.registry.followUpCommands | any(.role == "finance_operations" and .name == "expense_code.propose")) and
+            (.registry.followUpViews | any(.role == "revenue_operations" and .name == "quote_review" and .evidencePacket == "quote_approval_packet")) and
             (.registry.commands | any(.name == "run" and .idempotency == "required")) and
             (.registry.commands | any(.name == "continue" and .idempotency == "required")) and
             (.registry.commands | any(.name == "adapters.reconcile" and .requiresTenant == true)) and

@@ -630,14 +630,21 @@ export async function POST(request: Request) {
       request.headers.get("idempotency-key") ?? body.idempotencyKey,
     );
 
-    if (!approvalId || !action || !idempotency.ok) {
+    if (!approvalId || !action) {
       return errorResponse(
         {
           code: "invalid_workflow_approval_decision",
-          message:
-            approvalId && action
-              ? idempotency.message
-              : "config.approvalId, config.action, and idempotencyKey are required for approval.decide.",
+          message: "config.approvalId, config.action, and idempotencyKey are required for approval.decide.",
+        },
+        400,
+      );
+    }
+
+    if (!idempotency.ok) {
+      return errorResponse(
+        {
+          code: "invalid_workflow_approval_decision",
+          message: idempotency.message,
         },
         400,
       );
