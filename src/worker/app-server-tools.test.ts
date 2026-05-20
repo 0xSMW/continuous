@@ -129,6 +129,23 @@ describe("app-server worker tools", () => {
     await expect(
       executeAppServerWorkerTool("continuous.worker.command", {
         command: "run",
+        idempotencyKey: "app-server-missing-worker-test-001",
+        config: {},
+      }),
+    ).rejects.toThrow("worker must be an object with role, id, and tenantSlug selectors.");
+
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.command", {
+        command: "run",
+        worker: {},
+        idempotencyKey: "app-server-empty-worker-test-001",
+        config: {},
+      }),
+    ).rejects.toThrow("worker.role is required.");
+
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.command", {
+        command: "run",
         worker: {
           role: "revenue_operations",
           tenantSlug: "continuous-demo",

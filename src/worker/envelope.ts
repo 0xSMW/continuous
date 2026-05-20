@@ -33,7 +33,10 @@ export function validateWorkerTargetEnvelope(value: unknown):
   | { ok: true }
   | { ok: false; message: string } {
   if (value === undefined || value === null) {
-    return { ok: true };
+    return {
+      ok: false,
+      message: "worker must be an object with role, id, and tenantSlug selectors.",
+    };
   }
 
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -56,6 +59,16 @@ export function validateWorkerTargetEnvelope(value: unknown):
         workerTargetEnvelopeDescription,
         unexpectedFields,
       ),
+    };
+  }
+
+  const target = value as Record<string, unknown>;
+  const role = target.role;
+
+  if (typeof role !== "string" || !role.trim()) {
+    return {
+      ok: false,
+      message: "worker.role is required.",
     };
   }
 

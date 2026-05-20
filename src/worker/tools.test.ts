@@ -138,6 +138,23 @@ describe("worker tool contract", () => {
     await expect(
       executeWorkerTool("worker.command", {
         command: "run",
+        idempotencyKey: "local-missing-worker-test-001",
+        config: {},
+      }),
+    ).rejects.toThrow("worker must be an object with role, id, and tenantSlug selectors.");
+
+    await expect(
+      executeWorkerTool("worker.command", {
+        command: "run",
+        worker: {},
+        idempotencyKey: "local-empty-worker-test-001",
+        config: {},
+      }),
+    ).rejects.toThrow("worker.role is required.");
+
+    await expect(
+      executeWorkerTool("worker.command", {
+        command: "run",
         worker: {
           role: "revenue_operations",
           tenantSlug: "continuous-demo",

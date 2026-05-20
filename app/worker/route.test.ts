@@ -684,6 +684,55 @@ describe("/worker route", () => {
     expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
   });
 
+  it("rejects missing or empty worker selectors before registry dispatch", async () => {
+    const { POST } = await import("./route");
+    const missingWorker = await POST(
+      new Request("http://localhost/worker", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "run",
+          idempotencyKey: "missing-worker-selector-001",
+          config: {},
+        }),
+      }),
+    );
+    const emptyWorker = await POST(
+      new Request("http://localhost/worker", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "run",
+          worker: {},
+          idempotencyKey: "empty-worker-selector-001",
+          config: {},
+        }),
+      }),
+    );
+
+    await expect(missingWorker.json()).resolves.toMatchObject({
+      error: {
+        code: "invalid_worker_target",
+        message: "worker must be an object with role, id, and tenantSlug selectors.",
+      },
+    });
+    await expect(emptyWorker.json()).resolves.toMatchObject({
+      error: {
+        code: "invalid_worker_target",
+        message: "worker.role is required.",
+      },
+    });
+    expect(missingWorker.status).toBe(400);
+    expect(emptyWorker.status).toBe(400);
+    expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
+  });
+
   it("rejects non-object command config before registry dispatch", async () => {
     const { POST } = await import("./route");
     const response = await POST(
