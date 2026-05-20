@@ -14,7 +14,7 @@ state, workflow state, and object versioning without external sends or money mov
 | Core loop | One operator run creates workflow run/steps, worker run, source snapshot evidence, budget, inference, usage, event, adapter run/action, approval packet, task update, and object version records |
 | Operator read API | `GET /worker?view=snapshot&role=revenue_operations`, bearer-token required |
 | Approval API | `GET /worker?view=approvals&role=revenue_operations` and `POST /worker` with `command=approval.decide`, bearer-token required |
-| Source read API | `POST /worker` with `command=lead.read`, `idempotencyKey`, `config.source`, optional `config.reader`, and direct `config.records[]` or an active connection reference; persists website-form, inbox, and CRM source records as Core lead object/event/evidence rows, updates connection cursor proof when connection-backed, and returns `config.intake` selectors |
+| Source read API | `POST /worker` with `command=lead.read`, `idempotencyKey`, `config.source`, optional `config.reader`, and direct `config.records[]` or an active connection reference; persists website-form, inbox, CRM, buffered connection, or read-only API-polled source records as Core lead object/event/evidence rows, updates connection cursor proof when connection-backed, and returns `config.intake` selectors |
 | Split classify/draft APIs | `POST /worker` with `command=lead.classify` or `command=response.draft`; both accept `config.intake` selectors or direct fallback `config.leadPacket`, write worker run/event/evidence/audit/budget records, and keep external sends blocked |
 | Run API | `POST /worker` with `command=run` and `config.intake` source selectors or Core references; direct `config.leadPacket` remains an operator/test fallback |
 | Continuation API | `POST /worker` with `command=continue`, `idempotencyKey`, and `config.approvalId`; V1 turns `approved` decisions into blocked no-send execution packets, `revision_requested` decisions into revised packets plus fresh pending owner approval, and `rejected` decisions into closed no-send stop packets |
@@ -54,7 +54,7 @@ smoke test.
 
 | Capability | Autonomy | Notes |
 |---|---|---|
-| `lead.read` | Allowed | Website-form, authenticated-inbox, and CRM-style source records normalize into persisted Core lead intake selectors; live connector polling still comes next |
+| `lead.read` | Allowed | Website-form, authenticated-inbox, CRM-style, buffered connection, and read-only API-polled source records normalize into persisted Core lead intake selectors; production credential provisioning and scheduling still come next |
 | `lead.classify` | Allowed | Registered command now writes classification run, inference, usage, trace evidence, event, and audit proof |
 | `response.draft` | Allowed | Registered command now writes draft run, inference, usage, draft evidence, event, and audit proof; external send remains blocked |
 | `quote.prepare` | Approval required | Keep threshold, discount, and margin rules explicit |
@@ -65,8 +65,8 @@ smoke test.
 ## Adapter Order
 
 1. Website form intake with stored source snapshots. Present through `command=lead.read`.
-2. Gmail or Google Workspace lead inbox source-reader records with credential references, read-only metadata, and no external execution.
-3. CRM or spreadsheet lead source-reader records with credential references, read-only metadata, and no live write-back.
+2. Gmail or Google Workspace lead inbox source-reader records with credential references, read-only metadata, optional API polling, and no external execution.
+3. CRM or spreadsheet lead source-reader records with credential references, read-only metadata, optional HubSpot-style API polling, and no live write-back.
 4. Calendar availability read-only.
 5. Quote/invoice system draft creation.
 6. Stripe or payment provider preparation with human approval.
@@ -94,7 +94,7 @@ smoke test.
 
 ## Milestones
 
-1. Provision actual inbox/CRM connector polling behind the persisted `lead.read` source-reader shape.
-2. Provision scoped live credentials, tested rollback playbooks, and a first controlled send after the persisted retry readiness gate stays green.
+1. Provision production inbox/CRM credentials and scheduled connector polling behind the persisted `lead.read` source-reader shape.
+2. Provision scoped live write credentials, tested rollback playbooks, and a first controlled send after the persisted retry readiness gate stays green.
 3. Keep missing-fact, pricing override, and policy-risk eval fixtures green as the worker expands toward higher autonomy.
 4. Raise autonomy only for Revenue read, classify, and draft capabilities; owner brief generation belongs to the Owner Chief-of-Staff worker.

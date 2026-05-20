@@ -38,6 +38,7 @@ import {
   workers,
   type JsonObject,
 } from "../db/schema";
+import { pollLeadSourceConnection, type LeadSourcePollResult } from "./lead-source-connectors";
 
 type Database = typeof defaultDb;
 
@@ -869,6 +870,7 @@ function leadPacketFromConfig(config: JsonObject) {
 
 type ParsedLeadSourceRecord = {
   sourceEventId: string;
+  sourceCursor: string | null;
   occurredAt: Date | null;
   leadPacket: JsonObject;
 };
@@ -887,7 +889,7 @@ type LeadSourceReader = {
   connectionId?: string | null;
   connectionName?: string | null;
   connectionExternalAccountId?: string | null;
-  sourceMode?: "payload" | "connection_buffer";
+  sourceMode?: "payload" | "connection_buffer" | "connection_api";
 };
 
 type LeadSourceConnection = typeof connections.$inferSelect;
@@ -896,6 +898,13 @@ type LeadSourceConnectionCandidate = {
   adapterKey: string;
   adapterKind: string;
   adapterCapabilities: JsonObject;
+};
+
+type LeadSourceConnectionRead = {
+  connection: LeadSourceConnection;
+  records: JsonObject[];
+  sourceReader: LeadSourceReader;
+  pollingReceipt: JsonObject | null;
 };
 
 function inferredSourceReaderKind(sourceName: string) {
@@ -1226,6 +1235,7 @@ function parseLeadSourceRecords(
 
     return {
       sourceEventId,
+      sourceCursor: firstStringValue(record.sourceCursor, record.cursor, payload.sourceCursor, sourceEventId) || null,
       occurredAt: occurredAtFor(readerKind, record, payload, index),
       leadPacket: {
         source: sourceName,
@@ -1339,27 +1349,36 @@ function recordCursor(sourceReader: LeadSourceReader, record: JsonObject) {
   const payload = objectValue(record.payload ?? record.data ?? record.raw);
   const lead = objectValue(record.leadPacket ?? record.lead);
 
-  return sourceEventIdFor(sourceReader.kind, record, lead, payload);
+  return firstStringValue(
+    record.sourceCursor,
+    record.cursor,
+    payload.sourceCursor,
+    sourceEventIdFor(sourceReader.kind, record, lead, payload),
+  );
 }
 
-function recordsFromConnection(connection: LeadSourceConnection, sourceReader: LeadSourceReader) {
-  const config = objectValue(connection.config);
-  const arrays = connectionRecordArrays(config, sourceReader.kind);
-  const records = arrays[0]?.map((item) => objectValue(item)).filter((item) => Object.keys(item).length > 0) ?? [];
-  const previousCursor = stringValue(objectValue(config.lastLeadRead).cursor);
+function unreadConnectionRecords(params: {
+  records: JsonObject[];
+  connectionConfig: JsonObject;
+  sourceReader: LeadSourceReader;
+  missingCode: string;
+  missingMessage: string;
+  exhaustedMessage: string;
+}) {
+  const previousCursor = stringValue(objectValue(params.connectionConfig.lastLeadRead).cursor);
   const cursorIndex = previousCursor
-    ? records.findIndex((record) => recordCursor(sourceReader, record) === previousCursor)
+    ? params.records.findIndex((record) => recordCursor(params.sourceReader, record) === previousCursor)
     : -1;
-  const unreadRecords = cursorIndex >= 0 ? records.slice(cursorIndex + 1) : records;
+  const unreadRecords = cursorIndex >= 0 ? params.records.slice(cursorIndex + 1) : params.records;
 
   if (unreadRecords.length === 0) {
     throw new RevenueWorkerUnavailableError(
       previousCursor
         ? "worker_lead_read_connection_records_exhausted"
-        : "worker_lead_read_connection_records_missing",
+        : params.missingCode,
       previousCursor
-        ? "The referenced connection has no unread buffered lead source records after its cursor."
-        : "The referenced connection has no buffered lead source records to read.",
+        ? params.exhaustedMessage
+        : params.missingMessage,
       409,
     );
   }
@@ -1367,11 +1386,43 @@ function recordsFromConnection(connection: LeadSourceConnection, sourceReader: L
   return unreadRecords.slice(0, 25);
 }
 
+function recordsFromConnection(connection: LeadSourceConnection, sourceReader: LeadSourceReader) {
+  const config = objectValue(connection.config);
+  const arrays = connectionRecordArrays(config, sourceReader.kind);
+  const records = arrays[0]?.map((item) => objectValue(item)).filter((item) => Object.keys(item).length > 0) ?? [];
+
+  return unreadConnectionRecords({
+    records,
+    connectionConfig: config,
+    sourceReader,
+    missingCode: "worker_lead_read_connection_records_missing",
+    missingMessage: "The referenced connection has no buffered lead source records to read.",
+    exhaustedMessage: "The referenced connection has no unread buffered lead source records after its cursor.",
+  });
+}
+
+function recordsFromPollResult(
+  connection: LeadSourceConnection,
+  sourceReader: LeadSourceReader,
+  pollResult: LeadSourcePollResult,
+) {
+  const records = pollResult.records.map((record) => objectValue(record)).filter((record) => Object.keys(record).length > 0);
+
+  return unreadConnectionRecords({
+    records,
+    connectionConfig: objectValue(connection.config),
+    sourceReader,
+    missingCode: "worker_lead_read_live_records_missing",
+    missingMessage: "The referenced connection returned no lead source records from its read-only API poll.",
+    exhaustedMessage: "The referenced connection has no unread API-polled lead source records after its cursor.",
+  });
+}
+
 async function resolveLeadSourceConnection(
   db: Database,
   tenantId: string,
   sourceReader: LeadSourceReader,
-) {
+): Promise<LeadSourceConnectionRead> {
   const refs = [sourceReader.connectionRef, sourceReader.credentialRef]
     .filter((ref): ref is string => Boolean(ref))
     .map(normalizeConnectionRef);
@@ -1424,7 +1475,14 @@ async function resolveLeadSourceConnection(
     );
   }
 
-  const records = recordsFromConnection(connection.connection, sourceReader);
+  const pollResult = await pollLeadSourceConnection({
+    connectionId: connection.connection.id,
+    connectionConfig: objectValue(connection.connection.config),
+    sourceReader,
+  });
+  const records = pollResult
+    ? recordsFromPollResult(connection.connection, sourceReader, pollResult)
+    : recordsFromConnection(connection.connection, sourceReader);
 
   return {
     connection: connection.connection,
@@ -1434,15 +1492,16 @@ async function resolveLeadSourceConnection(
       connectionId: connection.connection.id,
       connectionName: connection.connection.name,
       connectionExternalAccountId: connection.connection.externalAccountId ?? null,
-      sourceMode: "connection_buffer" as const,
+      sourceMode: pollResult ? ("connection_api" as const) : ("connection_buffer" as const),
     },
+    pollingReceipt: pollResult?.receipt ?? null,
   };
 }
 
 function lastSourceCursor(records: ParsedLeadSourceRecord[]) {
   const last = records.at(-1);
 
-  return last?.sourceEventId ?? null;
+  return last?.sourceCursor ?? last?.sourceEventId ?? null;
 }
 
 function revisedPacketFromOriginal(params: {
@@ -2127,6 +2186,64 @@ export async function readRevenueLeads(input: {
   });
   const operator = await loadOperator(db, context.worker.tenantId, input.operatorEmail);
   const capabilityId = context.leadReadCapabilityId;
+
+  if (!capabilityId) {
+    throw new RevenueWorkerUnavailableError(
+      "worker_capability_missing",
+      "Revenue Worker requires the lead.read capability for lead.read.",
+      409,
+    );
+  }
+
+  const requestHash = hashObject({
+    schemaVersion: "revenue_worker.lead_read.request.v1",
+    idempotencyKey: input.idempotencyKey,
+    tenantId: context.worker.tenantId,
+    workerId: context.worker.id,
+    operatorUserId: operator.id,
+    config: requestConfig,
+    source: sourceRequest.sourceName,
+    sourceReader: sourceRequest.sourceReader,
+  });
+
+  if (!sourceRequest.records) {
+    const [existingRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(
+        and(
+          eq(workerRuns.tenantId, context.worker.tenantId),
+          eq(workerRuns.source, source),
+          eq(workerRuns.idempotencyKey, input.idempotencyKey),
+        ),
+      )
+      .limit(1);
+
+    if (existingRun) {
+      const existingInput = objectValue(existingRun.data.input);
+      const existingRequestHash = stringValue(existingInput.requestHash);
+
+      if (
+        stringValue(existingInput.command) !== "lead.read" ||
+        (existingRequestHash && existingRequestHash !== requestHash)
+      ) {
+        throw new RevenueWorkerUnavailableError(
+          "worker_idempotency_conflict",
+          "This idempotency key was already used with different worker input.",
+          409,
+        );
+      }
+
+      const snapshot = await getRevenueWorkerSnapshot(db, {
+        tenantSlug: input.tenantSlug,
+        workerId: context.worker.id,
+        role: revenueWorkerRole,
+      });
+
+      return replayedLeadReadResult(existingRun, snapshot);
+    }
+  }
+
   const connectionRead = sourceRequest.records
     ? null
     : await resolveLeadSourceConnection(
@@ -2144,16 +2261,9 @@ export async function readRevenueLeads(input: {
     connectionRead?.records ?? sourceRequest.records ?? [],
   );
 
-  if (!capabilityId) {
-    throw new RevenueWorkerUnavailableError(
-      "worker_capability_missing",
-      "Revenue Worker requires the lead.read capability for lead.read.",
-      409,
-    );
-  }
-
   const inputHash = hashObject({
     schemaVersion: "revenue_worker.lead_read.v1",
+    requestHash,
     idempotencyKey: input.idempotencyKey,
     tenantId: context.worker.tenantId,
     workerId: context.worker.id,
@@ -2184,8 +2294,13 @@ export async function readRevenueLeads(input: {
     if (existingRun) {
       const existingInput = objectValue(existingRun.data.input);
       const existingHash = stringValue(existingInput.inputHash);
+      const existingRequestHash = stringValue(existingInput.requestHash);
 
-      if (stringValue(existingInput.command) !== "lead.read" || (existingHash && existingHash !== inputHash)) {
+      if (
+        stringValue(existingInput.command) !== "lead.read" ||
+        (existingRequestHash && existingRequestHash !== requestHash) ||
+        (!existingRequestHash && existingHash && existingHash !== inputHash)
+      ) {
         throw new RevenueWorkerUnavailableError(
           "worker_idempotency_conflict",
           "This idempotency key was already used with different worker input.",
@@ -2259,6 +2374,7 @@ export async function readRevenueLeads(input: {
           sourceReader,
           readCount: records.length,
           connectionId: connectionRead?.connection.id ?? null,
+          pollingReceipt: connectionRead?.pollingReceipt ?? null,
           externalExecution: "blocked",
         },
         createdAt: now,
@@ -2278,11 +2394,13 @@ export async function readRevenueLeads(input: {
         data: {
           input: {
             command: "lead.read",
+            requestHash,
             inputHash,
             config: requestConfig,
             source: sourceName,
             sourceReader,
             connectionId: connectionRead?.connection.id ?? null,
+            pollingReceipt: connectionRead?.pollingReceipt ?? null,
             operator: {
               userId: operator.id,
               email: operator.email,
@@ -2476,12 +2594,15 @@ export async function readRevenueLeads(input: {
       usageEventId: usage.id,
       connectionId: connectionRead?.connection.id ?? null,
       cursor: lastSourceCursor(records),
+      pollingReceipt: connectionRead?.pollingReceipt ?? null,
       externalExecution: "blocked",
       externalSend: false,
     };
 
     if (connectionRead) {
       const connectionConfig = objectValue(connectionRead.connection.config);
+      const pollingReceipt = objectValue(connectionRead.pollingReceipt);
+      const apiCursor = firstStringValue(pollingReceipt.nextPageToken, pollingReceipt.nextAfter);
 
       await tx
         .update(connections)
@@ -2495,8 +2616,11 @@ export async function readRevenueLeads(input: {
               workerRunId: run.id,
               idempotencyKey: input.idempotencyKey,
               source: sourceName,
+              sourceMode: sourceReader.sourceMode ?? null,
               readCount: records.length,
               cursor: lastSourceCursor(records),
+              apiCursor: apiCursor || null,
+              pollingReceipt: connectionRead.pollingReceipt,
               readAt: now.toISOString(),
               externalExecution: "blocked",
             },

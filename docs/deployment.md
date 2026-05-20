@@ -164,6 +164,13 @@ lead object, `lead.received` event, and source snapshot through
 }
 ```
 
+For connection-backed source reads, the request still carries only a connection
+reference under `config.reader`. The active connection can provide buffered
+records, or a read-only polling config with an environment-backed credential
+reference on the server. Provider tokens are never sent in the request payload;
+the response records `connectionId`, `cursor`, `sourceMode`, and a redacted
+polling receipt when the read came from an API poll.
+
 ```json
 {
   "command": "run",

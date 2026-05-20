@@ -20,7 +20,7 @@
 - Run `scripts/recovery-drill.sh` against a disposable droplet, then install the observability timer with a real alert webhook, complete token rotation, add non-root host access, and make `scripts/check-production-readiness.sh` pass before using the production droplet for real customer data.
 - Extend the hashed control-plane token catalog into first-class operator auth with explicit rotation workflows and session-level audit trails before broad customer use.
 - Provision scoped adapter credentials, tested rollback playbooks, and a first controlled send only after retry readiness evidence stays green.
-- Provision live inbox and CRM API polling behind the persisted connection-backed `lead.read` source-reader shape.
+- Provision production inbox and CRM credentials plus scheduled polling behind the persisted connection-backed `lead.read` source-reader shape.
 - Extend Revenue `lead.classify` and `response.draft` eval scoring now that they are explicit persisted command surfaces.
 - Use `docs/revenue-operations-worker-expansion.md` as the expansion gate list for the next worker iteration.
 - Use `docs/revenue-operations-worker-v1-contract.md` as the machine-actionable contract for run and approval effects.

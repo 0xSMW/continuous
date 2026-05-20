@@ -248,7 +248,8 @@ For `command=lead.read`, use:
 | `reader.kind` | For inbox/CRM readers | `inbox` or `crm`; defaults are inferred for website-form and generic source records |
 | `reader.provider` | No | External source family, such as `google_workspace` or `hubspot`; stored as source-reader metadata |
 | `reader.credentialRef` | Required for inbox/CRM readers | Opaque credential or `connection:<id>` reference; never embed credential material in `config.reader` |
-| `reader.connectionRef` | For connection-backed reads | Optional explicit active connection id, name, or external account id; if no `records[]` are sent, the worker reads buffered source records from the connection config |
+| `reader.connectionRef` | For connection-backed reads | Optional explicit active connection id, name, or external account id; if no `records[]` are sent, the worker reads buffered source records or a read-only API poll from the connection config |
+| `connection.config.polling.enabled` | For API-polled connections | When `true`, the active connection may poll supported read-only providers such as Google Workspace/Gmail metadata or HubSpot CRM search using an environment-backed credential reference; access tokens are never accepted in the request payload |
 | `records[].sourceEventId` | Required for direct records | Stable external source event, form, message, deal, or row id; inbox readers may provide `messageId`, and CRM readers may provide `externalId` |
 | `records[].messageId`, `threadId`, `from`, `subject`, `snippet`, `receivedAt` | Inbox readers | Used to normalize inbox messages into lead source snapshots |
 | `records[].externalId`, `companyName`, `contactName`, `dealName`, `stage`, `updatedAt` | CRM readers | Used to normalize CRM lead or deal rows into lead source snapshots |
@@ -293,9 +294,12 @@ whose `result.output.selectors[]` contains:
 | `intake` | Minimal `{source, sourceEventId}` payload for a later `command=run` |
 
 When records are read from a connection, `result.output.connectionId` and
-`result.output.cursor` are set, and the connection receives `lastLeadRead`
-metadata with the worker run id, cursor, read count, timestamp, and blocked
-external-execution posture.
+`result.output.cursor` are set. Buffered reads report `sourceMode:
+connection_buffer`; read-only provider polls report `sourceMode:
+connection_api` and include a redacted `pollingReceipt`. The connection
+receives `lastLeadRead` metadata with the worker run id, source mode, cursor,
+optional provider cursor, read count, timestamp, redacted polling receipt, and
+blocked external-execution posture.
 
 `POST /worker` with `command=run` returns a generic command response whose
 `result.output` contains worker-derived data:
@@ -327,6 +331,7 @@ external-execution posture.
 | Referenced adapter connection exists and is active | `worker_lead_read_connection_missing` |
 | Referenced connection matches the requested source/provider/kind | `worker_lead_read_connection_incompatible` |
 | Connection-backed read has unread buffered source records after the last cursor | `worker_lead_read_connection_records_missing` or `worker_lead_read_connection_records_exhausted` |
+| API-polled connection has an environment-backed credential reference and readable source records | `worker_lead_read_live_credential_missing` or `worker_lead_read_live_records_missing` |
 
 ## Effects
 

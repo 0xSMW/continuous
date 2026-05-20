@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { createServer } from "node:http";
 
 import { and, count, eq, inArray, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -4029,6 +4030,167 @@ maybeDescribe("Revenue Worker integration eval", () => {
         },
       }),
     ).rejects.toThrow("not compatible with the requested lead source");
+
+    const liveMessageId = `gmail:live:${runId}`;
+    const previousToken = process.env.CONTINUOUS_TEST_GOOGLE_TOKEN;
+    process.env.CONTINUOUS_TEST_GOOGLE_TOKEN = "ci-google-token";
+    let apiHitCount = 0;
+    const apiServer = createServer((request, response) => {
+      const url = new URL(request.url ?? "/", "http://127.0.0.1");
+
+      response.setHeader("content-type", "application/json");
+      if (request.headers.authorization !== "Bearer ci-google-token") {
+        response.statusCode = 401;
+        response.end(JSON.stringify({ error: "unauthorized" }));
+        return;
+      }
+      apiHitCount += 1;
+
+      if (url.pathname === "/gmail/v1/users/me/messages") {
+        response.end(
+          JSON.stringify({
+            messages: [{ id: liveMessageId, threadId: `thread:live:${runId}` }],
+          }),
+        );
+        return;
+      }
+
+      if (url.pathname === `/gmail/v1/users/me/messages/${encodeURIComponent(liveMessageId)}`) {
+        response.end(
+          JSON.stringify({
+            id: liveMessageId,
+            threadId: `thread:live:${runId}`,
+            internalDate: String(Date.parse("2026-05-19T05:00:00.000Z")),
+            snippet: "Can you look at a roof leak this week?",
+            labelIds: ["INBOX"],
+            payload: {
+              headers: [
+                { name: "From", value: "Live Buyer <live@example.com>" },
+                { name: "Subject", value: "Roof leak this week" },
+                { name: "Date", value: "Tue, 19 May 2026 05:00:00 GMT" },
+              ],
+            },
+          }),
+        );
+        return;
+      }
+
+      response.statusCode = 404;
+      response.end(JSON.stringify({ error: "not_found", path: url.pathname }));
+    });
+    await new Promise<void>((resolve) => apiServer.listen(0, "127.0.0.1", resolve));
+
+    try {
+      const address = apiServer.address();
+      if (!address || typeof address === "string") {
+        throw new Error("Gmail test server did not expose a TCP address.");
+      }
+
+      const [liveConnection] = await db
+        .insert(connections)
+        .values({
+          tenantId: seedConnection.tenantId,
+          adapterId: googleAdapter.id,
+          name: `Google Workspace API poll ${runId}`,
+          state: "active",
+          externalAccountId: `google-workspace-api-${runId}`,
+          scopes: { reads: ["lead"] },
+          config: {
+            executable: false,
+            sources: ["google_workspace_inbox"],
+            providers: ["google_workspace"],
+            readerKinds: ["inbox"],
+            polling: {
+              enabled: true,
+              provider: "google_workspace",
+              endpointBase: `http://127.0.0.1:${address.port}/gmail/v1`,
+              credentialRef: "env:CONTINUOUS_TEST_GOOGLE_TOKEN",
+              maxResults: 1,
+            },
+          },
+        })
+        .returning();
+      const liveRead = await executeWorkerCommand({
+        command: "lead.read",
+        target: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        operatorEmail: "owner@continuoushq.com",
+        idempotencyKey: `ci-worker-connection-api-read-${runId}`,
+        config: {
+          source: "google_workspace_inbox",
+          reader: {
+            kind: "inbox",
+            provider: "google_workspace",
+            credentialRef: `connection:${liveConnection.id}`,
+            mode: "read_only",
+          },
+        },
+      });
+      const liveResult = objectValue(liveRead.result);
+      const liveOutput = objectValue(liveResult.output);
+      const liveReader = objectValue(liveOutput.sourceReader);
+      const liveReceipt = objectValue(liveOutput.pollingReceipt);
+      const liveSelector = objectValue(Array.isArray(liveResult.selectors) ? liveResult.selectors[0] : null);
+      const [updatedLiveConnection] = await db
+        .select()
+        .from(connections)
+        .where(eq(connections.id, liveConnection.id))
+        .limit(1);
+      const liveLastRead = objectValue(objectValue(updatedLiveConnection?.config).lastLeadRead);
+
+      expect(liveResult.readCount).toBe(1);
+      expect(liveReader.sourceMode).toBe("connection_api");
+      expect(liveOutput.connectionId).toBe(liveConnection.id);
+      expect(liveOutput.cursor).toBe(liveMessageId);
+      expect(liveSelector.sourceEventId).toBe(liveMessageId);
+      expect(liveReceipt).toMatchObject({
+        provider: "google_workspace",
+        api: "gmail",
+        credentialRef: "env:CONTINUOUS_TEST_GOOGLE_TOKEN",
+        returned: 1,
+        externalSend: false,
+      });
+      expect(JSON.stringify(liveOutput)).not.toContain("ci-google-token");
+      expect(liveLastRead).toMatchObject({
+        sourceMode: "connection_api",
+        cursor: liveMessageId,
+        externalExecution: "blocked",
+      });
+
+      const apiHitsAfterFirstRead = apiHitCount;
+      const liveReplay = await executeWorkerCommand({
+        command: "lead.read",
+        target: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        operatorEmail: "owner@continuoushq.com",
+        idempotencyKey: `ci-worker-connection-api-read-${runId}`,
+        config: {
+          source: "google_workspace_inbox",
+          reader: {
+            kind: "inbox",
+            provider: "google_workspace",
+            credentialRef: `connection:${liveConnection.id}`,
+            mode: "read_only",
+          },
+        },
+      });
+
+      expect(objectValue(liveReplay.result).created).toBe(false);
+      expect(apiHitCount).toBe(apiHitsAfterFirstRead);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        apiServer.close((error) => (error ? reject(error) : resolve()));
+      });
+      if (previousToken === undefined) {
+        delete process.env.CONTINUOUS_TEST_GOOGLE_TOKEN;
+      } else {
+        process.env.CONTINUOUS_TEST_GOOGLE_TOKEN = previousToken;
+      }
+    }
 
     const inboxRun = await runRevenueWorker({
       idempotencyKey: `ci-worker-run-from-inbox-read-${runId}`,

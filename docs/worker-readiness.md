@@ -32,7 +32,7 @@ Status values:
 
 | Worker | Contract | Registry | Object Map | Workflow | Capabilities | Budget | Approval | Adapter | Eval | UI | Launch | Primary blocker | Next action |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| Revenue Operations | live | live | live | live | live | live | live | partial | live | partial | partial | Real connector polling and approved external send remain blocked | Add connector-backed `lead.read` polling, then scoped adapter execution with receipt and rollback proof |
+| Revenue Operations | live | live | live | live | live | live | live | partial | live | partial | partial | Production connector credentials, scheduled polling, and approved external send remain blocked | Provision production connector credentials and scheduler coverage, then scoped adapter execution with receipt and rollback proof |
 | Owner Chief-of-Staff | live | live | live | live | live | live | live | blocked | partial | partial | partial | Read-only factuality and stale-source handling need broader evals | Expand owner brief eval cases and generated review views before mutation-capable commands |
 | Dispatch/Ops | planned | planned | planned | planned | planned | planned | planned | planned | planned | planned | planned | Needs Revenue-to-Dispatch job handoff fixture | Implement job/work-order object pack and calendar dry-run adapter fixture |
 | Finance | planned | planned | planned | planned | planned | planned | planned | planned | planned | planned | planned | Needs Dispatch closeout and Revenue invoice/payment handoff fixtures | Implement cash packet fixture, AR follow-up workflow, and money-movement dual-control gate |
@@ -51,4 +51,3 @@ Status values:
    its handoff contracts rather than inventing private object shapes.
 4. Every promotion must update this matrix, the worker contract, and the
    applicable eval or deploy smoke in the same change.
-
