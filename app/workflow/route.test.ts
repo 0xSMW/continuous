@@ -136,6 +136,53 @@ describe("/workflow route scope", () => {
     expect(mocks.startWorkflowRun).not.toHaveBeenCalled();
   });
 
+  it("requires managed credential inventory before workflow dispatch", async () => {
+    mocks.env.CONTROL_PLANE_ALLOWED_TENANTS = "continuous-demo";
+    mocks.authorizeManagedControlPlaneCredential.mockResolvedValue({
+      ok: false,
+      status: 403,
+      code: "control_plane_credential_required",
+      message: "Managed control-plane credential inventory is required for this control-plane route.",
+    });
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/workflow", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "start",
+          workflow: {
+            key: "lead_to_cash",
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "workflow-managed-required-001",
+          config: {},
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(body.error).toEqual({
+      code: "control_plane_credential_required",
+      message: "Managed control-plane credential inventory is required for this control-plane route.",
+    });
+    expect(mocks.authorizeManagedControlPlaneCredential).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: "workflow",
+        access: "write",
+        command: "start",
+        tenantSlug: "continuous-demo",
+        requireManagedCredential: true,
+      }),
+    );
+    expect(mocks.startWorkflowRun).not.toHaveBeenCalled();
+  });
+
   it("rejects unauthorized workflow commands before reading the request body", async () => {
     const getReader = vi.fn(() => {
       throw new Error("Body should not be read before auth succeeds.");
@@ -181,6 +228,15 @@ describe("/workflow route scope", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(mocks.authorizeManagedControlPlaneCredential).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: "workflow",
+        access: "read",
+        command: "view.overview",
+        tenantSlug: "continuous-demo",
+        requireManagedCredential: true,
+      }),
+    );
     expect(mocks.listWorkflows).toHaveBeenCalledWith({
       operatorEmail: "operator@example.com",
       tenantSlug: "continuous-demo",
@@ -226,6 +282,15 @@ describe("/workflow route scope", () => {
 
     expect(response.status).toBe(200);
     expect(body.data.command).toBe("transition");
+    expect(mocks.authorizeManagedControlPlaneCredential).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: "workflow",
+        access: "write",
+        command: "transition",
+        tenantSlug: "continuous-demo",
+        requireManagedCredential: true,
+      }),
+    );
     expect(mocks.transitionWorkflowRun).toHaveBeenCalledWith({
       operatorEmail: "operator@example.com",
       tenantSlug: "continuous-demo",

@@ -208,6 +208,10 @@ function unexpectedControlPlaneCredentialFields(config: Record<string, unknown>)
   return Object.keys(config).filter((field) => forbiddenControlPlaneCredentialFields.has(field));
 }
 
+function coreCommandRequiresManagedCredential(command?: string) {
+  return command !== "control_plane.token_rotation.attest" && command !== "control_plane.credential.upsert";
+}
+
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const tenantSlug = optionalString(url.searchParams.get("tenantSlug"));
@@ -264,6 +268,7 @@ export async function GET(request: Request) {
     command: "view.summary",
     tenantSlug,
     auth,
+    requireManagedCredential: true,
   });
 
   if (!managedCredential.ok) {
@@ -425,6 +430,7 @@ export async function POST(request: Request) {
     command,
     tenantSlug,
     auth,
+    requireManagedCredential: coreCommandRequiresManagedCredential(command),
   });
 
   if (!managedCredential.ok) {

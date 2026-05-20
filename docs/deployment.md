@@ -336,8 +336,10 @@ route wildcards such as `worker:*`. GET views are authorized as
 `<route>:view.<view>`, for example `worker:view.snapshot`.
 Treat the legacy single `WORKER_RUN_TOKEN` path as bootstrap-only. New
 control-plane credentials must set explicit `allowedRoutes`, `allowedAccess`,
-and `allowedCommands`; omitted catalog scope fields still inherit wildcard
-access for compatibility and are not appropriate for customer-facing operation.
+and `allowedCommands`; omitted catalog scope fields are not appropriate for
+customer-facing operation because `/core`, `/worker`, `/workflow`, and
+`/approval` now fail closed against the durable managed credential inventory
+after catalog auth succeeds.
 
 ## Production Readiness Gate
 
@@ -467,9 +469,11 @@ Record the rotation with the Core command surface, keeping operation details in
 ```
 
 Record the managed credential inventory row with the same Core envelope. The
-runtime still proves the bearer token against the hashed catalog, then the
-durable inventory can narrow, pause, expire, or revoke the matching
-`credentialId` without changing the API shape:
+runtime still proves the bearer token against the hashed catalog, then `/core`,
+`/worker`, `/workflow`, and `/approval` require the matching durable inventory
+row with a token fingerprint before dispatch. That inventory can also narrow,
+pause, expire, or revoke the matching `credentialId` without changing the API
+shape:
 
 ```json
 {

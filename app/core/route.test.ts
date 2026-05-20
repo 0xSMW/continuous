@@ -182,6 +182,15 @@ describe("POST /core", () => {
     expect(response.status).toBe(200);
     expect(body.health.status).toBe("ok");
     expect(body.data.counts.tasks).toBe(3);
+    expect(mocks.authorizeManagedControlPlaneCredential).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: "core",
+        access: "read",
+        command: "view.summary",
+        tenantSlug: "continuous-demo",
+        requireManagedCredential: true,
+      }),
+    );
     expect(mocks.getCoreSummarySafe).toHaveBeenCalledWith({
       tenantSlug: "continuous-demo",
     });
@@ -237,6 +246,36 @@ describe("POST /core", () => {
       code: "control_plane_route_forbidden",
       message: "This operator token is not allowed to access the requested control-plane route.",
     });
+    expect(mocks.createCoreTask).not.toHaveBeenCalled();
+  });
+
+  it("requires managed credential inventory for Core commands after bootstrap", async () => {
+    mocks.authorizeManagedControlPlaneCredential.mockResolvedValue({
+      ok: false,
+      status: 403,
+      code: "control_plane_credential_required",
+      message: "Managed control-plane credential inventory is required for this control-plane route.",
+    });
+
+    const response = await postCore("task.create", "managed-core-required-001", {
+      title: "Managed credential required",
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(body.error).toEqual({
+      code: "control_plane_credential_required",
+      message: "Managed control-plane credential inventory is required for this control-plane route.",
+    });
+    expect(mocks.authorizeManagedControlPlaneCredential).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: "core",
+        access: "write",
+        command: "task.create",
+        tenantSlug: "continuous-demo",
+        requireManagedCredential: true,
+      }),
+    );
     expect(mocks.createCoreTask).not.toHaveBeenCalled();
   });
 
@@ -362,6 +401,15 @@ describe("POST /core", () => {
     expect(response.status).toBe(200);
     expect(body.data.command).toBe("control_plane.token_rotation.attest");
     expect(body.data.result.tokenRotationAttestationId).toBe("rotation-1");
+    expect(mocks.authorizeManagedControlPlaneCredential).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: "core",
+        access: "write",
+        command: "control_plane.token_rotation.attest",
+        tenantSlug: "continuous-demo",
+        requireManagedCredential: false,
+      }),
+    );
     expect(mocks.attestControlPlaneTokenRotation).toHaveBeenCalledWith({
       operatorEmail: "operator@example.com",
       idempotencyKey: "rotation-attest-001",
@@ -462,6 +510,15 @@ describe("POST /core", () => {
     expect(response.status).toBe(200);
     expect(body.data.command).toBe("control_plane.credential.upsert");
     expect(body.data.result.controlPlaneCredentialId).toBe("credential-row-1");
+    expect(mocks.authorizeManagedControlPlaneCredential).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: "core",
+        access: "write",
+        command: "control_plane.credential.upsert",
+        tenantSlug: "continuous-demo",
+        requireManagedCredential: false,
+      }),
+    );
     expect(mocks.upsertControlPlaneCredential).toHaveBeenCalledWith({
       operatorEmail: "operator@example.com",
       idempotencyKey: "credential-upsert-001",

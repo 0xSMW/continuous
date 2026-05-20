@@ -224,6 +224,7 @@ export async function GET(request: Request) {
     command: `view.${view}`,
     tenantSlug,
     auth,
+    requireManagedCredential: true,
   });
 
   if (!managedCredential.ok) {
@@ -422,6 +423,7 @@ export async function POST(request: Request) {
     command,
     tenantSlug,
     auth,
+    requireManagedCredential: true,
   });
 
   if (!managedCredential.ok) {

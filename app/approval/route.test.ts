@@ -109,6 +109,15 @@ describe("/approval route", () => {
     expect(response.status).toBe(200);
     expect(body.api).toBe("continuous.approval.v1");
     expect(body.data.view).toBe("inbox");
+    expect(mocks.authorizeManagedControlPlaneCredential).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: "approval",
+        access: "read",
+        command: "view.inbox",
+        tenantSlug: "continuous-demo",
+        requireManagedCredential: true,
+      }),
+    );
     expect(mocks.listApprovals).toHaveBeenCalledWith({
       operatorEmail: "operator@example.com",
       tenantSlug: "continuous-demo",
@@ -118,6 +127,55 @@ describe("/approval route", () => {
       risk: undefined,
       kind: undefined,
     });
+  });
+
+  it("requires managed credential inventory before approval dispatch", async () => {
+    mocks.env.CONTROL_PLANE_ALLOWED_TENANTS = "continuous-demo";
+    mocks.authorizeManagedControlPlaneCredential.mockResolvedValue({
+      ok: false,
+      status: 403,
+      code: "control_plane_credential_required",
+      message: "Managed control-plane credential inventory is required for this control-plane route.",
+    });
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/approval", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "approval.decide",
+          approval: {
+            id: "77777777-7777-4777-8777-000000000001",
+            tenantSlug: "continuous-demo",
+            subject: "core",
+          },
+          config: {
+            action: "approved",
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(body.error).toEqual({
+      code: "control_plane_credential_required",
+      message: "Managed control-plane credential inventory is required for this control-plane route.",
+    });
+    expect(mocks.authorizeManagedControlPlaneCredential).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: "approval",
+        access: "write",
+        command: "approval.decide",
+        tenantSlug: "continuous-demo",
+        requireManagedCredential: true,
+      }),
+    );
+    expect(mocks.decideApproval).not.toHaveBeenCalled();
   });
 
   it("passes shared approval inbox filters without widening the route surface", async () => {
@@ -218,6 +276,15 @@ describe("/approval route", () => {
       tenantSlug: "continuous-demo",
       subject: "core",
     });
+    expect(mocks.authorizeManagedControlPlaneCredential).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: "approval",
+        access: "write",
+        command: "approval.decide",
+        tenantSlug: "continuous-demo",
+        requireManagedCredential: true,
+      }),
+    );
     expect(mocks.decideApproval).toHaveBeenCalledWith({
       approvalId: "77777777-7777-4777-8777-000000000001",
       operatorEmail: "operator@example.com",
