@@ -3,9 +3,9 @@
 This contract defines the finance worker for invoice drafts, AR follow-up,
 expense coding, cash forecast, and payment draft preparation. V1 never moves
 money and never sends external payment communications without approval.
-The first executable slice is `invoice.prepare`; the remaining Finance commands
-stay contract-defined until their runtime handlers are promoted through the same
-generic worker registry.
+The first executable slices are `invoice.prepare` and `ar_followup.draft`; the
+remaining Finance commands stay contract-defined until their runtime handlers
+are promoted through the same generic worker registry.
 
 ## Header
 
@@ -41,13 +41,39 @@ All commands use `POST /worker`; no finance-specific route is added.
 }
 ```
 
+AR follow-up uses the same envelope:
+
+```json
+{
+  "command": "ar_followup.draft",
+  "worker": {
+    "role": "finance_operations",
+    "tenantSlug": "continuous-demo"
+  },
+  "idempotencyKey": "finance-ar-followup-001",
+  "config": {
+    "invoiceId": "invoice_row_or_invoice_object_uuid",
+    "tonePolicy": "friendly_first_reminder",
+    "channel": "email",
+    "messageContext": {
+      "customerName": "Acme Roof Repair"
+    },
+    "policy": {
+      "requireOwnerApproval": true,
+      "externalSend": "blocked",
+      "moneyMovement": "blocked"
+    }
+  }
+}
+```
+
 ## Registry Entries
 
 | Command or view | Tool alias | Required config | Idempotency | Side effects | External execution |
 |---|---|---|---|---|---|
 | `GET view=snapshot` | `worker.snapshot` | `worker.role` | None | Read-only | Blocked |
 | `invoice.prepare` | `worker.finance.invoice.prepare` | `jobId`, `closeoutId`, or `sourceRefs` | Required | Invoice draft, cash packet, approval request, accounting dry-run receipt | Dry-run |
-| `ar_followup.draft` | `worker.finance.ar_followup.draft` | `invoiceId`, `tonePolicy` | Required | Draft message and approval request | Blocked |
+| `ar_followup.draft` | `worker.finance.ar_followup.draft` | `invoiceId`, `tonePolicy` | Required | AR follow-up draft, cash packet, approval request, generated review view | Blocked |
 | `expense_code.propose` | `worker.finance.expense_code.propose` | `receiptId` or `expenseId` | Required | Coding proposal and evidence | Blocked |
 | `cash_forecast.generate` | `worker.finance.cash_forecast.generate` | `window`, `accounts[]` | Required | Forecast object and packet | Blocked |
 | `payment_draft.prepare` | `worker.finance.payment_draft.prepare` | `billId` or `paymentId` | Required | Payment instruction draft only | Blocked |
@@ -58,6 +84,7 @@ All commands use `POST /worker`; no finance-specific route is added.
 | Object | Required data fields | Valid states | Links |
 |---|---|---|---|
 | `invoice` | `customerId`, `jobId`, `lines`, `subtotalCents`, `taxCents`, `totalCents`, `dueAt`, `currency` | `draft`, `approval_required`, `ready_to_send`, `sent`, `paid`, `void` | `bills_customer`, `prepared_from`, `collected_by` |
+| `ar_followup` | `invoiceId`, `tonePolicy`, `channel`, `draft`, `amountCents`, `currency`, `blockers` | `draft`, `approval_required`, `blocked`, `ready_to_send`, `receipt_recorded` | `follows_up_invoice`, `for_customer`, `about_job` |
 | `payment` | `invoiceId`, `amountCents`, `method`, `processor`, `status`, `receiptRef` | `draft`, `approval_required`, `prepared`, `settled`, `failed` | `pays_invoice`, `has_receipt` |
 | `bill` | `vendorId`, `amountCents`, `dueAt`, `category`, `sourceRef` | `received`, `coding_review`, `approval_required`, `ready_to_pay`, `paid` | `owed_to_vendor`, `supported_by` |
 | `expense` | `merchant`, `amountCents`, `category`, `receiptId`, `policyFlags` | `uncoded`, `proposed`, `approved`, `rejected` | `has_receipt`, `coded_as` |
@@ -105,14 +132,16 @@ details, and private memo fields are redacted.
 | View | Subject | Actions | Empty/error states |
 |---|---|---|---|
 | `finance.invoice.review` | `invoice` | `approve_invoice`, `request_revision`, `void_draft` | `missing_closeout`, `customer_missing` |
+| `finance.ar_followup.review` | `ar_followup` | `approve_ar_followup`, `request_revision`, `void_draft` | `invoice_paid`, `invoice_disputed`, `payment_link_blocked` |
 | `finance.cash.review` | `cash_forecast` | `publish_forecast`, `request_revision`, `route_risk` | `accounts_stale`, `source_partial` |
 | `finance.payment.review` | `payment` | `approve_draft`, `reject`, `request_dual_control` | `bank_unavailable`, `policy_blocked` |
 
 ## Evals
 
-Golden cases cover invoice accuracy from closeout, disputed invoice handling,
-expense coding accuracy, stale bank feed forecast, budget pressure, idempotent
-replay, no unauthorized sends, and no money movement.
+Golden cases cover invoice accuracy from closeout, AR follow-up drafting from an
+invoice, disputed and paid invoice blocking, expense coding accuracy, stale bank
+feed forecast, budget pressure, idempotent replay, no unauthorized sends, and no
+money movement.
 
 ## Security
 

@@ -122,6 +122,7 @@ describe("worker tool contract", () => {
       "worker.dispatch.closeout.prepare",
       "worker.dispatch.exception.route",
       "worker.finance.invoice.prepare",
+      "worker.finance.ar_followup.draft",
       "worker.continue",
       "worker.approvals.list",
       "worker.approvals.decide",
@@ -253,6 +254,13 @@ describe("worker tool contract", () => {
           requiresTenant: true,
           externalExecution: "dry_run",
         }),
+        expect.objectContaining({
+          role: "finance_operations",
+          name: "ar_followup.draft",
+          idempotency: "required",
+          requiresTenant: true,
+          externalExecution: "blocked",
+        }),
       ]),
     );
     expect(workerToolSchema.registry.commands).toEqual(
@@ -332,6 +340,19 @@ describe("worker tool contract", () => {
               sourceRefs: expect.objectContaining({ type: "object" }),
               billableLines: expect.objectContaining({ type: "array" }),
               policy: expect.objectContaining({ type: "object" }),
+            }),
+          }),
+        }),
+        expect.objectContaining({
+          role: "finance_operations",
+          name: "ar_followup.draft",
+          configSchema: expect.objectContaining({
+            required: ["invoiceId", "tonePolicy"],
+            properties: expect.objectContaining({
+              invoiceId: expect.objectContaining({ type: "string" }),
+              tonePolicy: expect.objectContaining({ type: "string" }),
+              sourceRefs: expect.objectContaining({ type: "object" }),
+              messageContext: expect.objectContaining({ type: "object" }),
             }),
           }),
         }),
@@ -726,6 +747,37 @@ describe("worker tool contract", () => {
         config: {},
       }),
     ).rejects.toThrow("config.jobId, closeoutId or sourceRefs is required for invoice.prepare.");
+  });
+
+  it("validates finance AR follow-up envelopes before invoking the worker", async () => {
+    await expect(
+      executeWorkerTool("worker.finance.ar_followup.draft", {
+        worker: {
+          role: "finance_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "bad key!",
+        config: {
+          invoiceId: "invoice_uuid",
+          tonePolicy: "friendly_first_reminder",
+        },
+      }),
+    ).rejects.toThrow(
+      "Idempotency key may only contain letters, numbers, dot, underscore, colon, or dash.",
+    );
+
+    await expect(
+      executeWorkerTool("worker.finance.ar_followup.draft", {
+        worker: {
+          role: "finance_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "finance-ar-followup-schema-001",
+        config: {
+          invoiceId: "invoice_uuid",
+        },
+      }),
+    ).rejects.toThrow("config.tonePolicy is required for ar_followup.draft.");
   });
 
   it("requires tenant scope for adapter reconciliation", async () => {

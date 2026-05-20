@@ -167,6 +167,7 @@ const ids = {
   workflowDailyOwnerBrief: "66666666-6666-4666-8666-000000000021",
   workflowPromiseToDelivery: "66666666-6666-4666-8666-000000000022",
   workflowInvoiceDraft: "66666666-6666-4666-8666-000000000023",
+  workflowArFollowup: "66666666-6666-4666-8666-000000000024",
   workflowOpenNewState: "66666666-6666-4666-8666-000000000009",
   workflowCompensationChange: "66666666-6666-4666-8666-000000000010",
   workflowLocationChange: "66666666-6666-4666-8666-000000000011",
@@ -397,6 +398,7 @@ async function seed() {
         },
         kpis: {
           invoices_prepared: 0,
+          ar_followups_drafted: 0,
           owner_review_packets: 0,
           cash_packets_prepared: 0,
         },
@@ -1554,6 +1556,26 @@ async function seed() {
         approvals: { required: ["finance_invoice_approval"], states: { approval_pending: ["finance_invoice_approval"] } },
         evidence: { packet: "cash_packet", required: ["job_closeout", "invoice_draft", "accounting_dry_run_receipt"] },
         tests: { required: ["source_closeout", "no_external_send", "money_movement_blocked"] },
+      },
+      {
+        id: ids.workflowArFollowup,
+        key: "ar_followup",
+        name: "AR follow-up",
+        purpose: "Turn invoice evidence into an owner-reviewable AR follow-up draft while sends and payment links remain blocked.",
+        domain: "finance",
+        states: {
+          order: ["draft", "policy_review", "approval_pending", "ready_to_send", "receipt_recorded", "blocked"],
+        },
+        transitions: {
+          draft: ["policy_review", "blocked"],
+          policy_review: ["approval_pending", "blocked"],
+          approval_pending: ["ready_to_send", "blocked"],
+          ready_to_send: ["receipt_recorded", "blocked"],
+        },
+        objects: { required: ["invoice", "ar_followup"], optional: ["customer", "job", "payment"] },
+        approvals: { required: ["finance_ar_followup_approval"], states: { approval_pending: ["finance_ar_followup_approval"] } },
+        evidence: { packet: "cash_packet", required: ["invoice_snapshot", "ar_followup_draft", "approval_request"] },
+        tests: { required: ["invoice_context", "no_external_send", "payment_link_blocked", "money_movement_blocked"] },
       },
     ])
     .onConflictDoNothing();

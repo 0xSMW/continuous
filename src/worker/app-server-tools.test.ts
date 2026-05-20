@@ -52,6 +52,14 @@ describe("app-server worker tools", () => {
           command.externalExecution === "dry_run",
       ),
     ).toBe(true);
+    expect(
+      schema.registry.commands.some(
+        (command) =>
+          command.role === "finance_operations" &&
+          command.name === "ar_followup.draft" &&
+          command.externalExecution === "blocked",
+      ),
+    ).toBe(true);
   });
 
   it("requires a clean canonical command envelope before dispatch", async () => {
@@ -198,5 +206,20 @@ describe("app-server worker tools", () => {
         config: {},
       }),
     ).rejects.toThrow("config.jobId, closeoutId or sourceRefs is required for invoice.prepare.");
+
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.command", {
+        command: "ar_followup.draft",
+        operatorEmail: "owner@continuoushq.com",
+        worker: {
+          role: "finance_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "app-server-finance-ar-followup-schema",
+        config: {
+          invoiceId: "invoice_uuid",
+        },
+      }),
+    ).rejects.toThrow("config.tonePolicy is required for ar_followup.draft.");
   });
 });

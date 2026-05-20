@@ -28,6 +28,11 @@ Finance `invoice.prepare` uses the same envelope with job, closeout, customer,
 and evidence selectors under `config.sourceRefs`, prepares an invoice draft,
 cash packet, owner approval request, and accounting dry-run receipt, and keeps
 external sends and money movement blocked.
+Finance `ar_followup.draft` extends that same registry path from a persisted
+invoice id, keeps `tonePolicy`, channel, message context, and approval policy
+under `config`, prepares an AR follow-up draft, cash packet, approval request,
+and generated review view, and still blocks customer sends, payment links, and
+money movement.
 
 ```sh
 bun run app-server:worker-tools
@@ -77,6 +82,10 @@ bun run worker:tool worker.owner.brief.generate --payload='{"worker":{"role":"ow
 
 ```sh
 bun run worker:tool worker.finance.invoice.prepare --payload='{"worker":{"role":"finance_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-finance-invoice-001","config":{"sourceRefs":{"jobObjectId":"33333333-3333-4333-8333-000000000005","closeoutObjectId":"closeout_object_uuid","customerObjectId":"33333333-3333-4333-8333-000000000001"},"policy":{"requireOwnerApproval":true}}}'
+```
+
+```sh
+bun run worker:tool worker.finance.ar_followup.draft --payload='{"worker":{"role":"finance_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-finance-ar-followup-001","config":{"invoiceId":"invoice_row_or_invoice_object_uuid","tonePolicy":"friendly_first_reminder","channel":"email","policy":{"requireOwnerApproval":true,"externalSend":"blocked","moneyMovement":"blocked"}}}'
 ```
 
 ```http

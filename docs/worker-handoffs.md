@@ -25,7 +25,7 @@ Every handoff must define:
 | `revenue.lead_to_owner_review` | Revenue Operations | Owner Chief-of-Staff | Revenue `run` creates an owner approval packet | `leadObjectId`, `quoteObjectId`, `approvalRequestId`, `evidencePacketId`, `workflowRunId`, `workerRunId` | `config.packet.approvalRequestId` plus `config.packet.workflowRunId` | Approval is pending, quote policy requires owner review, source snapshot exists, external send is false | read-only review |
 | `revenue.quote_to_dispatch` | Revenue Operations | Dispatch/Ops | Owner approves a quote but external execution remains blocked | `customerObjectId`, `quoteObjectId`, `jobObjectId`, `approvalRequestId`, `adapterReceiptEvidenceId`, `workflowRunId` | `config.sourceRefs.quoteObjectId` plus `config.sourceRefs.jobObjectId` | Approval action is `approved`, quote has total/currency/policy, job is not already scheduled, adapter receipt says `externalSend=false` | schedule proposal only |
 | `dispatch.closeout_to_finance` | Dispatch/Ops | Finance | Dispatch marks a job closeout packet review-ready | `jobObjectId`, `closeoutObjectId`, `customerObjectId`, `evidencePacketId`, `approvalRequestId` | `config.sourceRefs.closeoutObjectId` plus `config.sourceRefs.customerObjectId` | Closeout packet includes completion proof, customer update state, billable line summary, and no unresolved exception task | invoice/payment draft only |
-| `finance.invoice_to_owner_review` | Finance | Owner Chief-of-Staff | Finance prepares invoice or AR action requiring approval | `invoiceObjectId`, `cashPacketId`, `approvalRequestId`, `workflowRunId`, `usageEventId` | `config.packet.approvalRequestId` plus `config.packet.cashPacketId` | Money movement is blocked, invoice math is deterministic, source receipt/evidence docs are attached | read-only review |
+| `finance.invoice_to_owner_review` | Finance | Owner Chief-of-Staff | Finance prepares invoice or AR action requiring approval | `invoiceObjectId`, optional `arFollowupObjectId`, `cashPacketId`, `approvalRequestId`, `workflowRunId`, `usageEventId` | `config.packet.approvalRequestId` plus `config.packet.cashPacketId` | Money movement is blocked, invoice math or AR draft source is deterministic, source receipt/evidence docs are attached | read-only review |
 | `workforce.payroll_to_compliance` | Workforce | Compliance | Payroll preview packet is prepared or approved-blocked | `payrollRunId`, `payrollStatementIds`, `filingDraftId`, `paymentInstructionIds`, `approvalRequestId`, `evidencePacketId` | `config.sourceRefs.payrollRunId` plus `config.sourceRefs.filingDraftId` | Payroll state is preview/approved-blocked, tax draft has source trace, payment instructions have money movement blocked | filing draft review only |
 | `compliance.obligation_to_owner_review` | Compliance | Owner Chief-of-Staff | Compliance creates notice, filing, license, or insurance packet | `obligationObjectId`, `filingDraftId`, `rulePackId`, `evidencePacketId`, `approvalRequestId` | `config.packet.approvalRequestId` plus `config.packet.obligationObjectId` | Rule source ref exists, due date exists, sensitive-data reveal is policy gated, submission is blocked | read-only review |
 | `systems.sync_issue_to_worker` | Systems | Any worker | Systems detects sync failure, stale source, or permission mismatch | `connectionId`, `syncJobObjectId`, `dataQualityIssueObjectId`, `evidenceId`, `rollbackPlanDocumentId` | `config.sourceRefs.connectionId` plus `config.sourceRefs.dataQualityIssueObjectId` | Connection scope is tenant-bound, issue severity is set, repair plan is dry-run, rollback evidence exists | repair approval required |
@@ -39,16 +39,17 @@ incoming handoff. Dispatch/Ops now has executable fixtures through
 `/worker command=closeout.prepare`, and blocked
 `/worker command=exception.route`. Finance now consumes
 `dispatch.closeout_to_finance` through `/worker command=invoice.prepare` and
-produces a cash packet, invoice draft, accounting dry-run receipt, and
-`finance.invoice_to_owner_review` approval handoff. Live calendar,
-customer-send, accounting, payment, and bank credentials remain launch
-blockers.
+consumes persisted invoice evidence through `/worker command=ar_followup.draft`.
+It produces cash packets, invoice or AR drafts, approval requests, generated
+review views, and `finance.invoice_to_owner_review` approval handoffs while
+customer sends, payment links, and money movement remain blocked. Live calendar,
+customer-send, accounting, payment, and bank credentials remain launch blockers.
 
 | Worker | Required first fixture |
 |---|---|
 | Owner Chief-of-Staff | `revenue.lead_to_owner_review` approval packet with Revenue source evidence |
 | Dispatch/Ops | implemented: `revenue.quote_to_dispatch` approved quote with blocked adapter receipt produces a dry-run schedule proposal, blocked customer update draft, blocked closeout packet, and blocked exception route task |
-| Finance | implemented: `dispatch.closeout_to_finance` closeout packet with billable line summary produces a dry-run invoice draft, cash packet, owner approval request, and blocked money-movement posture |
+| Finance | implemented: `dispatch.closeout_to_finance` closeout packet with billable line summary produces a dry-run invoice draft, and persisted invoice refs produce a blocked AR follow-up draft, cash packet, owner approval request, and blocked money-movement posture |
 | Workforce | seeded employment or contractor packet with payroll preview blockers |
 | Compliance | `workforce.payroll_to_compliance` payroll preview with filing draft |
 | Systems | failing connection sync issue with dry-run repair and rollback plan |

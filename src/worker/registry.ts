@@ -34,6 +34,7 @@ import {
   routeDispatchException,
 } from "./dispatch";
 import {
+  draftFinanceArFollowup,
   financeWorkerRole,
   getFinanceWorkerSnapshotSafe,
   prepareFinanceInvoice,
@@ -517,6 +518,36 @@ const financeInvoicePrepareConfig: WorkerConfigSchema = {
   },
   additionalProperties: true,
 };
+const financeArFollowupDraftConfig: WorkerConfigSchema = {
+  type: "object",
+  required: ["invoiceId", "tonePolicy"],
+  properties: {
+    invoiceId: { type: "string" },
+    invoiceObjectId: { type: "string" },
+    tonePolicy: { type: "string" },
+    channel: {
+      type: "string",
+      enum: ["email", "sms", "phone"],
+    },
+    sourceRefs: jsonObjectConfig,
+    messageContext: jsonObjectConfig,
+    policy: jsonObjectConfig,
+    draft: { type: "string" },
+    dueAt: { type: "string" },
+    daysPastDue: { type: "number", integer: true, minimum: 0 },
+    amountCents: { type: "number", minimum: 0 },
+    currency: { type: "string" },
+    evidenceIds: {
+      type: "array",
+      items: { type: "string" },
+    },
+    sourceEvidenceIds: {
+      type: "array",
+      items: { type: "string" },
+    },
+  },
+  additionalProperties: true,
+};
 
 const revenueDefinition: WorkerDefinition = {
   role: revenueWorkerRole,
@@ -830,6 +861,32 @@ const financeDefinition: WorkerDefinition = {
         }
 
         return prepareFinanceInvoice({
+          idempotencyKey: context.idempotencyKey,
+          tenantSlug: context.target.tenantSlug,
+          workerId: context.target.workerId,
+          operatorEmail: context.operatorEmail,
+          config: context.config,
+        });
+      },
+    },
+    "ar_followup.draft": {
+      name: "ar_followup.draft",
+      description: "Draft an AR follow-up and payment-link preparation packet without external send.",
+      idempotency: "required",
+      sideEffects: "internal",
+      externalExecution: "blocked",
+      requiresTenant: true,
+      configSchema: financeArFollowupDraftConfig,
+      async handle(context) {
+        if (!context.idempotencyKey) {
+          throw new PlatformUnavailableError(
+            "invalid_idempotency_key",
+            "A string idempotency key is required.",
+            400,
+          );
+        }
+
+        return draftFinanceArFollowup({
           idempotencyKey: context.idempotencyKey,
           tenantSlug: context.target.tenantSlug,
           workerId: context.target.workerId,

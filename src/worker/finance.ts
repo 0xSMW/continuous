@@ -44,8 +44,11 @@ export const financeWorkerRole = "finance_operations";
 
 const financeSource = "continuous.finance_worker";
 const invoicePrepareCapabilityKey = "invoice.prepare";
+const arFollowupDraftCapabilityKey = "payment_link.prepare";
 const invoiceDraftWorkflowKey = "invoice_draft";
+const arFollowupWorkflowKey = "ar_followup";
 const invoicePrepareUnits = 3600;
+const arFollowupDraftUnits = 2600;
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -99,6 +102,27 @@ export type FinanceInvoicePrepareResult = {
   snapshot: FinanceWorkerSnapshot;
 };
 
+export type FinanceArFollowupDraftResult = {
+  created: boolean;
+  idempotencyKey: string;
+  workerRunId: string;
+  taskId: string | null;
+  eventId: string | null;
+  arFollowupObjectId: string | null;
+  invoiceObjectId: string | null;
+  invoiceId: string | null;
+  approvalRequestId: string | null;
+  evidenceId: string | null;
+  draftEvidenceId: string | null;
+  packetId: string | null;
+  documentId: string | null;
+  workflowRunId: string | null;
+  workflowStepIds: string[];
+  financeArFollowupViewId: string | null;
+  output: JsonObject;
+  snapshot: FinanceWorkerSnapshot;
+};
+
 export type FinanceWorkerSnapshot = {
   worker: {
     id: string;
@@ -127,6 +151,12 @@ export type FinanceWorkerSnapshot = {
     moneyMovement: "blocked";
   };
   invoices: Array<{
+    id: string;
+    name: string;
+    state: string;
+    data: JsonObject;
+  }>;
+  arFollowups: Array<{
     id: string;
     name: string;
     state: string;
@@ -574,6 +604,162 @@ async function loadInvoiceRefs(db: Database, tenantId: string, config: JsonObjec
   };
 }
 
+async function loadArFollowupRefs(db: Database, tenantId: string, config: JsonObject) {
+  const sourceRefs = objectValue(config.sourceRefs);
+  const invoiceRef =
+    optionalString(config.invoiceId) ??
+    optionalString(config.invoiceObjectId) ??
+    optionalString(sourceRefs.invoiceId) ??
+    optionalString(sourceRefs.invoiceObjectId);
+  const tonePolicy = optionalString(config.tonePolicy);
+
+  if (!invoiceRef) {
+    throw new PlatformUnavailableError(
+      "invalid_worker_command_config",
+      "config.invoiceId or sourceRefs.invoiceId is required for ar_followup.draft.",
+      400,
+    );
+  }
+
+  if (!tonePolicy) {
+    throw new PlatformUnavailableError(
+      "invalid_worker_command_config",
+      "config.tonePolicy is required for ar_followup.draft.",
+      400,
+    );
+  }
+
+  if (!uuidPattern.test(invoiceRef)) {
+    throw new PlatformUnavailableError(
+      "invalid_worker_command_config",
+      "config.invoiceId must be a tenant-scoped invoice row id or invoice object id.",
+      400,
+    );
+  }
+
+  const [invoiceRowById] = await db
+    .select()
+    .from(invoices)
+    .where(and(eq(invoices.tenantId, tenantId), eq(invoices.id, invoiceRef)))
+    .limit(1);
+  const invoiceObjectById = invoiceRowById ? null : await getObjectById(db, tenantId, invoiceRef);
+
+  if (invoiceObjectById && invoiceObjectById.type !== "invoice") {
+    throw new PlatformUnavailableError(
+      "finance_invoice_not_found",
+      "Finance AR follow-up requires a tenant-scoped invoice object.",
+      404,
+    );
+  }
+
+  const [invoiceRowByObjectId] =
+    invoiceObjectById && invoiceObjectById.type === "invoice"
+      ? await db
+          .select()
+          .from(invoices)
+          .where(and(eq(invoices.tenantId, tenantId), eq(invoices.objectId, invoiceObjectById.id)))
+          .limit(1)
+      : [null];
+  const invoiceRow = invoiceRowById ?? invoiceRowByObjectId;
+  const invoiceObject =
+    invoiceObjectById ??
+    (invoiceRow?.objectId ? await getObjectById(db, tenantId, invoiceRow.objectId) : null);
+
+  if (!invoiceRow || !invoiceObject || invoiceObject.type !== "invoice") {
+    throw new PlatformUnavailableError(
+      "finance_invoice_not_found",
+      "Finance AR follow-up requires a tenant-scoped invoice row or invoice object.",
+      404,
+    );
+  }
+
+  const invoiceData = objectValue(invoiceObject.data);
+  const messageContext = objectValue(config.messageContext);
+  const policy = objectValue(config.policy);
+  const customerRef =
+    optionalString(config.customerObjectId) ??
+    optionalString(sourceRefs.customerObjectId) ??
+    optionalString(invoiceData.customerObjectId) ??
+    optionalString(invoiceData.customerId);
+  const jobRef =
+    optionalString(config.jobObjectId) ??
+    optionalString(sourceRefs.jobObjectId) ??
+    optionalString(invoiceData.jobObjectId) ??
+    optionalString(invoiceData.jobId);
+  const customerObject = customerRef ? await getObjectById(db, tenantId, customerRef) : null;
+  const jobObject = jobRef ? await getObjectById(db, tenantId, jobRef) : null;
+
+  if (customerRef && customerObject?.type !== "customer") {
+    throw new PlatformUnavailableError(
+      "finance_customer_not_found",
+      "Finance AR follow-up requires a tenant-scoped customer object when customerObjectId is provided.",
+      404,
+    );
+  }
+
+  if (jobRef && jobObject?.type !== "job") {
+    throw new PlatformUnavailableError(
+      "finance_job_not_found",
+      "Finance AR follow-up requires a tenant-scoped job object when jobObjectId is provided.",
+      404,
+    );
+  }
+
+  const sourceEvidenceIds = Array.from(
+    new Set([
+      ...stringList(config.evidenceIds),
+      ...stringList(sourceRefs.evidenceIds),
+      ...stringList(config.sourceEvidenceIds),
+      ...stringList(sourceRefs.sourceEvidenceIds),
+      ...stringList(invoiceData.sourceEvidenceIds),
+    ]),
+  );
+  const sourceEvidence = await loadEvidenceRefs(db, tenantId, sourceEvidenceIds, "config.sourceRefs.evidenceIds");
+  const dueAt = optionalString(config.dueAt) ?? optionalString(invoiceData.dueAt);
+  const dueTime = dueAt ? Date.parse(dueAt) : Number.NaN;
+  const daysPastDue = Number.isFinite(dueTime)
+    ? Math.max(0, Math.ceil((Date.now() - dueTime) / (24 * 60 * 60 * 1000)))
+    : numberValue(config.daysPastDue, 0);
+  const amountCents = numberValue(invoiceData.totalCents, numberValue(config.amountCents));
+  const currency = optionalString(config.currency) ?? optionalString(invoiceData.currency) ?? "USD";
+  const channel = optionalString(config.channel) ?? optionalString(messageContext.channel) ?? "email";
+  const customerName =
+    optionalString(customerObject?.name) ??
+    optionalString(messageContext.customerName) ??
+    optionalString(invoiceData.customerName) ??
+    "customer";
+  const invoiceLabel = optionalString(config.invoiceNumber) ?? optionalString(invoiceData.invoiceNumber) ?? invoiceRow.id;
+  const blockers = [
+    ...(invoiceObject.state === "paid" || invoiceRow.state === "paid" ? ["invoice_already_paid"] : []),
+    ...(booleanValue(config.disputed) || booleanValue(policy.disputed) ? ["invoice_disputed"] : []),
+    ...(amountCents <= 0 ? ["invoice_total_not_positive"] : []),
+    ...(channel !== "email" && channel !== "sms" && channel !== "phone" ? ["unsupported_channel"] : []),
+  ];
+  const draft =
+    optionalString(config.draft) ??
+    `Hi ${customerName}, this is a ${tonePolicy} follow-up on invoice ${invoiceLabel} for ${currency} ${(amountCents / 100).toFixed(2)}${dueAt ? ` due ${dueAt.slice(0, 10)}` : ""}. Please review when convenient; no payment link or external send has been executed by Continuous.`;
+
+  return {
+    sourceRefs,
+    invoiceRow,
+    invoiceObject,
+    invoiceData,
+    customerObject,
+    jobObject,
+    sourceEvidenceIds: sourceEvidence.map((row) => row.id),
+    tonePolicy,
+    channel,
+    messageContext,
+    policy,
+    draft,
+    amountCents,
+    currency,
+    dueAt,
+    daysPastDue,
+    blockers,
+  };
+}
+
 async function replayedInvoicePrepare(
   db: Database,
   context: FinanceContext,
@@ -603,6 +789,42 @@ async function replayedInvoicePrepare(
     workflowStepIds: getWorkflowStepIds(data),
     financeInvoiceViewId:
       optionalString(data.financeInvoiceViewId) ?? optionalString(output.financeInvoiceViewId) ?? null,
+    output,
+    snapshot: await getFinanceWorkerSnapshot(db, {
+      role: financeWorkerRole,
+      tenantSlug: context.worker.tenantSlug,
+      workerId: context.worker.id,
+    }),
+  };
+}
+
+async function replayedArFollowupDraft(
+  db: Database,
+  context: FinanceContext,
+  run: typeof workerRuns.$inferSelect,
+): Promise<FinanceArFollowupDraftResult> {
+  const data = objectValue(run.data);
+  const output = outputData(data);
+
+  return {
+    created: false,
+    idempotencyKey: run.idempotencyKey,
+    workerRunId: run.id,
+    taskId: run.taskId,
+    eventId: run.eventId ?? optionalString(data.eventId) ?? null,
+    arFollowupObjectId:
+      optionalString(data.arFollowupObjectId) ?? optionalString(output.arFollowupObjectId) ?? null,
+    invoiceObjectId: optionalString(data.invoiceObjectId) ?? optionalString(output.invoiceObjectId) ?? null,
+    invoiceId: optionalString(data.invoiceId) ?? optionalString(output.invoiceId) ?? null,
+    approvalRequestId: optionalString(data.approvalRequestId) ?? optionalString(output.approvalRequestId) ?? null,
+    evidenceId: optionalString(data.evidenceId) ?? optionalString(output.evidenceId) ?? null,
+    draftEvidenceId: optionalString(data.draftEvidenceId) ?? optionalString(output.draftEvidenceId) ?? null,
+    packetId: optionalString(data.packetId) ?? optionalString(output.packetId) ?? null,
+    documentId: optionalString(data.documentId) ?? optionalString(output.documentId) ?? null,
+    workflowRunId: optionalString(data.workflowRunId) ?? optionalString(output.workflowRunId) ?? null,
+    workflowStepIds: getWorkflowStepIds(data),
+    financeArFollowupViewId:
+      optionalString(data.financeArFollowupViewId) ?? optionalString(output.financeArFollowupViewId) ?? null,
     output,
     snapshot: await getFinanceWorkerSnapshot(db, {
       role: financeWorkerRole,
@@ -1601,6 +1823,867 @@ export async function prepareFinanceInvoice(input: {
   };
 }
 
+export async function draftFinanceArFollowup(input: {
+  idempotencyKey: string;
+  tenantSlug?: string;
+  workerId?: string;
+  operatorEmail: string;
+  config?: JsonObject;
+  db?: Database;
+}): Promise<FinanceArFollowupDraftResult> {
+  const db = input.db ?? defaultDb;
+  const context = await loadFinanceContext({
+    db,
+    selector: { role: financeWorkerRole, tenantSlug: input.tenantSlug, workerId: input.workerId },
+    operatorEmail: input.operatorEmail,
+    capabilityKey: arFollowupDraftCapabilityKey,
+    capabilityLabel: "payment_link.prepare",
+  });
+  const config = input.config ?? {};
+  const refs = await loadArFollowupRefs(db, context.worker.tenantId, config);
+  const followupState = refs.blockers.length === 0 ? "approval_required" : "blocked";
+  const workflowState = refs.blockers.length === 0 ? "approval_pending" : "blocked";
+  const inputHash = hashObject({
+    schemaVersion: "finance.ar_followup.draft.v1",
+    tenantId: context.worker.tenantId,
+    workerId: context.worker.id,
+    idempotencyKey: input.idempotencyKey,
+    config,
+    invoiceObjectId: refs.invoiceObject.id,
+    invoiceId: refs.invoiceRow.id,
+    customerObjectId: refs.customerObject?.id ?? null,
+    jobObjectId: refs.jobObject?.id ?? null,
+    sourceEvidenceIds: refs.sourceEvidenceIds,
+    draft: refs.draft,
+    tonePolicy: refs.tonePolicy,
+    channel: refs.channel,
+  });
+  const now = new Date();
+
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${financeSource}:${input.idempotencyKey}`}))`,
+    );
+
+    const [existingRun] = await tx
+      .select()
+      .from(workerRuns)
+      .where(
+        and(
+          eq(workerRuns.tenantId, context.worker.tenantId),
+          eq(workerRuns.source, financeSource),
+          eq(workerRuns.idempotencyKey, input.idempotencyKey),
+        ),
+      )
+      .limit(1);
+
+    if (existingRun) {
+      const existingInput = objectValue(objectValue(existingRun.data).input);
+      const existingHash = optionalString(existingInput.inputHash);
+
+      if (existingHash && existingHash !== inputHash) {
+        throw new PlatformUnavailableError(
+          "worker_idempotency_conflict",
+          "A Finance AR follow-up draft already exists for this idempotency key with different input.",
+          409,
+        );
+      }
+
+      return { replay: existingRun };
+    }
+
+    const [definition] = await tx
+      .select({ id: workflowDefinitions.id })
+      .from(workflowDefinitions)
+      .where(and(eq(workflowDefinitions.key, arFollowupWorkflowKey), eq(workflowDefinitions.active, true)))
+      .orderBy(desc(workflowDefinitions.createdAt))
+      .limit(1);
+
+    if (!definition) {
+      throw new PlatformUnavailableError(
+        "worker_workflow_definition_missing",
+        "Finance Operations Worker requires the ar_followup workflow definition.",
+        409,
+      );
+    }
+
+    const followupData = {
+      invoiceObjectId: refs.invoiceObject.id,
+      invoiceId: refs.invoiceRow.id,
+      customerObjectId: refs.customerObject?.id ?? null,
+      jobObjectId: refs.jobObject?.id ?? null,
+      sourceRefs: refs.sourceRefs,
+      sourceEvidenceIds: refs.sourceEvidenceIds,
+      tonePolicy: refs.tonePolicy,
+      channel: refs.channel,
+      draft: refs.draft,
+      amountCents: refs.amountCents,
+      currency: refs.currency,
+      dueAt: refs.dueAt ?? null,
+      daysPastDue: refs.daysPastDue,
+      blockers: refs.blockers,
+      policy: refs.policy,
+      paymentLink: {
+        prepared: false,
+        status: "blocked",
+        reason: "payment_link_execution_blocked",
+      },
+      externalExecution: "blocked",
+      externalMutation: false,
+      externalSend: false,
+      moneyMovement: "blocked",
+    } satisfies JsonObject;
+
+    const [arFollowup] = await tx
+      .insert(objects)
+      .values({
+        tenantId: context.worker.tenantId,
+        type: "ar_followup",
+        name: `AR follow-up draft for ${refs.invoiceObject.name}`,
+        state: followupState,
+        source: financeSource,
+        externalId: `finance-ar-followup:${input.idempotencyKey}`,
+        data: followupData,
+        createdByUserId: context.operator.id,
+        createdByWorkerId: context.worker.id,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: objects.id });
+
+    await tx.insert(objectVersions).values({
+      tenantId: context.worker.tenantId,
+      objectId: arFollowup.id,
+      version: 1,
+      data: followupData,
+      changedByType: "worker",
+      changedById: context.worker.id,
+      reason: "finance AR follow-up draft",
+      createdAt: now,
+    });
+
+    await tx
+      .insert(objectLinks)
+      .values([
+        {
+          tenantId: context.worker.tenantId,
+          fromId: arFollowup.id,
+          toId: refs.invoiceObject.id,
+          type: "follows_up_invoice",
+          data: { source: financeSource },
+          effectiveAt: now,
+        },
+        ...(refs.customerObject
+          ? [
+              {
+                tenantId: context.worker.tenantId,
+                fromId: arFollowup.id,
+                toId: refs.customerObject.id,
+                type: "for_customer",
+                data: { source: financeSource },
+                effectiveAt: now,
+              },
+            ]
+          : []),
+        ...(refs.jobObject
+          ? [
+              {
+                tenantId: context.worker.tenantId,
+                fromId: arFollowup.id,
+                toId: refs.jobObject.id,
+                type: "about_job",
+                data: { source: financeSource },
+                effectiveAt: now,
+              },
+            ]
+          : []),
+      ])
+      .onConflictDoNothing();
+
+    const [task] = await tx
+      .insert(tasks)
+      .values({
+        tenantId: context.worker.tenantId,
+        objectId: arFollowup.id,
+        capabilityId: context.capabilityId,
+        title: `Review AR follow-up draft for ${refs.invoiceObject.name}`,
+        state: followupState,
+        priority: refs.blockers.length > 0 ? "high" : "normal",
+        ownerType: "worker",
+        ownerId: context.worker.id,
+        ownerRef: `worker:${context.worker.id}`,
+        reviewerUserId: context.reviewerUserId,
+        evidence: {
+          required: ["invoice_snapshot", "ar_followup_draft", "cash_packet"],
+          blockers: refs.blockers,
+          sourceEvidenceIds: refs.sourceEvidenceIds,
+        },
+        outcome: {
+          status: refs.blockers.length > 0 ? "ar_followup_blocked" : "ar_followup_approval_needed",
+          externalSend: false,
+        },
+        cost: { units: arFollowupDraftUnits },
+        kpi: { ar_followups_drafted: 1 },
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: tasks.id });
+
+    const runInput = {
+      command: "ar_followup.draft",
+      inputHash,
+      config,
+      arFollowupObjectId: arFollowup.id,
+      invoiceObjectId: refs.invoiceObject.id,
+      invoiceId: refs.invoiceRow.id,
+      customerObjectId: refs.customerObject?.id ?? null,
+      jobObjectId: refs.jobObject?.id ?? null,
+      sourceEvidenceIds: refs.sourceEvidenceIds,
+      tonePolicy: refs.tonePolicy,
+      channel: refs.channel,
+    } satisfies JsonObject;
+
+    const [workerRun] = await tx
+      .insert(workerRuns)
+      .values({
+        tenantId: context.worker.tenantId,
+        workerId: context.worker.id,
+        taskId: task.id,
+        capabilityId: context.capabilityId,
+        budgetAccountId: context.budgetAccountId,
+        source: financeSource,
+        idempotencyKey: input.idempotencyKey,
+        state: "running",
+        mode: "simulation",
+        data: {
+          input: runInput,
+          output: {},
+        },
+        startedAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: workerRuns.id });
+
+    const [workflowRun] = await tx
+      .insert(workflowRuns)
+      .values({
+        tenantId: context.worker.tenantId,
+        definitionId: definition.id,
+        objectId: arFollowup.id,
+        workerId: context.worker.id,
+        state: workflowState,
+        idempotencyKey: input.idempotencyKey,
+        data: {
+          workerRunId: workerRun.id,
+          arFollowupObjectId: arFollowup.id,
+          invoiceObjectId: refs.invoiceObject.id,
+          invoiceId: refs.invoiceRow.id,
+          inputHash,
+          externalExecution: "blocked",
+          externalSend: false,
+          moneyMovement: "blocked",
+        },
+        blockers: { open: ["external_send_blocked", "payment_link_blocked", ...refs.blockers] },
+        metrics: {
+          budgetUnits: arFollowupDraftUnits,
+          arFollowupsDrafted: 1,
+          amountCents: refs.amountCents,
+          blockerCount: refs.blockers.length,
+        },
+        startedAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: workflowRuns.id });
+
+    const [reservation] = await tx
+      .insert(budgetReservations)
+      .values({
+        tenantId: context.worker.tenantId,
+        accountId: context.budgetAccountId,
+        taskId: task.id,
+        units: arFollowupDraftUnits,
+        state: "used",
+        expiresAt: new Date(now.getTime() + 15 * 60 * 1000),
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: budgetReservations.id });
+
+    const [inference] = await tx
+      .insert(inferences)
+      .values({
+        tenantId: context.worker.tenantId,
+        budgetAccountId: context.budgetAccountId,
+        taskId: task.id,
+        capabilityId: context.capabilityId,
+        actorType: "worker",
+        actorId: context.worker.id,
+        promptHash: traceHash(input.idempotencyKey, "finance-ar-followup"),
+        request: {
+          mode: "deterministic",
+          objective: "Draft an AR follow-up from tenant-scoped invoice evidence without sending it.",
+          invoiceObjectId: refs.invoiceObject.id,
+          invoiceId: refs.invoiceRow.id,
+          tonePolicy: refs.tonePolicy,
+          inputHash,
+        },
+        result: {
+          arFollowupObjectId: arFollowup.id,
+          invoiceObjectId: refs.invoiceObject.id,
+          draft: refs.draft,
+          requiresApproval: true,
+          externalSend: false,
+        },
+        safety: {
+          externalExecution: "blocked",
+          externalMutation: false,
+          externalSend: false,
+          paymentLink: "blocked",
+          moneyMovement: "blocked",
+        },
+        promptTokens: 220,
+        completionTokens: 100,
+        units: arFollowupDraftUnits,
+        costUsd: "0.000000",
+        latencyMs: 70,
+        createdAt: now,
+      })
+      .returning({ id: inferences.id });
+
+    const [usage] = await tx
+      .insert(usageEvents)
+      .values({
+        tenantId: context.worker.tenantId,
+        accountId: context.budgetAccountId,
+        reservationId: reservation.id,
+        inferenceId: inference.id,
+        taskId: task.id,
+        capabilityId: context.capabilityId,
+        actorType: "worker",
+        actorId: context.worker.id,
+        units: arFollowupDraftUnits,
+        costUsd: "0.000000",
+        data: {
+          mode: "deterministic",
+          workerRunId: workerRun.id,
+          workflowRunId: workflowRun.id,
+          arFollowupObjectId: arFollowup.id,
+        },
+        createdAt: now,
+      })
+      .returning({ id: usageEvents.id });
+
+    const [event] = await tx
+      .insert(events)
+      .values({
+        tenantId: context.worker.tenantId,
+        type: "finance_worker.ar_followup_draft.completed",
+        source: financeSource,
+        actorType: "worker",
+        actorId: context.worker.id,
+        actorRef: `worker:${context.worker.id}`,
+        objectId: arFollowup.id,
+        taskId: task.id,
+        capabilityId: context.capabilityId,
+        idempotencyKey: input.idempotencyKey,
+        data: {
+          workerRunId: workerRun.id,
+          workflowRunId: workflowRun.id,
+          arFollowupObjectId: arFollowup.id,
+          invoiceObjectId: refs.invoiceObject.id,
+          invoiceId: refs.invoiceRow.id,
+          tonePolicy: refs.tonePolicy,
+          channel: refs.channel,
+          externalExecution: "blocked",
+          externalMutation: false,
+          externalSend: false,
+          moneyMovement: "blocked",
+          inputHash,
+        },
+        occurredAt: now,
+        createdAt: now,
+      })
+      .returning({ id: events.id });
+
+    await tx.update(workerRuns).set({ eventId: event.id, updatedAt: now }).where(eq(workerRuns.id, workerRun.id));
+
+    const [traceEvidence] = await tx
+      .insert(evidence)
+      .values({
+        tenantId: context.worker.tenantId,
+        kind: "trace",
+        name: "Finance AR follow-up trace",
+        objectId: arFollowup.id,
+        taskId: task.id,
+        eventId: event.id,
+        capabilityId: context.capabilityId,
+        actorType: "worker",
+        actorId: context.worker.id,
+        hash: inputHash,
+        data: {
+          inputHash,
+          arFollowupObjectId: arFollowup.id,
+          invoiceObjectId: refs.invoiceObject.id,
+          invoiceId: refs.invoiceRow.id,
+          sourceEvidenceIds: refs.sourceEvidenceIds,
+          externalExecution: "blocked",
+          externalSend: false,
+        },
+        createdAt: now,
+      })
+      .returning({ id: evidence.id });
+
+    const [draftEvidence] = await tx
+      .insert(evidence)
+      .values({
+        tenantId: context.worker.tenantId,
+        kind: "draft",
+        name: "AR follow-up draft",
+        objectId: arFollowup.id,
+        taskId: task.id,
+        eventId: event.id,
+        capabilityId: context.capabilityId,
+        actorType: "worker",
+        actorId: context.worker.id,
+        hash: traceHash(input.idempotencyKey, "ar_followup_draft"),
+        data: followupData,
+        createdAt: now,
+      })
+      .returning({ id: evidence.id });
+
+    const [document] = await tx
+      .insert(documents)
+      .values({
+        tenantId: context.worker.tenantId,
+        objectId: arFollowup.id,
+        workflowRunId: workflowRun.id,
+        kind: "finance_ar_followup_draft",
+        name: `AR follow-up draft for ${refs.invoiceObject.name}`,
+        state: followupState,
+        sensitivity: "medium",
+        hash: traceHash(input.idempotencyKey, "document"),
+        data: followupData,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: documents.id });
+
+    const [packet] = await tx
+      .insert(evidencePackets)
+      .values({
+        tenantId: context.worker.tenantId,
+        documentId: document.id,
+        objectId: arFollowup.id,
+        taskId: task.id,
+        workflowRunId: workflowRun.id,
+        eventId: event.id,
+        capabilityId: context.capabilityId,
+        kind: "cash_packet",
+        name: "Finance AR follow-up evidence packet",
+        state: refs.blockers.length > 0 ? "blocked" : "review_ready",
+        sensitivity: "medium",
+        evidenceIds: { ids: [traceEvidence.id, draftEvidence.id, ...refs.sourceEvidenceIds] },
+        documentIds: { ids: [document.id] },
+        data: {
+          arFollowupObjectId: arFollowup.id,
+          invoiceObjectId: refs.invoiceObject.id,
+          invoiceId: refs.invoiceRow.id,
+          amountCents: refs.amountCents,
+          currency: refs.currency,
+          workflowRunId: workflowRun.id,
+          externalExecution: "blocked",
+          externalMutation: false,
+          externalSend: false,
+          moneyMovement: "blocked",
+        },
+        hash: traceHash(input.idempotencyKey, "ar_followup_packet"),
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: evidencePackets.id });
+
+    const [approval] = await tx
+      .insert(approvalRequests)
+      .values({
+        tenantId: context.worker.tenantId,
+        taskId: task.id,
+        workerRunId: workerRun.id,
+        workflowRunId: workflowRun.id,
+        eventId: event.id,
+        objectId: arFollowup.id,
+        capabilityId: context.capabilityId,
+        requesterType: "worker",
+        requesterId: context.worker.id,
+        requesterRef: `worker:${context.worker.id}`,
+        reviewerUserId: context.reviewerUserId,
+        kind: "finance_ar_followup_approval",
+        state: "pending",
+        priority: refs.blockers.length > 0 ? "high" : "normal",
+        risk: refs.blockers.length > 0 ? "high" : "medium",
+        title: `Approve AR follow-up for ${refs.invoiceObject.name}`,
+        summary:
+          "Finance Operations Worker drafted an AR follow-up and payment-link preparation packet; external sends and money movement remain blocked.",
+        requestedAction: {
+          action: refs.blockers.length > 0 ? "request_revision" : "approve_ar_followup",
+          arFollowupObjectId: arFollowup.id,
+          invoiceObjectId: refs.invoiceObject.id,
+          invoiceId: refs.invoiceRow.id,
+          channel: refs.channel,
+          tonePolicy: refs.tonePolicy,
+          blockers: refs.blockers,
+          externalSend: false,
+          paymentLink: "blocked",
+          moneyMovement: "blocked",
+        },
+        evidence: {
+          packetId: packet.id,
+          documentId: document.id,
+          traceEvidenceId: traceEvidence.id,
+          draftEvidenceId: draftEvidence.id,
+          sourceEvidenceIds: refs.sourceEvidenceIds,
+        },
+        policy: {
+          customerSend: "blocked",
+          paymentLink: "blocked",
+          moneyMovement: "blocked",
+          externalExecution: "blocked",
+        },
+        data: {
+          workerRunId: workerRun.id,
+          workflowRunId: workflowRun.id,
+          arFollowupObjectId: arFollowup.id,
+          invoiceObjectId: refs.invoiceObject.id,
+        },
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: approvalRequests.id });
+
+    const stepRows = await tx
+      .insert(workflowSteps)
+      .values([
+        {
+          tenantId: context.worker.tenantId,
+          definitionId: definition.id,
+          workflowRunId: workflowRun.id,
+          eventId: event.id,
+          objectId: arFollowup.id,
+          workerId: context.worker.id,
+          capabilityId: context.capabilityId,
+          kind: "handoff",
+          name: "Finance AR invoice context accepted",
+          state: "done",
+          toState: "policy_review",
+          idempotencyKey: `${input.idempotencyKey}:invoice_context`,
+          input: { invoiceObjectId: refs.invoiceObject.id, invoiceId: refs.invoiceRow.id },
+          output: { daysPastDue: refs.daysPastDue, amountCents: refs.amountCents },
+          startedAt: now,
+          completedAt: now,
+          updatedAt: now,
+        },
+        {
+          tenantId: context.worker.tenantId,
+          definitionId: definition.id,
+          workflowRunId: workflowRun.id,
+          eventId: event.id,
+          objectId: arFollowup.id,
+          workerId: context.worker.id,
+          capabilityId: context.capabilityId,
+          kind: "worker_action",
+          name: "AR follow-up draft prepared",
+          state: "done",
+          fromState: "policy_review",
+          toState: refs.blockers.length > 0 ? "blocked" : "approval_pending",
+          idempotencyKey: `${input.idempotencyKey}:draft_prepared`,
+          input: { tonePolicy: refs.tonePolicy, channel: refs.channel },
+          output: { arFollowupObjectId: arFollowup.id, draftEvidenceId: draftEvidence.id },
+          startedAt: now,
+          completedAt: now,
+          updatedAt: now,
+        },
+        {
+          tenantId: context.worker.tenantId,
+          definitionId: definition.id,
+          workflowRunId: workflowRun.id,
+          eventId: event.id,
+          approvalRequestId: approval.id,
+          objectId: arFollowup.id,
+          workerId: context.worker.id,
+          capabilityId: context.capabilityId,
+          kind: "approval_request",
+          name: "AR follow-up approval requested",
+          state: "done",
+          fromState: refs.blockers.length > 0 ? "blocked" : "approval_pending",
+          toState: workflowState,
+          idempotencyKey: `${input.idempotencyKey}:approval_requested`,
+          input: { approvalRequestId: approval.id },
+          output: { packetId: packet.id, documentId: document.id },
+          startedAt: now,
+          completedAt: now,
+          updatedAt: now,
+        },
+      ])
+      .returning({ id: workflowSteps.id });
+
+    const workflowStepIds = stepRows.map((step) => step.id);
+    const viewKey = "finance.ar_followup.review";
+    const viewVersion = "1.0.0";
+    const viewValues = {
+      capabilityId: context.capabilityId,
+      key: viewKey,
+      version: viewVersion,
+      name: "Finance AR follow-up review",
+      purpose: "Let an operator review an AR follow-up draft while external sends and payment links remain blocked.",
+      surface: "web",
+      objectType: "ar_followup",
+      taskState: followupState as "approval_required" | "blocked",
+      contract: {
+        sections: ["InvoiceSummary", "DraftMessage", "PolicyReview", "EvidenceTimeline", "ActionBar"],
+        externalExecution: "blocked",
+        externalSend: false,
+        moneyMovement: "blocked",
+      } as JsonObject,
+      actions: {
+        decisionSurface: "/approval",
+        decisionCommand: "approval.decide",
+        valid: ["approved", "revision_requested", "rejected"],
+        arActions: ["approve_ar_followup", "request_revision", "void_draft"],
+        externalExecution: "blocked",
+        paymentLink: "blocked",
+        moneyMovement: "blocked",
+      } as JsonObject,
+      data: {
+        latest: {
+          approvalRequestId: approval.id,
+          workerRunId: workerRun.id,
+          workflowRunId: workflowRun.id,
+          taskId: task.id,
+          arFollowupObjectId: arFollowup.id,
+          invoiceObjectId: refs.invoiceObject.id,
+          invoiceId: refs.invoiceRow.id,
+          packetId: packet.id,
+          documentId: document.id,
+          traceEvidenceId: traceEvidence.id,
+          draftEvidenceId: draftEvidence.id,
+          amountCents: refs.amountCents,
+          currency: refs.currency,
+          tonePolicy: refs.tonePolicy,
+          channel: refs.channel,
+          blockers: refs.blockers,
+          externalExecution: "blocked",
+          externalMutation: false,
+          externalSend: false,
+          moneyMovement: "blocked",
+        },
+      } as JsonObject,
+      mask: {
+        customer_contact: "redacted_by_default",
+        payment_fields: "blocked",
+        moneyMovement: "blocked",
+      } as JsonObject,
+      active: true,
+      updatedAt: now,
+    };
+    const [existingView] = await tx
+      .select({ id: generatedViews.id })
+      .from(generatedViews)
+      .where(
+        and(
+          eq(generatedViews.tenantId, context.worker.tenantId),
+          eq(generatedViews.key, viewKey),
+          eq(generatedViews.version, viewVersion),
+        ),
+      )
+      .limit(1);
+    const [view] = existingView
+      ? await tx
+          .update(generatedViews)
+          .set(viewValues)
+          .where(eq(generatedViews.id, existingView.id))
+          .returning({ id: generatedViews.id })
+      : await tx
+          .insert(generatedViews)
+          .values({
+            tenantId: context.worker.tenantId,
+            ...viewValues,
+            createdAt: now,
+          })
+          .returning({ id: generatedViews.id });
+
+    await tx.insert(events).values({
+      tenantId: context.worker.tenantId,
+      type: existingView ? "view.updated" : "view.published",
+      source: financeSource,
+      actorType: "worker",
+      actorId: context.worker.id,
+      actorRef: `worker:${context.worker.id}`,
+      objectId: arFollowup.id,
+      taskId: task.id,
+      capabilityId: context.capabilityId,
+      idempotencyKey: `${input.idempotencyKey}:finance_ar_followup_view`,
+      data: {
+        key: viewKey,
+        version: viewVersion,
+        viewId: view.id,
+        workerRunId: workerRun.id,
+        workflowRunId: workflowRun.id,
+      },
+      occurredAt: now,
+      createdAt: now,
+    });
+
+    await tx.insert(auditEvents).values({
+      tenantId: context.worker.tenantId,
+      type: "finance_worker.ar_followup_draft.completed",
+      source: financeSource,
+      actorType: "worker",
+      actorId: context.worker.id,
+      actorRef: `worker:${context.worker.id}`,
+      targetType: "worker_run",
+      targetId: workerRun.id,
+      taskId: task.id,
+      workerRunId: workerRun.id,
+      approvalRequestId: approval.id,
+      eventId: event.id,
+      objectId: arFollowup.id,
+      capabilityId: context.capabilityId,
+      risk: refs.blockers.length > 0 ? "high" : "medium",
+      idempotencyKey: `${input.idempotencyKey}:audit`,
+      data: {
+        operatorEmail: context.operator.email,
+        inputHash,
+        invoiceObjectId: refs.invoiceObject.id,
+        invoiceId: refs.invoiceRow.id,
+        externalExecution: "blocked",
+        externalMutation: false,
+        externalSend: false,
+        moneyMovement: "blocked",
+      },
+      createdAt: now,
+    });
+
+    const output = {
+      arFollowupObjectId: arFollowup.id,
+      invoiceObjectId: refs.invoiceObject.id,
+      invoiceId: refs.invoiceRow.id,
+      customerObjectId: refs.customerObject?.id ?? null,
+      jobObjectId: refs.jobObject?.id ?? null,
+      approvalRequestId: approval.id,
+      evidenceId: traceEvidence.id,
+      draftEvidenceId: draftEvidence.id,
+      packetId: packet.id,
+      documentId: document.id,
+      workflowRunId: workflowRun.id,
+      workflowStepIds,
+      financeArFollowupViewId: view.id,
+      tonePolicy: refs.tonePolicy,
+      channel: refs.channel,
+      draft: refs.draft,
+      amountCents: refs.amountCents,
+      currency: refs.currency,
+      dueAt: refs.dueAt ?? null,
+      daysPastDue: refs.daysPastDue,
+      blockers: refs.blockers,
+      externalExecution: "blocked",
+      externalMutation: false,
+      externalSend: false,
+      paymentLink: "blocked",
+      moneyMovement: "blocked",
+      requiresApproval: true,
+    } satisfies JsonObject;
+
+    await tx
+      .update(workerRuns)
+      .set({
+        state: "done",
+        eventId: event.id,
+        data: {
+          input: runInput,
+          output,
+          eventId: event.id,
+          taskId: task.id,
+          arFollowupObjectId: arFollowup.id,
+          invoiceObjectId: refs.invoiceObject.id,
+          invoiceId: refs.invoiceRow.id,
+          approvalRequestId: approval.id,
+          evidenceId: traceEvidence.id,
+          draftEvidenceId: draftEvidence.id,
+          packetId: packet.id,
+          documentId: document.id,
+          workflowRunId: workflowRun.id,
+          workflowStepIds,
+          financeArFollowupViewId: view.id,
+          reservationId: reservation.id,
+          inferenceId: inference.id,
+          usageEventId: usage.id,
+        },
+        endedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(workerRuns.id, workerRun.id));
+
+    await tx
+      .update(workers)
+      .set({
+        kpis: {
+          ...context.worker.kpis,
+          ar_followups_drafted: numberValue(context.worker.kpis.ar_followups_drafted) + 1,
+          owner_review_packets: numberValue(context.worker.kpis.owner_review_packets) + 1,
+        },
+        updatedAt: now,
+      })
+      .where(eq(workers.id, context.worker.id));
+
+    return {
+      replay: null,
+      workerRunId: workerRun.id,
+      taskId: task.id,
+      eventId: event.id,
+      arFollowupObjectId: arFollowup.id,
+      invoiceObjectId: refs.invoiceObject.id,
+      invoiceId: refs.invoiceRow.id,
+      approvalRequestId: approval.id,
+      evidenceId: traceEvidence.id,
+      draftEvidenceId: draftEvidence.id,
+      packetId: packet.id,
+      documentId: document.id,
+      workflowRunId: workflowRun.id,
+      workflowStepIds,
+      financeArFollowupViewId: view.id,
+      output,
+    };
+  });
+
+  if (result.replay) {
+    return replayedArFollowupDraft(db, context, result.replay);
+  }
+
+  return {
+    created: true,
+    idempotencyKey: input.idempotencyKey,
+    workerRunId: result.workerRunId,
+    taskId: result.taskId,
+    eventId: result.eventId,
+    arFollowupObjectId: result.arFollowupObjectId,
+    invoiceObjectId: result.invoiceObjectId,
+    invoiceId: result.invoiceId,
+    approvalRequestId: result.approvalRequestId,
+    evidenceId: result.evidenceId,
+    draftEvidenceId: result.draftEvidenceId,
+    packetId: result.packetId,
+    documentId: result.documentId,
+    workflowRunId: result.workflowRunId,
+    workflowStepIds: result.workflowStepIds,
+    financeArFollowupViewId: result.financeArFollowupViewId,
+    output: result.output,
+    snapshot: await getFinanceWorkerSnapshot(db, {
+      role: financeWorkerRole,
+      tenantSlug: context.worker.tenantSlug,
+      workerId: context.worker.id,
+    }),
+  };
+}
+
 export async function getFinanceWorkerSnapshot(
   db: Database = defaultDb,
   selector: FinanceWorkerSelector = {},
@@ -1674,6 +2757,17 @@ export async function getFinanceWorkerSnapshot(
     .where(and(eq(objects.tenantId, worker.tenantId), eq(objects.type, "invoice")))
     .orderBy(desc(objects.updatedAt))
     .limit(10);
+  const arFollowupRows = await db
+    .select({
+      id: objects.id,
+      name: objects.name,
+      state: objects.state,
+      data: objects.data,
+    })
+    .from(objects)
+    .where(and(eq(objects.tenantId, worker.tenantId), eq(objects.type, "ar_followup")))
+    .orderBy(desc(objects.updatedAt))
+    .limit(10);
   const approvalRows = await db
     .select({
       id: approvalRequests.id,
@@ -1732,6 +2826,12 @@ export async function getFinanceWorkerSnapshot(
       state: invoice.state,
       data: invoice.data,
     })),
+    arFollowups: arFollowupRows.map((followup) => ({
+      id: followup.id,
+      name: followup.name,
+      state: followup.state,
+      data: followup.data,
+    })),
     approvals: approvalRows,
     latestRun: latestRun
       ? {
@@ -1770,6 +2870,7 @@ export async function getFinanceWorkerSnapshotSafe(selector: FinanceWorkerSelect
           moneyMovement: "blocked",
         },
         invoices: [],
+        arFollowups: [],
         approvals: [],
         latestRun: null,
       },

@@ -84,12 +84,14 @@ calendar/send credentials.
 
 ## Phase 4: Finance Worker
 
-First runtime slice is registered as `/worker command=invoice.prepare` for
-`worker.role=finance_operations`. It consumes Dispatch closeout refs from
-`config.sourceRefs`, creates an invoice draft, cash packet, approval request,
-and accounting dry-run receipt, and keeps sends and money movement blocked.
-Remaining Finance work is AR follow-up, cash forecast, payment draft, and live
-credential readiness.
+Runtime slices are registered as `/worker command=invoice.prepare` and
+`/worker command=ar_followup.draft` for `worker.role=finance_operations`.
+Invoice preparation consumes Dispatch closeout refs from `config.sourceRefs`,
+creates an invoice draft, cash packet, approval request, and accounting dry-run
+receipt. AR follow-up consumes persisted invoice refs from `config.invoiceId`,
+creates a blocked draft, cash packet, approval request, and generated review
+view. Both keep sends, payment links, and money movement blocked. Remaining
+Finance work is cash forecast, payment draft, and live credential readiness.
 
 | Dependency | Implementation target |
 |---|---|

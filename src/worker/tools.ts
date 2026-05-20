@@ -449,6 +449,63 @@ export const workerTools = [
     },
   },
   {
+    name: "worker.finance.ar_followup.draft",
+    description: "Draft an AR follow-up from invoice evidence without sending it or moving money.",
+    registry: {
+      role: "finance_operations",
+      surface: "command",
+      command: "ar_followup.draft",
+      idempotency: "required",
+      externalExecution: "blocked",
+      requiresTenant: true,
+    },
+    inputSchema: {
+      type: "object",
+      properties: {
+        worker: { $ref: "#/$defs/workerTarget" },
+        idempotencyKey: { type: "string" },
+        config: {
+          type: "object",
+          description:
+            "Finance AR follow-up config. Put invoice selectors, tone policy, channel, message context, sourceRefs, and policy under config; external sends and payment links remain blocked.",
+          properties: {
+            invoiceId: { type: "string" },
+            invoiceObjectId: { type: "string" },
+            tonePolicy: { type: "string" },
+            channel: {
+              enum: ["email", "sms", "phone"],
+            },
+            sourceRefs: { $ref: "#/$defs/sourceRefs" },
+            messageContext: {
+              type: "object",
+              additionalProperties: true,
+            },
+            policy: {
+              type: "object",
+              additionalProperties: true,
+            },
+            draft: { type: "string" },
+            dueAt: { type: "string" },
+            daysPastDue: { type: "number", minimum: 0 },
+            amountCents: { type: "number", minimum: 0 },
+            currency: { type: "string" },
+            evidenceIds: {
+              type: "array",
+              items: { type: "string" },
+            },
+            sourceEvidenceIds: {
+              type: "array",
+              items: { type: "string" },
+            },
+          },
+          required: ["invoiceId", "tonePolicy"],
+          additionalProperties: true,
+        },
+      },
+      required: ["worker", "idempotencyKey", "config"],
+    },
+  },
+  {
     name: "worker.continue",
     description: "Continue a worker-owned approval outcome with structured config.",
     registry: {
@@ -965,6 +1022,16 @@ export async function executeWorkerTool(name: string, payload: JsonObject = {}) 
   if (name === "worker.finance.invoice.prepare") {
     return executeWorkerCommand({
       command: "invoice.prepare",
+      target,
+      operatorEmail,
+      config,
+      idempotencyKey: payload.idempotencyKey,
+    });
+  }
+
+  if (name === "worker.finance.ar_followup.draft") {
+    return executeWorkerCommand({
+      command: "ar_followup.draft",
       target,
       operatorEmail,
       config,

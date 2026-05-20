@@ -148,7 +148,10 @@ describe("future worker contracts", () => {
     expect(source).toContain("All commands use `POST /worker`");
     expect(source).toContain("`invoice.prepare`");
     expect(source).toContain("`worker.finance.invoice.prepare`");
+    expect(source).toContain("`ar_followup.draft`");
+    expect(source).toContain("`worker.finance.ar_followup.draft`");
     expect(source).toContain("cash packet");
+    expect(source).toContain("AR follow-up draft");
     expect(source).toContain("accounting dry-run");
     expect(source).not.toMatch(/\/api\/[a-z0-9-]+-worker/);
   });

@@ -6314,6 +6314,117 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(financeReplayResult.workerRunId).toBe(financeResult.workerRunId);
     expect(financeReplayResult.invoiceObjectId).toBe(financeResult.invoiceObjectId);
 
+    const arFollowupResponse = await executeWorkerCommand({
+      command: "ar_followup.draft",
+      target: {
+        role: "finance_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: `ci-finance-ar-followup-${runId}`,
+      config: {
+        invoiceId: financeResult.invoiceId,
+        tonePolicy: "friendly_first_reminder",
+        channel: "email",
+        messageContext: {
+          customerName: "Acme Roof Repair",
+        },
+        policy: {
+          requireOwnerApproval: true,
+          externalSend: "blocked",
+          moneyMovement: "blocked",
+        },
+      },
+    });
+    const arFollowupResult = arFollowupResponse.result as Awaited<
+      ReturnType<typeof import("./finance").draftFinanceArFollowup>
+    >;
+    const arFollowupOutput = objectValue(arFollowupResult.output);
+    const [arFollowupRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(eq(workerRuns.id, arFollowupResult.workerRunId))
+      .limit(1);
+    const [arFollowupObject] = await db
+      .select()
+      .from(objects)
+      .where(eq(objects.id, arFollowupResult.arFollowupObjectId ?? ""))
+      .limit(1);
+    const [arFollowupApproval] = await db
+      .select()
+      .from(approvalRequests)
+      .where(eq(approvalRequests.id, arFollowupResult.approvalRequestId ?? ""))
+      .limit(1);
+    const [arFollowupPacket] = await db
+      .select()
+      .from(evidencePackets)
+      .where(eq(evidencePackets.id, arFollowupResult.packetId ?? ""))
+      .limit(1);
+    const [arFollowupDocument] = await db
+      .select()
+      .from(documents)
+      .where(eq(documents.id, arFollowupResult.documentId ?? ""))
+      .limit(1);
+    const [arFollowupView] = await db
+      .select()
+      .from(generatedViews)
+      .where(and(eq(generatedViews.tenantId, tenantId), eq(generatedViews.key, "finance.ar_followup.review")))
+      .limit(1);
+
+    expect(arFollowupResponse.command).toBe("ar_followup.draft");
+    expect(arFollowupResponse.worker.role).toBe("finance_operations");
+    expect(arFollowupResult.created).toBe(true);
+    expect(arFollowupResult.workflowStepIds).toHaveLength(3);
+    expect(arFollowupOutput.externalExecution).toBe("blocked");
+    expect(arFollowupOutput.externalMutation).toBe(false);
+    expect(arFollowupOutput.externalSend).toBe(false);
+    expect(arFollowupOutput.paymentLink).toBe("blocked");
+    expect(arFollowupOutput.moneyMovement).toBe("blocked");
+    expect(arFollowupOutput.requiresApproval).toBe(true);
+    expect(arFollowupOutput.invoiceId).toBe(financeResult.invoiceId);
+    expect(arFollowupRun?.source).toBe("continuous.finance_worker");
+    expect(arFollowupRun?.state).toBe("done");
+    expect(arFollowupObject?.type).toBe("ar_followup");
+    expect(arFollowupObject?.state).toBe("approval_required");
+    expect(arFollowupApproval?.state).toBe("pending");
+    expect(arFollowupApproval?.kind).toBe("finance_ar_followup_approval");
+    expect(arFollowupPacket?.kind).toBe("cash_packet");
+    expect(arFollowupDocument?.kind).toBe("finance_ar_followup_draft");
+    expect(arFollowupView?.key).toBe("finance.ar_followup.review");
+    expect(arFollowupResult.snapshot.arFollowups.some((followup) => followup.id === arFollowupResult.arFollowupObjectId)).toBe(
+      true,
+    );
+
+    const arFollowupReplay = await executeWorkerCommand({
+      command: "ar_followup.draft",
+      target: {
+        role: "finance_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: `ci-finance-ar-followup-${runId}`,
+      config: {
+        invoiceId: financeResult.invoiceId,
+        tonePolicy: "friendly_first_reminder",
+        channel: "email",
+        messageContext: {
+          customerName: "Acme Roof Repair",
+        },
+        policy: {
+          requireOwnerApproval: true,
+          externalSend: "blocked",
+          moneyMovement: "blocked",
+        },
+      },
+    });
+    const arFollowupReplayResult = arFollowupReplay.result as Awaited<
+      ReturnType<typeof import("./finance").draftFinanceArFollowup>
+    >;
+
+    expect(arFollowupReplayResult.created).toBe(false);
+    expect(arFollowupReplayResult.workerRunId).toBe(arFollowupResult.workerRunId);
+    expect(arFollowupReplayResult.arFollowupObjectId).toBe(arFollowupResult.arFollowupObjectId);
+
     const exceptionResponse = await executeWorkerCommand({
       command: "exception.route",
       target: {
