@@ -1915,6 +1915,7 @@ describe("POST /core", () => {
       auditEventId: "audit-1",
       adapter: {
         key: "google_workspace",
+        authMode: "oauth",
       },
     });
 
@@ -1950,6 +1951,8 @@ describe("POST /core", () => {
     expect(response.status).toBe(200);
     expect(body.data.command).toBe("adapter.upsert");
     expect(body.data.result.adapterId).toBe("99999999-9999-4999-8999-000000000021");
+    expect(body.data.result.adapter.authMode).toBe("oauth");
+    expect(body.data.result.adapter.auth).toBeUndefined();
     expect(mocks.upsertCoreAdapter).toHaveBeenCalledWith({
       operatorEmail: "operator@example.com",
       tenantSlug: "continuous-demo",

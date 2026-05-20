@@ -188,8 +188,10 @@ polling receipt when the read came from an API poll.
 Create the adapter and connection through `/core` before enabling scheduled
 polling. `adapter.upsert` owns the reusable connector catalog row, and
 `connection.upsert` owns the tenant-scoped account, scopes, and polling config.
-Managed credential refs such as `env:GOOGLE_WORKSPACE_TOKEN` are allowed;
-inline access tokens, passwords, and client secrets are rejected.
+`adapter.upsert` `config.auth` is only an adapter auth mode such as
+`managed_ref`, `oauth`, or `api_key`; it is not a credential slot. Managed
+credential refs such as `env:GOOGLE_WORKSPACE_TOKEN` belong on connection
+config, and inline access tokens, passwords, and client secrets are rejected.
 
 ```json
 {
@@ -202,7 +204,7 @@ inline access tokens, passwords, and client secrets are rejected.
     "key": "google_workspace",
     "name": "Google Workspace",
     "kind": "inbox",
-    "auth": "oauth",
+    "auth": "managed_ref",
     "capabilities": {
       "read": ["lead.read"],
       "sources": ["google_workspace_inbox"],

@@ -25,6 +25,7 @@ import {
   type JsonObject,
 } from "../db/schema";
 import { PlatformUnavailableError } from "./errors";
+import { assertCoreIdempotencyReplay, coreIdempotencyFingerprint } from "./idempotency";
 import { loadOperatorContext, type OperatorContext } from "./operators";
 
 type Database = typeof defaultDb;
@@ -34,6 +35,7 @@ type ActorType = "user" | "worker" | "adapter" | "system";
 type EvidenceKind = "snapshot" | "draft" | "approval" | "receipt" | "trace" | "export" | "note";
 type RiskLevel = "low" | "medium" | "high" | "critical";
 type CoreTaskState = "draft" | "active" | "waiting" | "approval_required" | "blocked" | "done" | "canceled";
+type AdapterAuthMode = "none" | "oauth" | "oauth2" | "api_key" | "basic" | "bearer" | "managed_ref" | "custom";
 type AdapterConnectionState = "draft" | "active" | "paused" | "error" | "archived";
 type ConnectionHealthStatus = "ready" | "needs_configuration" | "paused" | "error" | "archived";
 type ConnectionHealthCheckStatus = "pass" | "warn" | "fail" | "not_applicable";
@@ -79,6 +81,16 @@ const adapterConnectionStates = new Set<AdapterConnectionState>([
   "paused",
   "error",
   "archived",
+]);
+const adapterAuthModes = new Set<AdapterAuthMode>([
+  "none",
+  "oauth",
+  "oauth2",
+  "api_key",
+  "basic",
+  "bearer",
+  "managed_ref",
+  "custom",
 ]);
 const credentialRefKeys = new Set([
   "credentialref",
@@ -573,6 +585,31 @@ function parseAdapterConnectionState(value: string | undefined) {
     "config.state must be draft, active, paused, error, or archived.",
     400,
   );
+}
+
+function parseAdapterAuthMode(value: unknown) {
+  const raw = requiredStringMax(value, "config.auth", 80).toLowerCase();
+
+  if (
+    raw.includes(":") ||
+    credentialRefLooksManaged(raw) ||
+    !/^[a-z][a-z0-9_]*$/.test(raw) ||
+    !adapterAuthModes.has(raw as AdapterAuthMode)
+  ) {
+    throw new PlatformUnavailableError(
+      "core_adapter_auth_mode_invalid",
+      "config.auth must be a non-secret adapter auth mode such as none, oauth, api_key, basic, bearer, or managed_ref. Store credentials on connection records with managed credential refs.",
+      400,
+    );
+  }
+
+  return raw as AdapterAuthMode;
+}
+
+function adapterAuthModeForOutput(value: string) {
+  const mode = value.toLowerCase();
+
+  return adapterAuthModes.has(mode as AdapterAuthMode) ? (mode as AdapterAuthMode) : "custom";
 }
 
 function isCredentialRefKey(key: string) {
@@ -1365,6 +1402,19 @@ export async function upsertCoreObject(input: CoreObjectUpsertInput) {
     operatorEmail: input.operatorEmail,
     tenantSlug: input.tenantSlug,
   });
+  const idempotency = coreIdempotencyFingerprint("object.upsert", {
+    objectId: objectId ?? null,
+    type,
+    name,
+    state,
+    source: objectRecordSource,
+    externalId: externalId ?? null,
+    data: objectData,
+    effectiveAt: effectiveAt?.toISOString() ?? null,
+    archivedAt: archivedAt?.toISOString() ?? null,
+    reason,
+    versionData,
+  });
 
   return db.transaction(async (tx) => {
     await tx.execute(
@@ -1372,7 +1422,12 @@ export async function upsertCoreObject(input: CoreObjectUpsertInput) {
     );
 
     const [existingAudit] = await tx
-      .select({ auditEventId: auditEvents.id, targetId: auditEvents.targetId, eventId: auditEvents.eventId })
+      .select({
+        auditEventId: auditEvents.id,
+        targetId: auditEvents.targetId,
+        eventId: auditEvents.eventId,
+        data: auditEvents.data,
+      })
       .from(auditEvents)
       .where(
         and(
@@ -1385,6 +1440,12 @@ export async function upsertCoreObject(input: CoreObjectUpsertInput) {
       .limit(1);
 
     if (existingAudit?.targetId) {
+      assertCoreIdempotencyReplay({
+        command: "object.upsert",
+        fingerprint: idempotency,
+        storedData: existingAudit.data,
+      });
+
       const [object] = await tx
         .select()
         .from(objects)
@@ -1548,6 +1609,7 @@ export async function upsertCoreObject(input: CoreObjectUpsertInput) {
           objectId: object.id,
           objectVersionId: objectVersion.id,
           version: objectVersion.version,
+          idempotency,
           externalExecution: "blocked",
         },
       })
@@ -1579,7 +1641,7 @@ export async function upsertCoreAdapter(input: CoreAdapterUpsertInput) {
   const key = requiredStringMax(input.key, "config.key", 120);
   const name = requiredString(input.name, "config.name");
   const kind = requiredStringMax(input.kind, "config.kind", 120);
-  const auth = requiredStringMax(input.auth, "config.auth", 120);
+  const authMode = parseAdapterAuthMode(input.auth);
   const configSchema = jsonObject(input.configSchema);
   const eventSchema = jsonObject(input.eventSchema);
   const adapterCapabilities = jsonObject(input.capabilities);
@@ -1588,6 +1650,17 @@ export async function upsertCoreAdapter(input: CoreAdapterUpsertInput) {
     db,
     operatorEmail: input.operatorEmail,
     tenantSlug: input.tenantSlug,
+  });
+  const idempotency = coreIdempotencyFingerprint("adapter.upsert", {
+    adapterId: adapterId ?? null,
+    key,
+    name,
+    kind,
+    authMode,
+    configSchema,
+    eventSchema,
+    capabilities: adapterCapabilities,
+    active,
   });
 
   return db.transaction(async (tx) => {
@@ -1600,6 +1673,7 @@ export async function upsertCoreAdapter(input: CoreAdapterUpsertInput) {
         auditEventId: auditEvents.id,
         targetId: auditEvents.targetId,
         eventId: auditEvents.eventId,
+        data: auditEvents.data,
       })
       .from(auditEvents)
       .where(
@@ -1613,6 +1687,12 @@ export async function upsertCoreAdapter(input: CoreAdapterUpsertInput) {
       .limit(1);
 
     if (existingAudit?.targetId) {
+      assertCoreIdempotencyReplay({
+        command: "adapter.upsert",
+        fingerprint: idempotency,
+        storedData: existingAudit.data,
+      });
+
       const [adapter] = await tx.select().from(adapters).where(eq(adapters.id, existingAudit.targetId)).limit(1);
 
       if (adapter) {
@@ -1627,7 +1707,7 @@ export async function upsertCoreAdapter(input: CoreAdapterUpsertInput) {
             key: adapter.key,
             name: adapter.name,
             kind: adapter.kind,
-            auth: adapter.auth,
+            authMode: adapterAuthModeForOutput(adapter.auth),
             active: adapter.active,
           },
         };
@@ -1669,7 +1749,7 @@ export async function upsertCoreAdapter(input: CoreAdapterUpsertInput) {
             key,
             name,
             kind,
-            auth,
+            auth: authMode,
             configSchema,
             eventSchema,
             capabilities: adapterCapabilities,
@@ -1684,7 +1764,7 @@ export async function upsertCoreAdapter(input: CoreAdapterUpsertInput) {
             key,
             name,
             kind,
-            auth,
+            auth: authMode,
             configSchema,
             eventSchema,
             capabilities: adapterCapabilities,
@@ -1708,7 +1788,7 @@ export async function upsertCoreAdapter(input: CoreAdapterUpsertInput) {
           adapterId: adapter.id,
           key,
           kind,
-          auth,
+          authMode,
           active,
           externalExecution: "blocked",
         },
@@ -1733,8 +1813,9 @@ export async function upsertCoreAdapter(input: CoreAdapterUpsertInput) {
           adapterId: adapter.id,
           key,
           kind,
-          auth,
+          authMode,
           active,
+          idempotency,
           externalExecution: "blocked",
         },
       })
@@ -1751,7 +1832,7 @@ export async function upsertCoreAdapter(input: CoreAdapterUpsertInput) {
         key: adapter.key,
         name: adapter.name,
         kind: adapter.kind,
-        auth: adapter.auth,
+        authMode: adapterAuthModeForOutput(adapter.auth),
         active: adapter.active,
       },
     };
@@ -1776,6 +1857,17 @@ export async function upsertCoreConnection(input: CoreConnectionUpsertInput) {
   });
 
   assertConnectionSafety({ state, scopes, config: connectionConfig });
+  const idempotency = coreIdempotencyFingerprint("connection.upsert", {
+    connectionId: connectionId ?? null,
+    adapterId: adapterId ?? null,
+    adapterKey: adapterKey ?? null,
+    name,
+    state,
+    externalAccountId: externalAccountId ?? null,
+    scopes,
+    config: connectionConfig,
+    lastSyncAt: lastSyncAt?.toISOString() ?? null,
+  });
 
   return db.transaction(async (tx) => {
     await tx.execute(
@@ -1787,6 +1879,7 @@ export async function upsertCoreConnection(input: CoreConnectionUpsertInput) {
         auditEventId: auditEvents.id,
         targetId: auditEvents.targetId,
         eventId: auditEvents.eventId,
+        data: auditEvents.data,
       })
       .from(auditEvents)
       .where(
@@ -1800,6 +1893,12 @@ export async function upsertCoreConnection(input: CoreConnectionUpsertInput) {
       .limit(1);
 
     if (existingAudit?.targetId) {
+      assertCoreIdempotencyReplay({
+        command: "connection.upsert",
+        fingerprint: idempotency,
+        storedData: existingAudit.data,
+      });
+
       const [connection] = await tx
         .select()
         .from(connections)
@@ -2000,6 +2099,7 @@ export async function upsertCoreConnection(input: CoreConnectionUpsertInput) {
           externalAccountId: externalAccountId ?? null,
           pollingEnabled,
           credentialRefState: credentialRefForConnection(connectionConfig) ? "managed_ref_present" : "not_configured",
+          idempotency,
           externalExecution: "blocked",
         },
       })
@@ -2041,10 +2141,16 @@ export async function recordCoreConnectionHealth(input: CoreConnectionHealthReco
   const connectionId = requiredUuid(input.connectionId, "config.connectionId");
   const requestedChecks = connectionHealthChecks(input.checks);
   const observedAt = optionalDate(input.observedAt, "config.observedAt") ?? new Date();
+  const observedAtInput = cleanString(input.observedAt) ? observedAt.toISOString() : null;
   const operator = await loadOperatorContext({
     db,
     operatorEmail: input.operatorEmail,
     tenantSlug: input.tenantSlug,
+  });
+  const idempotency = coreIdempotencyFingerprint("connection.health.record", {
+    connectionId,
+    checks: requestedChecks,
+    observedAt: observedAtInput,
   });
 
   return db.transaction(async (tx) => {
@@ -2071,6 +2177,12 @@ export async function recordCoreConnectionHealth(input: CoreConnectionHealthReco
       .limit(1);
 
     if (existingAudit?.targetId) {
+      assertCoreIdempotencyReplay({
+        command: "connection.health.record",
+        fingerprint: idempotency,
+        storedData: existingAudit.data,
+      });
+
       const report = jsonObject(jsonObject(existingAudit.data).report);
 
       return {
@@ -2170,6 +2282,7 @@ export async function recordCoreConnectionHealth(input: CoreConnectionHealthReco
         data: {
           report,
           evidenceId: snapshot.id,
+          idempotency,
           externalExecution: "blocked",
         },
       })
@@ -2200,12 +2313,29 @@ export async function ingestCoreEvent(input: CoreEventIngestInput) {
   const adapterId = optionalUuid(input.adapterId, "config.adapterId");
   const connectionId = optionalUuid(input.connectionId, "config.connectionId");
   const occurredAt = optionalDate(input.occurredAt, "config.occurredAt") ?? new Date();
+  const occurredAtInput = cleanString(input.occurredAt) ? occurredAt.toISOString() : null;
   const operator = await loadOperatorContext({
     db,
     operatorEmail: input.operatorEmail,
     tenantSlug: input.tenantSlug,
   });
   const actor = parseActor(input.actor, operator);
+  const idempotency = coreIdempotencyFingerprint("event.ingest", {
+    type,
+    source,
+    actor: {
+      type: actor.type,
+      id: actor.id ?? null,
+      ref: actor.ref,
+    },
+    objectId: objectId ?? null,
+    taskId: taskId ?? null,
+    capabilityId: capabilityId ?? null,
+    adapterId: adapterId ?? null,
+    connectionId: connectionId ?? null,
+    data: jsonObject(input.data),
+    occurredAt: occurredAtInput,
+  });
 
   return db.transaction(async (tx) => {
     await tx.execute(
@@ -2226,7 +2356,7 @@ export async function ingestCoreEvent(input: CoreEventIngestInput) {
 
     if (existingEvent) {
       const [existingAudit] = await tx
-        .select({ id: auditEvents.id })
+        .select({ id: auditEvents.id, data: auditEvents.data })
         .from(auditEvents)
         .where(
           and(
@@ -2236,6 +2366,12 @@ export async function ingestCoreEvent(input: CoreEventIngestInput) {
           ),
         )
         .limit(1);
+
+      assertCoreIdempotencyReplay({
+        command: "event.ingest",
+        fingerprint: idempotency,
+        storedData: existingAudit?.data,
+      });
 
       return {
         created: false,
@@ -2291,6 +2427,7 @@ export async function ingestCoreEvent(input: CoreEventIngestInput) {
         data: {
           eventType: type,
           eventSource: source,
+          idempotency,
           externalExecution: "blocked",
         },
       })
@@ -2319,6 +2456,24 @@ export async function attachCoreEvidence(input: CoreEvidenceAttachInput) {
     tenantSlug: input.tenantSlug,
   });
   const actor = parseActor(input.actor, operator);
+  const idempotency = coreIdempotencyFingerprint("evidence.attach", {
+    kind,
+    name,
+    actor: {
+      type: actor.type,
+      id: actor.id ?? null,
+      ref: actor.ref,
+    },
+    objectId: objectId ?? null,
+    taskId: taskId ?? null,
+    eventId: eventId ?? null,
+    capabilityId: capabilityId ?? null,
+    uri: cleanString(input.uri) ?? null,
+    hash: cleanString(input.hash) ?? null,
+    data: jsonObject(input.data),
+    redaction: jsonObject(input.redaction),
+    retainedUntil: retainedUntil?.toISOString() ?? null,
+  });
 
   return db.transaction(async (tx) => {
     await tx.execute(
@@ -2326,7 +2481,11 @@ export async function attachCoreEvidence(input: CoreEvidenceAttachInput) {
     );
 
     const [existingAudit] = await tx
-      .select({ auditEventId: auditEvents.id, targetId: auditEvents.targetId })
+      .select({
+        auditEventId: auditEvents.id,
+        targetId: auditEvents.targetId,
+        data: auditEvents.data,
+      })
       .from(auditEvents)
       .where(
         and(
@@ -2339,6 +2498,12 @@ export async function attachCoreEvidence(input: CoreEvidenceAttachInput) {
       .limit(1);
 
     if (existingAudit?.targetId) {
+      assertCoreIdempotencyReplay({
+        command: "evidence.attach",
+        fingerprint: idempotency,
+        storedData: existingAudit.data,
+      });
+
       return {
         created: false,
         evidenceId: existingAudit.targetId,
@@ -2392,6 +2557,7 @@ export async function attachCoreEvidence(input: CoreEvidenceAttachInput) {
         data: {
           evidenceKind: kind,
           evidenceName: name,
+          idempotency,
           externalExecution: "blocked",
         },
       })
@@ -2419,6 +2585,17 @@ export async function createCoreDocument(input: CoreDocumentCreateInput) {
     operatorEmail: input.operatorEmail,
     tenantSlug: input.tenantSlug,
   });
+  const idempotency = coreIdempotencyFingerprint("document.create", {
+    kind,
+    name,
+    state,
+    sensitivity,
+    objectId: objectId ?? null,
+    workflowRunId: workflowRunId ?? null,
+    hash: cleanString(input.hash) ?? null,
+    data: jsonObject(input.data),
+    retainedUntil: retainedUntil?.toISOString() ?? null,
+  });
 
   return db.transaction(async (tx) => {
     await tx.execute(
@@ -2430,6 +2607,7 @@ export async function createCoreDocument(input: CoreDocumentCreateInput) {
         auditEventId: auditEvents.id,
         targetId: auditEvents.targetId,
         eventId: auditEvents.eventId,
+        data: auditEvents.data,
       })
       .from(auditEvents)
       .where(
@@ -2443,6 +2621,12 @@ export async function createCoreDocument(input: CoreDocumentCreateInput) {
       .limit(1);
 
     if (existingAudit?.targetId) {
+      assertCoreIdempotencyReplay({
+        command: "document.create",
+        fingerprint: idempotency,
+        storedData: existingAudit.data,
+      });
+
       return {
         created: false,
         documentId: existingAudit.targetId,
@@ -2513,6 +2697,7 @@ export async function createCoreDocument(input: CoreDocumentCreateInput) {
         data: {
           documentId: document.id,
           workflowRunId: workflowRunId ?? null,
+          idempotency,
           externalExecution: "blocked",
         },
       })
@@ -2544,6 +2729,23 @@ export async function prepareCorePacketForOperator(
   const evidenceIds = uuidList(input.evidenceIds, "config.evidenceIds");
   const documentIds = uuidList(input.documentIds, "config.documentIds");
   const retainedUntil = optionalDate(input.retainedUntil, "config.retainedUntil");
+  const idempotency = coreIdempotencyFingerprint("packet.prepare", {
+    kind,
+    name,
+    state,
+    sensitivity,
+    objectId: objectId ?? null,
+    taskId: taskId ?? null,
+    workflowRunId: workflowRunId ?? null,
+    eventId: eventId ?? null,
+    capabilityId: capabilityId ?? null,
+    evidenceIds,
+    documentIds,
+    sections: jsonObject(input.sections),
+    data: jsonObject(input.data),
+    hash: cleanString(input.hash) ?? null,
+    retainedUntil: retainedUntil?.toISOString() ?? null,
+  });
 
   await tx.execute(
     sql`select pg_advisory_xact_lock(hashtext(${operator.tenantId}), hashtext(${`${packetSource}:${input.idempotencyKey}`}))`,
@@ -2554,6 +2756,7 @@ export async function prepareCorePacketForOperator(
       auditEventId: auditEvents.id,
       targetId: auditEvents.targetId,
       eventId: auditEvents.eventId,
+      data: auditEvents.data,
     })
     .from(auditEvents)
     .where(
@@ -2567,6 +2770,12 @@ export async function prepareCorePacketForOperator(
     .limit(1);
 
   if (existingAudit?.targetId) {
+    assertCoreIdempotencyReplay({
+      command: "packet.prepare",
+      fingerprint: idempotency,
+      storedData: existingAudit.data,
+    });
+
     const [packet] = await tx
       .select()
       .from(evidencePackets)
@@ -2691,6 +2900,7 @@ export async function prepareCorePacketForOperator(
         documentId: document.id,
         evidenceIds,
         documentIds,
+        idempotency,
         externalExecution: "blocked",
       },
     })
@@ -2714,6 +2924,7 @@ export async function prepareCorePacketForOperator(
         auditEventId: audit.id,
         evidenceIds,
         documentIds,
+        idempotency,
         externalExecution: "blocked",
       },
       retainedUntil,
@@ -2747,6 +2958,7 @@ export async function recordCoreDecision(input: CoreDecisionRecordInput) {
   const db = input.db ?? defaultDb;
   const kind = requiredString(input.kind, "config.kind");
   const decisionValue = requiredString(input.decision, "config.decision");
+  const rationale = cleanString(input.rationale) ?? "";
   const state = cleanString(input.state) ?? "proposed";
   const taskId = optionalUuid(input.taskId, "config.taskId");
   const eventId = optionalUuid(input.eventId, "config.eventId");
@@ -2758,6 +2970,22 @@ export async function recordCoreDecision(input: CoreDecisionRecordInput) {
     tenantSlug: input.tenantSlug,
   });
   const actor = parseActor(input.actor, operator);
+  const idempotency = coreIdempotencyFingerprint("decision.record", {
+    kind,
+    decision: decisionValue,
+    rationale,
+    state,
+    actor: {
+      type: actor.type,
+      id: actor.id ?? null,
+      ref: actor.ref,
+    },
+    taskId: taskId ?? null,
+    eventId: eventId ?? null,
+    workflowRunId: workflowRunId ?? null,
+    capabilityId: capabilityId ?? null,
+    data: jsonObject(input.data),
+  });
 
   return db.transaction(async (tx) => {
     await tx.execute(
@@ -2769,6 +2997,7 @@ export async function recordCoreDecision(input: CoreDecisionRecordInput) {
         auditEventId: auditEvents.id,
         targetId: auditEvents.targetId,
         eventId: auditEvents.eventId,
+        data: auditEvents.data,
       })
       .from(auditEvents)
       .where(
@@ -2782,6 +3011,12 @@ export async function recordCoreDecision(input: CoreDecisionRecordInput) {
       .limit(1);
 
     if (existingAudit?.targetId) {
+      assertCoreIdempotencyReplay({
+        command: "decision.record",
+        fingerprint: idempotency,
+        storedData: existingAudit.data,
+      });
+
       return {
         created: false,
         decisionId: existingAudit.targetId,
@@ -2810,7 +3045,7 @@ export async function recordCoreDecision(input: CoreDecisionRecordInput) {
         kind,
         state,
         decision: decisionValue,
-        rationale: cleanString(input.rationale) ?? "",
+        rationale,
         data: jsonObject(input.data),
       })
       .returning({ id: decisions.id });
@@ -2856,6 +3091,7 @@ export async function recordCoreDecision(input: CoreDecisionRecordInput) {
           decisionId: decision.id,
           originalEventId: eventId ?? null,
           workflowRunId: workflowRunId ?? null,
+          idempotency,
           externalExecution: "blocked",
         },
       })
@@ -2891,6 +3127,27 @@ export async function recordAdapterIntentForOperator(
     );
   }
 
+  const request = {
+    ...jsonObject(input.request),
+    operation,
+    mode,
+    dryRun: true,
+    externalExecution: "blocked",
+    externalMutation: false,
+  };
+  const data = jsonObject(input.data);
+  const idempotency = coreIdempotencyFingerprint("adapter.intent.record", {
+    connectionId,
+    operation,
+    mode,
+    taskId: taskId ?? null,
+    eventId: eventId ?? null,
+    capabilityId: capabilityId ?? null,
+    request,
+    data,
+    maxAttempts,
+  });
+
   await tx.execute(
     sql`select pg_advisory_xact_lock(hashtext(${operator.tenantId}), hashtext(${`${adapterIntentSource}:${input.idempotencyKey}`}))`,
   );
@@ -2914,6 +3171,12 @@ export async function recordAdapterIntentForOperator(
       .limit(1);
 
     if (existingAudit?.targetId) {
+      assertCoreIdempotencyReplay({
+        command: "adapter.intent.record",
+        fingerprint: idempotency,
+        storedData: existingAudit.data,
+      });
+
       return {
         created: false,
         adapterRunId: cleanString(existingAudit.data.adapterRunId) ?? null,
@@ -2933,16 +3196,8 @@ export async function recordAdapterIntentForOperator(
 
     const connection = await loadConnection(tx, operator.tenantId, connectionId);
     const now = new Date();
-    const request = {
-      ...jsonObject(input.request),
-      operation,
-      mode,
-      dryRun: true,
-      externalExecution: "blocked",
-      externalMutation: false,
-    };
     const intentData = {
-      ...jsonObject(input.data),
+      ...data,
       connectionId,
       adapterId: connection.adapterId,
       operation,
@@ -3050,6 +3305,7 @@ export async function recordAdapterIntentForOperator(
           adapterId: connection.adapterId,
           operation,
           mode,
+          idempotency,
           externalExecution: "blocked",
         },
       })
@@ -3073,6 +3329,7 @@ export async function recordAdapterIntentForOperator(
           connectionId,
           adapterId: connection.adapterId,
           request,
+          idempotency,
           externalExecution: "blocked",
         },
       })
@@ -3111,10 +3368,36 @@ export async function recordRuleChangeForOperator(
   const title = requiredString(input.title, "config.title");
   const state = cleanString(input.state) ?? "proposed";
   const decisionValue = cleanString(input.decision) ?? "rule_change_proposed";
+  const summary = cleanString(input.summary) ?? "";
+  const rationale = cleanString(input.rationale) ?? "";
   const taskId = optionalUuid(input.taskId, "config.taskId");
   const workflowRunId = optionalUuid(input.workflowRunId, "config.workflowRunId");
   const capabilityId = optionalUuid(input.capabilityId, "config.capabilityId");
   const effectiveAt = optionalDate(input.effectiveAt, "config.effectiveAt");
+  const sourceRefs = jsonObject(input.sourceRefs);
+  const before = jsonObject(input.before);
+  const after = jsonObject(input.after);
+  const impact = jsonObject(input.impact);
+  const data = jsonObject(input.data);
+  const idempotency = coreIdempotencyFingerprint("rule.change.record", {
+    rulePackId: rulePackId ?? null,
+    ruleKey,
+    changeType,
+    title,
+    summary,
+    state,
+    decision: decisionValue,
+    rationale,
+    taskId: taskId ?? null,
+    workflowRunId: workflowRunId ?? null,
+    capabilityId: capabilityId ?? null,
+    sourceRefs,
+    before,
+    after,
+    impact,
+    data,
+    effectiveAt: effectiveAt?.toISOString() ?? null,
+  });
 
   await tx.execute(
     sql`select pg_advisory_xact_lock(hashtext(${operator.tenantId}), hashtext(${`${ruleChangeSource}:${input.idempotencyKey}`}))`,
@@ -3139,6 +3422,12 @@ export async function recordRuleChangeForOperator(
       .limit(1);
 
     if (existingAudit?.targetId) {
+      assertCoreIdempotencyReplay({
+        command: "rule.change.record",
+        fingerprint: idempotency,
+        storedData: existingAudit.data,
+      });
+
       return {
         created: false,
         objectId: existingAudit.targetId,
@@ -3161,17 +3450,17 @@ export async function recordRuleChangeForOperator(
 
     const now = new Date();
     const changeData = {
-      ...jsonObject(input.data),
+      ...data,
       rulePackId: rulePackId ?? null,
       ruleKey,
       changeType,
       title,
-      summary: cleanString(input.summary) ?? "",
+      summary,
       state,
-      sourceRefs: jsonObject(input.sourceRefs),
-      before: jsonObject(input.before),
-      after: jsonObject(input.after),
-      impact: jsonObject(input.impact),
+      sourceRefs,
+      before,
+      after,
+      impact,
       taskId: taskId ?? null,
       workflowRunId: workflowRunId ?? null,
       capabilityId: capabilityId ?? null,
@@ -3204,7 +3493,7 @@ export async function recordRuleChangeForOperator(
         data: changeData,
         changedByType: "user",
         changedById: operator.userId,
-        reason: cleanString(input.rationale) ?? "Rule change recorded",
+        reason: rationale || "Rule change recorded",
       })
       .returning({ id: objectVersions.id, version: objectVersions.version });
     const [event] = await tx
@@ -3242,7 +3531,7 @@ export async function recordRuleChangeForOperator(
         kind: "rule_change",
         state,
         decision: decisionValue,
-        rationale: cleanString(input.rationale) ?? "",
+        rationale,
         data: {
           ...changeData,
           objectId: object.id,
@@ -3275,6 +3564,7 @@ export async function recordRuleChangeForOperator(
           rulePackId: rulePackId ?? null,
           ruleKey,
           changeType,
+          idempotency,
           externalExecution: "blocked",
         },
       })
@@ -3300,6 +3590,7 @@ export async function recordRuleChangeForOperator(
           rulePackId: rulePackId ?? null,
           ruleKey,
           changeType,
+          idempotency,
           externalExecution: "blocked",
         },
       })
@@ -3336,10 +3627,19 @@ export async function linkCoreObjects(input: CoreObjectLinkInput) {
   const type = requiredStringMax(input.type, "config.type", 80);
   const effectiveAt = optionalDate(input.effectiveAt, "config.effectiveAt");
   const endedAt = optionalDate(input.endedAt, "config.endedAt");
+  const data = jsonObject(input.data);
   const operator = await loadOperatorContext({
     db,
     operatorEmail: input.operatorEmail,
     tenantSlug: input.tenantSlug,
+  });
+  const idempotency = coreIdempotencyFingerprint("object.link", {
+    fromObjectId,
+    toObjectId,
+    type,
+    data,
+    effectiveAt: effectiveAt?.toISOString() ?? null,
+    endedAt: endedAt?.toISOString() ?? null,
   });
 
   return db.transaction(async (tx) => {
@@ -3352,6 +3652,7 @@ export async function linkCoreObjects(input: CoreObjectLinkInput) {
         auditEventId: auditEvents.id,
         targetId: auditEvents.targetId,
         eventId: auditEvents.eventId,
+        data: auditEvents.data,
       })
       .from(auditEvents)
       .where(
@@ -3365,6 +3666,12 @@ export async function linkCoreObjects(input: CoreObjectLinkInput) {
       .limit(1);
 
     if (existingAudit?.targetId) {
+      assertCoreIdempotencyReplay({
+        command: "object.link",
+        fingerprint: idempotency,
+        storedData: existingAudit.data,
+      });
+
       const [link] = await tx
         .select()
         .from(objectLinks)
@@ -3414,7 +3721,7 @@ export async function linkCoreObjects(input: CoreObjectLinkInput) {
       ? await tx
           .update(objectLinks)
           .set({
-            data: jsonObject(input.data),
+            data,
             effectiveAt,
             endedAt,
           })
@@ -3427,7 +3734,7 @@ export async function linkCoreObjects(input: CoreObjectLinkInput) {
             fromId: fromObjectId,
             toId: toObjectId,
             type,
-            data: jsonObject(input.data),
+            data,
             effectiveAt,
             endedAt,
           })
@@ -3474,6 +3781,7 @@ export async function linkCoreObjects(input: CoreObjectLinkInput) {
           fromObjectId,
           toObjectId,
           type,
+          idempotency,
           externalExecution: "blocked",
         },
       })
@@ -3513,6 +3821,19 @@ export async function recordCustomerSignal(input: CoreCustomerSignalRecordInput)
     operatorEmail: input.operatorEmail,
     tenantSlug: input.tenantSlug,
   });
+  const idempotency = coreIdempotencyFingerprint("customer_signal.record", {
+    type,
+    name,
+    state,
+    source,
+    externalId: externalId ?? null,
+    customerObjectId: customerObjectId ?? null,
+    relatedObjectId: relatedObjectId ?? null,
+    taskId: taskId ?? null,
+    eventId: eventId ?? null,
+    data,
+    occurredAt: occurredAt?.toISOString() ?? null,
+  });
 
   return db.transaction(async (tx) => {
     await tx.execute(
@@ -3524,6 +3845,7 @@ export async function recordCustomerSignal(input: CoreCustomerSignalRecordInput)
         auditEventId: auditEvents.id,
         targetId: auditEvents.targetId,
         eventId: auditEvents.eventId,
+        data: auditEvents.data,
       })
       .from(auditEvents)
       .where(
@@ -3537,6 +3859,12 @@ export async function recordCustomerSignal(input: CoreCustomerSignalRecordInput)
       .limit(1);
 
     if (existingAudit?.targetId) {
+      assertCoreIdempotencyReplay({
+        command: "customer_signal.record",
+        fingerprint: idempotency,
+        storedData: existingAudit.data,
+      });
+
       const [signal] = await tx
         .select()
         .from(customerSignals)
@@ -3719,6 +4047,7 @@ export async function recordCustomerSignal(input: CoreCustomerSignalRecordInput)
           customerObjectId: customerObjectId ?? null,
           relatedObjectId: relatedObjectId ?? null,
           evidenceId: note.id,
+          idempotency,
           externalExecution: "blocked",
         },
       })
@@ -3753,10 +4082,29 @@ export async function publishCoreView(input: CoreViewPublishInput) {
   const objectType = optionalStringMax(input.objectType, "config.objectType", 80);
   const taskState = parseTaskState(cleanString(input.taskState));
   const active = input.active ?? true;
+  const contract = jsonObject(input.contract);
+  const actions = jsonObject(input.actions);
+  const data = jsonObject(input.data);
+  const mask = jsonObject(input.mask);
   const operator = await loadOperatorContext({
     db,
     operatorEmail: input.operatorEmail,
     tenantSlug: input.tenantSlug,
+  });
+  const idempotency = coreIdempotencyFingerprint("view.publish", {
+    key,
+    name,
+    purpose,
+    version,
+    surface,
+    capabilityId: capabilityId ?? null,
+    objectType: objectType ?? null,
+    taskState: taskState ?? null,
+    contract,
+    actions,
+    data,
+    mask,
+    active,
   });
 
   return db.transaction(async (tx) => {
@@ -3769,6 +4117,7 @@ export async function publishCoreView(input: CoreViewPublishInput) {
         auditEventId: auditEvents.id,
         targetId: auditEvents.targetId,
         eventId: auditEvents.eventId,
+        data: auditEvents.data,
       })
       .from(auditEvents)
       .where(
@@ -3782,6 +4131,12 @@ export async function publishCoreView(input: CoreViewPublishInput) {
       .limit(1);
 
     if (existingAudit?.targetId) {
+      assertCoreIdempotencyReplay({
+        command: "view.publish",
+        fingerprint: idempotency,
+        storedData: existingAudit.data,
+      });
+
       const [view] = await tx
         .select()
         .from(uiContracts)
@@ -3834,10 +4189,10 @@ export async function publishCoreView(input: CoreViewPublishInput) {
       surface,
       objectType,
       taskState,
-      contract: jsonObject(input.contract),
-      actions: jsonObject(input.actions),
-      data: jsonObject(input.data),
-      mask: jsonObject(input.mask),
+      contract,
+      actions,
+      data,
+      mask,
       active,
       updatedAt: now,
     };
@@ -3895,6 +4250,7 @@ export async function publishCoreView(input: CoreViewPublishInput) {
           viewId: view.id,
           key,
           version,
+          idempotency,
           externalExecution: "blocked",
         },
       })

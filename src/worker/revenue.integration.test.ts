@@ -1515,6 +1515,12 @@ maybeDescribe("Revenue Worker integration eval", () => {
       db,
     });
     const [adapter] = await db.select().from(adapters).where(eq(adapters.id, adapterResult.adapterId)).limit(1);
+    const [adapterEvent] = await db.select().from(events).where(eq(events.id, adapterResult.eventId)).limit(1);
+    const [adapterAudit] = await db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.id, adapterResult.auditEventId))
+      .limit(1);
     const [connection] = await db
       .select()
       .from(connections)
@@ -1560,8 +1566,15 @@ maybeDescribe("Revenue Worker integration eval", () => {
     const healthReport = objectValue(healthResult.report);
 
     expect(adapterResult.created).toBe(true);
+    expect(adapterResult.adapter.authMode).toBe("oauth");
+    expect(objectValue(adapterResult.adapter).auth).toBeUndefined();
     expect(adapter?.key).toBe(adapterKey);
+    expect(adapter?.auth).toBe("oauth");
     expect(objectValue(adapter?.capabilities).sources).toEqual(["google_workspace_inbox"]);
+    expect(objectValue(adapterEvent?.data).authMode).toBe("oauth");
+    expect(objectValue(adapterEvent?.data).auth).toBeUndefined();
+    expect(objectValue(adapterAudit?.data).authMode).toBe("oauth");
+    expect(objectValue(adapterAudit?.data).auth).toBeUndefined();
     expect(connectionResult.created).toBe(true);
     expect(connectionResult.externalExecution).toBe("blocked");
     expect(connectionResult.pollingEnabled).toBe(true);
@@ -1647,6 +1660,22 @@ maybeDescribe("Revenue Worker integration eval", () => {
       credentialRefKind: null,
       envConfigured: null,
       pollingMode: "connection_buffer",
+    });
+
+    await expect(
+      upsertCoreAdapter({
+        operatorEmail: "owner@continuoushq.com",
+        tenantSlug: "continuous-demo",
+        idempotencyKey: `ci-core-adapter-secret-block-${runId}`,
+        key: `${adapterKey}_secret`,
+        name: "Unsafe adapter",
+        kind: "inbox",
+        auth: "env:GOOGLE_WORKSPACE_TOKEN",
+        db,
+      }),
+    ).rejects.toMatchObject({
+      code: "core_adapter_auth_mode_invalid",
+      status: 400,
     });
 
     await expect(

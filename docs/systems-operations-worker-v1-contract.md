@@ -49,7 +49,7 @@ All commands use `POST /worker`; no systems-specific route is added.
 
 | Object | Required data fields | Valid states | Links |
 |---|---|---|---|
-| `adapter` | `kind`, `capabilities`, `authType`, `risk`, `ownerRef` | `draft`, `active`, `paused`, `error`, `archived` | `has_connection`, `grants_capability` |
+| `adapter` | `kind`, `capabilities`, `authMode`, `risk`, `ownerRef` | `draft`, `active`, `paused`, `error`, `archived` | `has_connection`, `grants_capability`; credentials live on connection `credentialRef` fields |
 | `connection` | `adapterId`, `externalAccountRef`, `scopes`, `status`, `lastSyncAt`, `errorState` | `draft`, `active`, `degraded`, `paused`, `revoked` | `connects_adapter`, `has_sync_job` |
 | `sync_job` | `connectionId`, `cursor`, `startedAt`, `completedAt`, `counts`, `errors` | `queued`, `running`, `done`, `failed`, `canceled` | `syncs_connection`, `produced_issue` |
 | `webhook` | `connectionId`, `eventTypes`, `lastReceivedAt`, `signatureState` | `active`, `stale`, `failed`, `disabled` | `belongs_to_connection` |
