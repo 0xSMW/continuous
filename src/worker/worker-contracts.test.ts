@@ -109,6 +109,7 @@ describe("future worker contracts", () => {
       "src",
       ".github/workflows",
       "README.md",
+      "STRATEGY.md",
       "package.json",
     ]);
     const offenders = files.filter((path) => forbiddenWorkerUrlPattern.test(read(path)));
@@ -127,6 +128,7 @@ describe("future worker contracts", () => {
       "src",
       ".github/workflows",
       "README.md",
+      "STRATEGY.md",
       "package.json",
     ]);
     const offenders = files.filter((path) => forbiddenNamespacePattern.test(read(path)));

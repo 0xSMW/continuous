@@ -20,6 +20,7 @@
 | Simplified the canonical data model | Replaced early one-table-per-concept naming with smaller primitives such as Worker.kind, WorkRelationship.type, FilingArtifact.type, EvidenceItem.type, and CustomerSignal.type |
 | Canonical worker HTTP surface is guarded | Operator routes require bearer credentials, and production credentials now carry tenant, worker-role, route, read/write, and command scope through the control-plane token catalog |
 | Added canonical worker API | `/worker` is the forward control-plane route; worker role, tenant selection, command, idempotency, and config live in structured payload fields for mutation commands |
+| Normalized worker role naming | Strategy examples and contract guardrails now use role-based names such as `revenue_operations` instead of `_worker` identifiers, so future workers extend the same `/worker` command envelope |
 | Added worker command registry | `/worker` and `bun run worker:tool` now share registered command metadata, role allowlisting, config validation, idempotency rules, tenant requirements, and external-execution posture |
 | Hardened the worker API contract | Route-level tests now assert the generic `/worker` payload envelope, body `idempotencyKey` precedence, GET selector mapping, and malformed command config rejection |
 | Removed worker-specific local shortcuts | `worker:tool` is the only local mutation entrypoint; Revenue Operations runs now use the same `worker`, `command`, `idempotencyKey`, and `config` envelope as `/worker` |

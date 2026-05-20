@@ -574,7 +574,7 @@ Leaders should be able to allocate monthly intelligence buying power to:
 **Budget policy example**
 
 ```yaml
-id: budget.policy.revenue_worker.standard
+id: budget.policy.revenue_operations.standard
 budget_target: agentic_worker
 monthly_units: 10000000
 soft_limit_percent: 80
@@ -669,7 +669,7 @@ Generated UI contract example:
   "target": "web",
   "actor": "owner",
   "object_ref": "quote:q_123",
-  "worker_ref": "agentic_worker:revenue_worker",
+  "worker_ref": "worker:revenue_operations",
   "risk_level": "medium",
   "sections": [
     {"component": "CustomerSummary"},
@@ -854,10 +854,10 @@ objects:
   - job_photo
   - closeout
 workers:
-  - revenue_worker
-  - dispatch_worker
-  - change_order_worker
-  - collections_worker
+  - revenue_operations
+  - dispatch_operations
+  - change_order_operations
+  - collections_operations
 workflows:
   - lead_to_estimate
   - estimate_to_deposit
