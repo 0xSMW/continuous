@@ -222,18 +222,18 @@ and config in structured fields; ad hoc top-level operation fields are rejected.
 The Revenue Worker owns the first registered `/worker` commands. HTTP commands
 and local toolbox aliases resolve to the same handlers and validation rules.
 
-| HTTP command or view | Tool alias | Required config | Idempotency | Side effects | External execution |
+| HTTP command or view | Tool surface | Required config | Idempotency | Side effects | External execution |
 |---|---|---|---|---|---|
-| `GET view=snapshot` | `worker.snapshot` | None | None | Read-only | Blocked |
-| `GET view=approvals` | `worker.approvals.list` | Optional `state` | None | Read-only | Blocked |
-| `lead.read` | `worker.lead.read` | `source`, direct `records[]` / `record`, or `reader` referencing an active connection | Required | Core lead object/event/evidence, worker run, budget/usage, connection cursor proof, audit | Blocked |
-| `lead.classify` | `worker.lead.classify` | One of `config.intake`, `config.leadPacket`, or `config.lead` | Required | Classification worker run, budget/usage, inference, trace evidence, audit | Blocked |
-| `response.draft` | `worker.response.draft` | One of `config.intake`, `config.leadPacket`, or `config.lead` | Required | Draft worker run, budget/usage, inference, draft evidence, audit | Blocked |
-| `run` | `worker.run` | One of `config.intake`, `config.leadPacket`, or `config.lead` | Required | Internal records, budget, approval, dry-run adapter receipt | Blocked |
-| `continue` | `worker.continue` | `approvalId` | Required | Approved execution packet, revised approval packet, or rejected stop packet, workflow step, task outcome, audit/evidence | Blocked |
-| `approval.decide` | `worker.approvals.decide` | `approvalId`, `action`, optional `note` | None | Approval/task/workflow evidence only | Blocked |
-| `adapters.reconcile` | `worker.adapters.reconcile` | Tenant-scoped `worker.tenantSlug`, optional integer `limit` | None | Adapter reconciliation audit/evidence plus retry/review system tasks | Blocked |
-| `adapters.retry` | `worker.adapters.retry` | Tenant-scoped `worker.tenantSlug`, optional integer `limit` | None | Executes due dry-run retry rows, closes retry tasks, and writes blocked receipt evidence with live-credential readiness and rollback proof | Blocked |
+| `GET view=snapshot` | `worker.view` | None | None | Read-only | Blocked |
+| `GET view=approvals` | `worker.view` | Optional `state` | None | Read-only | Blocked |
+| `lead.read` | `worker.command` | `source`, direct `records[]` / `record`, or `reader` referencing an active connection | Required | Core lead object/event/evidence, worker run, budget/usage, connection cursor proof, audit | Blocked |
+| `lead.classify` | `worker.command` | One of `config.intake`, `config.leadPacket`, or `config.lead` | Required | Classification worker run, budget/usage, inference, trace evidence, audit | Blocked |
+| `response.draft` | `worker.command` | One of `config.intake`, `config.leadPacket`, or `config.lead` | Required | Draft worker run, budget/usage, inference, draft evidence, audit | Blocked |
+| `run` | `worker.command` | One of `config.intake`, `config.leadPacket`, or `config.lead` | Required | Internal records, budget, approval, dry-run adapter receipt | Blocked |
+| `continue` | `worker.command` | `approvalId` | Required | Approved execution packet, revised approval packet, or rejected stop packet, workflow step, task outcome, audit/evidence | Blocked |
+| `approval.decide` | `worker.command` | `approvalId`, `action`, optional `note` | None | Approval/task/workflow evidence only | Blocked |
+| `adapters.reconcile` | `worker.command` | Tenant-scoped `worker.tenantSlug`, optional integer `limit` | None | Adapter reconciliation audit/evidence plus retry/review system tasks | Blocked |
+| `adapters.retry` | `worker.command` | Tenant-scoped `worker.tenantSlug`, optional integer `limit` | None | Executes due dry-run retry rows, closes retry tasks, and writes blocked receipt evidence with live-credential readiness and rollback proof | Blocked |
 
 ## Run Config
 
@@ -345,7 +345,7 @@ blocked external-execution posture.
 | `adapter_runs` | Records dry-run adapter execution, attempt metadata, retry execution, receipt state, and reconciliation state |
 | `inferences` | Stores prompt/result/safety trace |
 | `usage_events` | Attributes units to budget, task, capability, and worker |
-| `events` | Emits source `lead.received`, `revenue_worker.lead_read.completed`, and `revenue_worker.run.completed` records with linked output ids |
+| `events` | Emits source lead and worker lifecycle records with linked output ids |
 | `evidence` | Stores source snapshots, trace, adapter receipt, and later approval decision evidence |
 | `adapter_actions` | Links to the adapter run and drafts customer-response intent with `externalSend=false` |
 | `approval_requests` | Creates pending operator approval for the prepared action |

@@ -131,13 +131,11 @@ describe("future worker contracts", () => {
 
     expect(source).toContain("All commands use `POST /worker`; no dispatch-specific route is added.");
     expect(source).toContain("`customer_update.draft`");
-    expect(source).toContain("`worker.dispatch.customer_update.draft`");
+    expect(source).toContain("`worker.command`");
     expect(source).toContain("customer update draft");
     expect(source).toContain("`closeout.prepare`");
-    expect(source).toContain("`worker.dispatch.closeout.prepare`");
     expect(source).toContain("closeout packet");
     expect(source).toContain("`exception.route`");
-    expect(source).toContain("`worker.dispatch.exception.route`");
     expect(source).toContain("exception task");
     expect(source).not.toMatch(/\/api\/[a-z0-9-]+-worker/);
   });
@@ -146,14 +144,12 @@ describe("future worker contracts", () => {
     const source = read("docs/finance-operations-worker-v1-contract.md");
 
     expect(source).toContain("All commands use `POST /worker`");
+    expect(source).toContain("`worker.command`");
+    expect(source).toContain("`worker.view`");
     expect(source).toContain("`invoice.prepare`");
-    expect(source).toContain("`worker.finance.invoice.prepare`");
     expect(source).toContain("`ar_followup.draft`");
-    expect(source).toContain("`worker.finance.ar_followup.draft`");
     expect(source).toContain("`cash_forecast.generate`");
-    expect(source).toContain("`worker.finance.cash_forecast.generate`");
     expect(source).toContain("`payment_draft.prepare`");
-    expect(source).toContain("`worker.finance.payment_draft.prepare`");
     expect(source).toContain("cash packet");
     expect(source).toContain("AR follow-up draft");
     expect(source).toContain("cash forecast");

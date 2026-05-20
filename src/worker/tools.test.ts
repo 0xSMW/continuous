@@ -80,9 +80,7 @@ describe("worker tool contract", () => {
       expect(Object.keys(properties)).not.toEqual(
         expect.arrayContaining(["role", "tenantSlug", "leadPacket", "approvalId", "limit", "source", "records"]),
       );
-      if (tool.registry.idempotency === "required") {
-        expect(properties.idempotencyKey).toBeTruthy();
-      }
+      expect(properties.idempotencyKey).toBeTruthy();
       if (properties.config) {
         expect((properties.config as { type?: string }).type).toBe("object");
       }
@@ -91,7 +89,8 @@ describe("worker tool contract", () => {
 
   it("rejects local worker tool payloads with top-level operation fields", async () => {
     await expect(
-      executeWorkerTool("worker.run", {
+      executeWorkerTool("worker.command", {
+        command: "run",
         worker: {
           role: "revenue_operations",
           tenantSlug: "continuous-demo",
@@ -104,35 +103,42 @@ describe("worker tool contract", () => {
         config: {},
       }),
     ).rejects.toThrow(
-      "Worker tool payload fields must be worker, idempotencyKey, config, and operatorEmail. Move operation inputs into config. Unexpected fields: leadPacket, approvalId.",
+      "Worker tool payload fields must be command, worker, idempotencyKey, config, and operatorEmail. Move operation inputs into config. Unexpected fields: leadPacket, approvalId.",
+    );
+
+    await expect(
+      executeWorkerTool("worker.command", {
+        command: "run",
+        view: "snapshot",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "local-envelope-test-002",
+        config: {},
+      }),
+    ).rejects.toThrow(
+      "Worker tool payload fields must be command, worker, idempotencyKey, config, and operatorEmail. Move operation inputs into config. Unexpected fields: view.",
+    );
+
+    await expect(
+      executeWorkerTool("worker.view", {
+        view: "snapshot",
+        command: "run",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+      }),
+    ).rejects.toThrow(
+      "Worker tool payload fields must be view, worker, config, and operatorEmail. Move operation inputs into config. Unexpected fields: command.",
     );
   });
 
   it("exposes registry-backed repo-owned worker tools", () => {
     expect(workerTools.map((tool) => tool.name)).toEqual([
-      "worker.snapshot",
-      "worker.owner.briefs.list",
-      "worker.owner.decisions.list",
-      "worker.run",
-      "worker.lead.read",
-      "worker.lead.classify",
-      "worker.response.draft",
-      "worker.dispatch.schedule.propose",
-      "worker.dispatch.customer_update.draft",
-      "worker.dispatch.closeout.prepare",
-      "worker.dispatch.exception.route",
-      "worker.finance.invoice.prepare",
-      "worker.finance.ar_followup.draft",
-      "worker.finance.cash_forecast.generate",
-      "worker.finance.payment_draft.prepare",
-      "worker.continue",
-      "worker.approvals.list",
-      "worker.approvals.decide",
-      "worker.adapters.reconcile",
-      "worker.adapters.retry",
-      "worker.owner.brief.generate",
-      "worker.owner.decision_queue.prepare",
-      "worker.owner.anomaly.triage",
+      "worker.view",
+      "worker.command",
     ]);
     expect(workerToolSchema.tools).toBe(workerTools);
     expect(workerToolSchema.registry.commands).toEqual(registeredWorkerCommands());
@@ -432,7 +438,7 @@ describe("worker tool contract", () => {
 
   it("requires an explicit worker role before runtime work", async () => {
     await expect(
-      executeWorkerTool("worker.snapshot", {
+      executeWorkerTool("worker.view", {
         worker: {},
       }),
     ).rejects.toThrow("worker.role is required.");
@@ -440,7 +446,7 @@ describe("worker tool contract", () => {
 
   it("rejects unsupported worker roles before runtime work", async () => {
     await expect(
-      executeWorkerTool("worker.snapshot", {
+      executeWorkerTool("worker.view", {
         worker: {
           role: "payroll_operations",
         },
@@ -529,7 +535,8 @@ describe("worker tool contract", () => {
 
   it("validates worker run idempotency before invoking the worker", async () => {
     await expect(
-      executeWorkerTool("worker.run", {
+      executeWorkerTool("worker.command", {
+        command: "run",
         worker: {
           role: "revenue_operations",
           tenantSlug: "continuous-demo",
@@ -549,7 +556,8 @@ describe("worker tool contract", () => {
 
   it("requires explicit Revenue run intake or lead payload", async () => {
     await expect(
-      executeWorkerTool("worker.run", {
+      executeWorkerTool("worker.command", {
+        command: "run",
         worker: {
           role: "revenue_operations",
           tenantSlug: "continuous-demo",
@@ -562,7 +570,8 @@ describe("worker tool contract", () => {
 
   it("validates lead read idempotency before invoking the worker", async () => {
     await expect(
-      executeWorkerTool("worker.lead.read", {
+      executeWorkerTool("worker.command", {
+        command: "lead.read",
         worker: {
           role: "revenue_operations",
           tenantSlug: "continuous-demo",
@@ -585,7 +594,8 @@ describe("worker tool contract", () => {
 
   it("validates split revenue action idempotency before invoking the worker", async () => {
     await expect(
-      executeWorkerTool("worker.lead.classify", {
+      executeWorkerTool("worker.command", {
+        command: "lead.classify",
         worker: {
           role: "revenue_operations",
           tenantSlug: "continuous-demo",
@@ -602,7 +612,8 @@ describe("worker tool contract", () => {
     );
 
     await expect(
-      executeWorkerTool("worker.response.draft", {
+      executeWorkerTool("worker.command", {
+        command: "response.draft",
         worker: {
           role: "revenue_operations",
           tenantSlug: "continuous-demo",
@@ -621,7 +632,8 @@ describe("worker tool contract", () => {
 
   it("validates worker continuation idempotency before invoking the worker", async () => {
     await expect(
-      executeWorkerTool("worker.continue", {
+      executeWorkerTool("worker.command", {
+        command: "continue",
         worker: {
           role: "revenue_operations",
           tenantSlug: "continuous-demo",
@@ -638,7 +650,8 @@ describe("worker tool contract", () => {
 
   it("validates owner brief idempotency before invoking the worker", async () => {
     await expect(
-      executeWorkerTool("worker.owner.brief.generate", {
+      executeWorkerTool("worker.command", {
+        command: "brief.generate",
         worker: {
           role: "owner_chief_of_staff",
           tenantSlug: "continuous-demo",
@@ -659,7 +672,8 @@ describe("worker tool contract", () => {
 
   it("validates dispatch schedule proposal envelopes before invoking the worker", async () => {
     await expect(
-      executeWorkerTool("worker.dispatch.schedule.propose", {
+      executeWorkerTool("worker.command", {
+        command: "schedule.propose",
         worker: {
           role: "dispatch_operations",
           tenantSlug: "continuous-demo",
@@ -677,7 +691,8 @@ describe("worker tool contract", () => {
     );
 
     await expect(
-      executeWorkerTool("worker.dispatch.schedule.propose", {
+      executeWorkerTool("worker.command", {
+        command: "schedule.propose",
         worker: {
           role: "dispatch_operations",
           tenantSlug: "continuous-demo",
@@ -694,7 +709,8 @@ describe("worker tool contract", () => {
 
   it("validates dispatch customer update draft envelopes before invoking the worker", async () => {
     await expect(
-      executeWorkerTool("worker.dispatch.customer_update.draft", {
+      executeWorkerTool("worker.command", {
+        command: "customer_update.draft",
         worker: {
           role: "dispatch_operations",
           tenantSlug: "continuous-demo",
@@ -710,7 +726,8 @@ describe("worker tool contract", () => {
     );
 
     await expect(
-      executeWorkerTool("worker.dispatch.customer_update.draft", {
+      executeWorkerTool("worker.command", {
+        command: "customer_update.draft",
         worker: {
           role: "dispatch_operations",
           tenantSlug: "continuous-demo",
@@ -725,7 +742,8 @@ describe("worker tool contract", () => {
 
   it("validates dispatch closeout prepare envelopes before invoking the worker", async () => {
     await expect(
-      executeWorkerTool("worker.dispatch.closeout.prepare", {
+      executeWorkerTool("worker.command", {
+        command: "closeout.prepare",
         worker: {
           role: "dispatch_operations",
           tenantSlug: "continuous-demo",
@@ -740,7 +758,8 @@ describe("worker tool contract", () => {
     );
 
     await expect(
-      executeWorkerTool("worker.dispatch.closeout.prepare", {
+      executeWorkerTool("worker.command", {
+        command: "closeout.prepare",
         worker: {
           role: "dispatch_operations",
           tenantSlug: "continuous-demo",
@@ -757,7 +776,8 @@ describe("worker tool contract", () => {
 
   it("validates dispatch exception route envelopes before invoking the worker", async () => {
     await expect(
-      executeWorkerTool("worker.dispatch.exception.route", {
+      executeWorkerTool("worker.command", {
+        command: "exception.route",
         worker: {
           role: "dispatch_operations",
           tenantSlug: "continuous-demo",
@@ -774,7 +794,8 @@ describe("worker tool contract", () => {
     );
 
     await expect(
-      executeWorkerTool("worker.dispatch.exception.route", {
+      executeWorkerTool("worker.command", {
+        command: "exception.route",
         worker: {
           role: "dispatch_operations",
           tenantSlug: "continuous-demo",
@@ -790,7 +811,8 @@ describe("worker tool contract", () => {
 
   it("validates finance invoice prepare envelopes before invoking the worker", async () => {
     await expect(
-      executeWorkerTool("worker.finance.invoice.prepare", {
+      executeWorkerTool("worker.command", {
+        command: "invoice.prepare",
         worker: {
           role: "finance_operations",
           tenantSlug: "continuous-demo",
@@ -807,7 +829,8 @@ describe("worker tool contract", () => {
     );
 
     await expect(
-      executeWorkerTool("worker.finance.invoice.prepare", {
+      executeWorkerTool("worker.command", {
+        command: "invoice.prepare",
         worker: {
           role: "finance_operations",
           tenantSlug: "continuous-demo",
@@ -820,7 +843,8 @@ describe("worker tool contract", () => {
 
   it("validates finance AR follow-up envelopes before invoking the worker", async () => {
     await expect(
-      executeWorkerTool("worker.finance.ar_followup.draft", {
+      executeWorkerTool("worker.command", {
+        command: "ar_followup.draft",
         worker: {
           role: "finance_operations",
           tenantSlug: "continuous-demo",
@@ -836,7 +860,8 @@ describe("worker tool contract", () => {
     );
 
     await expect(
-      executeWorkerTool("worker.finance.ar_followup.draft", {
+      executeWorkerTool("worker.command", {
+        command: "ar_followup.draft",
         worker: {
           role: "finance_operations",
           tenantSlug: "continuous-demo",
@@ -851,7 +876,8 @@ describe("worker tool contract", () => {
 
   it("validates finance cash forecast envelopes before invoking the worker", async () => {
     await expect(
-      executeWorkerTool("worker.finance.cash_forecast.generate", {
+      executeWorkerTool("worker.command", {
+        command: "cash_forecast.generate",
         worker: {
           role: "finance_operations",
           tenantSlug: "continuous-demo",
@@ -870,7 +896,8 @@ describe("worker tool contract", () => {
     );
 
     await expect(
-      executeWorkerTool("worker.finance.cash_forecast.generate", {
+      executeWorkerTool("worker.command", {
+        command: "cash_forecast.generate",
         worker: {
           role: "finance_operations",
           tenantSlug: "continuous-demo",
@@ -888,7 +915,8 @@ describe("worker tool contract", () => {
 
   it("validates finance payment draft envelopes before invoking the worker", async () => {
     await expect(
-      executeWorkerTool("worker.finance.payment_draft.prepare", {
+      executeWorkerTool("worker.command", {
+        command: "payment_draft.prepare",
         worker: {
           role: "finance_operations",
           tenantSlug: "continuous-demo",
@@ -903,7 +931,8 @@ describe("worker tool contract", () => {
     );
 
     await expect(
-      executeWorkerTool("worker.finance.payment_draft.prepare", {
+      executeWorkerTool("worker.command", {
+        command: "payment_draft.prepare",
         worker: {
           role: "finance_operations",
           tenantSlug: "continuous-demo",
@@ -914,7 +943,8 @@ describe("worker tool contract", () => {
     ).rejects.toThrow("config.billId, paymentId or sourceRefs is required for payment_draft.prepare.");
 
     await expect(
-      executeWorkerTool("worker.finance.payment_draft.prepare", {
+      executeWorkerTool("worker.command", {
+        command: "payment_draft.prepare",
         worker: {
           role: "finance_operations",
           tenantSlug: "continuous-demo",
@@ -930,7 +960,8 @@ describe("worker tool contract", () => {
 
   it("requires tenant scope for adapter reconciliation", async () => {
     await expect(
-      executeWorkerTool("worker.adapters.reconcile", {
+      executeWorkerTool("worker.command", {
+        command: "adapters.reconcile",
         worker: {
           role: "revenue_operations",
         },
@@ -943,7 +974,8 @@ describe("worker tool contract", () => {
 
   it("requires tenant scope for lead source reads", async () => {
     await expect(
-      executeWorkerTool("worker.lead.read", {
+      executeWorkerTool("worker.command", {
+        command: "lead.read",
         worker: {
           role: "revenue_operations",
         },
@@ -963,7 +995,8 @@ describe("worker tool contract", () => {
 
   it("requires tenant scope for adapter retry execution", async () => {
     await expect(
-      executeWorkerTool("worker.adapters.retry", {
+      executeWorkerTool("worker.command", {
+        command: "adapters.retry",
         worker: {
           role: "revenue_operations",
         },
@@ -976,7 +1009,8 @@ describe("worker tool contract", () => {
 
   it("rejects malformed command config instead of silently normalizing it", async () => {
     await expect(
-      executeWorkerTool("worker.approvals.decide", {
+      executeWorkerTool("worker.command", {
+        command: "approval.decide",
         worker: {
           role: "revenue_operations",
           tenantSlug: "continuous-demo",
@@ -988,7 +1022,8 @@ describe("worker tool contract", () => {
 
   it("uses registry validation for adapter reconciliation limits", async () => {
     await expect(
-      executeWorkerTool("worker.adapters.reconcile", {
+      executeWorkerTool("worker.command", {
+        command: "adapters.reconcile",
         worker: {
           role: "revenue_operations",
           tenantSlug: "continuous-demo",
@@ -1002,7 +1037,8 @@ describe("worker tool contract", () => {
 
   it("uses registry validation for adapter retry limits", async () => {
     await expect(
-      executeWorkerTool("worker.adapters.retry", {
+      executeWorkerTool("worker.command", {
+        command: "adapters.retry",
         worker: {
           role: "revenue_operations",
           tenantSlug: "continuous-demo",
@@ -1016,7 +1052,8 @@ describe("worker tool contract", () => {
 
   it("uses registry config schemas for lead source reads", async () => {
     await expect(
-      executeWorkerTool("worker.lead.read", {
+      executeWorkerTool("worker.command", {
+        command: "lead.read",
         worker: {
           role: "revenue_operations",
           tenantSlug: "continuous-demo",
@@ -1034,7 +1071,8 @@ describe("worker tool contract", () => {
     ).rejects.toThrow("config.source is required for lead.read.");
 
     await expect(
-      executeWorkerTool("worker.lead.read", {
+      executeWorkerTool("worker.command", {
+        command: "lead.read",
         worker: {
           role: "revenue_operations",
           tenantSlug: "continuous-demo",
@@ -1049,7 +1087,8 @@ describe("worker tool contract", () => {
 
   it("requires source reader credential references without embedded credential material", async () => {
     await expect(
-      executeWorkerTool("worker.lead.read", {
+      executeWorkerTool("worker.command", {
+        command: "lead.read",
         worker: {
           role: "revenue_operations",
           tenantSlug: "continuous-demo",
@@ -1073,7 +1112,8 @@ describe("worker tool contract", () => {
     ).rejects.toThrow("config.reader.credentialRef is required for inbox and CRM lead readers.");
 
     await expect(
-      executeWorkerTool("worker.lead.read", {
+      executeWorkerTool("worker.command", {
+        command: "lead.read",
         worker: {
           role: "revenue_operations",
           tenantSlug: "continuous-demo",
@@ -1103,7 +1143,8 @@ describe("worker tool contract", () => {
 
   it("uses registry config schemas for owner commands", async () => {
     await expect(
-      executeWorkerTool("worker.owner.brief.generate", {
+      executeWorkerTool("worker.command", {
+        command: "brief.generate",
         worker: {
           role: "owner_chief_of_staff",
           tenantSlug: "continuous-demo",
@@ -1119,7 +1160,8 @@ describe("worker tool contract", () => {
     ).rejects.toThrow("config.scopes is required for brief.generate.");
 
     await expect(
-      executeWorkerTool("worker.owner.anomaly.triage", {
+      executeWorkerTool("worker.command", {
+        command: "anomaly.triage",
         worker: {
           role: "owner_chief_of_staff",
           tenantSlug: "continuous-demo",

@@ -1111,7 +1111,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
       upsertCoreConnection({
         operatorEmail: "owner@continuoushq.com",
         tenantSlug: "continuous-demo",
-        idempotencyKey: `ci-core-connection-secret-block-${runId}`,
+        idempotencyKey: `ci-core-connection-sensitive-field-block-${runId}`,
         adapterKey,
         name: "Unsafe connection",
         state: "active",
@@ -1123,7 +1123,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
             enabled: true,
             source: "google_workspace_inbox",
             provider: "google_workspace",
-            accessToken: "raw-token",
+            accessToken: "placeholder",
           },
         },
         db,

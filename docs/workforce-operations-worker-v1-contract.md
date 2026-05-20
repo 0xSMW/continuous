@@ -36,15 +36,15 @@ All commands use `POST /worker`; no workforce-specific route is added.
 
 ## Registry Entries
 
-| Command or view | Tool alias | Required config | Idempotency | Side effects | External execution |
+| Command or view | Tool surface | Required config | Idempotency | Side effects | External execution |
 |---|---|---|---|---|---|
-| `GET view=snapshot` | `worker.snapshot` | `worker.role` | None | Read-only | Blocked |
-| `hire.packet.prepare` | `worker.workforce.hire.packet.prepare` | `personId`, `positionId`, `workLocationId` | Required | Packet, document checklist, approval request | Blocked |
-| `contractor.packet.prepare` | `worker.workforce.contractor.packet.prepare` | `personId`, `engagementId` | Required | Classification packet and blocker task | Blocked |
-| `credential.review` | `worker.workforce.credential.review` | `personId` or `credentialId` | Required | Credential renewal task and evidence | Blocked |
-| `schedule_readiness.prepare` | `worker.workforce.schedule_readiness.prepare` | `personId`, `period` | Required | Readiness packet and exception tasks | Blocked |
-| `payroll_input.prepare` | `worker.workforce.payroll_input.prepare` | `employmentId`, `period` | Required | Payroll input packet plus Core `payroll.preview.record` and `payroll.preview.packet.prepare` handoff | Dry-run |
-| `approval.decide` | `worker.approvals.decide` | `approvalId`, `action`, optional `note` | None | Approval/task/workflow evidence only | Blocked |
+| `GET view=snapshot` | `worker.view` | `worker.role` | None | Read-only | Blocked |
+| `hire.packet.prepare` | `worker.command` | `personId`, `positionId`, `workLocationId` | Required | Packet, document checklist, approval request | Blocked |
+| `contractor.packet.prepare` | `worker.command` | `personId`, `engagementId` | Required | Classification packet and blocker task | Blocked |
+| `credential.review` | `worker.command` | `personId` or `credentialId` | Required | Credential renewal task and evidence | Blocked |
+| `schedule_readiness.prepare` | `worker.command` | `personId`, `period` | Required | Readiness packet and exception tasks | Blocked |
+| `payroll_input.prepare` | `worker.command` | `employmentId`, `period` | Required | Payroll input packet plus Core `payroll.preview.record` and `payroll.preview.packet.prepare` handoff | Dry-run |
+| `approval.decide` | `worker.command` | `approvalId`, `action`, optional `note` | None | Approval/task/workflow evidence only | Blocked |
 
 ## Core Object Map
 

@@ -48,9 +48,9 @@ Useful app surfaces for worker development:
 | `bun run app-server:worker-tools continuous.worker.command` | App-server command surface backed by the same worker registry |
 
 `bun run worker:tool schema` exposes the registered worker commands and local
-tool aliases. Agents should inspect that registry metadata before invoking a
-worker command, then send the same `worker`, `config`, and `idempotencyKey`
-payload shape through either the toolbox or `/worker`.
+generic tool surfaces. Agents should inspect that registry metadata before
+invoking a worker command, then send the same `command`, `worker`, `config`,
+and `idempotencyKey` payload shape through either the toolbox or `/worker`.
 
 ## Boundary
 
@@ -74,12 +74,12 @@ HTTP mutation. Read the lead source records into Core first, then run the worker
 from the returned source selector:
 
 ```sh
-bun run worker:tool worker.lead.read <<'JSON'
-{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-lead-read-001","config":{"source":"website_form","records":[{"sourceEventId":"form-001","customerName":"Acme Roof Repair","customerIntent":"roof leak inspection","serviceArea":"roofing","urgency":"high"}]}}
+bun run worker:tool worker.command <<'JSON'
+{"command":"lead.read","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-lead-read-001","config":{"source":"website_form","records":[{"sourceEventId":"form-001","customerName":"Acme Roof Repair","customerIntent":"roof leak inspection","serviceArea":"roofing","urgency":"high"}]}}
 JSON
 
-bun run worker:tool worker.run <<'JSON'
-{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-revenue-run-001","config":{"intake":{"source":"website_form","sourceEventId":"form-001"}}}
+bun run worker:tool worker.command <<'JSON'
+{"command":"run","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-revenue-run-001","config":{"intake":{"source":"website_form","sourceEventId":"form-001"}}}
 JSON
 ```
 
@@ -192,15 +192,15 @@ The worker toolbox uses the same payload shape:
 ```sh
 bun run worker:tool schema
 
-bun run worker:tool worker.snapshot <<'JSON'
+bun run worker:tool worker.view <<'JSON'
 {"worker":{"role":"revenue_operations"}}
 JSON
 
-bun run worker:tool worker.adapters.reconcile <<'JSON'
-{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{"limit":25}}
+bun run worker:tool worker.command <<'JSON'
+{"command":"adapters.reconcile","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{"limit":25}}
 JSON
 
-bun run worker:tool worker.adapters.retry <<'JSON'
-{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{"limit":25}}
+bun run worker:tool worker.command <<'JSON'
+{"command":"adapters.retry","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{"limit":25}}
 JSON
 ```

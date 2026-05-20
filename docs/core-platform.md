@@ -188,7 +188,7 @@ policy-bound:
 | `/workflow` | Canonical workflow command surface for listing definitions/runs/steps and executing validated `start` / `transition` / `steps.execute` / `approval.decide` commands |
 | `/workflow?view=approvals` | Operator-only approval queue for workflow decisions backed by the shared approval service |
 | `worker-scheduler` | Internal production runner that calls the same `/workflow` and `/worker` command envelopes to drain workflow steps, poll Revenue lead sources through `command=lead.read`, hand returned selectors to `command=run`, and run Revenue adapter retry/reconciliation work |
-| `bun run worker:tool worker.lead.read` / `worker.run` | Canonical local command surfaces using the same worker/config payload shape |
+| `bun run worker:tool worker.command` / `worker.view` | Canonical local command and read surfaces using the same worker/config payload shape |
 
 Worker-specific HTTP paths are not part of the public API. New worker families
 must extend `/worker` by registering role-scoped commands with structured
@@ -216,7 +216,7 @@ internal workflow already holds them. The worker stores a source snapshot, binds
 the idempotency key to a canonical input hash, derives classification, draft
 response, and quote fields from the resolved intake packet, reserves budget,
 records inference and usage, emits an idempotent
-`revenue_worker.run.completed` event, captures trace and receipt evidence,
+worker lifecycle event, captures trace and receipt evidence,
 creates an owner approval packet, updates the task to `approval_required`, and
 versions the quote object. `config.leadPacket` remains a direct operator/test
 fallback. External sends and money movement remain blocked until human approval

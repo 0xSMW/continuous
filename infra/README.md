@@ -29,7 +29,7 @@ HOST=your-droplet-ip ./scripts/deploy.sh
 ```
 
 The deploy script creates `/opt/continuous/.env` on the droplet with a random
-Postgres password and requires HTTPS `SITE_HOSTS`. The current production hosts
+Postgres credential and requires HTTPS `SITE_HOSTS`. The current production hosts
 are `continuoushq.com, getcontinuous.app`.
 
 ## Backup and restore

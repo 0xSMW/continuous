@@ -14,7 +14,7 @@ work from one worker family to the next.
 | Gate | Required proof |
 |---|---|
 | Contract | V1 contract doc defines API payloads, object fields, workflows, capabilities, adapters, evidence, views, evals, and security boundaries |
-| Command registry | Worker commands and local tool aliases are registered with role, config validation, idempotency, tenant requirements, and external-execution status |
+| Command registry | Worker commands and generic local worker tools are registered with role, config validation, idempotency, tenant requirements, and external-execution status |
 | Object map | Canonical records exist for the worker's operating flow |
 | Workflow | Definition, seeded run, seeded step, approval policy, and evidence packet are persisted |
 | Capabilities | Typed capability grants define read, draft, prepare, approve, and execute boundaries |

@@ -35,15 +35,15 @@ All commands use `POST /worker`; no systems-specific route is added.
 
 ## Registry Entries
 
-| Command or view | Tool alias | Required config | Idempotency | Side effects | External execution |
+| Command or view | Tool surface | Required config | Idempotency | Side effects | External execution |
 |---|---|---|---|---|---|
-| `GET view=snapshot` | `worker.snapshot` | `worker.role` | None | Read-only | Blocked |
-| `connector.health.scan` | `worker.systems.connector.health.scan` | `checks[]` | Required | Health evidence and tasks | Blocked |
-| `sync.repair.plan` | `worker.systems.sync.repair.plan` | `connectionId`, `issueId` | Required | Repair plan, dry-run adapter actions | Dry-run |
-| `data_quality.remediate` | `worker.systems.data_quality.remediate` | `issueId`, `policy` | Required | Proposed object updates and evidence | Dry-run |
-| `permission.review` | `worker.systems.permission.review` | `connectionId` or `grantId` | Required | Permission audit packet | Blocked |
-| `automation.plan` | `worker.systems.automation.plan` | `workflowKey`, `trigger` | Required | Automation proposal only | Blocked |
-| `approval.decide` | `worker.approvals.decide` | `approvalId`, `action`, optional `note` | None | Approval/task/workflow evidence only | Blocked |
+| `GET view=snapshot` | `worker.view` | `worker.role` | None | Read-only | Blocked |
+| `connector.health.scan` | `worker.command` | `checks[]` | Required | Health evidence and tasks | Blocked |
+| `sync.repair.plan` | `worker.command` | `connectionId`, `issueId` | Required | Repair plan, dry-run adapter actions | Dry-run |
+| `data_quality.remediate` | `worker.command` | `issueId`, `policy` | Required | Proposed object updates and evidence | Dry-run |
+| `permission.review` | `worker.command` | `connectionId` or `grantId` | Required | Permission audit packet | Blocked |
+| `automation.plan` | `worker.command` | `workflowKey`, `trigger` | Required | Automation proposal only | Blocked |
+| `approval.decide` | `worker.command` | `approvalId`, `action`, optional `note` | None | Approval/task/workflow evidence only | Blocked |
 
 ## Core Object Map
 

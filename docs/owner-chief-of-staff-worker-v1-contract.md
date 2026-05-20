@@ -54,15 +54,15 @@ Approval continuations use the same payload shape:
 
 ## Registry Entries
 
-| Command or view | Tool alias | Required config | Idempotency | Side effects | External execution |
+| Command or view | Tool surface | Required config | Idempotency | Side effects | External execution |
 |---|---|---|---|---|---|
-| `GET view=snapshot` | `worker.snapshot` | `worker.role` | None | Read-only | Blocked |
+| `GET view=snapshot` | `worker.view` | `worker.role` | None | Read-only | Blocked |
 | `GET view=briefs` | `worker.briefs.list` | Optional `state`, `from`, `to` | None | Read-only | Blocked |
-| `brief.generate` | `worker.owner.brief.generate` | `window`, `scopes[]` | Required | Evidence, document, decision drafts, view publish | Blocked |
-| `decision_queue.prepare` | `worker.owner.decision_queue.prepare` | `window`, optional `priorityFloor` | Required | Internal task and decision proposals | Blocked |
-| `anomaly.triage` | `worker.owner.anomaly.triage` | `window`, `metricKeys[]` | Required | Internal anomaly evidence and tasks | Blocked |
-| `approval.decide` | `worker.approvals.decide` | `approvalId`, `action`, optional `note` | None | Approval/task/workflow evidence only | Blocked |
-| `continue` | `worker.continue` | `approvalId` | Required | Publish, revise, or stale an owner brief from a decided approval | Blocked |
+| `brief.generate` | `worker.command` | `window`, `scopes[]` | Required | Evidence, document, decision drafts, view publish | Blocked |
+| `decision_queue.prepare` | `worker.command` | `window`, optional `priorityFloor` | Required | Internal task and decision proposals | Blocked |
+| `anomaly.triage` | `worker.command` | `window`, `metricKeys[]` | Required | Internal anomaly evidence and tasks | Blocked |
+| `approval.decide` | `worker.command` | `approvalId`, `action`, optional `note` | None | Approval/task/workflow evidence only | Blocked |
+| `continue` | `worker.command` | `approvalId` | Required | Publish, revise, or stale an owner brief from a decided approval | Blocked |
 
 ## Core Object Map
 

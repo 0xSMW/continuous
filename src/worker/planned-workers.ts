@@ -157,7 +157,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "owner_chief_of_staff",
         name: "brief.generate",
-        toolAlias: "worker.owner.brief.generate",
+        toolAlias: "worker.command",
         description: "Generate a read-only owner brief over tasks, approvals, cash, capacity, obligations, and worker health.",
         idempotency: "required",
         sideEffects: "internal",
@@ -168,7 +168,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "owner_chief_of_staff",
         name: "decision_queue.prepare",
-        toolAlias: "worker.owner.decision_queue.prepare",
+        toolAlias: "worker.command",
         description: "Prepare owner decisions with source evidence, priority, options, rationale, and approval gates.",
         idempotency: "required",
         sideEffects: "internal",
@@ -179,7 +179,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "owner_chief_of_staff",
         name: "anomaly.triage",
-        toolAlias: "worker.owner.anomaly.triage",
+        toolAlias: "worker.command",
         description: "Triage cross-system metric anomalies into review-ready evidence and route proposals.",
         idempotency: "required",
         sideEffects: "internal",
@@ -190,7 +190,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "owner_chief_of_staff",
         name: "approval.decide",
-        toolAlias: "worker.approvals.decide",
+        toolAlias: "worker.command",
         description: "Record an owner approval decision without executing external actions.",
         idempotency: "none",
         sideEffects: "internal",
@@ -203,7 +203,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "owner_chief_of_staff",
         name: "snapshot",
-        toolAlias: "worker.owner.snapshot",
+        toolAlias: "worker.view",
         description: "Read the owner chief-of-staff worker runtime snapshot.",
         idempotency: "none",
         sideEffects: "none",
@@ -213,7 +213,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "owner_chief_of_staff",
         name: "briefs",
-        toolAlias: "worker.owner.briefs.list",
+        toolAlias: "worker.view",
         description: "List generated owner briefs by state and time window.",
         idempotency: "none",
         sideEffects: "none",
@@ -223,7 +223,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "owner_chief_of_staff",
         name: "decisions",
-        toolAlias: "worker.owner.decisions.list",
+        toolAlias: "worker.view",
         description: "List owner decision proposals and approval state.",
         idempotency: "none",
         sideEffects: "none",
@@ -244,7 +244,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "dispatch_operations",
         name: "schedule.propose",
-        toolAlias: "worker.dispatch.schedule.propose",
+        toolAlias: "worker.command",
         description: "Prepare a schedule proposal, conflict scan, appointment draft, and approval request.",
         idempotency: "required",
         sideEffects: "dry_run",
@@ -255,7 +255,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "dispatch_operations",
         name: "customer_update.draft",
-        toolAlias: "worker.dispatch.customer_update.draft",
+        toolAlias: "worker.command",
         description: "Draft a customer update from job evidence without sending externally.",
         idempotency: "required",
         sideEffects: "internal",
@@ -266,7 +266,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "dispatch_operations",
         name: "closeout.prepare",
-        toolAlias: "worker.dispatch.closeout.prepare",
+        toolAlias: "worker.command",
         description: "Prepare a closeout packet with QA checklist, proof, blockers, and invoice handoff.",
         idempotency: "required",
         sideEffects: "internal",
@@ -277,7 +277,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "dispatch_operations",
         name: "exception.route",
-        toolAlias: "worker.dispatch.exception.route",
+        toolAlias: "worker.command",
         description: "Route schedule, material, safety, or closeout exceptions into Core tasks and evidence.",
         idempotency: "required",
         sideEffects: "internal",
@@ -288,7 +288,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "dispatch_operations",
         name: "approval.decide",
-        toolAlias: "worker.approvals.decide",
+        toolAlias: "worker.command",
         description: "Record an operator decision on a dispatch approval without executing external actions.",
         idempotency: "none",
         sideEffects: "internal",
@@ -301,7 +301,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "dispatch_operations",
         name: "snapshot",
-        toolAlias: "worker.dispatch.snapshot",
+        toolAlias: "worker.view",
         description: "Read the dispatch worker runtime snapshot.",
         idempotency: "none",
         sideEffects: "none",
@@ -311,7 +311,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "dispatch_operations",
         name: "board",
-        toolAlias: "worker.dispatch.board",
+        toolAlias: "worker.view",
         description: "Read the dispatch board, conflicts, approvals, and schedule readiness.",
         idempotency: "none",
         sideEffects: "none",
@@ -321,7 +321,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "dispatch_operations",
         name: "exceptions",
-        toolAlias: "worker.dispatch.exceptions",
+        toolAlias: "worker.view",
         description: "Read dispatch exceptions with blocker and evidence links.",
         idempotency: "none",
         sideEffects: "none",
@@ -342,7 +342,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "finance_operations",
         name: "invoice.prepare",
-        toolAlias: "worker.finance.invoice.prepare",
+        toolAlias: "worker.command",
         description: "Prepare an invoice draft from job or closeout evidence with approval and adapter dry-run receipt.",
         idempotency: "required",
         sideEffects: "dry_run",
@@ -354,7 +354,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "finance_operations",
         name: "ar_followup.draft",
-        toolAlias: "worker.finance.ar_followup.draft",
+        toolAlias: "worker.command",
         description: "Draft an AR follow-up and payment-link preparation packet without sending externally.",
         idempotency: "required",
         sideEffects: "internal",
@@ -365,7 +365,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "finance_operations",
         name: "expense_code.propose",
-        toolAlias: "worker.finance.expense_code.propose",
+        toolAlias: "worker.command",
         description: "Propose expense coding from receipt evidence with policy flags and review state.",
         idempotency: "required",
         sideEffects: "internal",
@@ -377,7 +377,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "finance_operations",
         name: "cash_forecast.generate",
-        toolAlias: "worker.finance.cash_forecast.generate",
+        toolAlias: "worker.command",
         description: "Generate a cash forecast from balances, invoices, bills, receipts, and confidence evidence.",
         idempotency: "required",
         sideEffects: "internal",
@@ -388,7 +388,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "finance_operations",
         name: "payment_draft.prepare",
-        toolAlias: "worker.finance.payment_draft.prepare",
+        toolAlias: "worker.command",
         description: "Prepare a payment instruction draft with dual-control evidence and no money movement.",
         idempotency: "required",
         sideEffects: "internal",
@@ -400,7 +400,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "finance_operations",
         name: "approval.decide",
-        toolAlias: "worker.approvals.decide",
+        toolAlias: "worker.command",
         description: "Decide a finance approval request without executing external actions.",
         idempotency: "none",
         sideEffects: "internal",
@@ -413,7 +413,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "finance_operations",
         name: "snapshot",
-        toolAlias: "worker.finance.snapshot",
+        toolAlias: "worker.view",
         description: "Read invoices, AR, expenses, cash forecast, payment drafts, and finance approvals.",
         idempotency: "none",
         sideEffects: "none",
@@ -423,7 +423,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "finance_operations",
         name: "approvals",
-        toolAlias: "worker.finance.approvals",
+        toolAlias: "worker.view",
         description: "Read finance approval queue items and packet refs.",
         idempotency: "none",
         sideEffects: "none",
@@ -444,7 +444,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "workforce_operations",
         name: "hire.packet.prepare",
-        toolAlias: "worker.workforce.hire.packet.prepare",
+        toolAlias: "worker.command",
         description: "Prepare a new-hire packet with document checklist, approvals, and payroll blockers.",
         idempotency: "required",
         sideEffects: "internal",
@@ -455,7 +455,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "workforce_operations",
         name: "contractor.packet.prepare",
-        toolAlias: "worker.workforce.contractor.packet.prepare",
+        toolAlias: "worker.command",
         description: "Prepare a contractor engagement and classification review packet.",
         idempotency: "required",
         sideEffects: "internal",
@@ -466,7 +466,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "workforce_operations",
         name: "credential.review",
-        toolAlias: "worker.workforce.credential.review",
+        toolAlias: "worker.command",
         description: "Review credentials, expirations, evidence, renewal blockers, and owner tasks.",
         idempotency: "required",
         sideEffects: "internal",
@@ -478,7 +478,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "workforce_operations",
         name: "schedule_readiness.prepare",
-        toolAlias: "worker.workforce.schedule_readiness.prepare",
+        toolAlias: "worker.command",
         description: "Prepare schedule readiness evidence and exception tasks for workforce capacity.",
         idempotency: "required",
         sideEffects: "internal",
@@ -489,7 +489,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "workforce_operations",
         name: "payroll_input.prepare",
-        toolAlias: "worker.workforce.payroll_input.prepare",
+        toolAlias: "worker.command",
         description: "Prepare payroll input readiness with blockers; payroll submission stays blocked.",
         idempotency: "required",
         sideEffects: "dry_run",
@@ -500,7 +500,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "workforce_operations",
         name: "approval.decide",
-        toolAlias: "worker.approvals.decide",
+        toolAlias: "worker.command",
         description: "Decide a workforce approval request without executing external actions.",
         idempotency: "none",
         sideEffects: "internal",
@@ -513,7 +513,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "workforce_operations",
         name: "snapshot",
-        toolAlias: "worker.workforce.snapshot",
+        toolAlias: "worker.view",
         description: "Read workforce cases, blockers, credentials, approvals, and readiness state.",
         idempotency: "none",
         sideEffects: "none",
@@ -523,7 +523,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "workforce_operations",
         name: "readiness",
-        toolAlias: "worker.workforce.readiness",
+        toolAlias: "worker.view",
         description: "Read payroll, schedule, credential, and document blocker boards.",
         idempotency: "none",
         sideEffects: "none",
@@ -544,7 +544,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "compliance_operations",
         name: "obligation.scan",
-        toolAlias: "worker.compliance.obligation.scan",
+        toolAlias: "worker.command",
         description: "Scan source refs and rule packs into obligation proposals with evidence.",
         idempotency: "required",
         sideEffects: "internal",
@@ -555,7 +555,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "compliance_operations",
         name: "notice.response.prepare",
-        toolAlias: "worker.compliance.notice.response.prepare",
+        toolAlias: "worker.command",
         description: "Prepare a notice response draft, source packet, validation trace, and approval request.",
         idempotency: "required",
         sideEffects: "internal",
@@ -566,7 +566,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "compliance_operations",
         name: "license.renewal.prepare",
-        toolAlias: "worker.compliance.license.renewal.prepare",
+        toolAlias: "worker.command",
         description: "Prepare a license or permit renewal packet with due-date and blocker evidence.",
         idempotency: "required",
         sideEffects: "internal",
@@ -577,7 +577,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "compliance_operations",
         name: "filing.prepare",
-        toolAlias: "worker.compliance.filing.prepare",
+        toolAlias: "worker.command",
         description: "Prepare a filing draft from source facts, rule refs, validation results, and approval gates.",
         idempotency: "required",
         sideEffects: "internal",
@@ -588,7 +588,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "compliance_operations",
         name: "evidence_binder.export",
-        toolAlias: "worker.compliance.evidence_binder.export",
+        toolAlias: "worker.command",
         description: "Prepare a redacted compliance evidence binder for review and export.",
         idempotency: "required",
         sideEffects: "internal",
@@ -599,7 +599,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "compliance_operations",
         name: "approval.decide",
-        toolAlias: "worker.approvals.decide",
+        toolAlias: "worker.command",
         description: "Decide a compliance approval without agency submission or external mutation.",
         idempotency: "none",
         sideEffects: "internal",
@@ -612,7 +612,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "compliance_operations",
         name: "snapshot",
-        toolAlias: "worker.compliance.snapshot",
+        toolAlias: "worker.view",
         description: "Read the compliance worker runtime snapshot.",
         idempotency: "none",
         sideEffects: "none",
@@ -622,7 +622,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "compliance_operations",
         name: "obligations",
-        toolAlias: "worker.compliance.obligations",
+        toolAlias: "worker.view",
         description: "Read obligations, filings, notices, licenses, blockers, and due dates.",
         idempotency: "none",
         sideEffects: "none",
@@ -632,7 +632,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "compliance_operations",
         name: "packet",
-        toolAlias: "worker.compliance.packet",
+        toolAlias: "worker.view",
         description: "Read compliance packet details, rule refs, approvals, redactions, and receipts.",
         idempotency: "none",
         sideEffects: "none",
@@ -653,7 +653,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "systems_operations",
         name: "connector.health.scan",
-        toolAlias: "worker.systems.connector.health.scan",
+        toolAlias: "worker.command",
         description: "Scan connector health, scopes, sync lag, schema drift, and error rates.",
         idempotency: "required",
         sideEffects: "internal",
@@ -664,7 +664,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "systems_operations",
         name: "sync.repair.plan",
-        toolAlias: "worker.systems.sync.repair.plan",
+        toolAlias: "worker.command",
         description: "Prepare a sync repair plan, dry-run action, reconciliation evidence, and rollback packet.",
         idempotency: "required",
         sideEffects: "dry_run",
@@ -675,7 +675,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "systems_operations",
         name: "data_quality.remediate",
-        toolAlias: "worker.systems.data_quality.remediate",
+        toolAlias: "worker.command",
         description: "Prepare a data-quality remediation proposal and object diff without applying live changes.",
         idempotency: "required",
         sideEffects: "dry_run",
@@ -686,7 +686,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "systems_operations",
         name: "permission.review",
-        toolAlias: "worker.systems.permission.review",
+        toolAlias: "worker.command",
         description: "Review connection or capability grant scopes and prepare least-privilege decisions.",
         idempotency: "required",
         sideEffects: "internal",
@@ -698,7 +698,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "systems_operations",
         name: "automation.plan",
-        toolAlias: "worker.systems.automation.plan",
+        toolAlias: "worker.command",
         description: "Prepare a workflow automation plan and simulation packet without enabling automation.",
         idempotency: "required",
         sideEffects: "internal",
@@ -709,7 +709,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "systems_operations",
         name: "approval.decide",
-        toolAlias: "worker.approvals.decide",
+        toolAlias: "worker.command",
         description: "Decide a systems worker approval without executing external actions.",
         idempotency: "none",
         sideEffects: "internal",
@@ -722,7 +722,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "systems_operations",
         name: "snapshot",
-        toolAlias: "worker.systems.snapshot",
+        toolAlias: "worker.view",
         description: "Read the Systems Operations Worker runtime snapshot.",
         idempotency: "none",
         sideEffects: "none",
@@ -732,7 +732,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "systems_operations",
         name: "health",
-        toolAlias: "worker.systems.health",
+        toolAlias: "worker.view",
         description: "Read connector health, sync jobs, data-quality issues, and permission reviews.",
         idempotency: "none",
         sideEffects: "none",
@@ -742,7 +742,7 @@ const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       {
         role: "systems_operations",
         name: "repairs",
-        toolAlias: "worker.systems.repairs",
+        toolAlias: "worker.view",
         description: "Read sync repair plans, dry-run receipts, rollback plans, and approval state.",
         idempotency: "none",
         sideEffects: "none",

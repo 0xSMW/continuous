@@ -51,7 +51,7 @@ route.
 | Field | Required behavior |
 |---|---|
 | Command key | Plain action name used by `POST /worker`, such as `run` or `approval.decide` |
-| Tool alias | Agent/toolbox name, such as `worker.run`, mapped to the same handler |
+| Tool surface | Agent/toolbox surface, such as `worker.command`, mapped to the same handler |
 | Role | Worker role allowed to execute the command |
 | Target requirements | Required `worker` fields, especially `tenantSlug` for tenant-scoped jobs |
 | Config schema | Required fields, validation errors, and defaults |

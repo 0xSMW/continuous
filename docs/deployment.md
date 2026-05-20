@@ -42,7 +42,7 @@ HOST=45.55.53.92 ./scripts/deploy.sh
 ```
 
 The deploy script waits for cloud-init, syncs the repo to `/opt/continuous`,
-creates a remote `.env` with a random Postgres password, runs migrations, seeds
+creates a remote `.env` with a random Postgres credential, runs migrations, seeds
 bootstrap records, builds the app image, and starts the stack. After DNS is
 pointed, the default hosts are `continuoushq.com, getcontinuous.app` and the
 default app URL is `https://continuoushq.com`.
@@ -126,8 +126,8 @@ requests to `/worker`, `/core`, or `/workflow` must carry an allowed
 CLI path over SSH for direct operator-controlled smoke runs:
 
 ```sh
-ssh root@45.55.53.92 'cd /opt/continuous && docker compose --profile tools run --rm migrate bun run worker:tool worker.lead.read --payload='"'"'{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"deploy-lead-read-001","config":{"source":"website_form","records":[{"sourceEventId":"deploy-form-001","customerName":"Acme Roof Repair","customerIntent":"roof leak inspection","serviceArea":"roofing","urgency":"high"}]}}'"'"''
-ssh root@45.55.53.92 'cd /opt/continuous && docker compose --profile tools run --rm migrate bun run worker:tool worker.run --payload='"'"'{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"deploy-worker-run-001","config":{"intake":{"source":"website_form","sourceEventId":"deploy-form-001"}}}'"'"''
+ssh root@45.55.53.92 'cd /opt/continuous && docker compose --profile tools run --rm migrate bun run worker:tool worker.command --payload='"'"'{"command":"lead.read","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"deploy-lead-read-001","config":{"source":"website_form","records":[{"sourceEventId":"deploy-form-001","customerName":"Acme Roof Repair","customerIntent":"roof leak inspection","serviceArea":"roofing","urgency":"high"}]}}'"'"''
+ssh root@45.55.53.92 'cd /opt/continuous && docker compose --profile tools run --rm migrate bun run worker:tool worker.command --payload='"'"'{"command":"run","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"deploy-worker-run-001","config":{"intake":{"source":"website_form","sourceEventId":"deploy-form-001"}}}'"'"''
 ```
 
 The deploy path also starts the `worker-scheduler` profile. The scheduler uses

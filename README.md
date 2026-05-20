@@ -88,11 +88,11 @@ Then open `http://localhost:3000`.
   to `/worker command=run`, then drains `/worker` adapter retry/reconcile
   envelopes on a cadence; it does not introduce worker-family URLs or enable
   external execution.
-Worker-specific HTTP routes and local mutation shortcuts are intentionally
-absent; new worker families extend `/worker` and `worker:tool` by registering
-commands and structured payload fields. The HTTP, app-server, and local worker
-command surfaces reject stray top-level operation fields so worker-specific
-inputs stay under `config`.
+Worker-specific HTTP routes and local family-specific mutation shortcuts are
+intentionally absent; new worker families extend `/worker` and generic
+`worker:tool` surfaces by registering commands and structured payload fields.
+The HTTP, app-server, and local worker command surfaces reject stray top-level
+operation fields so worker-specific inputs stay under `config`.
 
 ## Docs
 

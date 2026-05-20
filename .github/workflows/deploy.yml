@@ -501,20 +501,7 @@ jobs:
             (.registry.commands | any(.name == "run" and .idempotency == "required")) and
             (.registry.commands | any(.name == "continue" and .idempotency == "required")) and
             (.registry.commands | any(.name == "adapters.reconcile" and .requiresTenant == true)) and
-            (.tools | map(.name) | index("worker.run")) != null and
-            (.tools | map(.name) | index("worker.lead.read")) != null and
-            (.tools | map(.name) | index("worker.lead.classify")) != null and
-            (.tools | map(.name) | index("worker.response.draft")) != null and
-            (.tools | map(.name) | index("worker.dispatch.schedule.propose")) != null and
-            (.tools | map(.name) | index("worker.dispatch.customer_update.draft")) != null and
-            (.tools | map(.name) | index("worker.dispatch.closeout.prepare")) != null and
-            (.tools | map(.name) | index("worker.dispatch.exception.route")) != null and
-            (.tools | map(.name) | index("worker.finance.invoice.prepare")) != null and
-            (.tools | map(.name) | index("worker.finance.ar_followup.draft")) != null and
-            (.tools | map(.name) | index("worker.finance.cash_forecast.generate")) != null and
-            (.tools | map(.name) | index("worker.continue")) != null and
-            (.tools | map(.name) | index("worker.adapters.reconcile")) != null and
-            (.tools | map(.name) | index("worker.owner.brief.generate")) != null
+            (.tools | map(.name) == ["worker.view","worker.command"])
           ' >/dev/null
 
           DISPATCH_CUSTOMER_UPDATE_KEY="deploy-dispatch-customer-update-smoke-$SMOKE_RUN_ID"

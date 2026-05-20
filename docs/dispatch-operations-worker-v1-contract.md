@@ -48,14 +48,14 @@ inside `config` and use the shared `/worker` command envelope.
 
 ## Registry Entries
 
-| Command or view | Tool alias | Required config | Idempotency | Side effects | External execution |
+| Command or view | Tool surface | Required config | Idempotency | Side effects | External execution |
 |---|---|---|---|---|---|
-| `GET view=snapshot` | `worker.snapshot` | `worker.role` | None | Read-only | Blocked |
-| `schedule.propose` | `worker.dispatch.schedule.propose` | `jobId` or `sourceRefs`, plus `constraints` | Required | Appointment draft, adapter dry-run, approval request | Dry-run |
-| `customer_update.draft` | `worker.dispatch.customer_update.draft` | `jobId`, `updateKind` | Required | Draft message, evidence packet, approval request | Blocked |
-| `closeout.prepare` | `worker.dispatch.closeout.prepare` | `workOrderId`, optional keyed `sourceRefs` | Required | Closeout document, QA checklist, evidence packet, approval request, Finance handoff refs | Blocked |
-| `exception.route` | `worker.dispatch.exception.route` | `jobId`, `reason`, `severity`, optional keyed `sourceRefs` | Required | Blocked exception task, decision record, document, and evidence packet | Blocked |
-| `approval.decide` | `worker.approvals.decide` | `approvalId`, `action`, optional `note` | None | Approval/task/workflow evidence only | Blocked |
+| `GET view=snapshot` | `worker.view` | `worker.role` | None | Read-only | Blocked |
+| `schedule.propose` | `worker.command` | `jobId` or `sourceRefs`, plus `constraints` | Required | Appointment draft, adapter dry-run, approval request | Dry-run |
+| `customer_update.draft` | `worker.command` | `jobId`, `updateKind` | Required | Draft message, evidence packet, approval request | Blocked |
+| `closeout.prepare` | `worker.command` | `workOrderId`, optional keyed `sourceRefs` | Required | Closeout document, QA checklist, evidence packet, approval request, Finance handoff refs | Blocked |
+| `exception.route` | `worker.command` | `jobId`, `reason`, `severity`, optional keyed `sourceRefs` | Required | Blocked exception task, decision record, document, and evidence packet | Blocked |
+| `approval.decide` | `worker.command` | `approvalId`, `action`, optional `note` | None | Approval/task/workflow evidence only | Blocked |
 
 ## Core Object Map
 

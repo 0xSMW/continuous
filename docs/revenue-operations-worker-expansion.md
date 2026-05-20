@@ -23,8 +23,8 @@ state, workflow state, and object versioning without external sends or money mov
 | Workflow packet execution | Queued `packet_prepare` steps can prepare Core packets through `/workflow` execution, carrying packet content under `workflow_steps.input.packet` and writing packet/document/event/audit/evidence/task proof |
 | Workflow approval execution | Queued `approval_request` steps can create shared workflow approval records through `/workflow` execution, carrying business approval details under `workflow_steps.input.approval` while run, step, task, event, audit, and evidence links are derived by the executor |
 | Quote approval UI | Revenue runs bind the shared `quote.approval.review` generated view contract to the latest quote approval request, including approval actions, evidence refs, and blocked continuation hints |
-| Operator run | `bun run worker:tool worker.run` or `continuous.worker.command` with the same worker/config payload |
-| Command registry | `/worker`, `worker:*` local tool aliases, and app-server worker commands share role, config, idempotency, tenant, and external-execution validation |
+| Operator run | `bun run worker:tool worker.command` or `continuous.worker.command` with the same worker/config payload |
+| Command registry | `/worker`, `worker.command` / `worker.view`, and app-server worker commands share role, config, idempotency, tenant, and external-execution validation |
 | External execution | Disabled; source readers normalize supplied read-only records with credential references only, and adapter runtime records dry-run receipts, reconciliation states, retry execution receipts, retry/review system tasks, and workflow-level retry/review/post-retry steps only |
 
 `/worker` is the forward API. Worker role, tenant, operation config, and

@@ -164,7 +164,8 @@ curl -X POST http://localhost:3000/worker \
 Runs are bound to `WORKER_OPERATOR_EMAIL`, which defaults to the seeded
 `owner@continuoushq.com` user. A successful run records an approval request and
 audit trail while keeping external send and money movement blocked. Use
-`worker.lead.read` to persist source lead records before `worker.run`;
+`worker.command` with `command=lead.read` to persist source lead records before
+`worker.command` with `command=run`;
 `config.leadPacket` is only the direct fallback for controlled local tests. If
 `CONTROL_PLANE_ALLOWED_TENANTS` is set, every operator route must include an
 allowed `tenantSlug`; if `CONTROL_PLANE_ALLOWED_WORKER_ROLES` is set, `/worker`
@@ -175,12 +176,12 @@ read/write, and command scope is enforced before dispatch.
 The same persisted loop can run without exposing HTTP:
 
 ```sh
-bun run worker:tool worker.lead.read <<'JSON'
-{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-lead-read-001","config":{"source":"website_form","records":[{"sourceEventId":"form-local-001","customerName":"Acme Roof Repair","customerIntent":"roof leak inspection","serviceArea":"roofing","urgency":"high"}]}}
+bun run worker:tool worker.command <<'JSON'
+{"command":"lead.read","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-lead-read-001","config":{"source":"website_form","records":[{"sourceEventId":"form-local-001","customerName":"Acme Roof Repair","customerIntent":"roof leak inspection","serviceArea":"roofing","urgency":"high"}]}}
 JSON
 
-bun run worker:tool worker.run <<'JSON'
-{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-revenue-run-002","config":{"intake":{"source":"website_form","sourceEventId":"form-local-001"}}}
+bun run worker:tool worker.command <<'JSON'
+{"command":"run","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-revenue-run-002","config":{"intake":{"source":"website_form","sourceEventId":"form-local-001"}}}
 JSON
 ```
 
@@ -188,10 +189,10 @@ Agent-facing local automation can use the repo-owned worker toolbox:
 
 ```sh
 bun run worker:tool schema
-bun run worker:tool worker.snapshot --payload='{"worker":{"role":"revenue_operations"}}'
-bun run worker:tool worker.lead.read --payload='{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-lead-read-002","config":{"source":"website_form","records":[{"sourceEventId":"form-local-002","customerName":"Acme Roof Repair"}]}}'
-bun run worker:tool worker.adapters.reconcile --payload='{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{"limit":25}}'
-bun run worker:tool worker.adapters.retry --payload='{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{"limit":25}}'
+bun run worker:tool worker.view --payload='{"view":"snapshot","worker":{"role":"revenue_operations"}}'
+bun run worker:tool worker.command --payload='{"command":"lead.read","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-lead-read-002","config":{"source":"website_form","records":[{"sourceEventId":"form-local-002","customerName":"Acme Roof Repair"}]}}'
+bun run worker:tool worker.command --payload='{"command":"adapters.reconcile","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{"limit":25}}'
+bun run worker:tool worker.command --payload='{"command":"adapters.retry","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{"limit":25}}'
 ```
 
 Inbox and CRM source readers use the same `lead.read` command. They store
@@ -200,8 +201,8 @@ provide records in the payload and never fetch from external systems or write
 back:
 
 ```sh
-bun run worker:tool worker.lead.read --payload='{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-inbox-read-001","config":{"source":"google_workspace_inbox","reader":{"kind":"inbox","provider":"google_workspace","credentialRef":"connection:google-workspace-demo","mode":"read_only"},"records":[{"messageId":"message-local-001","from":"Buyer <buyer@example.com>","subject":"Need roof leak inspection"}]}}'
-bun run worker:tool worker.lead.read --payload='{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-crm-read-001","config":{"source":"hubspot_crm","reader":{"kind":"crm","provider":"hubspot","credentialRef":"connection:hubspot-demo","mode":"read_only"},"records":[{"externalId":"deal-local-001","companyName":"Acme Roof Repair","dealName":"Window replacement quote","stage":"qualified"}]}}'
+bun run worker:tool worker.command --payload='{"command":"lead.read","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-inbox-read-001","config":{"source":"google_workspace_inbox","reader":{"kind":"inbox","provider":"google_workspace","credentialRef":"connection:google-workspace-demo","mode":"read_only"},"records":[{"messageId":"message-local-001","from":"Buyer <buyer@example.com>","subject":"Need roof leak inspection"}]}}'
+bun run worker:tool worker.command --payload='{"command":"lead.read","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-crm-read-001","config":{"source":"hubspot_crm","reader":{"kind":"crm","provider":"hubspot","credentialRef":"connection:hubspot-demo","mode":"read_only"},"records":[{"externalId":"deal-local-001","companyName":"Acme Roof Repair","dealName":"Window replacement quote","stage":"qualified"}]}}'
 ```
 
 Connection-backed reads can also omit `records` when the referenced active
@@ -213,12 +214,12 @@ records with `sourceMode: connection_api`, cursor proof, and a redacted polling
 receipt. The request payload still only references the connection:
 
 ```sh
-bun run worker:tool worker.lead.read --payload='{"worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-connection-read-001","config":{"source":"google_workspace_inbox","reader":{"kind":"inbox","provider":"google_workspace","credentialRef":"connection:<connection-id>","mode":"read_only"}}}'
+bun run worker:tool worker.command --payload='{"command":"lead.read","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-connection-read-001","config":{"source":"google_workspace_inbox","reader":{"kind":"inbox","provider":"google_workspace","credentialRef":"connection:<connection-id>","mode":"read_only"}}}'
 ```
 
 `worker:tool schema` is registry-backed. It exposes registered commands, local
-tool aliases, idempotency policy, tenant requirements, and external-execution
-status before a command is invoked.
+generic tool surfaces, idempotency policy, tenant requirements, and
+external-execution status before a command is invoked.
 
 The app-server worker tool uses the same command envelope and registry:
 

@@ -14,846 +14,64 @@ import {
 
 export const workerTools = [
   {
-    name: "worker.snapshot",
-    description: "Read a worker snapshot by role, tenant, or worker id.",
+    name: "worker.view",
+    description: "Read a registered Continuous worker view through the canonical worker view envelope.",
     registry: {
       role: "*",
       surface: "view",
-      view: "snapshot",
+      view: "*",
     },
     inputSchema: {
       type: "object",
       properties: {
-        worker: { $ref: "#/$defs/workerTarget" },
-      },
-      required: ["worker"],
-    },
-  },
-  {
-    name: "worker.owner.briefs.list",
-    description: "List generated owner briefs.",
-    registry: {
-      role: "owner_chief_of_staff",
-      surface: "view",
-      view: "briefs",
-    },
-    inputSchema: {
-      type: "object",
-      properties: {
+        view: {
+          type: "string",
+          description: "Registered view name. Defaults to snapshot when omitted.",
+        },
         worker: { $ref: "#/$defs/workerTarget" },
         config: {
           type: "object",
+          description: "View config. Put read filters such as state under config.",
           properties: {
             state: { type: "string" },
           },
+          additionalProperties: true,
         },
+        operatorEmail: { type: "string" },
       },
       required: ["worker"],
+      additionalProperties: false,
     },
   },
   {
-    name: "worker.owner.decisions.list",
-    description: "List owner decision proposals.",
-    registry: {
-      role: "owner_chief_of_staff",
-      surface: "view",
-      view: "decisions",
-    },
-    inputSchema: {
-      type: "object",
-      properties: {
-        worker: { $ref: "#/$defs/workerTarget" },
-        config: {
-          type: "object",
-          properties: {
-            state: { type: "string" },
-          },
-        },
-      },
-      required: ["worker"],
-    },
-  },
-  {
-    name: "worker.run",
-    description: "Run a worker with an idempotency key and structured config.",
-    registry: {
-      role: "revenue_operations",
-      surface: "command",
-      command: "run",
-      idempotency: "required",
-      externalExecution: "blocked",
-    },
-    inputSchema: {
-      type: "object",
-      properties: {
-        worker: { $ref: "#/$defs/workerTarget" },
-        idempotencyKey: { type: "string" },
-        config: {
-          type: "object",
-          description:
-            "Worker-specific run configuration. Revenue operations runs prefer intake references to persisted Core records; leadPacket is a direct operator/test fallback.",
-          properties: {
-            intake: { $ref: "#/$defs/intake" },
-            leadPacket: { $ref: "#/$defs/leadPacket" },
-            pricing: {
-              type: "object",
-              properties: {
-                baseCents: { type: "number", minimum: 0 },
-              },
-            },
-            expectedAction: { type: "string" },
-          },
-          additionalProperties: true,
-        },
-      },
-      required: ["worker", "idempotencyKey"],
-    },
-  },
-  {
-    name: "worker.lead.read",
-    description: "Read inbound lead source records into persisted Core intake selectors.",
-    registry: {
-      role: "revenue_operations",
-      surface: "command",
-      command: "lead.read",
-      idempotency: "required",
-      externalExecution: "blocked",
-      requiresTenant: true,
-    },
-    inputSchema: {
-      type: "object",
-      properties: {
-        worker: { $ref: "#/$defs/workerTarget" },
-        idempotencyKey: { type: "string" },
-        config: {
-          type: "object",
-          description:
-            "Read-only source intake configuration. Provide source records directly or reference an active connection through config.reader; records are persisted as Core lead object/event/evidence rows and returned as config.intake selectors for worker.run.",
-          properties: {
-            source: { type: "string" },
-            sourceKind: { type: "string" },
-            reader: { $ref: "#/$defs/sourceReader" },
-            records: {
-              type: "array",
-              minItems: 1,
-              maxItems: 25,
-              items: { $ref: "#/$defs/leadSourceRecord" },
-            },
-            record: { $ref: "#/$defs/leadSourceRecord" },
-          },
-          required: ["source"],
-          additionalProperties: true,
-        },
-      },
-      required: ["worker", "idempotencyKey", "config"],
-    },
-  },
-  {
-    name: "worker.lead.classify",
-    description: "Classify a persisted or direct lead packet without external execution.",
-    registry: {
-      role: "revenue_operations",
-      surface: "command",
-      command: "lead.classify",
-      idempotency: "required",
-      externalExecution: "blocked",
-      requiresTenant: true,
-    },
-    inputSchema: {
-      type: "object",
-      properties: {
-        worker: { $ref: "#/$defs/workerTarget" },
-        idempotencyKey: { type: "string" },
-        config: {
-          type: "object",
-          description:
-            "Lead classification configuration. Prefer persisted config.intake selectors; config.leadPacket is a direct operator/test fallback.",
-          properties: {
-            intake: { $ref: "#/$defs/intake" },
-            leadPacket: { $ref: "#/$defs/leadPacket" },
-            expectedAction: { type: "string" },
-          },
-          additionalProperties: true,
-        },
-      },
-      required: ["worker", "idempotencyKey", "config"],
-    },
-  },
-  {
-    name: "worker.response.draft",
-    description: "Draft an owner-reviewable customer response without sending it.",
-    registry: {
-      role: "revenue_operations",
-      surface: "command",
-      command: "response.draft",
-      idempotency: "required",
-      externalExecution: "blocked",
-      requiresTenant: true,
-    },
-    inputSchema: {
-      type: "object",
-      properties: {
-        worker: { $ref: "#/$defs/workerTarget" },
-        idempotencyKey: { type: "string" },
-        config: {
-          type: "object",
-          description:
-            "Response draft configuration. Prefer persisted config.intake selectors; config.leadPacket is a direct operator/test fallback.",
-          properties: {
-            intake: { $ref: "#/$defs/intake" },
-            leadPacket: { $ref: "#/$defs/leadPacket" },
-            pricing: {
-              type: "object",
-              properties: {
-                baseCents: { type: "number", minimum: 0 },
-              },
-            },
-            expectedAction: { type: "string" },
-          },
-          additionalProperties: true,
-        },
-      },
-      required: ["worker", "idempotencyKey", "config"],
-    },
-  },
-  {
-    name: "worker.dispatch.schedule.propose",
-    description: "Prepare a dry-run dispatch schedule proposal from Core job and handoff refs.",
-    registry: {
-      role: "dispatch_operations",
-      surface: "command",
-      command: "schedule.propose",
-      idempotency: "required",
-      externalExecution: "dry_run",
-      requiresTenant: true,
-    },
-    inputSchema: {
-      type: "object",
-      properties: {
-        worker: { $ref: "#/$defs/workerTarget" },
-        idempotencyKey: { type: "string" },
-        config: {
-          type: "object",
-          description:
-            "Dispatch schedule proposal config. Put Core handoff selectors under sourceRefs and schedule constraints under constraints.",
-          properties: {
-            jobId: { type: "string" },
-            sourceRefs: { $ref: "#/$defs/sourceRefs" },
-            constraints: { $ref: "#/$defs/scheduleConstraints" },
-          },
-          required: ["constraints"],
-          additionalProperties: true,
-        },
-      },
-      required: ["worker", "idempotencyKey", "config"],
-    },
-  },
-  {
-    name: "worker.dispatch.customer_update.draft",
-    description: "Draft a customer update from Core job evidence without sending it.",
-    registry: {
-      role: "dispatch_operations",
-      surface: "command",
-      command: "customer_update.draft",
-      idempotency: "required",
-      externalExecution: "blocked",
-      requiresTenant: true,
-    },
-    inputSchema: {
-      type: "object",
-      properties: {
-        worker: { $ref: "#/$defs/workerTarget" },
-        idempotencyKey: { type: "string" },
-        config: {
-          type: "object",
-          description:
-            "Dispatch customer update draft config. Put operation data under config with jobId, updateKind, optional channel, sourceRefs, and messageContext.",
-          properties: {
-            jobId: { type: "string" },
-            updateKind: { type: "string" },
-            channel: { type: "string" },
-            sourceRefs: { $ref: "#/$defs/sourceRefs" },
-            messageContext: {
-              type: "object",
-              additionalProperties: true,
-            },
-          },
-          required: ["jobId", "updateKind"],
-          additionalProperties: true,
-        },
-      },
-      required: ["worker", "idempotencyKey", "config"],
-    },
-  },
-  {
-    name: "worker.dispatch.closeout.prepare",
-    description: "Prepare a closeout packet and QA checklist without external invoice or customer send.",
-    registry: {
-      role: "dispatch_operations",
-      surface: "command",
-      command: "closeout.prepare",
-      idempotency: "required",
-      externalExecution: "blocked",
-      requiresTenant: true,
-    },
-    inputSchema: {
-      type: "object",
-      properties: {
-        worker: { $ref: "#/$defs/workerTarget" },
-        idempotencyKey: { type: "string" },
-        config: {
-          type: "object",
-          description:
-            "Dispatch closeout config. Put work order selectors and source evidence under config, with sourceRefs as a keyed object and optional QA checklist, notes, invoice readiness, and billable lines.",
-          properties: {
-            workOrderId: { type: "string" },
-            sourceRefs: { $ref: "#/$defs/sourceRefs" },
-            photoEvidenceIds: {
-              type: "array",
-              items: { type: "string" },
-            },
-            evidenceIds: {
-              type: "array",
-              items: { type: "string" },
-            },
-            completionEvidenceIds: {
-              type: "array",
-              items: { type: "string" },
-            },
-            qaChecklist: {
-              type: "object",
-              additionalProperties: true,
-            },
-            completionNotes: { type: "string" },
-            invoiceReady: { type: "boolean" },
-            billableLines: {
-              type: "array",
-              items: {
-                type: "object",
-                additionalProperties: true,
-              },
-            },
-          },
-          required: ["workOrderId"],
-          additionalProperties: true,
-        },
-      },
-      required: ["worker", "idempotencyKey", "config"],
-    },
-  },
-  {
-    name: "worker.dispatch.exception.route",
-    description: "Route a dispatch exception into Core task, decision, and evidence records.",
-    registry: {
-      role: "dispatch_operations",
-      surface: "command",
-      command: "exception.route",
-      idempotency: "required",
-      externalExecution: "blocked",
-      requiresTenant: true,
-    },
-    inputSchema: {
-      type: "object",
-      properties: {
-        worker: { $ref: "#/$defs/workerTarget" },
-        idempotencyKey: { type: "string" },
-        config: {
-          type: "object",
-          description:
-            "Dispatch exception config. Put the job selector, reason, severity, and optional related Core refs under config.",
-          properties: {
-            jobId: { type: "string" },
-            reason: { type: "string" },
-            severity: { enum: ["low", "medium", "high", "critical"] },
-            kind: { type: "string" },
-            notes: { type: "string" },
-            note: { type: "string" },
-            sourceRefs: { $ref: "#/$defs/sourceRefs" },
-            evidenceIds: {
-              type: "array",
-              items: { type: "string" },
-            },
-            sourceEvidenceIds: {
-              type: "array",
-              items: { type: "string" },
-            },
-          },
-          required: ["jobId", "reason", "severity"],
-          additionalProperties: true,
-        },
-      },
-      required: ["worker", "idempotencyKey", "config"],
-    },
-  },
-  {
-    name: "worker.finance.invoice.prepare",
-    description: "Prepare an invoice draft from Core job or closeout refs with accounting dry-run evidence.",
-    registry: {
-      role: "finance_operations",
-      surface: "command",
-      command: "invoice.prepare",
-      idempotency: "required",
-      externalExecution: "dry_run",
-      requiresTenant: true,
-    },
-    inputSchema: {
-      type: "object",
-      properties: {
-        worker: { $ref: "#/$defs/workerTarget" },
-        idempotencyKey: { type: "string" },
-        config: {
-          type: "object",
-          description:
-            "Finance invoice config. Put Core handoff selectors under sourceRefs and operation details such as billableLines, tax, due date, and approval policy under config.",
-          properties: {
-            jobId: { type: "string" },
-            jobObjectId: { type: "string" },
-            closeoutId: { type: "string" },
-            closeoutObjectId: { type: "string" },
-            customerObjectId: { type: "string" },
-            sourceRefs: { $ref: "#/$defs/sourceRefs" },
-            billableLines: {
-              type: "array",
-              items: {
-                type: "object",
-                additionalProperties: true,
-              },
-            },
-            lines: {
-              type: "array",
-              items: {
-                type: "object",
-                additionalProperties: true,
-              },
-            },
-            currency: { type: "string" },
-            taxCents: { type: "number", minimum: 0 },
-            dueAt: { type: "string" },
-            policy: {
-              type: "object",
-              additionalProperties: true,
-            },
-            evidenceIds: {
-              type: "array",
-              items: { type: "string" },
-            },
-            sourceEvidenceIds: {
-              type: "array",
-              items: { type: "string" },
-            },
-          },
-          additionalProperties: true,
-        },
-      },
-      required: ["worker", "idempotencyKey", "config"],
-    },
-  },
-  {
-    name: "worker.finance.ar_followup.draft",
-    description: "Draft an AR follow-up from invoice evidence without sending it or moving money.",
-    registry: {
-      role: "finance_operations",
-      surface: "command",
-      command: "ar_followup.draft",
-      idempotency: "required",
-      externalExecution: "blocked",
-      requiresTenant: true,
-    },
-    inputSchema: {
-      type: "object",
-      properties: {
-        worker: { $ref: "#/$defs/workerTarget" },
-        idempotencyKey: { type: "string" },
-        config: {
-          type: "object",
-          description:
-            "Finance AR follow-up config. Put invoice selectors, tone policy, channel, message context, sourceRefs, and policy under config; external sends and payment links remain blocked.",
-          properties: {
-            invoiceId: { type: "string" },
-            invoiceObjectId: { type: "string" },
-            tonePolicy: { type: "string" },
-            channel: {
-              enum: ["email", "sms", "phone"],
-            },
-            sourceRefs: { $ref: "#/$defs/sourceRefs" },
-            messageContext: {
-              type: "object",
-              additionalProperties: true,
-            },
-            policy: {
-              type: "object",
-              additionalProperties: true,
-            },
-            draft: { type: "string" },
-            dueAt: { type: "string" },
-            daysPastDue: { type: "number", minimum: 0 },
-            amountCents: { type: "number", minimum: 0 },
-            currency: { type: "string" },
-            evidenceIds: {
-              type: "array",
-              items: { type: "string" },
-            },
-            sourceEvidenceIds: {
-              type: "array",
-              items: { type: "string" },
-            },
-          },
-          required: ["invoiceId", "tonePolicy"],
-          additionalProperties: true,
-        },
-      },
-      required: ["worker", "idempotencyKey", "config"],
-    },
-  },
-  {
-    name: "worker.finance.cash_forecast.generate",
-    description: "Generate a cash forecast packet from account, invoice, and payment evidence without moving money.",
-    registry: {
-      role: "finance_operations",
-      surface: "command",
-      command: "cash_forecast.generate",
-      idempotency: "required",
-      externalExecution: "blocked",
-      requiresTenant: true,
-    },
-    inputSchema: {
-      type: "object",
-      properties: {
-        worker: { $ref: "#/$defs/workerTarget" },
-        idempotencyKey: { type: "string" },
-        config: {
-          type: "object",
-          description:
-            "Finance cash forecast config. Put forecast window, account refs, optional inflows/outflows, balances, evidence refs, and policy under config; external execution and money movement remain blocked.",
-          properties: {
-            window: {
-              type: "object",
-              properties: {
-                from: { type: "string" },
-                to: { type: "string" },
-              },
-              required: ["from", "to"],
-              additionalProperties: true,
-            },
-            accounts: {
-              type: "array",
-              minItems: 1,
-              items: { type: "string" },
-            },
-            sourceRefs: { $ref: "#/$defs/sourceRefs" },
-            startingBalanceCents: { type: "number" },
-            expectedInflowCents: { type: "number", minimum: 0 },
-            expectedOutflowCents: { type: "number", minimum: 0 },
-            inflows: {
-              type: "array",
-              items: {
-                type: "object",
-                additionalProperties: true,
-              },
-            },
-            outflows: {
-              type: "array",
-              items: {
-                type: "object",
-                additionalProperties: true,
-              },
-            },
-            currency: { type: "string" },
-            confidence: { type: "string" },
-            accountsStale: { type: "boolean" },
-            policy: {
-              type: "object",
-              additionalProperties: true,
-            },
-            evidenceIds: {
-              type: "array",
-              items: { type: "string" },
-            },
-            sourceEvidenceIds: {
-              type: "array",
-              items: { type: "string" },
-            },
-          },
-          required: ["window", "accounts"],
-          additionalProperties: true,
-        },
-      },
-      required: ["worker", "idempotencyKey", "config"],
-    },
-  },
-  {
-    name: "worker.finance.payment_draft.prepare",
-    description: "Prepare a payment instruction draft with dual-control evidence without moving money.",
-    registry: {
-      role: "finance_operations",
-      surface: "command",
-      command: "payment_draft.prepare",
-      idempotency: "required",
-      externalExecution: "blocked",
-      requiresTenant: true,
-    },
-    inputSchema: {
-      type: "object",
-      properties: {
-        worker: { $ref: "#/$defs/workerTarget" },
-        idempotencyKey: { type: "string" },
-        config: {
-          type: "object",
-          description:
-            "Finance payment draft config. Put bill or payment selectors, bank account refs, amount, method, evidence refs, and dual-control policy under config; external execution and money movement remain blocked.",
-          properties: {
-            billId: { type: "string" },
-            billObjectId: { type: "string" },
-            paymentId: { type: "string" },
-            paymentObjectId: { type: "string" },
-            paymentInstructionId: { type: "string" },
-            bankAccountId: { type: "string" },
-            amountCents: { type: "number", minimum: 0 },
-            currency: { type: "string" },
-            method: { type: "string" },
-            dueAt: { type: "string" },
-            payee: { type: "string" },
-            sourceRefs: { $ref: "#/$defs/sourceRefs" },
-            policy: {
-              type: "object",
-              additionalProperties: true,
-            },
-            evidenceIds: {
-              type: "array",
-              items: { type: "string" },
-            },
-            sourceEvidenceIds: {
-              type: "array",
-              items: { type: "string" },
-            },
-          },
-          additionalProperties: true,
-        },
-      },
-      required: ["worker", "idempotencyKey", "config"],
-    },
-  },
-  {
-    name: "worker.continue",
-    description: "Continue a worker-owned approval outcome with structured config.",
+    name: "worker.command",
+    description: "Invoke any registered Continuous worker command through the canonical worker command envelope.",
     registry: {
       role: "*",
       surface: "command",
-      command: "continue",
-      idempotency: "required",
-      externalExecution: "blocked",
+      command: "*",
+      idempotency: "per_command",
+      externalExecution: "registry_controlled",
+      requiresTenant: "per_command",
     },
     inputSchema: {
       type: "object",
       properties: {
+        command: {
+          type: "string",
+          description: "Registered command name from workerToolSchema.registry.commands.",
+        },
         worker: { $ref: "#/$defs/workerTarget" },
         idempotencyKey: { type: "string" },
         config: {
           type: "object",
-          properties: {
-            approvalId: { type: "string" },
-          },
-          required: ["approvalId"],
+          description: "Command config. Put every operation-specific input under config.",
+          additionalProperties: true,
         },
+        operatorEmail: { type: "string" },
       },
-      required: ["worker", "idempotencyKey", "config"],
-    },
-  },
-  {
-    name: "worker.approvals.list",
-    description: "List pending or decided worker approval requests.",
-    registry: {
-      role: "*",
-      surface: "view",
-      view: "approvals",
-    },
-    inputSchema: {
-      type: "object",
-      properties: {
-        worker: { $ref: "#/$defs/workerTarget" },
-        config: {
-          type: "object",
-          properties: {
-            state: { type: "string" },
-          },
-        },
-      },
-      required: ["worker"],
-    },
-  },
-  {
-    name: "worker.approvals.decide",
-    description: "Decide a worker approval request with an operator action.",
-    registry: {
-      role: "*",
-      surface: "command",
-      command: "approval.decide",
-      idempotency: "none",
-      externalExecution: "blocked",
-    },
-    inputSchema: {
-      type: "object",
-      properties: {
-        worker: { $ref: "#/$defs/workerTarget" },
-        config: {
-          type: "object",
-          properties: {
-            approvalId: { type: "string" },
-            action: {
-              enum: ["approved", "rejected", "revision_requested"],
-            },
-            note: { type: "string" },
-          },
-          required: ["approvalId", "action"],
-        },
-      },
-      required: ["worker", "config"],
-    },
-  },
-  {
-    name: "worker.adapters.reconcile",
-    description: "Reconcile pending dry-run adapter runs/actions without external execution.",
-    registry: {
-      role: "revenue_operations",
-      surface: "command",
-      command: "adapters.reconcile",
-      idempotency: "none",
-      externalExecution: "blocked",
-      requiresTenant: true,
-    },
-    inputSchema: {
-      type: "object",
-      properties: {
-        worker: { $ref: "#/$defs/workerTarget" },
-        config: {
-          type: "object",
-          properties: {
-            limit: { type: "integer", minimum: 1, maximum: 100 },
-          },
-        },
-      },
-      required: ["worker"],
-    },
-  },
-  {
-    name: "worker.adapters.retry",
-    description:
-      "Execute due dry-run adapter retries, recording live-credential and rollback readiness while external execution stays blocked.",
-    registry: {
-      role: "revenue_operations",
-      surface: "command",
-      command: "adapters.retry",
-      idempotency: "none",
-      externalExecution: "blocked",
-      requiresTenant: true,
-    },
-    inputSchema: {
-      type: "object",
-      properties: {
-        worker: { $ref: "#/$defs/workerTarget" },
-        config: {
-          type: "object",
-          properties: {
-            limit: { type: "integer", minimum: 1, maximum: 100 },
-          },
-        },
-      },
-      required: ["worker"],
-    },
-  },
-  {
-    name: "worker.owner.brief.generate",
-    description: "Generate an owner brief from tenant-scoped Core records.",
-    registry: {
-      role: "owner_chief_of_staff",
-      surface: "command",
-      command: "brief.generate",
-      idempotency: "required",
-      externalExecution: "blocked",
-      requiresTenant: true,
-    },
-    inputSchema: {
-      type: "object",
-      properties: {
-        worker: { $ref: "#/$defs/workerTarget" },
-        idempotencyKey: { type: "string" },
-        config: {
-          type: "object",
-          properties: {
-            window: { $ref: "#/$defs/window" },
-            scopes: {
-              type: "array",
-              minItems: 1,
-              items: {
-                enum: ["tasks", "approvals", "cash", "capacity", "obligations", "workers"],
-              },
-            },
-            includeEvidence: { type: "boolean" },
-          },
-          required: ["window", "scopes"],
-        },
-      },
-      required: ["worker", "idempotencyKey", "config"],
-    },
-  },
-  {
-    name: "worker.owner.decision_queue.prepare",
-    description: "Prepare source-backed owner decision proposals.",
-    registry: {
-      role: "owner_chief_of_staff",
-      surface: "command",
-      command: "decision_queue.prepare",
-      idempotency: "required",
-      externalExecution: "blocked",
-      requiresTenant: true,
-    },
-    inputSchema: {
-      type: "object",
-      properties: {
-        worker: { $ref: "#/$defs/workerTarget" },
-        idempotencyKey: { type: "string" },
-        config: {
-          type: "object",
-          properties: {
-            window: { $ref: "#/$defs/window" },
-            priorityFloor: { type: "string" },
-          },
-          required: ["window"],
-        },
-      },
-      required: ["worker", "idempotencyKey", "config"],
-    },
-  },
-  {
-    name: "worker.owner.anomaly.triage",
-    description: "Triage owner-facing metric anomalies without external execution.",
-    registry: {
-      role: "owner_chief_of_staff",
-      surface: "command",
-      command: "anomaly.triage",
-      idempotency: "required",
-      externalExecution: "blocked",
-      requiresTenant: true,
-    },
-    inputSchema: {
-      type: "object",
-      properties: {
-        worker: { $ref: "#/$defs/workerTarget" },
-        idempotencyKey: { type: "string" },
-        config: {
-          type: "object",
-          properties: {
-            window: { $ref: "#/$defs/window" },
-            metricKeys: {
-              type: "array",
-              minItems: 1,
-              items: { type: "string" },
-            },
-          },
-          required: ["window", "metricKeys"],
-        },
-      },
-      required: ["worker", "idempotencyKey", "config"],
+      required: ["command", "worker"],
+      additionalProperties: false,
     },
   },
 ] as const;
@@ -1034,172 +252,62 @@ function targetFrom(payload: JsonObject): WorkerTargetInput {
   };
 }
 
-const workerToolEnvelopeFields = new Set(["worker", "idempotencyKey", "config", "operatorEmail"]);
+const workerCommandToolEnvelopeFields = new Set([
+  "command",
+  "worker",
+  "idempotencyKey",
+  "config",
+  "operatorEmail",
+]);
 
-function assertWorkerToolEnvelope(payload: JsonObject) {
-  const unexpectedFields = Object.keys(payload).filter((field) => !workerToolEnvelopeFields.has(field));
+const workerViewToolEnvelopeFields = new Set(["view", "worker", "config", "operatorEmail"]);
+
+function workerToolEnvelope(name: string) {
+  if (name === "worker.command") {
+    return {
+      fields: workerCommandToolEnvelopeFields,
+      description: "command, worker, idempotencyKey, config, and operatorEmail",
+    };
+  }
+
+  if (name === "worker.view") {
+    return {
+      fields: workerViewToolEnvelopeFields,
+      description: "view, worker, config, and operatorEmail",
+    };
+  }
+
+  return null;
+}
+
+function assertWorkerToolEnvelope(name: string, payload: JsonObject) {
+  const envelope = workerToolEnvelope(name);
+
+  if (!envelope) {
+    throw new Error(`Unknown worker tool: ${name}`);
+  }
+
+  const unexpectedFields = Object.keys(payload).filter((field) => !envelope.fields.has(field));
 
   if (unexpectedFields.length > 0) {
     throw new Error(
-      `Worker tool payload fields must be worker, idempotencyKey, config, and operatorEmail. Move operation inputs into config. Unexpected fields: ${unexpectedFields.join(", ")}.`,
+      `Worker tool payload fields must be ${envelope.description}. Move operation inputs into config. Unexpected fields: ${unexpectedFields.join(", ")}.`,
     );
   }
 }
 
 export async function executeWorkerTool(name: string, payload: JsonObject = {}) {
-  assertWorkerToolEnvelope(payload);
+  assertWorkerToolEnvelope(name, payload);
 
   const target = targetFrom(payload);
   const config = payload.config;
   const viewConfig = objectValue(payload.config);
   const operatorEmail = stringValue(payload.operatorEmail) ?? process.env.WORKER_OPERATOR_EMAIL ?? "";
 
-  if (name === "worker.snapshot") {
+  if (name === "worker.view") {
+    const view = stringValue(payload.view) ?? "snapshot";
     const result = await executeWorkerView({
-      view: "snapshot",
-      target,
-      operatorEmail,
-    });
-
-    return {
-      ...result.data,
-      error: result.error,
-    };
-  }
-
-  if (name === "worker.run") {
-    return executeWorkerCommand({
-      command: "run",
-      target,
-      operatorEmail,
-      config,
-      idempotencyKey: payload.idempotencyKey,
-    });
-  }
-
-  if (name === "worker.lead.read") {
-    return executeWorkerCommand({
-      command: "lead.read",
-      target,
-      operatorEmail,
-      config,
-      idempotencyKey: payload.idempotencyKey,
-    });
-  }
-
-  if (name === "worker.lead.classify") {
-    return executeWorkerCommand({
-      command: "lead.classify",
-      target,
-      operatorEmail,
-      config,
-      idempotencyKey: payload.idempotencyKey,
-    });
-  }
-
-  if (name === "worker.response.draft") {
-    return executeWorkerCommand({
-      command: "response.draft",
-      target,
-      operatorEmail,
-      config,
-      idempotencyKey: payload.idempotencyKey,
-    });
-  }
-
-  if (name === "worker.dispatch.schedule.propose") {
-    return executeWorkerCommand({
-      command: "schedule.propose",
-      target,
-      operatorEmail,
-      config,
-      idempotencyKey: payload.idempotencyKey,
-    });
-  }
-
-  if (name === "worker.dispatch.customer_update.draft") {
-    return executeWorkerCommand({
-      command: "customer_update.draft",
-      target,
-      operatorEmail,
-      config,
-      idempotencyKey: payload.idempotencyKey,
-    });
-  }
-
-  if (name === "worker.dispatch.closeout.prepare") {
-    return executeWorkerCommand({
-      command: "closeout.prepare",
-      target,
-      operatorEmail,
-      config,
-      idempotencyKey: payload.idempotencyKey,
-    });
-  }
-
-  if (name === "worker.dispatch.exception.route") {
-    return executeWorkerCommand({
-      command: "exception.route",
-      target,
-      operatorEmail,
-      config,
-      idempotencyKey: payload.idempotencyKey,
-    });
-  }
-
-  if (name === "worker.finance.invoice.prepare") {
-    return executeWorkerCommand({
-      command: "invoice.prepare",
-      target,
-      operatorEmail,
-      config,
-      idempotencyKey: payload.idempotencyKey,
-    });
-  }
-
-  if (name === "worker.finance.ar_followup.draft") {
-    return executeWorkerCommand({
-      command: "ar_followup.draft",
-      target,
-      operatorEmail,
-      config,
-      idempotencyKey: payload.idempotencyKey,
-    });
-  }
-
-  if (name === "worker.finance.cash_forecast.generate") {
-    return executeWorkerCommand({
-      command: "cash_forecast.generate",
-      target,
-      operatorEmail,
-      config,
-      idempotencyKey: payload.idempotencyKey,
-    });
-  }
-
-  if (name === "worker.finance.payment_draft.prepare") {
-    return executeWorkerCommand({
-      command: "payment_draft.prepare",
-      target,
-      operatorEmail,
-      config,
-      idempotencyKey: payload.idempotencyKey,
-    });
-  }
-
-  if (name === "worker.continue") {
-    return executeWorkerCommand({
-      command: "continue",
-      target,
-      operatorEmail,
-      config,
-      idempotencyKey: payload.idempotencyKey,
-    });
-  }
-
-  if (name === "worker.approvals.list") {
-    const result = await executeWorkerView({
-      view: "approvals",
+      view,
       target,
       operatorEmail,
       state: stringValue(viewConfig.state),
@@ -1211,84 +319,15 @@ export async function executeWorkerTool(name: string, payload: JsonObject = {}) 
     };
   }
 
-  if (name === "worker.owner.briefs.list") {
-    const result = await executeWorkerView({
-      view: "briefs",
-      target,
-      operatorEmail,
-      state: stringValue(viewConfig.state),
-    });
+  if (name === "worker.command") {
+    const command = stringValue(payload.command);
 
-    return {
-      ...result.data,
-      error: result.error,
-    };
-  }
+    if (!command) {
+      throw new Error("worker.command requires command.");
+    }
 
-  if (name === "worker.owner.decisions.list") {
-    const result = await executeWorkerView({
-      view: "decisions",
-      target,
-      operatorEmail,
-      state: stringValue(viewConfig.state),
-    });
-
-    return {
-      ...result.data,
-      error: result.error,
-    };
-  }
-
-  if (name === "worker.approvals.decide") {
     return executeWorkerCommand({
-      command: "approval.decide",
-      target,
-      operatorEmail,
-      config,
-    });
-  }
-
-  if (name === "worker.adapters.reconcile") {
-    return executeWorkerCommand({
-      command: "adapters.reconcile",
-      target,
-      operatorEmail,
-      config,
-    });
-  }
-
-  if (name === "worker.adapters.retry") {
-    return executeWorkerCommand({
-      command: "adapters.retry",
-      target,
-      operatorEmail,
-      config,
-    });
-  }
-
-  if (name === "worker.owner.brief.generate") {
-    return executeWorkerCommand({
-      command: "brief.generate",
-      target,
-      operatorEmail,
-      config,
-      idempotencyKey: payload.idempotencyKey,
-    });
-  }
-
-  if (name === "worker.owner.decision_queue.prepare") {
-    return executeWorkerCommand({
-      command: "decision_queue.prepare",
-      target,
-      operatorEmail,
-      config,
-      idempotencyKey: payload.idempotencyKey,
-    });
-  }
-
-  if (name === "worker.owner.anomaly.triage") {
-    return executeWorkerCommand({
-      command: "anomaly.triage",
+      command,
       target,
       operatorEmail,
       config,
