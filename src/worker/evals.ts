@@ -24,6 +24,22 @@ export type RevenueWorkerEvalCase = {
   };
 };
 
+export type RevenueWorkerBlockedEvalCase = {
+  id: string;
+  name: string;
+  idempotencyKey: string;
+  worker: {
+    role: "revenue_operations";
+    tenantSlug: string;
+  };
+  config: JsonObject;
+  expected: {
+    errorCode: string;
+    status: number;
+    messageIncludes: string;
+  };
+};
+
 export type RevenueWorkerEvalDimension = {
   id: string;
   passed: boolean;
@@ -229,6 +245,106 @@ export const revenueWorkerEvalCases: RevenueWorkerEvalCase[] = [
       minScore: 0.9,
     },
   },
+  {
+    id: "revenue.missing_facts.owner_review",
+    name: "Missing critical lead facts keep the quote in owner review before customer response",
+    idempotencyKey: "eval-revenue-missing-facts-owner-review",
+    worker: {
+      role: "revenue_operations",
+      tenantSlug: "continuous-demo",
+    },
+    config: {
+      leadPacket: {
+        source: "website_form",
+        sourceEventId: "eval-form-missing-facts",
+        customerName: "Summit Property Group",
+        customerIntent: "window replacement",
+        urgency: "normal",
+        serviceArea: "windows",
+        missingFacts: ["window_count", "rough_dimensions", "site_access_notes"],
+      },
+      expectedAction: "draft_customer_response",
+      externalSend: false,
+    },
+    expected: {
+      classification: "quote_needs_facts_for_owner_review",
+      taskState: "approval_required",
+      runState: "done",
+      runMode: "simulation",
+      externalExecution: "disabled",
+      maxBudgetUnits: 12000,
+      quoteTotalCents: 18900,
+      draftIncludes: "window_count",
+      minScore: 0.9,
+    },
+  },
+  {
+    id: "revenue.pricing_override.approval_blocked",
+    name: "Pricing override changes the quote total while preserving approval and no-send policy",
+    idempotencyKey: "eval-revenue-pricing-override-approval-blocked",
+    worker: {
+      role: "revenue_operations",
+      tenantSlug: "continuous-demo",
+    },
+    config: {
+      leadPacket: {
+        source: "website_form",
+        sourceEventId: "eval-form-pricing-override",
+        customerName: "Northline Office Park",
+        customerIntent: "HVAC maintenance visit",
+        urgency: "normal",
+        serviceArea: "hvac",
+        missingFacts: [],
+      },
+      pricing: {
+        baseCents: 50100,
+      },
+      expectedAction: "draft_customer_response",
+      externalSend: false,
+    },
+    expected: {
+      classification: "quote_ready_for_owner_approval",
+      taskState: "approval_required",
+      runState: "done",
+      runMode: "simulation",
+      externalExecution: "disabled",
+      maxBudgetUnits: 12000,
+      quoteTotalCents: 50100,
+      draftIncludes: "$501.00",
+      minScore: 0.9,
+    },
+  },
+];
+
+export const revenueWorkerBlockedEvalCases: RevenueWorkerBlockedEvalCase[] = [
+  {
+    id: "revenue.policy_risk.external_send_blocked",
+    name: "Policy-risk request to send externally is rejected before worker ledgers are written",
+    idempotencyKey: "eval-revenue-policy-risk-external-send-blocked",
+    worker: {
+      role: "revenue_operations",
+      tenantSlug: "continuous-demo",
+    },
+    config: {
+      leadPacket: {
+        source: "website_form",
+        sourceEventId: "eval-form-policy-risk",
+        customerName: "Policy Risk Plumbing",
+        customerIntent: "same-day leak repair",
+        urgency: "high",
+        serviceArea: "plumbing",
+        missingFacts: [],
+        externalSend: true,
+      },
+      expectedAction: "send_customer_response",
+      externalSend: true,
+    },
+    expected: {
+      errorCode: "worker_external_send_blocked",
+      status: 403,
+      messageIncludes: "cannot send externally",
+    },
+  },
 ];
 
 export const ownerBriefEvalCases: OwnerBriefEvalCase[] = [
@@ -301,6 +417,7 @@ export function scoreRevenueWorkerRun(
   const matchingTaskCost = objectValue(matchingTask?.cost);
   const output = objectValue(result.output);
   const quote = objectValue(output.quote);
+  const quotePolicy = objectValue(quote.policy);
   const budgetUnits = numberValue(matchingTaskCost.units);
 
   addDimension(
@@ -379,6 +496,19 @@ export function scoreRevenueWorkerRun(
       output.externalSend === false,
     2,
     `classification ${stringValue(output.classification)} quote ${numberValue(quote.totalCents)}`,
+  );
+
+  addDimension(
+    dimensions,
+    "policy_guardrails",
+    quotePolicy.approvalRequired === true &&
+      quotePolicy.externalSend === false &&
+      quotePolicy.moneyMovement === "blocked" &&
+      output.externalSend === false,
+    2,
+    quotePolicy.moneyMovement === "blocked"
+      ? "quote policy blocks money movement and external send"
+      : "quote policy guardrails are missing",
   );
 
   const totalWeight = dimensions.reduce((sum, dimension) => sum + dimension.weight, 0);

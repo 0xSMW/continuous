@@ -62,7 +62,13 @@ import {
   workers,
   type JsonObject,
 } from "../db/schema";
-import { ownerBriefEvalCases, revenueWorkerEvalCases, scoreOwnerBriefRun, scoreRevenueWorkerRun } from "./evals";
+import {
+  ownerBriefEvalCases,
+  revenueWorkerBlockedEvalCases,
+  revenueWorkerEvalCases,
+  scoreOwnerBriefRun,
+  scoreRevenueWorkerRun,
+} from "./evals";
 import { executeWorkerCommand } from "./registry";
 import { continueRevenueWorker, runRevenueWorker } from "./revenue";
 
@@ -1579,6 +1585,77 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(secondOutput.classification).not.toBe(output.classification);
     expect(secondOutput.draftResponse).not.toEqual(output.draftResponse);
     expect(secondOutput.quote).not.toEqual(output.quote);
+  }, 120_000);
+
+  it("runs the missing-fact and pricing-override Revenue eval cases", async () => {
+    const evalCases = [
+      revenueWorkerEvalCases.find((item) => item.id === "revenue.missing_facts.owner_review"),
+      revenueWorkerEvalCases.find((item) => item.id === "revenue.pricing_override.approval_blocked"),
+    ];
+
+    for (const evalCase of evalCases) {
+      expect(evalCase).toBeDefined();
+      if (!evalCase) {
+        throw new Error("Missing Revenue Worker eval case.");
+      }
+
+      const result = await runRevenueWorker({
+        idempotencyKey: evalCase.idempotencyKey,
+        tenantSlug: evalCase.worker.tenantSlug,
+        operatorEmail: "owner@continuoushq.com",
+        config: evalCase.config,
+      });
+      const scored = scoreRevenueWorkerRun(result, evalCase);
+      const output = objectValue(result.output);
+      const quote = objectValue(output.quote);
+      const quotePolicy = objectValue(quote.policy);
+
+      expect(result.created).toBe(true);
+      expect(scored.dimensions.filter((dimension) => !dimension.passed)).toEqual([]);
+      expect(scored.passed).toBe(true);
+      expect(output.classification).toBe(evalCase.expected.classification);
+      expect(output.draftResponse).toContain(evalCase.expected.draftIncludes);
+      expect(quote.totalCents).toBe(evalCase.expected.quoteTotalCents);
+      expect(quotePolicy.approvalRequired).toBe(true);
+      expect(quotePolicy.externalSend).toBe(false);
+      expect(quotePolicy.moneyMovement).toBe("blocked");
+      expect(output.externalSend).toBe(false);
+
+      if (evalCase.id === "revenue.pricing_override.approval_blocked") {
+        expect(quote.subtotalCents).toBe(50100);
+        expect(objectValue(Array.isArray(quote.lines) ? quote.lines[0] : {}).amountCents).toBe(50100);
+      }
+    }
+  }, 120_000);
+
+  it("rejects policy-risk Revenue eval cases before worker ledgers are written", async () => {
+    const evalCase = revenueWorkerBlockedEvalCases.find(
+      (item) => item.id === "revenue.policy_risk.external_send_blocked",
+    );
+
+    expect(evalCase).toBeDefined();
+    if (!evalCase) {
+      throw new Error("Missing Revenue Worker blocked eval case.");
+    }
+
+    await expect(
+      runRevenueWorker({
+        idempotencyKey: evalCase.idempotencyKey,
+        tenantSlug: evalCase.worker.tenantSlug,
+        operatorEmail: "owner@continuoushq.com",
+        config: evalCase.config,
+      }),
+    ).rejects.toMatchObject({
+      code: evalCase.expected.errorCode,
+      status: evalCase.expected.status,
+    });
+
+    const [workerRunCount] = await db
+      .select({ count: count() })
+      .from(workerRuns)
+      .where(eq(workerRuns.idempotencyKey, evalCase.idempotencyKey));
+
+    expect(workerRunCount.count).toBe(0);
   }, 120_000);
 
   it("records a workflow spine and approval continuation for Revenue Worker runs", async () => {

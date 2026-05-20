@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   ownerBriefEvalCases,
+  revenueWorkerBlockedEvalCases,
   revenueWorkerEvalCases,
   scoreOwnerBriefRun,
   scoreRevenueWorkerRun,
@@ -96,6 +97,11 @@ const completeResult: RevenueWorkerRunResult = {
     quote: {
       totalCents: 27400,
       currency: "USD",
+      policy: {
+        approvalRequired: true,
+        externalSend: false,
+        moneyMovement: "blocked",
+      },
     },
     externalSend: false,
   },
@@ -194,7 +200,7 @@ describe("Revenue Worker evals", () => {
     const configs = revenueWorkerEvalCases.map((evalCase) => objectValue(evalCase.config));
     const intakeConfigs = configs.map((config) => objectValue(config.intake));
 
-    expect(revenueWorkerEvalCases).toHaveLength(5);
+    expect(revenueWorkerEvalCases).toHaveLength(7);
     expect(configs.some((config) => Object.keys(objectValue(config.leadPacket)).length > 0)).toBe(true);
     expect(
       intakeConfigs.some((intake) => Boolean(intake.objectId && intake.eventId && intake.evidenceId)),
@@ -209,6 +215,39 @@ describe("Revenue Worker evals", () => {
           evalCase.expected.quoteTotalCents === 12900,
       ),
     ).toBe(true);
+    expect(
+      revenueWorkerEvalCases.some(
+        (evalCase) =>
+          evalCase.id === "revenue.missing_facts.owner_review" &&
+          evalCase.expected.classification === "quote_needs_facts_for_owner_review" &&
+          evalCase.expected.draftIncludes === "window_count",
+      ),
+    ).toBe(true);
+    expect(
+      revenueWorkerEvalCases.some(
+        (evalCase) =>
+          evalCase.id === "revenue.pricing_override.approval_blocked" &&
+          evalCase.expected.quoteTotalCents === 50100,
+      ),
+    ).toBe(true);
+  });
+
+  it("covers policy-risk requests as blocked eval fixtures", () => {
+    expect(revenueWorkerBlockedEvalCases).toEqual([
+      expect.objectContaining({
+        id: "revenue.policy_risk.external_send_blocked",
+        expected: expect.objectContaining({
+          errorCode: "worker_external_send_blocked",
+          status: 403,
+        }),
+      }),
+    ]);
+
+    const blockedConfig = objectValue(revenueWorkerBlockedEvalCases[0]?.config);
+    const leadPacket = objectValue(blockedConfig.leadPacket);
+
+    expect(blockedConfig.externalSend).toBe(true);
+    expect(leadPacket.externalSend).toBe(true);
   });
 
   it("passes a run that links ledgers, blocks external execution, and requests approval", () => {
@@ -217,6 +256,9 @@ describe("Revenue Worker evals", () => {
     expect(result.passed).toBe(true);
     expect(result.score).toBe(1);
     expect(result.dimensions.every((dimension) => dimension.passed)).toBe(true);
+    expect(result.dimensions.find((dimension) => dimension.id === "policy_guardrails")?.passed).toBe(
+      true,
+    );
   });
 
   it("fails when adapter receipt evidence is missing", () => {

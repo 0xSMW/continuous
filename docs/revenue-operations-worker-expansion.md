@@ -95,5 +95,5 @@ smoke test.
 1. Expand read-only real lead intake beyond website-form source records into authenticated inbox and CRM source readers.
 2. Add quote approval UI backed by `ui_contracts`.
 3. Extend blocked retry execution into scoped live credential checks and rollback paths for failed or uncertain adapter results.
-4. Extend eval fixtures into missing-fact, pricing override, and policy-risk cases.
+4. Keep missing-fact, pricing override, and policy-risk eval fixtures green as the worker expands toward higher autonomy.
 5. Raise autonomy only for Revenue read, classify, and draft capabilities; owner brief generation belongs to the Owner Chief-of-Staff worker.
