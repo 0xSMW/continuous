@@ -46,6 +46,7 @@ CONTROL_PLANE_ALLOWED_COMMANDS_JSON='[
   "worker:view.decisions",
   "worker:view.board",
   "worker:view.exceptions",
+  "worker:view.readiness",
   "worker:run",
   "worker:lead.read",
   "worker:lead.classify",
@@ -58,6 +59,8 @@ CONTROL_PLANE_ALLOWED_COMMANDS_JSON='[
   "worker:ar_followup.draft",
   "worker:cash_forecast.generate",
   "worker:payment_draft.prepare",
+  "worker:hire.packet.prepare",
+  "worker:payroll_input.prepare",
   "worker:continue",
   "worker:approval.decide",
   "worker:adapters.reconcile",
@@ -160,7 +163,8 @@ BOOTSTRAP_PAYLOAD="$(
           "revenue_operations",
           "owner_chief_of_staff",
           "dispatch_operations",
-          "finance_operations"
+          "finance_operations",
+          "workforce_operations"
         ],
         allowedRoutes: ["core", "worker", "workflow", "approval"],
         allowedAccess: ["read", "write"],
