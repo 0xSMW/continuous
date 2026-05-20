@@ -223,8 +223,12 @@ function commandListAllows(items: string[], route: string, command?: string | nu
   const cleanedCommand = cleanString(command);
   const cleanedRoute = cleanString(route);
 
-  if (!cleanedCommand || !cleanedRoute) {
+  if (items.length === 0) {
     return true;
+  }
+
+  if (!cleanedCommand || !cleanedRoute) {
+    return false;
   }
 
   return items.includes(`${cleanedRoute}:${cleanedCommand}`);

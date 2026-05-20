@@ -385,6 +385,79 @@ describe("authorizeControlPlaneAccess", () => {
     });
   });
 
+  it("rejects blank commands for command-scoped catalog tokens", () => {
+    const tokenCatalogJson = JSON.stringify([
+      {
+        id: "worker-runner",
+        token: acceptedCredential,
+        operatorEmail,
+        allowedRoutes: ["worker"],
+        allowedAccess: ["write"],
+        allowedCommands: ["worker:run"],
+      },
+    ]);
+
+    for (const command of ["", " "]) {
+      expect(
+        authorizeControlPlaneAccess({
+          enabled: true,
+          appEnv: "production",
+          operatorEmail,
+          authorization: `Bearer ${acceptedCredential}`,
+          tokenCatalogJson,
+          route: "worker",
+          access: "write",
+          command,
+        }),
+      ).toEqual({
+        ok: false,
+        status: 403,
+        code: "control_plane_command_forbidden",
+        message: "This operator token is not allowed to execute the requested control-plane command.",
+      });
+    }
+  });
+
+  it("rejects malformed control-plane token catalogs", () => {
+    const cases = [
+      {
+        tokenCatalogJson: "{",
+      },
+      {
+        tokenCatalogJson: JSON.stringify({ tokens: {} }),
+      },
+      {
+        tokenCatalogJson: JSON.stringify([{ id: "missing-token", operatorEmail }]),
+      },
+      {
+        tokenCatalogB64: Buffer.from(
+          JSON.stringify([{ id: "missing-operator", token: acceptedCredential }]),
+        ).toString("base64"),
+        operatorEmail: "",
+      },
+    ];
+
+    for (const testCase of cases) {
+      expect(
+        authorizeControlPlaneAccess({
+          enabled: true,
+          appEnv: "production",
+          operatorEmail: testCase.operatorEmail ?? operatorEmail,
+          authorization: `Bearer ${acceptedCredential}`,
+          tokenCatalogJson: testCase.tokenCatalogJson,
+          tokenCatalogB64: testCase.tokenCatalogB64,
+          route: "worker",
+          access: "write",
+          command: "run",
+        }),
+      ).toMatchObject({
+        ok: false,
+        status: 403,
+        code: "control_plane_token_catalog_invalid",
+      });
+    }
+  });
+
   it("fails closed when catalog route, access, or command scopes are omitted", () => {
     const tokenCatalogJson = JSON.stringify([
       {

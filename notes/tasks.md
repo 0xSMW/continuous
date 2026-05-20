@@ -34,4 +34,4 @@
 - Remove the compatibility `/api/health` alias only after old probes and external monitors have moved to `/health`; decide whether the `/approvals` UI route should stay as a human console while `/approval` remains the API surface.
 - Add production-grade app-server worker transport that derives operator identity from authenticated control-plane request state instead of `WORKER_OPERATOR_EMAIL` and trusted-local toggles.
 - Make normal DigitalOcean deploys non-root by default, then make the production-readiness gate mandatory for customer-data deploys; strict workflow runs now fail before sync if `DEPLOY_USER` resolves to root, but bootstrap provisioning for backup, observability, and non-root readiness still needs a first-class host setup path.
-- Add missing replay/security coverage for `external_action.record`, workflow route failure mapping, and malformed control-plane token catalogs.
+- Add missing replay/security coverage for `external_action.record` and workflow route failure mapping.

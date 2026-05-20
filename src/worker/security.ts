@@ -472,6 +472,15 @@ export function authorizeControlPlaneAccess(input: {
 
   const command = optionalScopeValue(input.command);
 
+  if ("command" in input && !command && credential.commands.length > 0) {
+    return {
+      ok: false,
+      status: 403,
+      code: "control_plane_command_forbidden",
+      message: "This operator token is not allowed to execute the requested control-plane command.",
+    };
+  }
+
   if (command && !allowsCommand(credential, input.route, command)) {
     return {
       ok: false,

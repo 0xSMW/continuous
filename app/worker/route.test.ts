@@ -986,24 +986,34 @@ describe("/worker route", () => {
 
   it("rejects worker-family-specific GET query fields", async () => {
     const { GET } = await import("./route");
-    const response = await GET(
-      new Request(
-        "http://localhost/worker?view=snapshot&role=revenue_operations&tenantSlug=continuous-demo&extra=true",
-        {
-          headers: {
-            authorization: "Bearer test-token",
-          },
-        },
-      ),
-    );
-    const body = await response.json();
+    const forbiddenFields = [
+      "extra",
+      "workerRole",
+      "revenueWorker",
+      "dispatchWorker",
+      "leadSource",
+    ];
 
-    expect(response.status).toBe(400);
-    expect(body.error).toEqual({
-      code: "invalid_worker_view_query",
-      message:
-        "Worker view query fields must be view, role, id, tenantSlug, and state. Move read filters into config-backed worker tool surfaces. Unexpected fields: extra.",
-    });
+    for (const field of forbiddenFields) {
+      const response = await GET(
+        new Request(
+          `http://localhost/worker?view=snapshot&role=revenue_operations&tenantSlug=continuous-demo&${field}=true`,
+          {
+            headers: {
+              authorization: "Bearer test-token",
+            },
+          },
+        ),
+      );
+      const body = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(body.error).toEqual({
+        code: "invalid_worker_view_query",
+        message:
+          `Worker view query fields must be view, role, id, tenantSlug, and state. Move read filters into config-backed worker tool surfaces. Unexpected fields: ${field}.`,
+      });
+    }
     expect(mocks.authorizeManagedControlPlaneCredential).not.toHaveBeenCalled();
     expect(mocks.executeWorkerView).not.toHaveBeenCalled();
   });

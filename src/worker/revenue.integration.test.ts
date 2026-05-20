@@ -321,6 +321,39 @@ maybeDescribe("Revenue Worker integration eval", () => {
     });
 
     expect(allowed.ok).toBe(true);
+
+    for (const command of [undefined, " "]) {
+      const denied = await authorizeManagedControlPlaneCredential({
+        request: new Request("http://localhost/worker", {
+          headers: {
+            authorization: `Bearer ${token}`,
+          },
+        }),
+        auth: {
+          ok: true,
+          operatorEmail: "owner@continuoushq.com",
+          credentialId,
+          scope: {
+            tenantSlugs: ["continuous-demo"],
+            workerRoles: ["revenue_operations"],
+          },
+        },
+        tenantSlug: "continuous-demo",
+        workerRole: "revenue_operations",
+        route: "worker",
+        access: "write",
+        command,
+        requireManagedCredential: true,
+        db,
+      });
+
+      expect(denied).toEqual({
+        ok: false,
+        status: 403,
+        code: "control_plane_command_forbidden",
+        message: "This managed control-plane credential is not allowed to execute the requested command.",
+      });
+    }
   });
 
   it("enforces managed control-plane credential revocation after catalog auth succeeds", async () => {
