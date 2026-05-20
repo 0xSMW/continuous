@@ -49,7 +49,7 @@ vi.mock("../../src/core/control-plane-auth", () => ({
 vi.mock("../../src/worker/revenue", () => ({
   RevenueWorkerUnavailableError: class RevenueWorkerUnavailableError extends Error {
     status = 503;
-    code = "revenue_worker_unavailable";
+    code = "worker_unavailable";
   },
 }));
 

@@ -44,7 +44,7 @@ type Database = typeof defaultDb;
 
 const revenueWorkerRole = "revenue_operations";
 const revenueWorkflowKey = "lead_to_cash";
-const source = "continuous.revenue_worker";
+const source = "continuous.worker";
 const runUnits = 12000;
 const leadReadUnits = 1000;
 const leadClassifyUnits = 2000;
@@ -1538,7 +1538,7 @@ function revisedPacketFromOriginal(params: {
   };
 
   return {
-    schemaVersion: "revenue_worker.revised_packet.v1",
+    schemaVersion: "worker.revised_packet.v1",
     status: "revised_packet_ready_for_owner_approval",
     revision,
     revisionHistory: [...previousHistory, revision],
@@ -1589,7 +1589,7 @@ function approvedExecutionPacketFromOriginal(params: {
   const approvedAt = params.now.toISOString();
 
   return {
-    schemaVersion: "revenue_worker.approved_execution_packet.v1",
+    schemaVersion: "worker.approved_execution_packet.v1",
     status: "approved_execution_blocked",
     approval: {
       approvalRequestId: params.approvalRequestId,
@@ -1641,7 +1641,7 @@ function rejectedPacketFromOriginal(params: {
   const rejectedAt = params.now.toISOString();
 
   return {
-    schemaVersion: "revenue_worker.rejected_packet.v1",
+    schemaVersion: "worker.rejected_packet.v1",
     status: "rejected_closed",
     rejection: {
       approvalRequestId: params.approvalRequestId,
@@ -2045,7 +2045,7 @@ export async function getRevenueWorkerSnapshot(
         and(
           eq(events.tenantId, workerRow.tenantId),
           eq(events.source, source),
-          eq(events.type, "revenue_worker.run.completed"),
+          eq(events.type, "worker.run.completed"),
         ),
       )
       .orderBy(desc(events.occurredAt))
@@ -2196,7 +2196,7 @@ export async function readRevenueLeads(input: {
   }
 
   const requestHash = hashObject({
-    schemaVersion: "revenue_worker.lead_read.request.v1",
+    schemaVersion: "worker.lead_read.request.v1",
     idempotencyKey: input.idempotencyKey,
     tenantId: context.worker.tenantId,
     workerId: context.worker.id,
@@ -2262,7 +2262,7 @@ export async function readRevenueLeads(input: {
   );
 
   const inputHash = hashObject({
-    schemaVersion: "revenue_worker.lead_read.v1",
+    schemaVersion: "worker.lead_read.v1",
     requestHash,
     idempotencyKey: input.idempotencyKey,
     tenantId: context.worker.tenantId,
@@ -2633,7 +2633,7 @@ export async function readRevenueLeads(input: {
       .insert(events)
       .values({
         tenantId: context.worker.tenantId,
-        type: "revenue_worker.lead_read.completed",
+        type: "worker.lead_read.completed",
         source,
         actorType: "worker",
         actorId: context.worker.id,
@@ -2653,7 +2653,7 @@ export async function readRevenueLeads(input: {
       .insert(auditEvents)
       .values({
         tenantId: context.worker.tenantId,
-        type: "revenue_worker.lead_read.completed",
+        type: "worker.lead_read.completed",
         source,
         actorType: "worker",
         actorId: context.worker.id,
@@ -2863,14 +2863,14 @@ async function runRevenueActionCommand(input: {
   const mode = input.command === "lead.classify" ? "classification" : "draft";
   const eventType =
     input.command === "lead.classify"
-      ? "revenue_worker.lead_classify.completed"
-      : "revenue_worker.response_draft.completed";
+      ? "worker.lead_classify.completed"
+      : "worker.response_draft.completed";
   const evidenceName =
     input.command === "lead.classify"
       ? "Revenue lead classification trace"
       : "Revenue response draft";
   const inputHash = hashObject({
-    schemaVersion: `revenue_worker.${input.command}.v1`,
+    schemaVersion: `worker.${input.command}.v1`,
     command: input.command,
     idempotencyKey: input.idempotencyKey,
     tenantId: context.worker.tenantId,
@@ -3296,7 +3296,7 @@ export async function runRevenueWorker(input: {
   };
   const runObjectId = task?.objectId ?? sourceObjectId;
   const inputHash = hashObject({
-    schemaVersion: "revenue_worker.lead_packet.v1",
+    schemaVersion: "worker.lead_packet.v1",
     mode: "simulation",
     idempotencyKey: input.idempotencyKey,
     tenantId: context.worker.tenantId,
@@ -3728,7 +3728,7 @@ export async function runRevenueWorker(input: {
       .insert(auditEvents)
       .values({
         tenantId: context.worker.tenantId,
-        type: "revenue_worker.run.requested",
+        type: "worker.run.requested",
         source,
         actorType: "user",
         actorId: operator.id,
@@ -3865,7 +3865,7 @@ export async function runRevenueWorker(input: {
       .insert(events)
       .values({
         tenantId: context.worker.tenantId,
-        type: "revenue_worker.run.completed",
+        type: "worker.run.completed",
         source,
         actorType: "worker",
         actorId: context.worker.id,
@@ -5049,7 +5049,7 @@ export async function continueRevenueWorker(input: {
         .insert(events)
         .values({
           tenantId: context.worker.tenantId,
-          type: "revenue_worker.approved_execution.blocked",
+          type: "worker.approved_execution.blocked",
           source,
           actorType: "worker",
           actorId: context.worker.id,
@@ -5084,7 +5084,7 @@ export async function continueRevenueWorker(input: {
         .insert(auditEvents)
         .values({
           tenantId: context.worker.tenantId,
-          type: "revenue_worker.continuation.completed",
+          type: "worker.continuation.completed",
           source,
           actorType: "worker",
           actorId: context.worker.id,
@@ -5555,7 +5555,7 @@ export async function continueRevenueWorker(input: {
         .insert(events)
         .values({
           tenantId: context.worker.tenantId,
-          type: "revenue_worker.rejection.closed",
+          type: "worker.rejection.closed",
           source,
           actorType: "worker",
           actorId: context.worker.id,
@@ -5590,7 +5590,7 @@ export async function continueRevenueWorker(input: {
         .insert(auditEvents)
         .values({
           tenantId: context.worker.tenantId,
-          type: "revenue_worker.continuation.completed",
+          type: "worker.continuation.completed",
           source,
           actorType: "worker",
           actorId: context.worker.id,
@@ -6053,7 +6053,7 @@ export async function continueRevenueWorker(input: {
       .insert(events)
       .values({
         tenantId: context.worker.tenantId,
-        type: "revenue_worker.revision.prepared",
+        type: "worker.revision.prepared",
         source,
         actorType: "worker",
         actorId: context.worker.id,
@@ -6086,7 +6086,7 @@ export async function continueRevenueWorker(input: {
       .insert(auditEvents)
       .values({
         tenantId: context.worker.tenantId,
-        type: "revenue_worker.continuation.completed",
+        type: "worker.continuation.completed",
         source,
         actorType: "worker",
         actorId: context.worker.id,

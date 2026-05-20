@@ -2142,7 +2142,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .from(workerRuns)
       .where(
         and(
-          eq(workerRuns.source, "continuous.revenue_worker"),
+          eq(workerRuns.source, "continuous.worker"),
           eq(workerRuns.idempotencyKey, evalCase.idempotencyKey),
         ),
       );
@@ -2161,7 +2161,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .from(workerRuns)
       .where(
         and(
-          eq(workerRuns.source, "continuous.revenue_worker"),
+          eq(workerRuns.source, "continuous.worker"),
           eq(workerRuns.idempotencyKey, evalCase.idempotencyKey),
         ),
       );
@@ -4401,9 +4401,9 @@ maybeDescribe("Revenue Worker integration eval", () => {
 
     expect(classifyRun?.mode).toBe("classification");
     expect(objectValue(objectValue(classifyRun?.data).input).command).toBe("lead.classify");
-    expect(classifyEvent?.type).toBe("revenue_worker.lead_classify.completed");
+    expect(classifyEvent?.type).toBe("worker.lead_classify.completed");
     expect(classifyEvidence?.kind).toBe("trace");
-    expect(classifyAudit?.type).toBe("revenue_worker.lead_classify.completed");
+    expect(classifyAudit?.type).toBe("worker.lead_classify.completed");
     expect(classifyUsage?.units).toBeGreaterThan(0);
 
     const [draftRun] = await db
@@ -4434,9 +4434,9 @@ maybeDescribe("Revenue Worker integration eval", () => {
 
     expect(draftRun?.mode).toBe("draft");
     expect(objectValue(objectValue(draftRun?.data).input).command).toBe("response.draft");
-    expect(draftEvent?.type).toBe("revenue_worker.response_draft.completed");
+    expect(draftEvent?.type).toBe("worker.response_draft.completed");
     expect(draftEvidence?.kind).toBe("draft");
-    expect(draftAudit?.type).toBe("revenue_worker.response_draft.completed");
+    expect(draftAudit?.type).toBe("worker.response_draft.completed");
     expect(draftUsage?.units).toBeGreaterThan(0);
 
     const run = await runRevenueWorker({
@@ -4555,7 +4555,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .limit(1);
 
     expect(objectValue(objectValue(readRun?.data).input).command).toBe("lead.read");
-    expect(runRow?.source).toBe("continuous.revenue_worker");
+    expect(runRow?.source).toBe("continuous.worker");
     expect(runRow?.state).toBe("done");
     expect(objectValue(objectValue(runRow?.data).input).inputHash).toBeTruthy();
     expect(approval?.state).toBe("pending");

@@ -185,7 +185,7 @@ describe("worker scheduler", () => {
     });
   });
 
-  it("hands successful lead reads to revenue worker runs once per selector", async () => {
+  it("hands successful lead reads to worker runs once per selector", async () => {
     const postCommand = vi.fn(async ({ payload }) => {
       if (payload.command === "lead.read") {
         return scheduledResult("lead.read", {
@@ -247,14 +247,14 @@ describe("worker scheduler", () => {
               connectionId: "conn-google-workspace",
               source: "website_form",
               sourceEventId: "website-lead-001",
-              idempotencyKey: "scheduler-revenue-run:conn-google-workspace:website_form:website-lead-001",
+              idempotencyKey: "scheduler-worker-run:conn-google-workspace:website_form:website-lead-001",
               status: "succeeded",
             },
             {
               connectionId: "conn-google-workspace",
               source: "google_workspace_inbox",
               sourceEventId: "gmail-msg-002",
-              idempotencyKey: "scheduler-revenue-run:conn-google-workspace:google_workspace_inbox:gmail-msg-002",
+              idempotencyKey: "scheduler-worker-run:conn-google-workspace:google_workspace_inbox:gmail-msg-002",
               status: "succeeded",
             },
           ],
@@ -272,7 +272,7 @@ describe("worker scheduler", () => {
           role: "revenue_operations",
           tenantSlug: "continuous-demo",
         },
-        idempotencyKey: "scheduler-revenue-run:conn-google-workspace:website_form:website-lead-001",
+        idempotencyKey: "scheduler-worker-run:conn-google-workspace:website_form:website-lead-001",
         config: {
           intake: {
             source: "website_form",
@@ -292,7 +292,7 @@ describe("worker scheduler", () => {
           role: "revenue_operations",
           tenantSlug: "continuous-demo",
         },
-        idempotencyKey: "scheduler-revenue-run:conn-google-workspace:google_workspace_inbox:gmail-msg-002",
+        idempotencyKey: "scheduler-worker-run:conn-google-workspace:google_workspace_inbox:gmail-msg-002",
         config: {
           intake: {
             source: "google_workspace_inbox",
@@ -324,7 +324,7 @@ describe("worker scheduler", () => {
 
       if (
         payload.command === "run" &&
-        payload.idempotencyKey === "scheduler-revenue-run:conn-google-workspace:website_form:bad-lead-001"
+        payload.idempotencyKey === "scheduler-worker-run:conn-google-workspace:website_form:bad-lead-001"
       ) {
         throw new Error("run failed");
       }
@@ -369,7 +369,7 @@ describe("worker scheduler", () => {
               connectionId: "conn-google-workspace",
               source: "website_form",
               sourceEventId: "bad-lead-001",
-              idempotencyKey: "scheduler-revenue-run:conn-google-workspace:website_form:bad-lead-001",
+              idempotencyKey: "scheduler-worker-run:conn-google-workspace:website_form:bad-lead-001",
               status: "failed",
               error: {
                 message: "run failed",
@@ -379,7 +379,7 @@ describe("worker scheduler", () => {
               connectionId: "conn-google-workspace",
               source: "website_form",
               sourceEventId: "good-lead-002",
-              idempotencyKey: "scheduler-revenue-run:conn-google-workspace:website_form:good-lead-002",
+              idempotencyKey: "scheduler-worker-run:conn-google-workspace:website_form:good-lead-002",
               status: "succeeded",
             },
           ],

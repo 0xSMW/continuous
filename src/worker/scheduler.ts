@@ -563,7 +563,7 @@ async function runLeadPollCommands(input: {
         result.revenueRuns.attempted += 1;
 
         const idempotencyKey =
-          `scheduler-revenue-run:${command.connectionId}:${runInput.source}:${runInput.sourceEventId}`;
+          `scheduler-worker-run:${command.connectionId}:${runInput.source}:${runInput.sourceEventId}`;
 
         try {
           const runResponse = await input.postCommand({
