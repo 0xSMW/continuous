@@ -145,7 +145,7 @@ curl -X POST http://localhost:3000/worker \
   -H "content-type: application/json" \
   -d '{
     "command": "run",
-    "worker": {"role": "revenue_operations"},
+    "worker": {"role": "revenue_operations", "tenantSlug": "continuous-demo"},
     "idempotencyKey": "local-worker-run-001",
     "config": {
       "intake": {
@@ -185,7 +185,7 @@ Agent-facing local automation can use the repo-owned worker toolbox:
 
 ```sh
 bun run worker:tool schema
-bun run worker:tool worker.view --payload='{"view":"snapshot","worker":{"role":"revenue_operations"}}'
+bun run worker:tool worker.view --payload='{"view":"snapshot","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{}}'
 bun run worker:tool worker.command --payload='{"command":"lead.read","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-lead-read-002","config":{"source":"website_form","records":[{"sourceEventId":"form-local-002","customerName":"Acme Roof Repair"}]}}'
 bun run worker:tool worker.command --payload='{"command":"adapters.reconcile","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-adapters-reconcile-001","config":{"limit":25}}'
 bun run worker:tool worker.command --payload='{"command":"adapters.retry","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-adapters-retry-001","config":{"limit":25}}'

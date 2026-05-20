@@ -270,3 +270,8 @@ longer prevent the remaining lanes from running in that scheduler cycle.
 Public health checks now prefer `/health`; deploy, rollback, restore, dashboard,
 and observability references were moved to that route while `/api/health`
 continues to respond for older probes.
+
+Workforce readiness now includes existing employment objects updated by
+`hire.packet.prepare`, so production deploy smoke can keep proving both hire
+packet visibility and payroll readiness rows through the generic `/worker`
+readiness view.

@@ -197,7 +197,7 @@ The worker toolbox uses the same payload shape:
 bun run worker:tool schema
 
 bun run worker:tool worker.view <<'JSON'
-{"worker":{"role":"revenue_operations"}}
+{"view":"snapshot","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{}}
 JSON
 
 bun run worker:tool worker.command <<'JSON'

@@ -7311,6 +7311,8 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(readiness.error).toBeNull();
     expect(Array.isArray(readinessData.documentBlockers)).toBe(true);
     expect(Array.isArray(readinessData.payrollBlockers)).toBe(true);
+    expect((readinessData.documentBlockers as unknown[]).length).toBeGreaterThanOrEqual(1);
+    expect((readinessData.payrollBlockers as unknown[]).length).toBeGreaterThanOrEqual(1);
   }, 120_000);
 
   it("promotes approved Revenue quote handoffs into Dispatch schedule proposals through /worker", async () => {

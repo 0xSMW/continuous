@@ -758,7 +758,13 @@ async function snapshotForWorker(db: Database, worker: Awaited<ReturnType<typeof
     db
       .select({ id: objects.id, name: objects.name, state: objects.state, data: objects.data })
       .from(objects)
-      .where(and(eq(objects.tenantId, worker.tenantId), eq(objects.source, workforceSource), eq(objects.type, "employment")))
+      .where(
+        and(
+          eq(objects.tenantId, worker.tenantId),
+          eq(objects.type, "employment"),
+          or(eq(objects.source, workforceSource), sql`${objects.data} ? 'workforcePacket'`),
+        ),
+      )
       .orderBy(desc(objects.updatedAt))
       .limit(10),
     db
@@ -1064,6 +1070,7 @@ export async function prepareWorkforceHirePacket(input: {
             state: packetState,
             data: {
               ...objectValue(existingEmploymentObject.data),
+              ...packetData,
               workforcePacket: packetData,
             },
             updatedAt: now,
@@ -2154,13 +2161,15 @@ export async function getWorkforceReadiness(input: {
     worker: snapshot.worker,
     documentBlockers: snapshot.hirePackets.map((packet) => {
       const data = objectValue(packet.data);
+      const packetData = objectValue(data.workforcePacket);
+      const effectiveData = Object.keys(packetData).length > 0 ? packetData : data;
 
       return {
         objectId: packet.id,
         name: packet.name,
         state: packet.state,
-        blockers: stringList(data.blockers),
-        restrictedDocuments: objectValue(data.restrictedDocuments),
+        blockers: stringList(effectiveData.blockers),
+        restrictedDocuments: objectValue(effectiveData.restrictedDocuments),
       };
     }),
     payrollBlockers: snapshot.payrollInputs.map((packet) => {
