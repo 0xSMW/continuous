@@ -127,6 +127,74 @@ describe("POST /core", () => {
     vi.resetAllMocks();
   });
 
+  async function postCore(command: string, idempotencyKey: string, config: Record<string, unknown>) {
+    const { POST } = await import("./route");
+
+    return POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command,
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey,
+          config,
+        }),
+      }),
+    );
+  }
+
+  it("returns tenant-scoped Core summaries", async () => {
+    mocks.getCoreSummarySafe.mockResolvedValue({
+      ok: true,
+      error: null,
+      summary: {
+        counts: {
+          tasks: 3,
+          objects: 5,
+        },
+        activeTasks: [],
+        recentEvents: [],
+      },
+    });
+    mocks.getHealth.mockReturnValue({
+      status: "ok",
+      checks: {
+        db: "ok",
+      },
+    });
+
+    const { GET } = await import("./route");
+    const response = await GET(
+      new Request("http://localhost/core?tenantSlug=continuous-demo", {
+        headers: {
+          authorization: "Bearer test-token",
+        },
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.health.status).toBe("ok");
+    expect(body.data.counts.tasks).toBe(3);
+    expect(mocks.getCoreSummarySafe).toHaveBeenCalledWith({
+      tenantSlug: "continuous-demo",
+    });
+    expect(mocks.getHealth).toHaveBeenCalledWith({
+      dbOk: true,
+      dbError: null,
+      counts: {
+        tasks: 3,
+        objects: 5,
+      },
+    });
+  });
+
   it("rejects worker-only catalog tokens before Core dispatch", async () => {
     vi.stubEnv(
       "CONTROL_PLANE_TOKENS_JSON",
@@ -709,6 +777,816 @@ describe("POST /core", () => {
       since: "2026-05-20T00:00:00.000Z",
       limit: 25,
     });
+  });
+
+  it("dispatches task.create with task config payload", async () => {
+    mocks.createCoreTask.mockResolvedValue({
+      created: true,
+      taskId: "task-1",
+      eventId: "event-1",
+      auditEventId: "audit-1",
+    });
+
+    const response = await postCore("task.create", "task-create-route-test-001", {
+      title: "Review cheerful paperwork packet",
+      objectId: "33333333-3333-4333-8333-000000000001",
+      capabilityId: "44444444-4444-4444-8444-000000000001",
+      state: "open",
+      priority: "high",
+      owner: {
+        type: "worker",
+        role: "owner_chief_of_staff",
+      },
+      evidence: {
+        required: ["packet"],
+      },
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.command).toBe("task.create");
+    expect(body.data.result.taskId).toBe("task-1");
+    expect(mocks.createCoreTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operatorEmail: "operator@example.com",
+        tenantSlug: "continuous-demo",
+        idempotencyKey: "task-create-route-test-001",
+        title: "Review cheerful paperwork packet",
+        objectId: "33333333-3333-4333-8333-000000000001",
+        capabilityId: "44444444-4444-4444-8444-000000000001",
+        state: "open",
+        priority: "high",
+        owner: {
+          type: "worker",
+          role: "owner_chief_of_staff",
+        },
+        evidence: {
+          required: ["packet"],
+        },
+      }),
+    );
+  });
+
+  it("dispatches task.transition with transition config payload", async () => {
+    mocks.transitionCoreTask.mockResolvedValue({
+      transitioned: true,
+      taskId: "task-1",
+      eventId: "event-1",
+      auditEventId: "audit-1",
+    });
+
+    const response = await postCore("task.transition", "task-transition-route-test-001", {
+      taskId: "task-1",
+      toState: "review_ready",
+      reason: "Packet complete",
+      evidence: {
+        packetId: "packet-1",
+      },
+      outcome: {
+        status: "ready",
+      },
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.command).toBe("task.transition");
+    expect(body.data.result.taskId).toBe("task-1");
+    expect(mocks.transitionCoreTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operatorEmail: "operator@example.com",
+        tenantSlug: "continuous-demo",
+        idempotencyKey: "task-transition-route-test-001",
+        taskId: "task-1",
+        toState: "review_ready",
+        reason: "Packet complete",
+        evidence: {
+          packetId: "packet-1",
+        },
+        outcome: {
+          status: "ready",
+        },
+      }),
+    );
+  });
+
+  it("dispatches object.upsert with object config payload", async () => {
+    mocks.upsertCoreObject.mockResolvedValue({
+      created: true,
+      objectId: "object-1",
+      objectVersionId: "version-1",
+      eventId: "event-1",
+      auditEventId: "audit-1",
+    });
+
+    const response = await postCore("object.upsert", "object-upsert-route-test-001", {
+      type: "agency_notice",
+      name: "Friendly compliance notice",
+      state: "active",
+      source: "operator_payload",
+      externalId: "notice-1",
+      data: {
+        agency: "Department of Cheerful Paperwork",
+      },
+      version: {
+        data: {
+          pageCount: 2,
+        },
+        reason: "Initial packet",
+      },
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.command).toBe("object.upsert");
+    expect(body.data.result.objectId).toBe("object-1");
+    expect(mocks.upsertCoreObject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operatorEmail: "operator@example.com",
+        tenantSlug: "continuous-demo",
+        idempotencyKey: "object-upsert-route-test-001",
+        type: "agency_notice",
+        name: "Friendly compliance notice",
+        source: "operator_payload",
+        externalId: "notice-1",
+        data: {
+          agency: "Department of Cheerful Paperwork",
+        },
+        version: {
+          data: {
+            pageCount: 2,
+          },
+          reason: "Initial packet",
+        },
+      }),
+    );
+  });
+
+  it("dispatches event.ingest with event config payload", async () => {
+    mocks.ingestCoreEvent.mockResolvedValue({
+      created: true,
+      eventId: "event-1",
+      auditEventId: "audit-1",
+    });
+
+    const response = await postCore("event.ingest", "event-ingest-route-test-001", {
+      type: "notice.received",
+      source: "operator_payload",
+      actor: {
+        type: "user",
+        ref: "owner@continuoushq.com",
+      },
+      objectId: "object-1",
+      data: {
+        channel: "mail",
+      },
+      occurredAt: "2026-05-20T12:00:00.000Z",
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.command).toBe("event.ingest");
+    expect(body.data.result.eventId).toBe("event-1");
+    expect(mocks.ingestCoreEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operatorEmail: "operator@example.com",
+        tenantSlug: "continuous-demo",
+        idempotencyKey: "event-ingest-route-test-001",
+        type: "notice.received",
+        source: "operator_payload",
+        actor: {
+          type: "user",
+          id: undefined,
+          ref: "owner@continuoushq.com",
+        },
+        objectId: "object-1",
+        data: {
+          channel: "mail",
+        },
+        occurredAt: "2026-05-20T12:00:00.000Z",
+      }),
+    );
+  });
+
+  it("dispatches evidence.attach with evidence config payload", async () => {
+    mocks.attachCoreEvidence.mockResolvedValue({
+      created: true,
+      evidenceId: "evidence-1",
+      auditEventId: "audit-1",
+    });
+
+    const response = await postCore("evidence.attach", "evidence-attach-route-test-001", {
+      kind: "document",
+      name: "Notice scan",
+      actor: {
+        type: "user",
+        ref: "owner@continuoushq.com",
+      },
+      objectId: "object-1",
+      uri: "s3://continuous-demo/notices/notice-1.pdf",
+      hash: "notice-hash-1",
+      data: {
+        pages: 2,
+      },
+      redaction: {
+        pii: "masked",
+      },
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.command).toBe("evidence.attach");
+    expect(body.data.result.evidenceId).toBe("evidence-1");
+    expect(mocks.attachCoreEvidence).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operatorEmail: "operator@example.com",
+        tenantSlug: "continuous-demo",
+        idempotencyKey: "evidence-attach-route-test-001",
+        kind: "document",
+        name: "Notice scan",
+        objectId: "object-1",
+        uri: "s3://continuous-demo/notices/notice-1.pdf",
+        hash: "notice-hash-1",
+        data: {
+          pages: 2,
+        },
+        redaction: {
+          pii: "masked",
+        },
+      }),
+    );
+  });
+
+  it("dispatches document.create with document config payload", async () => {
+    mocks.createCoreDocument.mockResolvedValue({
+      created: true,
+      documentId: "document-1",
+      eventId: "event-1",
+      auditEventId: "audit-1",
+    });
+
+    const response = await postCore("document.create", "document-create-route-test-001", {
+      kind: "notice_packet",
+      name: "Notice response packet",
+      state: "draft",
+      sensitivity: "internal",
+      objectId: "object-1",
+      hash: "document-hash-1",
+      data: {
+        sections: ["summary", "response"],
+      },
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.command).toBe("document.create");
+    expect(body.data.result.documentId).toBe("document-1");
+    expect(mocks.createCoreDocument).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operatorEmail: "operator@example.com",
+        tenantSlug: "continuous-demo",
+        idempotencyKey: "document-create-route-test-001",
+        kind: "notice_packet",
+        name: "Notice response packet",
+        state: "draft",
+        sensitivity: "internal",
+        objectId: "object-1",
+        hash: "document-hash-1",
+        data: {
+          sections: ["summary", "response"],
+        },
+      }),
+    );
+  });
+
+  it("dispatches packet.prepare with packet config payload", async () => {
+    mocks.prepareCorePacket.mockResolvedValue({
+      created: true,
+      packetId: "packet-1",
+      documentId: "document-1",
+      eventId: "event-1",
+      auditEventId: "audit-1",
+    });
+
+    const response = await postCore("packet.prepare", "packet-prepare-route-test-001", {
+      kind: "notice_review",
+      name: "Notice review packet",
+      state: "ready",
+      objectId: "object-1",
+      taskId: "task-1",
+      evidenceIds: ["evidence-1"],
+      documentIds: ["document-1"],
+      sections: {
+        summary: "Review packet ready.",
+      },
+      data: {
+        required: ["owner_review"],
+      },
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.command).toBe("packet.prepare");
+    expect(body.data.result.packetId).toBe("packet-1");
+    expect(mocks.prepareCorePacket).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operatorEmail: "operator@example.com",
+        tenantSlug: "continuous-demo",
+        idempotencyKey: "packet-prepare-route-test-001",
+        kind: "notice_review",
+        name: "Notice review packet",
+        objectId: "object-1",
+        taskId: "task-1",
+        evidenceIds: ["evidence-1"],
+        documentIds: ["document-1"],
+        sections: {
+          summary: "Review packet ready.",
+        },
+        data: {
+          required: ["owner_review"],
+        },
+      }),
+    );
+  });
+
+  it("dispatches document.packet.prepare through the shared packet branch", async () => {
+    mocks.prepareCorePacket.mockResolvedValue({
+      created: true,
+      packetId: "packet-2",
+      documentId: "document-2",
+      eventId: "event-2",
+      auditEventId: "audit-2",
+    });
+
+    const response = await postCore("document.packet.prepare", "document-packet-route-test-001", {
+      kind: "document_packet",
+      name: "Document packet",
+      documentIds: ["document-1"],
+      sections: {
+        docs: "Attached.",
+      },
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.command).toBe("document.packet.prepare");
+    expect(body.data.result.packetId).toBe("packet-2");
+    expect(mocks.prepareCorePacket).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operatorEmail: "operator@example.com",
+        tenantSlug: "continuous-demo",
+        idempotencyKey: "document-packet-route-test-001",
+        kind: "document_packet",
+        name: "Document packet",
+        documentIds: ["document-1"],
+        sections: {
+          docs: "Attached.",
+        },
+      }),
+    );
+  });
+
+  it("dispatches decision.record with decision config payload", async () => {
+    mocks.recordCoreDecision.mockResolvedValue({
+      created: true,
+      decisionId: "decision-1",
+      eventId: "event-1",
+      auditEventId: "audit-1",
+    });
+
+    const response = await postCore("decision.record", "decision-record-route-test-001", {
+      kind: "notice_response",
+      decision: "request_owner_review",
+      rationale: "Customer impact is low but deadline is near.",
+      state: "recorded",
+      actor: {
+        type: "worker",
+        id: "worker-1",
+      },
+      taskId: "task-1",
+      data: {
+        deadlineDays: 5,
+      },
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.command).toBe("decision.record");
+    expect(body.data.result.decisionId).toBe("decision-1");
+    expect(mocks.recordCoreDecision).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operatorEmail: "operator@example.com",
+        tenantSlug: "continuous-demo",
+        idempotencyKey: "decision-record-route-test-001",
+        kind: "notice_response",
+        decision: "request_owner_review",
+        rationale: "Customer impact is low but deadline is near.",
+        actor: {
+          type: "worker",
+          id: "worker-1",
+          ref: undefined,
+        },
+        taskId: "task-1",
+        data: {
+          deadlineDays: 5,
+        },
+      }),
+    );
+  });
+
+  it("dispatches approval.request with approval config payload", async () => {
+    mocks.requestApproval.mockResolvedValue({
+      created: true,
+      approvalRequestId: "approval-1",
+      eventId: "event-1",
+      auditEventId: "audit-1",
+    });
+
+    const response = await postCore("approval.request", "approval-request-route-test-001", {
+      kind: "notice_review",
+      title: "Approve notice response",
+      summary: "Response packet is ready for owner review.",
+      taskId: "task-1",
+      objectId: "object-1",
+      reviewerUserId: "user-1",
+      priority: "high",
+      risk: "low",
+      requestedAction: {
+        action: "approve_response",
+      },
+      evidence: {
+        packetId: "packet-1",
+      },
+      policy: {
+        requireOwnerApproval: true,
+      },
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.command).toBe("approval.request");
+    expect(body.data.result.approvalRequestId).toBe("approval-1");
+    expect(mocks.requestApproval).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operatorEmail: "operator@example.com",
+        tenantSlug: "continuous-demo",
+        idempotencyKey: "approval-request-route-test-001",
+        kind: "notice_review",
+        title: "Approve notice response",
+        taskId: "task-1",
+        objectId: "object-1",
+        reviewerUserId: "user-1",
+        priority: "high",
+        risk: "low",
+        requestedAction: {
+          action: "approve_response",
+        },
+        evidence: {
+          packetId: "packet-1",
+        },
+        policy: {
+          requireOwnerApproval: true,
+        },
+      }),
+    );
+  });
+
+  it("dispatches object.link with relationship config payload", async () => {
+    mocks.linkCoreObjects.mockResolvedValue({
+      created: true,
+      objectLinkId: "link-1",
+      eventId: "event-1",
+      auditEventId: "audit-1",
+      link: {
+        id: "link-1",
+        fromObjectId: "object-1",
+        toObjectId: "object-2",
+        type: "supports",
+      },
+    });
+
+    const response = await postCore("object.link", "object-link-route-test-001", {
+      fromObjectId: "object-1",
+      toObjectId: "object-2",
+      type: "supports",
+      data: {
+        reason: "Notice packet supports task review.",
+      },
+      effectiveAt: "2026-05-20T12:00:00.000Z",
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.command).toBe("object.link");
+    expect(body.data.result.objectLinkId).toBe("link-1");
+    expect(mocks.linkCoreObjects).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operatorEmail: "operator@example.com",
+        tenantSlug: "continuous-demo",
+        idempotencyKey: "object-link-route-test-001",
+        fromObjectId: "object-1",
+        toObjectId: "object-2",
+        type: "supports",
+        data: {
+          reason: "Notice packet supports task review.",
+        },
+        effectiveAt: "2026-05-20T12:00:00.000Z",
+      }),
+    );
+  });
+
+  it("dispatches capability.grant with authority config payload", async () => {
+    mocks.grantCapability.mockResolvedValue({
+      granted: true,
+      created: true,
+      updated: false,
+      capabilityGrantId: "grant-1",
+      capabilityId: "capability-1",
+      eventId: "event-1",
+      auditEventId: "audit-1",
+      evidenceId: "evidence-1",
+      grant: {
+        id: "grant-1",
+        capabilityId: "capability-1",
+        capabilityKey: "notice.response.prepare",
+        actor: {
+          type: "worker",
+          id: "worker-1",
+          ref: "worker:worker-1",
+        },
+        active: true,
+      },
+    });
+
+    const response = await postCore("capability.grant", "capability-grant-route-test-001", {
+      capabilityKey: "notice.response.prepare",
+      capabilityVersion: "v1",
+      actor: {
+        type: "worker",
+        role: "owner_chief_of_staff",
+      },
+      scope: {
+        tenantSlug: "continuous-demo",
+      },
+      policy: {
+        externalExecution: "blocked",
+      },
+      active: true,
+      reason: "Enable review packet preparation.",
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.command).toBe("capability.grant");
+    expect(body.data.result.capabilityGrantId).toBe("grant-1");
+    expect(mocks.grantCapability).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operatorEmail: "operator@example.com",
+        tenantSlug: "continuous-demo",
+        idempotencyKey: "capability-grant-route-test-001",
+        capabilityKey: "notice.response.prepare",
+        capabilityVersion: "v1",
+        actor: {
+          type: "worker",
+          role: "owner_chief_of_staff",
+        },
+        scope: {
+          tenantSlug: "continuous-demo",
+        },
+        policy: {
+          externalExecution: "blocked",
+        },
+        active: true,
+        reason: "Enable review packet preparation.",
+      }),
+    );
+  });
+
+  it("dispatches budget.reserve with reservation config payload", async () => {
+    mocks.reserveBudget.mockResolvedValue({
+      reserved: true,
+      reservationId: "reservation-1",
+      budgetAccountId: "budget-1",
+      eventId: "event-1",
+      auditEventId: "audit-1",
+      evidenceId: "evidence-1",
+      reservation: {
+        id: "reservation-1",
+        budgetAccountId: "budget-1",
+        taskId: "task-1",
+        units: 250,
+        state: "held",
+      },
+    });
+
+    const response = await postCore("budget.reserve", "budget-reserve-route-test-001", {
+      budgetAccountId: "budget-1",
+      units: 250,
+      taskId: "task-1",
+      capabilityId: "capability-1",
+      reason: "Reserve deterministic inference budget.",
+      data: {
+        lane: "notice_review",
+      },
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.command).toBe("budget.reserve");
+    expect(body.data.result.reservationId).toBe("reservation-1");
+    expect(mocks.reserveBudget).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operatorEmail: "operator@example.com",
+        tenantSlug: "continuous-demo",
+        idempotencyKey: "budget-reserve-route-test-001",
+        budgetAccountId: "budget-1",
+        units: 250,
+        taskId: "task-1",
+        capabilityId: "capability-1",
+        reason: "Reserve deterministic inference budget.",
+        data: {
+          lane: "notice_review",
+        },
+      }),
+    );
+  });
+
+  it("dispatches budget.charge with usage config payload", async () => {
+    mocks.chargeBudget.mockResolvedValue({
+      charged: true,
+      usageEventId: "usage-1",
+      reservationId: "reservation-1",
+      eventId: "event-1",
+      auditEventId: "audit-1",
+      evidenceId: "evidence-1",
+      usage: {
+        id: "usage-1",
+        budgetAccountId: "budget-1",
+        reservationId: "reservation-1",
+        units: 125,
+        costUsd: "0.000001",
+        actor: {
+          type: "worker",
+          role: "owner_chief_of_staff",
+        },
+      },
+    });
+
+    const response = await postCore("budget.charge", "budget-charge-route-test-001", {
+      reservationId: "reservation-1",
+      units: 125,
+      costUsd: "0.000001",
+      actor: {
+        type: "worker",
+        role: "owner_chief_of_staff",
+      },
+      taskId: "task-1",
+      capabilityId: "capability-1",
+      inferenceId: "inference-1",
+      reason: "Charge deterministic inference usage.",
+      data: {
+        model: "simulation",
+      },
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.command).toBe("budget.charge");
+    expect(body.data.result.usageEventId).toBe("usage-1");
+    expect(mocks.chargeBudget).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operatorEmail: "operator@example.com",
+        tenantSlug: "continuous-demo",
+        idempotencyKey: "budget-charge-route-test-001",
+        reservationId: "reservation-1",
+        units: 125,
+        costUsd: "0.000001",
+        actor: {
+          type: "worker",
+          role: "owner_chief_of_staff",
+        },
+        taskId: "task-1",
+        capabilityId: "capability-1",
+        inferenceId: "inference-1",
+        reason: "Charge deterministic inference usage.",
+        data: {
+          model: "simulation",
+        },
+      }),
+    );
+  });
+
+  it("dispatches budget.release with release config payload", async () => {
+    mocks.releaseBudget.mockResolvedValue({
+      released: true,
+      reservationId: "reservation-1",
+      eventId: "event-1",
+      auditEventId: "audit-1",
+      evidenceId: "evidence-1",
+      reservation: {
+        id: "reservation-1",
+        budgetAccountId: "budget-1",
+        taskId: "task-1",
+        units: 125,
+        state: "released",
+      },
+    });
+
+    const response = await postCore("budget.release", "budget-release-route-test-001", {
+      reservationId: "reservation-1",
+      reason: "Unused budget returned.",
+      data: {
+        remainingUnits: 125,
+      },
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.command).toBe("budget.release");
+    expect(body.data.result.reservationId).toBe("reservation-1");
+    expect(mocks.releaseBudget).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operatorEmail: "operator@example.com",
+        tenantSlug: "continuous-demo",
+        idempotencyKey: "budget-release-route-test-001",
+        reservationId: "reservation-1",
+        reason: "Unused budget returned.",
+        data: {
+          remainingUnits: 125,
+        },
+      }),
+    );
+  });
+
+  it("dispatches view.publish with generated-view config payload", async () => {
+    mocks.publishCoreView.mockResolvedValue({
+      created: true,
+      updated: false,
+      viewId: "view-1",
+      eventId: "event-1",
+      auditEventId: "audit-1",
+      view: {
+        id: "view-1",
+        key: "notice.review",
+        version: "v1",
+        name: "Notice Review",
+        active: true,
+      },
+    });
+
+    const response = await postCore("view.publish", "view-publish-route-test-001", {
+      key: "notice.review",
+      name: "Notice Review",
+      purpose: "approval_review",
+      version: "v1",
+      surface: "operator_console",
+      objectType: "agency_notice",
+      taskState: "review_ready",
+      contract: {
+        fields: ["summary", "deadline"],
+      },
+      actions: {
+        approve: "approval.decide",
+      },
+      data: {
+        title: "Notice response ready",
+      },
+      mask: {
+        pii: "redacted",
+      },
+      active: true,
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.command).toBe("view.publish");
+    expect(body.data.result.viewId).toBe("view-1");
+    expect(mocks.publishCoreView).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operatorEmail: "operator@example.com",
+        tenantSlug: "continuous-demo",
+        idempotencyKey: "view-publish-route-test-001",
+        key: "notice.review",
+        name: "Notice Review",
+        purpose: "approval_review",
+        version: "v1",
+        surface: "operator_console",
+        objectType: "agency_notice",
+        taskState: "review_ready",
+        contract: {
+          fields: ["summary", "deadline"],
+        },
+        actions: {
+          approve: "approval.decide",
+        },
+        data: {
+          title: "Notice response ready",
+        },
+        mask: {
+          pii: "redacted",
+        },
+        active: true,
+      }),
+    );
   });
 
   it("dispatches customer_signal.record with command config payload", async () => {

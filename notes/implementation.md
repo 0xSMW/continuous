@@ -127,6 +127,7 @@
 | Hardened workflow and approval envelopes | `/workflow` and `/approval` now reject missing content type, malformed JSON, array bodies, and non-object `config` instead of normalizing malformed mutation requests to empty objects |
 | Redacted scheduler cycle logs | Scheduler cycle logs now record command status, errors, and counts without raw worker/workflow result payloads that may contain customer or tenant data |
 | Hardened route-scoped control-plane auth | The legacy `WORKER_RUN_TOKEN` fallback is now worker-route-only, non-worker routes use explicit catalog tokens in tests/docs, and all control-plane mutation routes require an exact `application/json` media type instead of substring content-type matching |
+| Completed Core route dispatch proof | `app/core/route.test.ts` now proves successful `GET /core` summary plus `/core` dispatch for task, object, graph-link, event, evidence, document, packet, decision, approval, capability, budget, and generated-view commands through the canonical `command`/`core`/`idempotencyKey`/`config` envelope |
 
 ### Tradeoffs
 
@@ -163,7 +164,9 @@ document, decision, workflow, and generated UI primitives plus worker run lifecy
 records and `/`, `/api/health`, `/approval`, `/approvals`, `/core`, and `POST /core` task,
 task-transition, approval-request, capability-grant, budget-ledger, object,
 object-link, event, evidence, document, packet, payroll preview, payroll packet,
-decision, and generated-view commands. Local
+decision, and generated-view commands. Route tests now prove those canonical
+Core command dispatch paths, including successful tenant-scoped `GET /core`.
+Local
 Node-side validation passes; the real Bun path is verified in the droplet
 containers and GitHub CI.
 
