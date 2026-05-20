@@ -128,6 +128,9 @@ control-plane token catalog and scopes that credential to
 requests to `/worker`, `/core`, or `/workflow` must carry an allowed
 `tenantSlug`, and worker requests must carry an allowed `worker.role`. Use the
 CLI path over SSH for direct operator-controlled smoke runs:
+`/core`, `/worker`, `/workflow`, and `/approval` reject invalid credentials
+before reading request bodies, cap command bodies at 1 MiB, and still rerun
+command-scoped authorization after parsing the structured envelope.
 
 ```sh
 ssh root@45.55.53.92 'cd /opt/continuous && docker compose --profile tools run --rm migrate bun run worker:tool worker.command --payload='"'"'{"command":"lead.read","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"deploy-lead-read-001","config":{"source":"website_form","records":[{"sourceEventId":"deploy-form-001","customerName":"Acme Roof Repair","customerIntent":"roof leak inspection","serviceArea":"roofing","urgency":"high"}]}}'"'"''
