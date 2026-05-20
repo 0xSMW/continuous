@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
     WORKER_OPERATOR_EMAIL: "operator@example.com",
     CONTROL_PLANE_ALLOWED_TENANTS: undefined as string | undefined,
     CONTROL_PLANE_ALLOWED_WORKER_ROLES: undefined as string | undefined,
+    CONTROL_PLANE_TOKENS_JSON: undefined as string | undefined,
+    CONTROL_PLANE_TOKEN_CATALOG_B64: undefined as string | undefined,
   },
 }));
 
@@ -43,6 +45,17 @@ describe("/approval route", () => {
       WORKER_OPERATOR_EMAIL: "operator@example.com",
       CONTROL_PLANE_ALLOWED_TENANTS: undefined,
       CONTROL_PLANE_ALLOWED_WORKER_ROLES: undefined,
+      CONTROL_PLANE_TOKENS_JSON: JSON.stringify([
+        {
+          id: "approval-route-test",
+          token: "test-token",
+          operatorEmail: "operator@example.com",
+          allowedRoutes: ["approval"],
+          allowedAccess: ["read", "write"],
+          allowedCommands: ["approval:*"],
+        },
+      ]),
+      CONTROL_PLANE_TOKEN_CATALOG_B64: undefined,
     });
     mocks.authorizeManagedControlPlaneCredential.mockResolvedValue({ ok: true });
     mocks.recordControlPlaneAuthAttempt.mockResolvedValue({ id: "auth-session-1" });
@@ -229,6 +242,30 @@ describe("/approval route", () => {
         }),
       }),
     );
+    const invalidContentType = await POST(
+      new Request("http://localhost/approval", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "text/plain",
+        },
+        body: JSON.stringify({
+          command: "approval.decide",
+        }),
+      }),
+    );
+    const jsonpContentType = await POST(
+      new Request("http://localhost/approval", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/jsonp",
+        },
+        body: JSON.stringify({
+          command: "approval.decide",
+        }),
+      }),
+    );
     const malformedJson = await POST(
       new Request("http://localhost/approval", {
         method: "POST",
@@ -256,6 +293,18 @@ describe("/approval route", () => {
         message: "POST /approval requires an application/json request body.",
       },
     });
+    await expect(invalidContentType.json()).resolves.toMatchObject({
+      error: {
+        code: "invalid_approval_command_body",
+        message: "POST /approval requires an application/json request body.",
+      },
+    });
+    await expect(jsonpContentType.json()).resolves.toMatchObject({
+      error: {
+        code: "invalid_approval_command_body",
+        message: "POST /approval requires an application/json request body.",
+      },
+    });
     await expect(malformedJson.json()).resolves.toMatchObject({
       error: {
         code: "invalid_approval_command_body",
@@ -269,6 +318,8 @@ describe("/approval route", () => {
       },
     });
     expect(missingContentType.status).toBe(415);
+    expect(invalidContentType.status).toBe(415);
+    expect(jsonpContentType.status).toBe(415);
     expect(malformedJson.status).toBe(400);
     expect(arrayBody.status).toBe(400);
     expect(mocks.decideApproval).not.toHaveBeenCalled();

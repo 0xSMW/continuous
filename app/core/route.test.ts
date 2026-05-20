@@ -104,6 +104,20 @@ describe("POST /core", () => {
     vi.stubEnv("WORKER_RUN_ENABLED", "true");
     vi.stubEnv("WORKER_RUN_TOKEN", "test-token");
     vi.stubEnv("WORKER_OPERATOR_EMAIL", "operator@example.com");
+    vi.stubEnv(
+      "CONTROL_PLANE_TOKENS_JSON",
+      JSON.stringify([
+        {
+          id: "core-route-test",
+          token: "test-token",
+          operatorEmail: "operator@example.com",
+          allowedRoutes: ["core"],
+          allowedAccess: ["read", "write"],
+          allowedCommands: ["core:*"],
+        },
+      ]),
+    );
+    vi.stubEnv("CONTROL_PLANE_TOKEN_CATALOG_B64", "");
     mocks.authorizeManagedControlPlaneCredential.mockResolvedValue({ ok: true });
     mocks.recordControlPlaneAuthAttempt.mockResolvedValue({ id: "auth-session-1" });
   });
@@ -111,6 +125,51 @@ describe("POST /core", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.resetAllMocks();
+  });
+
+  it("rejects worker-only catalog tokens before Core dispatch", async () => {
+    vi.stubEnv(
+      "CONTROL_PLANE_TOKENS_JSON",
+      JSON.stringify([
+        {
+          id: "worker-only-route-test",
+          token: "test-token",
+          operatorEmail: "operator@example.com",
+          allowedRoutes: ["worker"],
+          allowedAccess: ["write"],
+          allowedCommands: ["worker:run"],
+        },
+      ]),
+    );
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "task.create",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "worker-only-core-route-test-001",
+          config: {
+            title: "This should not dispatch",
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(body.error).toEqual({
+      code: "control_plane_route_forbidden",
+      message: "This operator token is not allowed to access the requested control-plane route.",
+    });
+    expect(mocks.createCoreTask).not.toHaveBeenCalled();
   });
 
   it("attests control-plane token rotation through the Core command envelope", async () => {
@@ -440,6 +499,30 @@ describe("POST /core", () => {
         }),
       }),
     );
+    const invalidContentType = await POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "text/plain",
+        },
+        body: JSON.stringify({
+          command: "task.create",
+        }),
+      }),
+    );
+    const jsonpContentType = await POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/jsonp",
+        },
+        body: JSON.stringify({
+          command: "task.create",
+        }),
+      }),
+    );
     const malformedJson = await POST(
       new Request("http://localhost/core", {
         method: "POST",
@@ -467,6 +550,18 @@ describe("POST /core", () => {
         message: "POST /core requires an application/json request body.",
       },
     });
+    await expect(invalidContentType.json()).resolves.toMatchObject({
+      error: {
+        code: "invalid_core_command_body",
+        message: "POST /core requires an application/json request body.",
+      },
+    });
+    await expect(jsonpContentType.json()).resolves.toMatchObject({
+      error: {
+        code: "invalid_core_command_body",
+        message: "POST /core requires an application/json request body.",
+      },
+    });
     await expect(malformedJson.json()).resolves.toMatchObject({
       error: {
         code: "invalid_core_command_body",
@@ -480,6 +575,8 @@ describe("POST /core", () => {
       },
     });
     expect(missingContentType.status).toBe(415);
+    expect(invalidContentType.status).toBe(415);
+    expect(jsonpContentType.status).toBe(415);
     expect(malformedJson.status).toBe(400);
     expect(arrayBody.status).toBe(400);
     expect(mocks.createCoreTask).not.toHaveBeenCalled();

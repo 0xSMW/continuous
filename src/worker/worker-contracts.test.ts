@@ -293,7 +293,9 @@ describe("future worker contracts", () => {
     expect(readinessScript).toContain("CONTROL_PLANE_CREDENTIAL_REVOCATION_AUDIT_ID");
     expect(readinessScript).toContain("CONTROL_PLANE_SESSION_REVIEW_VIEW_ID");
     expect(readinessScript).toContain("REQUIRE_CONTROL_PLANE_CREDENTIAL_ATTESTATION");
+    expect(observabilityScript).toContain("caddy_logs=");
     expect(observabilityScript).toContain("caddy_access_log_present:docker_stdout");
+    expect(observabilityScript).not.toContain("logs --tail=400 caddy 2>/dev/null | grep -q");
     expect(deployment).toContain("structured Docker stdout logs");
     expect(attestationScript).toContain("control_plane.credential.upsert");
     expect(attestationScript).toContain("control_plane.credential.revoke");

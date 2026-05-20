@@ -240,9 +240,9 @@ function legacyCredential(input: {
       allowedTenants: input.allowedTenants,
       allowedWorkerRoles: input.allowedWorkerRoles,
     }),
-    routes: ["*"],
+    routes: ["worker"],
     access: ["read", "write"],
-    commands: ["*"],
+    commands: ["worker:*"],
   };
 }
 

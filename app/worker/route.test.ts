@@ -147,6 +147,30 @@ describe("/worker route", () => {
         }),
       }),
     );
+    const invalidContentType = await POST(
+      new Request("http://localhost/worker", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "text/plain",
+        },
+        body: JSON.stringify({
+          command: "run",
+        }),
+      }),
+    );
+    const jsonpContentType = await POST(
+      new Request("http://localhost/worker", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/jsonp",
+        },
+        body: JSON.stringify({
+          command: "run",
+        }),
+      }),
+    );
     const malformedJson = await POST(
       new Request("http://localhost/worker", {
         method: "POST",
@@ -174,6 +198,18 @@ describe("/worker route", () => {
         message: "POST /worker requires an application/json request body.",
       },
     });
+    await expect(invalidContentType.json()).resolves.toMatchObject({
+      error: {
+        code: "invalid_worker_command_body",
+        message: "POST /worker requires an application/json request body.",
+      },
+    });
+    await expect(jsonpContentType.json()).resolves.toMatchObject({
+      error: {
+        code: "invalid_worker_command_body",
+        message: "POST /worker requires an application/json request body.",
+      },
+    });
     await expect(malformedJson.json()).resolves.toMatchObject({
       error: {
         code: "invalid_worker_command_body",
@@ -187,6 +223,8 @@ describe("/worker route", () => {
       },
     });
     expect(missingContentType.status).toBe(415);
+    expect(invalidContentType.status).toBe(415);
+    expect(jsonpContentType.status).toBe(415);
     expect(malformedJson.status).toBe(400);
     expect(arrayBody.status).toBe(400);
     expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();

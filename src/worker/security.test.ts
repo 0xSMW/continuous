@@ -446,7 +446,7 @@ describe("authorizeControlPlaneAccess", () => {
     });
   });
 
-  it("falls back to the legacy token and global allowlists when no catalog is configured", () => {
+  it("limits the legacy bootstrap token to the worker route", () => {
     expect(
       authorizeControlPlaneAccess({
         enabled: true,
@@ -456,9 +456,9 @@ describe("authorizeControlPlaneAccess", () => {
         authorization: `Bearer ${acceptedCredential}`,
         allowedTenants: "continuous-demo",
         allowedWorkerRoles: "revenue_operations",
-        route: "core",
+        route: "worker",
         access: "write",
-        command: "task.create",
+        command: "run",
       }),
     ).toEqual({
       ok: true,
@@ -469,5 +469,31 @@ describe("authorizeControlPlaneAccess", () => {
         workerRoles: ["revenue_operations"],
       },
     });
+
+    for (const [route, command] of [
+      ["core", "task.create"],
+      ["workflow", "start"],
+      ["approval", "approval.decide"],
+    ] as const) {
+      expect(
+        authorizeControlPlaneAccess({
+          enabled: true,
+          appEnv: "production",
+          expectedToken: acceptedCredential,
+          operatorEmail,
+          authorization: `Bearer ${acceptedCredential}`,
+          allowedTenants: "continuous-demo",
+          allowedWorkerRoles: "revenue_operations",
+          route,
+          access: "write",
+          command,
+        }),
+      ).toEqual({
+        ok: false,
+        status: 403,
+        code: "control_plane_route_forbidden",
+        message: "This operator token is not allowed to access the requested control-plane route.",
+      });
+    }
   });
 });

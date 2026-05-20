@@ -32,6 +32,7 @@ import {
 } from "../../src/core/primitives";
 import { createCoreTask, transitionCoreTask } from "../../src/core/tasks";
 import { PlatformUnavailableError } from "../../src/core/errors";
+import { isJsonContentType } from "../../src/http/content";
 import {
   authorizeControlPlaneAccess,
   authorizeControlPlaneScope,
@@ -110,7 +111,7 @@ async function readBody(
   | { ok: true; value: Record<string, unknown> }
   | { ok: false; status: number; error: { code: string; message: string } }
 > {
-  if (!request.headers.get("content-type")?.includes("application/json")) {
+  if (!isJsonContentType(request.headers.get("content-type"))) {
     return {
       ok: false,
       status: 415,

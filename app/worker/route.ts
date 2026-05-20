@@ -14,6 +14,7 @@ import {
   authorizeManagedControlPlaneCredential,
   recordControlPlaneAuthAttempt,
 } from "../../src/core/control-plane-auth";
+import { isJsonContentType } from "../../src/http/content";
 
 export const dynamic = "force-dynamic";
 
@@ -55,7 +56,7 @@ async function readBody(
   | { ok: true; value: Record<string, unknown> }
   | { ok: false; status: number; error: { code: string; message: string } }
 > {
-  if (!request.headers.get("content-type")?.includes("application/json")) {
+  if (!isJsonContentType(request.headers.get("content-type"))) {
     return {
       ok: false,
       status: 415,

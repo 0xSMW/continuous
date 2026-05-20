@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => ({
     WORKER_OPERATOR_EMAIL: "operator@example.com",
     CONTROL_PLANE_ALLOWED_TENANTS: undefined as string | undefined,
     CONTROL_PLANE_ALLOWED_WORKER_ROLES: undefined as string | undefined,
+    CONTROL_PLANE_TOKENS_JSON: undefined as string | undefined,
+    CONTROL_PLANE_TOKEN_CATALOG_B64: undefined as string | undefined,
   },
 }));
 
@@ -61,6 +63,17 @@ describe("/workflow route scope", () => {
       WORKER_OPERATOR_EMAIL: "operator@example.com",
       CONTROL_PLANE_ALLOWED_TENANTS: undefined,
       CONTROL_PLANE_ALLOWED_WORKER_ROLES: undefined,
+      CONTROL_PLANE_TOKENS_JSON: JSON.stringify([
+        {
+          id: "workflow-route-test",
+          token: "test-token",
+          operatorEmail: "operator@example.com",
+          allowedRoutes: ["workflow"],
+          allowedAccess: ["read", "write"],
+          allowedCommands: ["workflow:*"],
+        },
+      ]),
+      CONTROL_PLANE_TOKEN_CATALOG_B64: undefined,
     });
     mocks.authorizeManagedControlPlaneCredential.mockResolvedValue({ ok: true });
     mocks.recordControlPlaneAuthAttempt.mockResolvedValue({ id: "auth-session-1" });
@@ -214,6 +227,30 @@ describe("/workflow route scope", () => {
         }),
       }),
     );
+    const invalidContentType = await POST(
+      new Request("http://localhost/workflow", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "text/plain",
+        },
+        body: JSON.stringify({
+          command: "steps.execute",
+        }),
+      }),
+    );
+    const jsonpContentType = await POST(
+      new Request("http://localhost/workflow", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/jsonp",
+        },
+        body: JSON.stringify({
+          command: "steps.execute",
+        }),
+      }),
+    );
     const malformedJson = await POST(
       new Request("http://localhost/workflow", {
         method: "POST",
@@ -241,6 +278,18 @@ describe("/workflow route scope", () => {
         message: "POST /workflow requires an application/json request body.",
       },
     });
+    await expect(invalidContentType.json()).resolves.toMatchObject({
+      error: {
+        code: "invalid_workflow_command_body",
+        message: "POST /workflow requires an application/json request body.",
+      },
+    });
+    await expect(jsonpContentType.json()).resolves.toMatchObject({
+      error: {
+        code: "invalid_workflow_command_body",
+        message: "POST /workflow requires an application/json request body.",
+      },
+    });
     await expect(malformedJson.json()).resolves.toMatchObject({
       error: {
         code: "invalid_workflow_command_body",
@@ -254,6 +303,8 @@ describe("/workflow route scope", () => {
       },
     });
     expect(missingContentType.status).toBe(415);
+    expect(invalidContentType.status).toBe(415);
+    expect(jsonpContentType.status).toBe(415);
     expect(malformedJson.status).toBe(400);
     expect(arrayBody.status).toBe(400);
     expect(mocks.startWorkflowRun).not.toHaveBeenCalled();
