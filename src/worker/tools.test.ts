@@ -235,6 +235,19 @@ describe("worker tool contract", () => {
   });
 
   it("exposes planned worker metadata without enabling future runtime handlers", () => {
+    const plannedCommands = workerToolSchema.registry.plannedCommands as Array<{
+      role: string;
+      name: string;
+      requiredConfig: string[];
+      oneRequiredConfig?: string[];
+      configSchema: {
+        type: string;
+        required?: string[];
+        oneRequired?: string[];
+        properties?: Record<string, { type?: string; minItems?: number }>;
+      };
+    }>;
+
     expect(workerToolSchema.registry.plannedContracts.map((contract) => contract.role)).toEqual([
       "dispatch_operations",
       "finance_operations",
@@ -261,6 +274,49 @@ describe("worker tool contract", () => {
         }),
       ]),
     );
+    for (const command of plannedCommands) {
+      expect(command.configSchema.type).toBe("object");
+      expect(command.configSchema.required).toEqual(command.requiredConfig);
+      for (const field of command.requiredConfig) {
+        expect(command.configSchema.properties?.[field]).toBeTruthy();
+      }
+      if (command.oneRequiredConfig) {
+        expect(command.configSchema.oneRequired).toEqual(command.oneRequiredConfig);
+        for (const field of command.oneRequiredConfig) {
+          expect(command.configSchema.properties?.[field]).toBeTruthy();
+        }
+      }
+    }
+    expect(
+      plannedCommands.find(
+        (command) => command.role === "dispatch_operations" && command.name === "schedule.propose",
+      )?.configSchema.properties?.constraints?.type,
+    ).toBe("object");
+    expect(
+      plannedCommands.find(
+        (command) => command.role === "systems_operations" && command.name === "connector.health.scan",
+      )?.configSchema.properties?.checks?.type,
+    ).toBe("array");
+    expect(
+      plannedCommands.find(
+        (command) => command.role === "finance_operations" && command.name === "cash_forecast.generate",
+      )?.configSchema.properties?.accounts?.minItems,
+    ).toBe(1);
+    expect(
+      plannedCommands.find(
+        (command) => command.role === "finance_operations" && command.name === "invoice.prepare",
+      )?.configSchema.oneRequired,
+    ).toEqual(["jobId", "closeoutId"]);
+    expect(
+      plannedCommands.find(
+        (command) => command.role === "dispatch_operations" && command.name === "closeout.prepare",
+      )?.configSchema.properties?.sourceRefs?.type,
+    ).toBe("array");
+    expect(
+      plannedCommands.find(
+        (command) => command.role === "systems_operations" && command.name === "permission.review",
+      )?.configSchema.oneRequired,
+    ).toEqual(["connectionId", "grantId"]);
     expect(workerToolSchema.registry.plannedCommands).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({

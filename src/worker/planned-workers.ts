@@ -2,6 +2,22 @@ type IdempotencyPolicy = "required" | "none";
 type SideEffectLevel = "internal" | "dry_run" | "approved_only" | "external" | "none";
 type ExternalExecution = "blocked" | "dry_run" | "approved_only" | "enabled";
 
+export type PlannedWorkerConfigSchema = {
+  type: "object" | "array" | "string" | "number" | "boolean";
+  description?: string;
+  required?: string[];
+  oneRequired?: string[];
+  properties?: Record<string, PlannedWorkerConfigSchema>;
+  items?: PlannedWorkerConfigSchema;
+  enum?: string[];
+  minItems?: number;
+  maxItems?: number;
+  minimum?: number;
+  maximum?: number;
+  integer?: boolean;
+  additionalProperties?: boolean;
+};
+
 export type PlannedWorkerCommandMetadata = {
   role: string;
   name: string;
@@ -12,6 +28,8 @@ export type PlannedWorkerCommandMetadata = {
   externalExecution: ExternalExecution;
   requiresTenant: boolean;
   requiredConfig: string[];
+  oneRequiredConfig?: string[];
+  configSchema?: PlannedWorkerConfigSchema;
 };
 
 export type PlannedWorkerViewMetadata = {
@@ -25,9 +43,10 @@ export type PlannedWorkerViewMetadata = {
   requiresTenant: boolean;
 };
 
-export type PlannedWorkerCommandRegistryEntry = PlannedWorkerCommandMetadata & {
+export type PlannedWorkerCommandRegistryEntry = Omit<PlannedWorkerCommandMetadata, "configSchema"> & {
   contractPath: string;
   evidencePacket: string;
+  configSchema: PlannedWorkerConfigSchema;
 };
 
 export type PlannedWorkerViewRegistryEntry = PlannedWorkerViewMetadata & {
@@ -47,7 +66,85 @@ export type PlannedWorkerContractMetadata = {
   views: PlannedWorkerViewMetadata[];
 };
 
-export const plannedWorkerContracts: PlannedWorkerContractMetadata[] = [
+function stringSchema(description?: string): PlannedWorkerConfigSchema {
+  return {
+    type: "string",
+    ...(description ? { description } : {}),
+  };
+}
+
+function stringArraySchema(description?: string): PlannedWorkerConfigSchema {
+  return {
+    type: "array",
+    minItems: 1,
+    items: stringSchema(),
+    ...(description ? { description } : {}),
+  };
+}
+
+function objectSchema(description?: string): PlannedWorkerConfigSchema {
+  return {
+    type: "object",
+    additionalProperties: true,
+    ...(description ? { description } : {}),
+  };
+}
+
+function windowSchema(): PlannedWorkerConfigSchema {
+  return {
+    type: "object",
+    required: ["from", "to"],
+    properties: {
+      from: stringSchema("Inclusive ISO timestamp."),
+      to: stringSchema("Exclusive ISO timestamp."),
+    },
+    additionalProperties: false,
+  };
+}
+
+function plannedFieldSchema(field: string): PlannedWorkerConfigSchema {
+  if (field === "window") {
+    return windowSchema();
+  }
+
+  if (field === "accounts" || field === "checks" || field === "objectIds" || field === "sourceRefs") {
+    return stringArraySchema();
+  }
+
+  if (field === "constraints" || field === "policy" || field === "trigger") {
+    return objectSchema();
+  }
+
+  if (field === "action") {
+    return {
+      type: "string",
+      enum: ["approved", "rejected", "revision_requested"],
+    };
+  }
+
+  return stringSchema();
+}
+
+function plannedConfigSchema(command: PlannedWorkerCommandMetadata): PlannedWorkerConfigSchema {
+  if (command.configSchema) {
+    return command.configSchema;
+  }
+
+  return {
+    type: "object",
+    required: command.requiredConfig,
+    ...(command.oneRequiredConfig ? { oneRequired: command.oneRequiredConfig } : {}),
+    properties: Object.fromEntries(
+      [...command.requiredConfig, ...(command.oneRequiredConfig ?? [])].map((field) => [
+        field,
+        plannedFieldSchema(field),
+      ]),
+    ),
+    additionalProperties: true,
+  };
+}
+
+const allPlannedWorkerContracts: PlannedWorkerContractMetadata[] = [
   {
     role: "owner_chief_of_staff",
     name: "Owner Chief-of-Staff Worker",
@@ -251,7 +348,8 @@ export const plannedWorkerContracts: PlannedWorkerContractMetadata[] = [
         sideEffects: "dry_run",
         externalExecution: "dry_run",
         requiresTenant: true,
-        requiredConfig: ["jobId"],
+        requiredConfig: [],
+        oneRequiredConfig: ["jobId", "closeoutId"],
       },
       {
         role: "finance_operations",
@@ -273,7 +371,8 @@ export const plannedWorkerContracts: PlannedWorkerContractMetadata[] = [
         sideEffects: "internal",
         externalExecution: "blocked",
         requiresTenant: true,
-        requiredConfig: ["receiptId"],
+        requiredConfig: [],
+        oneRequiredConfig: ["receiptId", "expenseId"],
       },
       {
         role: "finance_operations",
@@ -295,7 +394,8 @@ export const plannedWorkerContracts: PlannedWorkerContractMetadata[] = [
         sideEffects: "internal",
         externalExecution: "blocked",
         requiresTenant: true,
-        requiredConfig: ["billId"],
+        requiredConfig: [],
+        oneRequiredConfig: ["billId", "paymentId"],
       },
       {
         role: "finance_operations",
@@ -372,7 +472,8 @@ export const plannedWorkerContracts: PlannedWorkerContractMetadata[] = [
         sideEffects: "internal",
         externalExecution: "blocked",
         requiresTenant: true,
-        requiredConfig: ["personId"],
+        requiredConfig: [],
+        oneRequiredConfig: ["personId", "credentialId"],
       },
       {
         role: "workforce_operations",
@@ -591,7 +692,8 @@ export const plannedWorkerContracts: PlannedWorkerContractMetadata[] = [
         sideEffects: "internal",
         externalExecution: "blocked",
         requiresTenant: true,
-        requiredConfig: ["connectionId"],
+        requiredConfig: [],
+        oneRequiredConfig: ["connectionId", "grantId"],
       },
       {
         role: "systems_operations",
@@ -649,9 +751,10 @@ export const plannedWorkerContracts: PlannedWorkerContractMetadata[] = [
       },
     ],
   },
-].filter(
-  (contract): contract is PlannedWorkerContractMetadata =>
-    contract.role !== "owner_chief_of_staff",
+];
+
+export const plannedWorkerContracts = allPlannedWorkerContracts.filter(
+  (contract) => contract.role !== "owner_chief_of_staff",
 );
 
 export function plannedWorkerRoles() {
@@ -660,11 +763,14 @@ export function plannedWorkerRoles() {
 
 export function plannedWorkerCommands(): PlannedWorkerCommandRegistryEntry[] {
   return plannedWorkerContracts.flatMap((contract) =>
-    contract.commands.map((command) => ({
-      ...command,
-      contractPath: contract.contractPath,
-      evidencePacket: contract.evidencePacket,
-    })),
+    contract.commands.map((command) => {
+      return {
+        ...command,
+        contractPath: contract.contractPath,
+        evidencePacket: contract.evidencePacket,
+        configSchema: plannedConfigSchema(command),
+      };
+    }),
   );
 }
 
