@@ -104,6 +104,41 @@ vi.mock("../../src/core/tasks", () => ({
   transitionCoreTask: mocks.transitionCoreTask,
 }));
 
+const exactCoreRouteCommands = [
+  "core:view.summary",
+  "core:task.create",
+  "core:task.transition",
+  "core:object.upsert",
+  "core:adapter.upsert",
+  "core:connection.upsert",
+  "core:connection.health.record",
+  "core:entity.setup.record",
+  "core:object.link",
+  "core:event.ingest",
+  "core:evidence.attach",
+  "core:document.create",
+  "core:packet.prepare",
+  "core:document.packet.prepare",
+  "core:decision.record",
+  "core:approval.request",
+  "core:adapter.intent.record",
+  "core:rule.change.record",
+  "core:external_action.record",
+  "core:capability.grant",
+  "core:budget.reserve",
+  "core:budget.charge",
+  "core:budget.release",
+  "core:ai.infer",
+  "core:view.publish",
+  "core:customer_signal.record",
+  "core:payroll.preview.record",
+  "core:payroll.preview.packet.prepare",
+  "core:control_plane.token_rotation.attest",
+  "core:control_plane.credential.upsert",
+  "core:control_plane.credential.revoke",
+  "core:control_plane.session.review",
+];
+
 describe("POST /core", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -120,7 +155,7 @@ describe("POST /core", () => {
           operatorEmail: "operator@example.com",
           allowedRoutes: ["core"],
           allowedAccess: ["read", "write"],
-          allowedCommands: ["core:*"],
+          allowedCommands: exactCoreRouteCommands,
         },
       ]),
     );
@@ -504,7 +539,7 @@ describe("POST /core", () => {
             allowedWorkerRoles: ["revenue_operations"],
             allowedRoutes: ["core", "worker"],
             allowedAccess: ["read", "write"],
-            allowedCommands: ["core:*", "worker:run"],
+            allowedCommands: ["core:control_plane.credential.upsert", "worker:run"],
             evidence: {
               owner: "ops",
             },
@@ -539,7 +574,7 @@ describe("POST /core", () => {
       allowedWorkerRoles: ["revenue_operations"],
       allowedRoutes: ["core", "worker"],
       allowedAccess: ["read", "write"],
-      allowedCommands: ["core:*", "worker:run"],
+      allowedCommands: ["core:control_plane.credential.upsert", "worker:run"],
       expiresAt: undefined,
       evidence: {
         owner: "ops",

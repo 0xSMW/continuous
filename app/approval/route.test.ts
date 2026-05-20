@@ -52,7 +52,7 @@ describe("/approval route", () => {
           operatorEmail: "operator@example.com",
           allowedRoutes: ["approval"],
           allowedAccess: ["read", "write"],
-          allowedCommands: ["approval:*"],
+          allowedCommands: ["approval:view.inbox", "approval:approval.decide"],
         },
       ]),
       CONTROL_PLANE_TOKEN_CATALOG_B64: undefined,

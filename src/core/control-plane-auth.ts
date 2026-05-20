@@ -160,6 +160,23 @@ function listObject(value: unknown): JsonObject {
   };
 }
 
+function commandListObject(value: unknown): JsonObject {
+  const items = stringList(value);
+  const invalid = items.find(
+    (item) => item === "*" || item.endsWith(":*") || !item.includes(":"),
+  );
+
+  if (invalid) {
+    throw new PlatformUnavailableError(
+      "invalid_control_plane_credential",
+      "config.allowedCommands must use exact route-qualified command keys.",
+      400,
+    );
+  }
+
+  return { items };
+}
+
 function listItems(value: JsonObject | null | undefined, key = "items") {
   return stringList(value?.[key]);
 }
@@ -200,6 +217,17 @@ function patternListAllows(items: string[], value?: string | null) {
 
     return false;
   });
+}
+
+function commandListAllows(items: string[], route: string, command?: string | null) {
+  const cleanedCommand = cleanString(command);
+  const cleanedRoute = cleanString(route);
+
+  if (!cleanedCommand || !cleanedRoute) {
+    return true;
+  }
+
+  return items.includes(`${cleanedRoute}:${cleanedCommand}`);
 }
 
 function hashFingerprint(value?: string | null) {
@@ -808,11 +836,7 @@ export async function authorizeManagedControlPlaneCredential(
 
   const command = cleanString(input.command);
 
-  if (
-    command &&
-    !patternListAllows(listItems(credential.commands), `${input.route}:${command}`) &&
-    !patternListAllows(listItems(credential.commands), command)
-  ) {
+  if (!commandListAllows(listItems(credential.commands), input.route, command)) {
     return {
       ok: false,
       status: 403,
@@ -850,7 +874,7 @@ export async function upsertControlPlaneCredential(input: ControlPlaneCredential
   });
   const routes = listObject(input.allowedRoutes);
   const access = listObject(input.allowedAccess);
-  const commands = listObject(input.allowedCommands);
+  const commands = commandListObject(input.allowedCommands);
   const expiresAt = optionalDate(input.expiresAt, "config.expiresAt");
   const evidence = jsonObject(input.evidence);
   const idempotency = coreIdempotencyFingerprint("control_plane.credential.upsert", {

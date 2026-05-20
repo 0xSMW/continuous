@@ -248,6 +248,81 @@ maybeDescribe("Revenue Worker integration eval", () => {
     });
   });
 
+  it("requires exact route-qualified commands in managed credential inventory", async () => {
+    for (const allowedCommands of [["run"], ["worker:*"], ["*"]]) {
+      await expect(
+        upsertControlPlaneCredential({
+          operatorEmail: "owner@continuoushq.com",
+          tenantSlug: "continuous-demo",
+          idempotencyKey: `ci-managed-weak-command-${randomUUID()}`,
+          credentialId: `ci-managed-weak-command-${randomUUID()}`,
+          displayName: "CI weak command scope",
+          tokenFingerprint: controlPlaneTokenFingerprint(`ci-managed-token-${randomUUID()}`) ?? undefined,
+          allowedTenants: ["continuous-demo"],
+          allowedWorkerRoles: ["revenue_operations"],
+          allowedRoutes: ["worker"],
+          allowedAccess: ["write"],
+          allowedCommands,
+          evidence: {
+            source: "ci",
+          },
+          db,
+        }),
+      ).rejects.toMatchObject({
+        code: "invalid_control_plane_credential",
+        status: 400,
+      });
+    }
+
+    const token = `ci-managed-exact-token-${randomUUID()}`;
+    const credentialId = `ci-managed-exact-command-${randomUUID()}`;
+    const tokenFingerprint = controlPlaneTokenFingerprint(token);
+
+    await upsertControlPlaneCredential({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-managed-exact-command-${randomUUID()}`,
+      credentialId,
+      displayName: "CI exact command scope",
+      tokenFingerprint: tokenFingerprint ?? undefined,
+      allowedTenants: ["continuous-demo"],
+      allowedWorkerRoles: ["revenue_operations"],
+      allowedRoutes: ["worker"],
+      allowedAccess: ["write"],
+      allowedCommands: ["worker:run"],
+      evidence: {
+        source: "ci",
+      },
+      db,
+    });
+
+    const allowed = await authorizeManagedControlPlaneCredential({
+      request: new Request("http://localhost/worker", {
+        headers: {
+          authorization: `Bearer ${token}`,
+        },
+      }),
+      auth: {
+        ok: true,
+        operatorEmail: "owner@continuoushq.com",
+        credentialId,
+        scope: {
+          tenantSlugs: ["continuous-demo"],
+          workerRoles: ["revenue_operations"],
+        },
+      },
+      tenantSlug: "continuous-demo",
+      workerRole: "revenue_operations",
+      route: "worker",
+      access: "write",
+      command: "run",
+      requireManagedCredential: true,
+      db,
+    });
+
+    expect(allowed.ok).toBe(true);
+  });
+
   it("enforces managed control-plane credential revocation after catalog auth succeeds", async () => {
     const credentialId = `ci-managed-${randomUUID()}`;
     const token = `ci-managed-token-${randomUUID()}`;

@@ -139,6 +139,20 @@ function allowsPattern(patterns: string[], value: string) {
   });
 }
 
+function allowsCommand(credential: ControlPlaneCredential, route: ControlPlaneRoute, command: string) {
+  const commandKey = `${route}:${command}`;
+
+  if (credential.commands.includes(commandKey)) {
+    return true;
+  }
+
+  return (
+    credential.id === "legacy-worker-run-token" &&
+    route === "worker" &&
+    credential.commands.includes("worker:*")
+  );
+}
+
 function parseTokenCatalog(input: {
   tokenCatalogJson?: string | null;
   tokenCatalogB64?: string | null;
@@ -457,14 +471,8 @@ export function authorizeControlPlaneAccess(input: {
   }
 
   const command = optionalScopeValue(input.command);
-  const commandKey = command ? `${input.route}:${command}` : undefined;
 
-  if (
-    command &&
-    commandKey &&
-    !allowsPattern(credential.commands, commandKey) &&
-    !allowsPattern(credential.commands, command)
-  ) {
+  if (command && !allowsCommand(credential, input.route, command)) {
     return {
       ok: false,
       status: 403,

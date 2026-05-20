@@ -294,7 +294,7 @@ describe("authorizeControlPlaneAccess", () => {
           operatorEmail,
           allowedRoutes: ["worker"],
           allowedAccess: ["write"],
-          allowedCommands: ["worker:*"],
+          allowedCommands: ["worker:lead.read"],
         },
       ]),
     ).toString("base64");
@@ -319,6 +319,39 @@ describe("authorizeControlPlaneAccess", () => {
         workerRoles: [],
       },
     });
+  });
+
+  it("requires exact route-qualified catalog command scopes", () => {
+    for (const allowedCommands of [["run"], ["worker:*"], ["*"]]) {
+      const tokenCatalogJson = JSON.stringify([
+        {
+          id: "weak-worker-runner",
+          token: acceptedCredential,
+          operatorEmail,
+          allowedRoutes: ["worker"],
+          allowedAccess: ["write"],
+          allowedCommands,
+        },
+      ]);
+
+      expect(
+        authorizeControlPlaneAccess({
+          enabled: true,
+          appEnv: "production",
+          operatorEmail,
+          authorization: `Bearer ${acceptedCredential}`,
+          tokenCatalogJson,
+          route: "worker",
+          access: "write",
+          command: "run",
+        }),
+      ).toEqual({
+        ok: false,
+        status: 403,
+        code: "control_plane_command_forbidden",
+        message: "This operator token is not allowed to execute the requested control-plane command.",
+      });
+    }
   });
 
   it("rejects catalog tokens outside their command scope", () => {
@@ -487,6 +520,29 @@ describe("authorizeControlPlaneAccess", () => {
         route: "worker",
         access: "write",
         command: "run",
+      }),
+    ).toEqual({
+      ok: true,
+      operatorEmail,
+      credentialId: "legacy-worker-run-token",
+      scope: {
+        tenantSlugs: ["continuous-demo"],
+        workerRoles: ["revenue_operations"],
+      },
+    });
+
+    expect(
+      authorizeControlPlaneAccess({
+        enabled: true,
+        appEnv: "production",
+        expectedToken: acceptedCredential,
+        operatorEmail,
+        authorization: `Bearer ${acceptedCredential}`,
+        allowedTenants: "continuous-demo",
+        allowedWorkerRoles: "revenue_operations",
+        route: "worker",
+        access: "write",
+        command: "adapters.retry",
       }),
     ).toEqual({
       ok: true,
