@@ -150,6 +150,7 @@ describe("future worker contracts", () => {
       expect(source).toContain(`Worker role | \`${contract.role}\``);
       expect(source).toContain("POST /worker");
       expect(source).toContain("idempotencyKey");
+      expect(source).toContain("config");
       if (contract.evidencePacket) {
         expect(source).toContain(contract.evidencePacket);
       }
@@ -210,6 +211,15 @@ describe("future worker contracts", () => {
 
     expect(expansion).toContain("worker-readiness.md");
     expect(expansion).toContain("worker-handoffs.md");
+    expect(expansion).toContain("the same `/worker` registry");
+    expect(expansion).toContain("the exact `/worker` `command`, `worker`, `config`, and");
+  });
+
+  it("keeps the worker roadmap pinned to generic worker routes", () => {
+    const roadmap = read("docs/worker-roadmap.md");
+
+    expect(roadmap).toContain("Do not add worker-specific HTTP routes.");
+    expect(roadmap).toContain("New worker families extend `/worker`");
   });
 
   it("tracks worker expansion readiness against shared launch gates", () => {
@@ -254,6 +264,7 @@ describe("future worker contracts", () => {
 
   it("keeps production readiness tied to durable auth rotation evidence", () => {
     const deployment = read("docs/deployment.md");
+    const compose = read("docker-compose.yml");
     const deployScript = read("scripts/deploy.sh");
     const deployWorkflow = read(".github/workflows/deploy.yml");
     const readinessScript = read("scripts/check-production-readiness-on-host.sh");
@@ -273,6 +284,8 @@ describe("future worker contracts", () => {
     expect(deployment).toContain("CONTROL_PLANE_CREDENTIAL_ID");
     expect(deployment).toContain("CONTROL_PLANE_CREDENTIAL_REVOCATION_AUDIT_ID");
     expect(deployment).toContain("CONTROL_PLANE_SESSION_REVIEW_VIEW_ID");
+    expect(deployment).toContain("legacy single `WORKER_RUN_TOKEN` path as bootstrap-only");
+    expect(compose).not.toContain("REVENUE_WORKER_");
     expect(readinessScript).toContain("TOKEN_ROTATION_ATTESTATION_ID");
     expect(readinessScript).toContain("CONTROL_PLANE_AUTH_AUDIT_ATTESTED_AT");
     expect(readinessScript).toContain("CONTROL_PLANE_AUTH_SESSION_ID");

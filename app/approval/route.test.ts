@@ -215,6 +215,65 @@ describe("/approval route", () => {
     });
   });
 
+  it("rejects invalid approval command bodies before dispatch", async () => {
+    const { POST } = await import("./route");
+
+    const missingContentType = await POST(
+      new Request("http://localhost/approval", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+        },
+        body: JSON.stringify({
+          command: "approval.decide",
+        }),
+      }),
+    );
+    const malformedJson = await POST(
+      new Request("http://localhost/approval", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: "{",
+      }),
+    );
+    const arrayBody = await POST(
+      new Request("http://localhost/approval", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify([]),
+      }),
+    );
+
+    await expect(missingContentType.json()).resolves.toMatchObject({
+      error: {
+        code: "invalid_approval_command_body",
+        message: "POST /approval requires an application/json request body.",
+      },
+    });
+    await expect(malformedJson.json()).resolves.toMatchObject({
+      error: {
+        code: "invalid_approval_command_body",
+        message: "Approval command body must be valid JSON.",
+      },
+    });
+    await expect(arrayBody.json()).resolves.toMatchObject({
+      error: {
+        code: "invalid_approval_command_body",
+        message: "Approval command body must be a JSON object.",
+      },
+    });
+    expect(missingContentType.status).toBe(415);
+    expect(malformedJson.status).toBe(400);
+    expect(arrayBody.status).toBe(400);
+    expect(mocks.decideApproval).not.toHaveBeenCalled();
+  });
+
   it("rejects broad approval decision subjects before dispatch", async () => {
     const { POST } = await import("./route");
     const response = await POST(

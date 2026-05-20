@@ -37,7 +37,6 @@ export const workerTools = [
           },
           additionalProperties: true,
         },
-        operatorEmail: { type: "string" },
       },
       required: ["worker"],
       additionalProperties: false,
@@ -68,7 +67,6 @@ export const workerTools = [
           description: "Command config. Put every operation-specific input under config.",
           additionalProperties: true,
         },
-        operatorEmail: { type: "string" },
       },
       required: ["command", "worker"],
       additionalProperties: false,
@@ -258,10 +256,9 @@ const workerCommandToolEnvelopeFields = new Set([
   "worker",
   "idempotencyKey",
   "config",
-  "operatorEmail",
 ]);
 
-const workerViewToolEnvelopeFields = new Set(["view", "worker", "config", "operatorEmail"]);
+const workerViewToolEnvelopeFields = new Set(["view", "worker", "config"]);
 const workerTargetEnvelopeFields = new Set(["role", "id", "tenantSlug"]);
 
 export function assertTrustedLocalWorkerMutation(surface: string) {
@@ -279,14 +276,14 @@ function workerToolEnvelope(name: string) {
   if (name === "worker.command") {
     return {
       fields: workerCommandToolEnvelopeFields,
-      description: "command, worker, idempotencyKey, config, and operatorEmail",
+      description: "command, worker, idempotencyKey, and config",
     };
   }
 
   if (name === "worker.view") {
     return {
       fields: workerViewToolEnvelopeFields,
-      description: "view, worker, config, and operatorEmail",
+      description: "view, worker, and config",
     };
   }
 
@@ -335,7 +332,7 @@ export async function executeWorkerTool(name: string, payload: JsonObject = {}) 
   const target = targetFrom(payload);
   const config = payload.config;
   const viewConfig = objectValue(payload.config);
-  const operatorEmail = stringValue(payload.operatorEmail) ?? process.env.WORKER_OPERATOR_EMAIL ?? "";
+  const operatorEmail = process.env.WORKER_OPERATOR_EMAIL ?? "owner@continuoushq.com";
 
   if (name === "worker.view") {
     const view = stringValue(payload.view) ?? "snapshot";

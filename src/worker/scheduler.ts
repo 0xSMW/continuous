@@ -111,6 +111,38 @@ export type SchedulerCycleResult = {
   adapterReconcile: ScheduledCommandResult;
 };
 
+function commandLogSummary(result: ScheduledCommandResult) {
+  return {
+    endpoint: result.endpoint,
+    command: result.command,
+    status: result.status,
+    error: result.error,
+  };
+}
+
+function leadPollLogSummary(result: ScheduledLeadPollResult) {
+  return {
+    attempted: result.attempted,
+    succeeded: result.succeeded,
+    failed: result.failed,
+    error: result.error,
+    revenueRuns: result.revenueRuns,
+    commands: result.commands.map((command) => ({
+      connectionId: command.connectionId,
+      source: command.source,
+      status: command.status,
+      error: command.error,
+      revenueRuns: command.revenueRuns.map((run) => ({
+        connectionId: run.connectionId,
+        source: run.source,
+        sourceEventId: run.sourceEventId,
+        status: run.status,
+        error: run.error,
+      })),
+    })),
+  };
+}
+
 function optionalString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
@@ -749,22 +781,10 @@ export async function runScheduler(
         level: "info",
         event: "scheduler_cycle_completed",
         tenantSlug: config.tenantSlug,
-        workflow: {
-          status: result.workflow.status,
-          result: result.workflow.result,
-          error: result.workflow.error,
-        },
-        leadPolls: result.leadPolls,
-        adapterRetry: {
-          status: result.adapterRetry.status,
-          result: result.adapterRetry.result,
-          error: result.adapterRetry.error,
-        },
-        adapterReconcile: {
-          status: result.adapterReconcile.status,
-          result: result.adapterReconcile.result,
-          error: result.adapterReconcile.error,
-        },
+        workflow: commandLogSummary(result.workflow),
+        leadPolls: leadPollLogSummary(result.leadPolls),
+        adapterRetry: commandLogSummary(result.adapterRetry),
+        adapterReconcile: commandLogSummary(result.adapterReconcile),
       });
     } catch (error) {
       log({

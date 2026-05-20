@@ -1055,7 +1055,7 @@ jobs:
             psql_db -Atc "select id from worker_runs where source = 'continuous.revenue_worker' and idempotency_key = 'scheduler-revenue-run:$CONNECTION_ID:google_workspace_inbox:$CONNECTION_LEAD_READ_SOURCE_EVENT_ID' order by created_at desc limit 1;"
           )"
           if [ -z "$SCHEDULER_WORKER_RUN_ID" ]; then
-            echo "Scheduler did not hand the buffered lead selector to the Revenue Worker run command." >&2
+            echo "Scheduler did not hand the buffered lead selector to the Revenue Operations Worker run command." >&2
             exit 1
           fi
 
@@ -1064,7 +1064,7 @@ jobs:
           )"
           SCHEDULER_WORKFLOW_RUN_ID="${SCHEDULER_RUN_ROW##*|}"
           if [ "$SCHEDULER_RUN_ROW" != "done|$CONNECTION_LEAD_READ_SOURCE_EVENT_ID|false|$SCHEDULER_WORKFLOW_RUN_ID" ] || [ -z "$SCHEDULER_WORKFLOW_RUN_ID" ]; then
-            echo "Unexpected scheduler Revenue Worker run row: $SCHEDULER_RUN_ROW" >&2
+            echo "Unexpected scheduler Revenue Operations Worker run row: $SCHEDULER_RUN_ROW" >&2
             exit 1
           fi
 

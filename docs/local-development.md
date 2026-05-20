@@ -122,7 +122,7 @@ protocol tooling and repo-owned worker controls; inspect it with
 `bun run app-server:help` and `bun run app-server:worker-tools` when worker
 build tooling needs it.
 
-## Revenue Worker
+## Revenue Operations Worker
 
 The seed data includes the Continuous Revenue Worker for a service-SMB
 lead-to-cash slice. Detailed snapshots are operator-only and require the worker
@@ -224,7 +224,7 @@ external-execution status before a command is invoked.
 The app-server worker tool uses the same command envelope and registry:
 
 ```sh
-bun run app-server:worker-tools continuous.worker.command --payload='{"command":"lead.read","operatorEmail":"owner@continuoushq.com","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-app-server-lead-001","config":{"source":"website_form","records":[{"sourceEventId":"form-local-app-server-001","customerName":"Acme Roof Repair","customerIntent":"roof leak inspection","serviceArea":"roofing","urgency":"high"}]}}'
+bun run app-server:worker-tools continuous.worker.command --payload='{"command":"lead.read","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-app-server-lead-001","config":{"source":"website_form","records":[{"sourceEventId":"form-local-app-server-001","customerName":"Acme Roof Repair","customerIntent":"roof leak inspection","serviceArea":"roofing","urgency":"high"}]}}'
 ```
 
 The same reconciliation command is available through the canonical worker API:

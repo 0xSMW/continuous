@@ -319,7 +319,7 @@ Control-plane token catalog entries have this shape when provided directly via
     "allowedWorkerRoles": ["revenue_operations", "owner_chief_of_staff", "dispatch_operations"],
     "allowedRoutes": ["core", "worker", "workflow", "approval"],
     "allowedAccess": ["read", "write"],
-    "allowedCommands": ["*"],
+    "allowedCommands": ["core:*", "worker:*", "workflow:*", "approval:*"],
     "expiresAt": "2026-06-20T00:00:00.000Z"
   }
 ]
@@ -328,6 +328,10 @@ Control-plane token catalog entries have this shape when provided directly via
 `allowedCommands` accepts exact route-qualified keys such as `worker:run` or
 route wildcards such as `worker:*`. GET views are authorized as
 `<route>:view.<view>`, for example `worker:view.snapshot`.
+Treat the legacy single `WORKER_RUN_TOKEN` path as bootstrap-only. New
+control-plane credentials must set explicit `allowedRoutes`, `allowedAccess`,
+and `allowedCommands`; omitted catalog scope fields inherit wildcard access and
+are not appropriate for customer-facing operation.
 
 ## Production Readiness Gate
 

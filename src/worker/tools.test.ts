@@ -115,7 +115,16 @@ describe("worker tool contract", () => {
 
       expect(properties.worker).toBeTruthy();
       expect(Object.keys(properties)).not.toEqual(
-        expect.arrayContaining(["role", "tenantSlug", "leadPacket", "approvalId", "limit", "source", "records"]),
+        expect.arrayContaining([
+          "role",
+          "tenantSlug",
+          "operatorEmail",
+          "leadPacket",
+          "approvalId",
+          "limit",
+          "source",
+          "records",
+        ]),
       );
       expect(properties.idempotencyKey).toBeTruthy();
       if (properties.config) {
@@ -141,7 +150,7 @@ describe("worker tool contract", () => {
         config: {},
       }),
     ).rejects.toThrow(
-      "Worker tool payload fields must be command, worker, idempotencyKey, config, and operatorEmail. Move operation inputs into config. Unexpected fields: leadPacket, approvalId.",
+      "Worker tool payload fields must be command, worker, idempotencyKey, and config. Move operation inputs into config. Unexpected fields: leadPacket, approvalId.",
     );
 
     await expect(
@@ -156,7 +165,7 @@ describe("worker tool contract", () => {
         config: {},
       }),
     ).rejects.toThrow(
-      "Worker tool payload fields must be command, worker, idempotencyKey, config, and operatorEmail. Move operation inputs into config. Unexpected fields: view.",
+      "Worker tool payload fields must be command, worker, idempotencyKey, and config. Move operation inputs into config. Unexpected fields: view.",
     );
 
     await expect(
@@ -169,7 +178,7 @@ describe("worker tool contract", () => {
         },
       }),
     ).rejects.toThrow(
-      "Worker tool payload fields must be view, worker, config, and operatorEmail. Move operation inputs into config. Unexpected fields: command.",
+      "Worker tool payload fields must be view, worker, and config. Move operation inputs into config. Unexpected fields: command.",
     );
 
     await expect(
@@ -1283,7 +1292,6 @@ describe("worker tool contract", () => {
           role: "revenue_operations",
           tenantSlug: "continuous-demo",
         },
-        operatorEmail: "owner@continuoushq.com",
         config: {
           approvalId: "approval-1",
         },

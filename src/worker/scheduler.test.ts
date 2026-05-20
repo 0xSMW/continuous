@@ -441,6 +441,60 @@ describe("worker scheduler", () => {
     expect(postCommand).toHaveBeenCalledTimes(4);
   });
 
+  it("isolates lead poll discovery failures from workflow and adapter draining", async () => {
+    const postCommand = vi.fn(async ({ payload }) => scheduledResult(String(payload.command)));
+
+    const result = await runSchedulerCycle(
+      {
+        enabled: true,
+        once: true,
+        baseUrl: "http://app:3000",
+        token: "test-token",
+        tenantSlug: "continuous-demo",
+        intervalMs: 60_000,
+        workflowLimit: 7,
+        adapterLimit: 11,
+        leadPollLimit: 5,
+        leaseMs: 120_000,
+        leaseOwner: "scheduler-test",
+      },
+      {
+        postCommand,
+        listLeadPollCommands: vi.fn(async () => {
+          throw new Error("lead source discovery unavailable");
+        }),
+      },
+    );
+
+    expect(result.workflow).toMatchObject({
+      command: "steps.execute",
+      status: "succeeded",
+    });
+    expect(result.leadPolls).toMatchObject({
+      attempted: 0,
+      succeeded: 0,
+      failed: 1,
+      error: {
+        message: "lead source discovery unavailable",
+      },
+      commands: [],
+      revenueRuns: {
+        attempted: 0,
+        succeeded: 0,
+        failed: 0,
+      },
+    });
+    expect(result.adapterRetry).toMatchObject({
+      command: "adapters.retry",
+      status: "succeeded",
+    });
+    expect(result.adapterReconcile).toMatchObject({
+      command: "adapters.reconcile",
+      status: "succeeded",
+    });
+    expect(postCommand).toHaveBeenCalledTimes(3);
+  });
+
   it("isolates workflow and adapter drain failures from each other", async () => {
     const postCommand = vi.fn(async ({ payload }) => {
       if (payload.command === "steps.execute") {
@@ -498,6 +552,64 @@ describe("worker scheduler", () => {
       status: "succeeded",
     });
     expect(postCommand).toHaveBeenCalledTimes(4);
+  });
+
+  it("logs scheduler cycle summaries without raw command results", async () => {
+    const postCommand = vi.fn(async ({ payload }) =>
+      scheduledResult(String(payload.command), {
+        privateCustomerField: "do-not-log",
+      }),
+    );
+    const log = vi.fn();
+
+    await runScheduler(
+      {
+        enabled: true,
+        once: true,
+        baseUrl: "http://app:3000",
+        token: "test-token",
+        tenantSlug: "continuous-demo",
+        intervalMs: 60_000,
+        workflowLimit: 7,
+        adapterLimit: 11,
+        leadPollLimit: 5,
+        leaseMs: 120_000,
+        leaseOwner: "scheduler-test",
+      },
+      {
+        postCommand,
+        listLeadPollCommands: vi.fn(async () => []),
+        log,
+      },
+    );
+
+    const completed = log.mock.calls.find(([event]) => event.event === "scheduler_cycle_completed")?.[0];
+
+    expect(completed).toMatchObject({
+      level: "info",
+      event: "scheduler_cycle_completed",
+      tenantSlug: "continuous-demo",
+      workflow: {
+        command: "steps.execute",
+        status: "succeeded",
+      },
+      leadPolls: {
+        attempted: 0,
+        succeeded: 0,
+        failed: 0,
+        commands: [],
+      },
+      adapterRetry: {
+        command: "adapters.retry",
+        status: "succeeded",
+      },
+      adapterReconcile: {
+        command: "adapters.reconcile",
+        status: "succeeded",
+      },
+    });
+    expect(JSON.stringify(completed)).not.toContain("privateCustomerField");
+    expect(JSON.stringify(completed)).not.toContain("do-not-log");
   });
 
   it("does not run commands when the scheduler is disabled", async () => {

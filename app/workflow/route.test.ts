@@ -200,6 +200,67 @@ describe("/workflow route scope", () => {
     });
   });
 
+  it("rejects invalid workflow command bodies before dispatch", async () => {
+    const { POST } = await import("./route");
+
+    const missingContentType = await POST(
+      new Request("http://localhost/workflow", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+        },
+        body: JSON.stringify({
+          command: "steps.execute",
+        }),
+      }),
+    );
+    const malformedJson = await POST(
+      new Request("http://localhost/workflow", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: "{",
+      }),
+    );
+    const arrayBody = await POST(
+      new Request("http://localhost/workflow", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify([]),
+      }),
+    );
+
+    await expect(missingContentType.json()).resolves.toMatchObject({
+      error: {
+        code: "invalid_workflow_command_body",
+        message: "POST /workflow requires an application/json request body.",
+      },
+    });
+    await expect(malformedJson.json()).resolves.toMatchObject({
+      error: {
+        code: "invalid_workflow_command_body",
+        message: "Workflow command body must be valid JSON.",
+      },
+    });
+    await expect(arrayBody.json()).resolves.toMatchObject({
+      error: {
+        code: "invalid_workflow_command_body",
+        message: "Workflow command body must be a JSON object.",
+      },
+    });
+    expect(missingContentType.status).toBe(415);
+    expect(malformedJson.status).toBe(400);
+    expect(arrayBody.status).toBe(400);
+    expect(mocks.startWorkflowRun).not.toHaveBeenCalled();
+    expect(mocks.transitionWorkflowRun).not.toHaveBeenCalled();
+    expect(mocks.executeWorkflowSteps).not.toHaveBeenCalled();
+  });
+
   it("rejects workflow transitions without an idempotency key before dispatch", async () => {
     mocks.env.CONTROL_PLANE_ALLOWED_TENANTS = "continuous-demo";
 

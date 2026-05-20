@@ -8,7 +8,7 @@ raising autonomy or permitting external sends.
 | Input | Required | Notes |
 |---|---:|---|
 | `idempotencyKey` | Yes | Stable per operator-triggered run |
-| `operatorEmail` | Yes | Must match an active user in the tenant |
+| Operator identity | Yes | Resolved from the authenticated control-plane credential or trusted local `WORKER_OPERATOR_EMAIL`; it is not part of the command payload |
 | `worker.role` | Yes | Explicit worker family selector; no default role is assumed |
 | `worker.tenantSlug` | No | Required when an operator email spans tenants |
 | `worker.id` | No | Required when multiple Revenue Workers match |

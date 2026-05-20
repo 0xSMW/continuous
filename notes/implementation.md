@@ -86,6 +86,7 @@
 | Added Core AI gateway | `POST /core` now supports `command=ai.infer`, selecting an active model route, redacting configured request fields, reserving and charging budget, and writing inference, usage, event, audit, and evidence proof while live provider execution remains blocked |
 | Agent build path uses app-server protocol tooling plus Next.js MCP | The installed Codex app-server CLI exposes protocol generation/help commands; `.mcp.json` keeps the Next.js 16 MCP bridge for route/runtime diagnostics |
 | Added app-server worker command control | `continuous.worker.schema` exposes the registry, and `continuous.worker.command` invokes registered worker commands through the same `command`, `worker`, `idempotencyKey`, and `config` envelope without loading production tokens |
+| Matched local worker envelopes to `/worker` | `worker.command` and `continuous.worker.command` no longer accept top-level `operatorEmail`; trusted local execution resolves operator identity from `WORKER_OPERATOR_EMAIL` so payloads stay `command`, `worker`, `idempotencyKey`, and `config` |
 | Added registry-owned worker config schemas | `/worker`, `worker:tool`, and `continuous.worker.command` now share per-command `configSchema` checks for required fields, enums, integer bounds, and non-empty arrays before handlers run |
 | Added the first authority ledger | Revenue Worker runs now create approval requests and audit events, and approval decisions create evidence before any external action is allowed |
 | Added first-class adapter dry-runs | Revenue Worker runs now create linked adapter runs/actions, receipt evidence, attempt metadata, and reconciliation state while external mutation remains disabled |
@@ -122,6 +123,9 @@
 | Added production observability checks | Caddy now writes retained JSON access logs, deploy creates log directories, and `scripts/check-observability-on-host.sh` verifies Compose service state, public health, TLS freshness, disk usage, Caddy logs, and optional backup/systemd checks with webhook failure alerts |
 | Tightened control-plane config envelopes | `/worker`, `/core`, `/workflow`, and `/approval` now reject non-object `config` values instead of silently normalizing them to `{}` |
 | Added production readiness gate | `scripts/check-production-readiness.sh` and the optional deploy workflow gate now compose strict observability, scheduled off-host backup freshness, object-storage backup manifests, alerting, recovery-drill attestation, token-rotation, managed credential, auth-audit record references, and non-root access attestation into one customer-data readiness check |
+| Removed legacy worker env aliases | Compose services now use only `WORKER_*` names instead of `REVENUE_WORKER_*` fallbacks so worker runtime configuration is role-neutral |
+| Hardened workflow and approval envelopes | `/workflow` and `/approval` now reject missing content type, malformed JSON, array bodies, and non-object `config` instead of normalizing malformed mutation requests to empty objects |
+| Redacted scheduler cycle logs | Scheduler cycle logs now record command status, errors, and counts without raw worker/workflow result payloads that may contain customer or tenant data |
 
 ### Tradeoffs
 
@@ -145,8 +149,8 @@
 | Alerting boundary | Deploy smoke now proves the host observability check, but recurring alerts are not complete until `scripts/install-observability-timer.sh` is run with a real `ALERT_WEBHOOK_URL` |
 | Readiness boundary | The production readiness gate is strict and opt-in; it is expected to fail until observability timer/webhook, recovery drill report, production connector credentials, and non-root host access are all actually provisioned and attested |
 | Worker selector boundary | `/worker`, `worker.command`, and `continuous.worker.command` now treat `worker` as a strict selector object with only `role`, `id`, and `tenantSlug`; every operation-specific field must live under `config` |
-| Command body boundary | `/core` and `/worker` reject non-JSON, malformed JSON, and non-object command bodies after authentication instead of collapsing them into empty envelopes |
-| Local mutation trust boundary | `worker.command` and `continuous.worker.command` are disabled under `APP_ENV=production` unless `CONTINUOUS_TRUSTED_LOCAL_WORKER_TOOLS=true`; production automation should prefer the authenticated `/worker` route |
+| Command body boundary | `/core`, `/worker`, `/workflow`, and `/approval` reject non-JSON, malformed JSON, and non-object command bodies after authentication instead of collapsing them into empty envelopes |
+| Local mutation trust boundary | `worker.command` and `continuous.worker.command` are disabled under `APP_ENV=production` unless `CONTINUOUS_TRUSTED_LOCAL_WORKER_TOOLS=true`; their payloads mirror `/worker`, and production automation should prefer the authenticated `/worker` route |
 
 ### Current State
 

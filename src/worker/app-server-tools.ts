@@ -28,14 +28,13 @@ export const appServerWorkerTools = [
       properties: {
         command: { type: "string" },
         worker: { $ref: "#/$defs/workerTarget" },
-        operatorEmail: { type: "string" },
         idempotencyKey: { type: "string" },
         config: {
           type: "object",
           additionalProperties: true,
         },
       },
-      required: ["command", "worker", "operatorEmail"],
+      required: ["command", "worker"],
       additionalProperties: false,
       $defs: {
         workerTarget: {
@@ -62,7 +61,7 @@ export const appServerWorkerToolManifest = {
     externalExecution: "blocked",
     mutationTools: "continuous.worker.command",
     runtimeControl:
-      "App-server worker commands delegate to the same command registry used by POST /worker and bun run worker:tool. Caller supplies operatorEmail, worker target, idempotencyKey, and config; no production token is loaded.",
+      "App-server worker commands delegate to the same command registry used by POST /worker and bun run worker:tool. Caller supplies command, worker target, idempotencyKey, and config; operator identity is resolved from the trusted local environment and no production token is loaded.",
   },
   tools: appServerWorkerTools,
 } as const;
@@ -90,7 +89,6 @@ function targetFrom(args: JsonObject): WorkerTargetInput {
 const appServerWorkerCommandEnvelopeFields = new Set([
   "command",
   "worker",
-  "operatorEmail",
   "idempotencyKey",
   "config",
 ]);
@@ -101,7 +99,7 @@ function assertAppServerWorkerCommandEnvelope(args: JsonObject) {
 
   if (unexpectedFields.length > 0) {
     throw new Error(
-      `continuous.worker.command payload fields must be command, worker, operatorEmail, idempotencyKey, and config. Move operation inputs into config. Unexpected fields: ${unexpectedFields.join(", ")}.`,
+      `continuous.worker.command payload fields must be command, worker, idempotencyKey, and config. Move operation inputs into config. Unexpected fields: ${unexpectedFields.join(", ")}.`,
     );
   }
 
@@ -144,14 +142,10 @@ export async function executeAppServerWorkerTool(name: string, args: JsonObject 
     assertAppServerWorkerCommandEnvelope(args);
 
     const command = stringValue(args.command);
-    const operatorEmail = stringValue(args.operatorEmail);
+    const operatorEmail = process.env.WORKER_OPERATOR_EMAIL ?? "owner@continuoushq.com";
 
     if (!command) {
       throw new Error("continuous.worker.command requires command.");
-    }
-
-    if (!operatorEmail) {
-      throw new Error("continuous.worker.command requires operatorEmail.");
     }
 
     assertTrustedLocalWorkerMutation("continuous.worker.command");

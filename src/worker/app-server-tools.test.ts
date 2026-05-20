@@ -31,6 +31,12 @@ describe("app-server worker tools", () => {
       "continuous.worker.schema",
       "continuous.worker.command",
     ]);
+    expect(
+      Object.keys(
+        appServerWorkerToolManifest.tools.find((tool) => tool.name === "continuous.worker.command")
+          ?.inputSchema.properties ?? {},
+      ),
+    ).not.toContain("operatorEmail");
     if (!("registry" in schema)) {
       throw new Error("Expected schema result.");
     }
@@ -123,7 +129,6 @@ describe("app-server worker tools", () => {
     await expect(
       executeAppServerWorkerTool("continuous.worker.command", {
         command: "run",
-        operatorEmail: "owner@continuoushq.com",
         worker: {
           role: "revenue_operations",
           tenantSlug: "continuous-demo",
@@ -134,7 +139,7 @@ describe("app-server worker tools", () => {
         config: {},
       }),
     ).rejects.toThrow(
-      "continuous.worker.command payload fields must be command, worker, operatorEmail, idempotencyKey, and config. Move operation inputs into config. Unexpected fields: approvalId, limit.",
+      "continuous.worker.command payload fields must be command, worker, idempotencyKey, and config. Move operation inputs into config. Unexpected fields: approvalId, limit.",
     );
 
     await expect(
@@ -154,14 +159,16 @@ describe("app-server worker tools", () => {
           role: "revenue_operations",
           tenantSlug: "continuous-demo",
         },
+        operatorEmail: "owner@continuoushq.com",
         config: {},
       }),
-    ).rejects.toThrow("continuous.worker.command requires operatorEmail.");
+    ).rejects.toThrow(
+      "continuous.worker.command payload fields must be command, worker, idempotencyKey, and config. Move operation inputs into config. Unexpected fields: operatorEmail.",
+    );
 
     await expect(
       executeAppServerWorkerTool("continuous.worker.command", {
         command: "run",
-        operatorEmail: "owner@continuoushq.com",
         worker: {
           role: "revenue_operations",
           tenantSlug: "continuous-demo",
@@ -184,7 +191,6 @@ describe("app-server worker tools", () => {
     await expect(
       executeAppServerWorkerTool("continuous.worker.command", {
         command: "hire.packet.prepare",
-        operatorEmail: "owner@continuoushq.com",
         worker: {
           role: "workforce_operations",
           tenantSlug: "continuous-demo",
@@ -202,7 +208,6 @@ describe("app-server worker tools", () => {
     await expect(
       executeAppServerWorkerTool("continuous.worker.command", {
         command: "run",
-        operatorEmail: "owner@continuoushq.com",
         worker: {
           role: "revenue_operations",
           tenantSlug: "continuous-demo",
@@ -218,7 +223,6 @@ describe("app-server worker tools", () => {
     await expect(
       executeAppServerWorkerTool("continuous.worker.command", {
         command: "missing.command",
-        operatorEmail: "owner@continuoushq.com",
         worker: {
           role: "revenue_operations",
           tenantSlug: "continuous-demo",
@@ -233,7 +237,6 @@ describe("app-server worker tools", () => {
     await expect(
       executeAppServerWorkerTool("continuous.worker.command", {
         command: "lead.read",
-        operatorEmail: "owner@continuoushq.com",
         worker: {
           role: "revenue_operations",
           tenantSlug: "continuous-demo",
@@ -261,7 +264,6 @@ describe("app-server worker tools", () => {
     await expect(
       executeAppServerWorkerTool("continuous.worker.command", {
         command: "customer_update.draft",
-        operatorEmail: "owner@continuoushq.com",
         worker: {
           role: "dispatch_operations",
           tenantSlug: "continuous-demo",
@@ -276,7 +278,6 @@ describe("app-server worker tools", () => {
     await expect(
       executeAppServerWorkerTool("continuous.worker.command", {
         command: "closeout.prepare",
-        operatorEmail: "owner@continuoushq.com",
         worker: {
           role: "dispatch_operations",
           tenantSlug: "continuous-demo",
@@ -293,7 +294,6 @@ describe("app-server worker tools", () => {
     await expect(
       executeAppServerWorkerTool("continuous.worker.command", {
         command: "exception.route",
-        operatorEmail: "owner@continuoushq.com",
         worker: {
           role: "dispatch_operations",
           tenantSlug: "continuous-demo",
@@ -309,7 +309,6 @@ describe("app-server worker tools", () => {
     await expect(
       executeAppServerWorkerTool("continuous.worker.command", {
         command: "invoice.prepare",
-        operatorEmail: "owner@continuoushq.com",
         worker: {
           role: "finance_operations",
           tenantSlug: "continuous-demo",
@@ -322,7 +321,6 @@ describe("app-server worker tools", () => {
     await expect(
       executeAppServerWorkerTool("continuous.worker.command", {
         command: "ar_followup.draft",
-        operatorEmail: "owner@continuoushq.com",
         worker: {
           role: "finance_operations",
           tenantSlug: "continuous-demo",
@@ -337,7 +335,6 @@ describe("app-server worker tools", () => {
     await expect(
       executeAppServerWorkerTool("continuous.worker.command", {
         command: "cash_forecast.generate",
-        operatorEmail: "owner@continuoushq.com",
         worker: {
           role: "finance_operations",
           tenantSlug: "continuous-demo",
@@ -355,7 +352,6 @@ describe("app-server worker tools", () => {
     await expect(
       executeAppServerWorkerTool("continuous.worker.command", {
         command: "payment_draft.prepare",
-        operatorEmail: "owner@continuoushq.com",
         worker: {
           role: "finance_operations",
           tenantSlug: "continuous-demo",

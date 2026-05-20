@@ -54,7 +54,8 @@ Then open `http://localhost:3000`.
 - `/approval` is the shared approval control-plane API. Use
   `GET /approval?view=inbox&tenantSlug=continuous-demo&subject=all`, or
   `POST /approval` with `command=approval.decide`, structured `approval`, and
-  `config` fields.
+  `config` fields. Approval mutation requests accept only `command`,
+  `approval`, `idempotencyKey`, and `config` as top-level fields.
 - `/worker` is the canonical worker control-plane API. Use
   `GET /worker?view=snapshot&role=revenue_operations` or
   `GET /worker?view=approvals&role=revenue_operations`; use `POST /worker` with
@@ -84,7 +85,9 @@ Then open `http://localhost:3000`.
   approvals, and `POST /workflow` with `command=start`, `command=transition`,
   `command=steps.execute`, or `command=approval.decide`. Queued workflow
   execution can now prepare durable Core packets from packet-backed step kinds
-  without adding packet-specific business-process routes.
+  without adding packet-specific business-process routes. Workflow mutation
+  requests accept only `command`, `workflow`, `idempotencyKey`, and `config` as
+  top-level fields.
 - `worker-scheduler` is the internal production drain for queued platform work.
   It posts the same `/workflow` `steps.execute` envelope, polls active lead
   source connections with `/worker command=lead.read`, hands returned selectors

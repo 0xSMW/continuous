@@ -352,6 +352,37 @@ describe("authorizeControlPlaneAccess", () => {
     });
   });
 
+  it("rejects catalog tokens outside their route scope", () => {
+    const tokenCatalogJson = JSON.stringify([
+      {
+        id: "worker-runner",
+        token: acceptedCredential,
+        operatorEmail,
+        allowedRoutes: ["worker"],
+        allowedAccess: ["write"],
+        allowedCommands: ["worker:run"],
+      },
+    ]);
+
+    expect(
+      authorizeControlPlaneAccess({
+        enabled: true,
+        appEnv: "production",
+        operatorEmail,
+        authorization: `Bearer ${acceptedCredential}`,
+        tokenCatalogJson,
+        route: "core",
+        access: "write",
+        command: "task.create",
+      }),
+    ).toEqual({
+      ok: false,
+      status: 403,
+      code: "control_plane_route_forbidden",
+      message: "This operator token is not allowed to access the requested control-plane route.",
+    });
+  });
+
   it("rejects expired catalog credentials while accepting active rotated credentials", () => {
     const rotatedCredential = ["rotated", "worker", "credential"].join(".");
     const tokenCatalogJson = JSON.stringify([

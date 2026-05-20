@@ -53,7 +53,7 @@ bun run app-server:worker-tools continuous.worker.schema
 ```
 
 ```sh
-bun run app-server:worker-tools continuous.worker.command --payload='{"command":"lead.read","operatorEmail":"owner@continuoushq.com","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-app-server-lead-001","config":{"source":"website_form","records":[{"sourceEventId":"form-001","customerName":"Acme Roof Repair","customerIntent":"roof leak inspection","serviceArea":"roofing","urgency":"high"}]}}'
+bun run app-server:worker-tools continuous.worker.command --payload='{"command":"lead.read","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-app-server-lead-001","config":{"source":"website_form","records":[{"sourceEventId":"form-001","customerName":"Acme Roof Repair","customerIntent":"roof leak inspection","serviceArea":"roofing","urgency":"high"}]}}'
 ```
 
 Inbox and CRM lead intake use the same command surface with source-reader
@@ -66,7 +66,7 @@ The app-server command tool is intentionally narrow:
 
 - Commands are resolved by the same registry as `/worker` and `worker:tool`.
 - Mutation envelopes are strict. Top-level fields are limited to `command`,
-  `worker`, `operatorEmail`, `idempotencyKey`, and `config` for
+  `worker`, `idempotencyKey`, and `config` for
   `continuous.worker.command`; top-level operation inputs such as `approvalId`,
   source records, retry limits, or lead payloads are rejected and must live
   under `config`.
@@ -74,7 +74,10 @@ The app-server command tool is intentionally narrow:
   command registry's `configSchema`.
 - Planned worker roles expose config schemas but remain non-executable until
   handlers are registered; promoted roles move into the registered command list.
-- Caller supplies `operatorEmail`, `worker`, `idempotencyKey`, and `config`.
+- Caller supplies `command`, `worker`, `idempotencyKey`, and `config`.
+- Operator identity comes from the trusted local `WORKER_OPERATOR_EMAIL`
+  environment, matching the authenticated identity that `/worker` derives from
+  its bearer credential.
 - No external execution is available.
 - No production token is loaded.
 - Mutation tools are trusted-local by default; in `APP_ENV=production`, set
