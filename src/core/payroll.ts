@@ -26,6 +26,7 @@ import {
   users,
 } from "../db/schema";
 import { PlatformUnavailableError } from "./errors";
+import { assertCoreIdempotencyReplay, coreIdempotencyFingerprint } from "./idempotency";
 import { loadOperatorContext } from "./operators";
 
 type Database = typeof defaultDb;
@@ -286,6 +287,61 @@ export async function recordPayrollPreview(input: PayrollPreviewRecordInput) {
   const employmentId = optionalUuid(statementInput.employmentId, "config.statement.employmentId");
   const requestedPersonId = optionalUuid(statementInput.personId, "config.statement.personId");
   const objectId = optionalUuid(statementInput.objectId, "config.statement.objectId");
+  const statementFingerprint: JsonObject = {
+    employmentId: employmentId ?? null,
+    personId: requestedPersonId ?? null,
+    objectId: objectId ?? null,
+    externalId: cleanString(statementInput.externalId) ?? null,
+    state: cleanString(statementInput.state) ?? "draft",
+    grossCents: requiredInteger(statementInput.grossCents, "config.statement.grossCents", 0),
+    netCents: requiredInteger(statementInput.netCents, "config.statement.netCents", 0),
+    taxCents: requiredInteger(statementInput.taxCents, "config.statement.taxCents", 0),
+    deductionCents: requiredInteger(statementInput.deductionCents, "config.statement.deductionCents", 0),
+    currency: currencyCode(statementInput.currency, "config.statement.currency"),
+    periodStart: optionalDate(statementInput.periodStart, "config.statement.periodStart")?.toISOString() ?? null,
+    periodEnd: optionalDate(statementInput.periodEnd, "config.statement.periodEnd")?.toISOString() ?? null,
+    checkDate: optionalDate(statementInput.checkDate, "config.statement.checkDate")?.toISOString() ?? null,
+    data: jsonObject(statementInput.data),
+  };
+  const lineFingerprint = lineInputs.map(
+    (line, index): JsonObject => ({
+      kind: requiredString(line.kind, `config.lines[${index}].kind`),
+      code: cleanString(line.code) ?? null,
+      description: cleanString(line.description) ?? null,
+      amountCents: requiredInteger(line.amountCents, `config.lines[${index}].amountCents`),
+      currency: currencyCode(line.currency, `config.lines[${index}].currency`),
+      taxable: typeof line.taxable === "boolean" ? line.taxable : false,
+      data: jsonObject(line.data),
+    }),
+  );
+  const liabilityFingerprint = liabilityInputs.map(
+    (liability, index): JsonObject => ({
+      kind: requiredString(liability.kind, `config.liabilities[${index}].kind`),
+      payee: cleanString(liability.payee) ?? null,
+      jurisdiction: cleanString(liability.jurisdiction) ?? null,
+      amountCents: requiredInteger(liability.amountCents, `config.liabilities[${index}].amountCents`),
+      currency: currencyCode(liability.currency, `config.liabilities[${index}].currency`),
+      state: cleanString(liability.state) ?? "draft",
+      dueAt: optionalDate(liability.dueAt, `config.liabilities[${index}].dueAt`)?.toISOString() ?? null,
+      data: jsonObject(liability.data),
+    }),
+  );
+  const traceFingerprint: JsonObject = {
+    kind: cleanString(traceInput.kind) ?? "calculation",
+    sourceRefs: jsonObject(traceInput.sourceRefs),
+    inputs: jsonObject(traceInput.inputs),
+    outputs: jsonObject(traceInput.outputs),
+    rules: jsonObject(traceInput.rules),
+    hash: cleanString(traceInput.hash) ?? null,
+    data: jsonObject(traceInput.data),
+  };
+  const idempotency = coreIdempotencyFingerprint("payroll.preview.record", {
+    payrollRunId,
+    statement: statementFingerprint,
+    lines: lineFingerprint,
+    liabilities: liabilityFingerprint,
+    trace: traceFingerprint,
+  });
   const operator = await loadOperatorContext({
     db,
     operatorEmail: input.operatorEmail,
@@ -302,6 +358,7 @@ export async function recordPayrollPreview(input: PayrollPreviewRecordInput) {
         auditEventId: auditEvents.id,
         targetId: auditEvents.targetId,
         eventId: auditEvents.eventId,
+        data: auditEvents.data,
       })
       .from(auditEvents)
       .where(
@@ -315,6 +372,12 @@ export async function recordPayrollPreview(input: PayrollPreviewRecordInput) {
       .limit(1);
 
     if (existingAudit?.targetId) {
+      assertCoreIdempotencyReplay({
+        command: "payroll.preview.record",
+        fingerprint: idempotency,
+        storedData: existingAudit.data,
+      });
+
       const [statement] = await tx
         .select({ id: payrollStatements.id, payrollRunId: payrollStatements.payrollRunId })
         .from(payrollStatements)
@@ -527,6 +590,7 @@ export async function recordPayrollPreview(input: PayrollPreviewRecordInput) {
             netCents: Number(totals?.netCents ?? 0),
             taxCents: Number(totals?.taxCents ?? 0),
           },
+          idempotency,
           externalExecution: "blocked",
         },
         occurredAt: now,
@@ -553,6 +617,7 @@ export async function recordPayrollPreview(input: PayrollPreviewRecordInput) {
           lineCount: lineIds.length,
           liabilityCount: liabilityIds.length,
           traceId: trace.id,
+          idempotency,
           externalExecution: "blocked",
         },
       })
@@ -576,6 +641,7 @@ export async function recordPayrollPreview(input: PayrollPreviewRecordInput) {
           liabilityIds,
           traceId: trace.id,
           sourceRefs: jsonObject(traceInput.sourceRefs),
+          idempotency,
           externalExecution: "blocked",
         },
       })
@@ -601,6 +667,16 @@ export async function preparePayrollPreviewPacket(input: PayrollPreviewPacketInp
   const requestedObjectId = optionalUuid(input.objectId, "config.objectId");
   const requestedReviewerUserId = optionalUuid(input.reviewerUserId, "config.reviewerUserId");
   const dueAt = optionalDate(input.dueAt, "config.dueAt");
+  const varianceInput = jsonObject(input.variance);
+  const dataInput = jsonObject(input.data);
+  const idempotency = coreIdempotencyFingerprint("payroll.preview.packet.prepare", {
+    payrollRunId,
+    objectId: requestedObjectId ?? null,
+    reviewerUserId: requestedReviewerUserId ?? null,
+    dueAt: dueAt?.toISOString() ?? null,
+    variance: varianceInput,
+    data: dataInput,
+  });
   const operator = await loadOperatorContext({
     db,
     operatorEmail: input.operatorEmail,
@@ -617,6 +693,7 @@ export async function preparePayrollPreviewPacket(input: PayrollPreviewPacketInp
         auditEventId: auditEvents.id,
         targetId: auditEvents.targetId,
         eventId: auditEvents.eventId,
+        data: auditEvents.data,
       })
       .from(auditEvents)
       .where(
@@ -630,6 +707,12 @@ export async function preparePayrollPreviewPacket(input: PayrollPreviewPacketInp
       .limit(1);
 
     if (existingAudit?.targetId) {
+      assertCoreIdempotencyReplay({
+        command: "payroll.preview.packet.prepare",
+        fingerprint: idempotency,
+        storedData: existingAudit.data,
+      });
+
       const [packet] = await tx
         .select({ id: evidencePackets.id, documentId: evidencePackets.documentId, data: evidencePackets.data })
         .from(evidencePackets)
@@ -826,7 +909,7 @@ export async function preparePayrollPreviewPacket(input: PayrollPreviewPacketInp
         netCents: netCents - payrollRun.netCents,
         taxCents: taxCents - payrollRun.taxCents,
         liabilityCents: liabilityCents - taxCents,
-        ...jsonObject(input.variance),
+        ...varianceInput,
       },
     };
     const period = {
@@ -969,7 +1052,7 @@ export async function preparePayrollPreviewPacket(input: PayrollPreviewPacketInp
     const sourceEvidenceIds = sourceEvidence.map((item) => item.id);
     const packetDocumentIds = [varianceDocument.id, ...payStatementDocumentIds];
     const packetData: JsonObject = {
-      ...jsonObject(input.data),
+      ...dataInput,
       payrollRunId,
       period,
       totals,
@@ -985,6 +1068,7 @@ export async function preparePayrollPreviewPacket(input: PayrollPreviewPacketInp
       sections: {
         order: ["summary", "variance", "pay_statements", "funding", "tax_drafts", "approval"],
       },
+      idempotency,
       externalExecution: "blocked",
       moneyMovement: "blocked",
       submission: "blocked",
@@ -1037,6 +1121,7 @@ export async function preparePayrollPreviewPacket(input: PayrollPreviewPacketInp
           ...packetData,
           packetId: packet.id,
           packetDocumentId: packetDocument.id,
+          idempotency,
         },
         occurredAt: now,
       })
@@ -1060,6 +1145,7 @@ export async function preparePayrollPreviewPacket(input: PayrollPreviewPacketInp
           packetId: packet.id,
           packetDocumentId: packetDocument.id,
           ...packetData,
+          idempotency,
         },
       })
       .returning({ id: auditEvents.id });

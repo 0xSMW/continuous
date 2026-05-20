@@ -852,18 +852,65 @@ maybeDescribe("Revenue Worker integration eval", () => {
       payrollRunId,
       statement: {
         employmentId,
-        grossCents: 1,
-        netCents: 1,
-        taxCents: 0,
+        objectId: payrollObjectId,
+        externalId: `ci-payroll-statement-${runId}`,
+        state: "draft",
+        grossCents: 336000,
+        netCents: 248640,
+        taxCents: 87360,
+        deductionCents: 0,
+        data: {
+          source: "ci",
+        },
       },
       lines: [
         {
           kind: "earning",
-          amountCents: 1,
+          code: "regular_hours",
+          description: "Regular wages",
+          amountCents: 336000,
+          taxable: true,
+          data: {
+            hours: 80,
+            rateCents: 4200,
+          },
+        },
+        {
+          kind: "tax",
+          code: "federal_withholding",
+          amountCents: 87360,
+          data: {
+            authority: "IRS",
+          },
+        },
+      ],
+      liabilities: [
+        {
+          kind: "tax_withholding",
+          payee: "IRS",
+          jurisdiction: "US",
+          amountCents: 87360,
+          state: "draft",
         },
       ],
       trace: {
-        hash: "should-not-create-new-trace",
+        hash: `ci-payroll-trace-${runId}`,
+        sourceRefs: {
+          payrollRunId,
+          employmentId,
+        },
+        inputs: {
+          hours: 80,
+          rateCents: 4200,
+        },
+        outputs: {
+          grossCents: 336000,
+          netCents: 248640,
+          taxCents: 87360,
+        },
+        rules: {
+          execution: "preview_only",
+        },
       },
       db,
     });
@@ -880,6 +927,33 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(replay.recorded).toBe(false);
     expect(replay.statementId).toBe(first.statementId);
     expect(auditCount.value).toBe(1);
+    await expect(
+      recordPayrollPreview({
+        operatorEmail: "owner@continuoushq.com",
+        tenantSlug: "continuous-demo",
+        idempotencyKey,
+        payrollRunId,
+        statement: {
+          employmentId,
+          grossCents: 1,
+          netCents: 1,
+          taxCents: 0,
+        },
+        lines: [
+          {
+            kind: "earning",
+            amountCents: 1,
+          },
+        ],
+        trace: {
+          hash: "should-conflict",
+        },
+        db,
+      }),
+    ).rejects.toMatchObject({
+      code: "core_command_idempotency_conflict",
+      status: 409,
+    });
   }, 120_000);
 
   it("prepares payroll preview packets with approval and blocked funding handoffs", async () => {
@@ -984,7 +1058,10 @@ maybeDescribe("Revenue Worker integration eval", () => {
       payrollRunId,
       objectId: payrollObjectId,
       variance: {
-        source: "changed",
+        source: "ci",
+      },
+      data: {
+        source: "ci.core",
       },
       db,
     });
@@ -1002,6 +1079,22 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(replay.packetId).toBe(first.packetId);
     expect(replay.approvalRequestId).toBe(first.approvalRequestId);
     expect(auditCount.value).toBe(1);
+    await expect(
+      preparePayrollPreviewPacket({
+        operatorEmail: "owner@continuoushq.com",
+        tenantSlug: "continuous-demo",
+        idempotencyKey,
+        payrollRunId,
+        objectId: payrollObjectId,
+        variance: {
+          source: "changed",
+        },
+        db,
+      }),
+    ).rejects.toMatchObject({
+      code: "core_command_idempotency_conflict",
+      status: 409,
+    });
 
     const decision = await decideApproval({
       approvalId: first.approvalRequestId ?? "",
