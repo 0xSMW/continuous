@@ -89,6 +89,25 @@ describe("worker tool contract", () => {
     }
   });
 
+  it("rejects local worker tool payloads with top-level operation fields", async () => {
+    await expect(
+      executeWorkerTool("worker.run", {
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "local-envelope-test-001",
+        leadPacket: {
+          customerName: "Acme Roof Repair",
+        },
+        approvalId: "approval-1",
+        config: {},
+      }),
+    ).rejects.toThrow(
+      "Worker tool payload fields must be worker, idempotencyKey, config, and operatorEmail. Move operation inputs into config. Unexpected fields: leadPacket, approvalId.",
+    );
+  });
+
   it("exposes registry-backed repo-owned worker tools", () => {
     expect(workerTools.map((tool) => tool.name)).toEqual([
       "worker.snapshot",

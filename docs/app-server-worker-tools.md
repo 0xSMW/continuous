@@ -36,6 +36,11 @@ registry without loading production tokens or executing external reads.
 The app-server command tool is intentionally narrow:
 
 - Commands are resolved by the same registry as `/worker` and `worker:tool`.
+- Mutation envelopes are strict. Top-level fields are limited to `command`,
+  `worker`, `operatorEmail`, `idempotencyKey`, and `config` for
+  `continuous.worker.command`; top-level operation inputs such as `approvalId`,
+  source records, retry limits, or lead payloads are rejected and must live
+  under `config`.
 - Worker-specific options stay inside `config` and are validated by the
   command registry's `configSchema`.
 - Planned worker roles expose config schemas but remain non-executable until
@@ -65,3 +70,6 @@ POST /worker
 
 Those mutation surfaces keep the same scalable payload shape:
 `command`, `worker`, `idempotencyKey`, and `config`.
+The local `worker:tool` command uses the tool name as the command selector and
+keeps the same strict `worker`, `idempotencyKey`, `config`, and optional
+`operatorEmail` envelope.

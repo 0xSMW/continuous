@@ -79,7 +79,9 @@ Then open `http://localhost:3000`.
   introduce worker-family URLs or enable external execution.
 Worker-specific HTTP routes and local mutation shortcuts are intentionally
 absent; new worker families extend `/worker` and `worker:tool` by registering
-commands and structured payload fields.
+commands and structured payload fields. The HTTP, app-server, and local worker
+command surfaces reject stray top-level operation fields so worker-specific
+inputs stay under `config`.
 
 ## Docs
 

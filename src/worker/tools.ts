@@ -510,7 +510,21 @@ function targetFrom(payload: JsonObject): WorkerTargetInput {
   };
 }
 
+const workerToolEnvelopeFields = new Set(["worker", "idempotencyKey", "config", "operatorEmail"]);
+
+function assertWorkerToolEnvelope(payload: JsonObject) {
+  const unexpectedFields = Object.keys(payload).filter((field) => !workerToolEnvelopeFields.has(field));
+
+  if (unexpectedFields.length > 0) {
+    throw new Error(
+      `Worker tool payload fields must be worker, idempotencyKey, config, and operatorEmail. Move operation inputs into config. Unexpected fields: ${unexpectedFields.join(", ")}.`,
+    );
+  }
+}
+
 export async function executeWorkerTool(name: string, payload: JsonObject = {}) {
+  assertWorkerToolEnvelope(payload);
+
   const target = targetFrom(payload);
   const config = payload.config;
   const viewConfig = objectValue(payload.config);

@@ -24,6 +24,23 @@ describe("app-server worker tools", () => {
   it("requires a clean canonical command envelope before dispatch", async () => {
     await expect(
       executeAppServerWorkerTool("continuous.worker.command", {
+        command: "run",
+        operatorEmail: "owner@continuoushq.com",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "app-server-envelope-test-001",
+        approvalId: "approval-1",
+        limit: 25,
+        config: {},
+      }),
+    ).rejects.toThrow(
+      "continuous.worker.command payload fields must be command, worker, operatorEmail, idempotencyKey, and config. Move operation inputs into config. Unexpected fields: approvalId, limit.",
+    );
+
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.command", {
         worker: {
           role: "revenue_operations",
           tenantSlug: "continuous-demo",

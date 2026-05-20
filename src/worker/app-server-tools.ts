@@ -87,6 +87,24 @@ function targetFrom(args: JsonObject): WorkerTargetInput {
   };
 }
 
+const appServerWorkerCommandEnvelopeFields = new Set([
+  "command",
+  "worker",
+  "operatorEmail",
+  "idempotencyKey",
+  "config",
+]);
+
+function assertAppServerWorkerCommandEnvelope(args: JsonObject) {
+  const unexpectedFields = Object.keys(args).filter((field) => !appServerWorkerCommandEnvelopeFields.has(field));
+
+  if (unexpectedFields.length > 0) {
+    throw new Error(
+      `continuous.worker.command payload fields must be command, worker, operatorEmail, idempotencyKey, and config. Move operation inputs into config. Unexpected fields: ${unexpectedFields.join(", ")}.`,
+    );
+  }
+}
+
 export async function executeAppServerWorkerTool(name: string, args: JsonObject = {}) {
   if (name === "continuous.worker.schema") {
     if (Object.keys(args).length > 0) {
@@ -102,6 +120,8 @@ export async function executeAppServerWorkerTool(name: string, args: JsonObject 
   }
 
   if (name === "continuous.worker.command") {
+    assertAppServerWorkerCommandEnvelope(args);
+
     const command = stringValue(args.command);
     const operatorEmail = stringValue(args.operatorEmail);
 
