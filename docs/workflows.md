@@ -266,6 +266,7 @@ Workflow approvals use the same platform approval ledger as worker approvals:
   "workflow": {
     "tenantSlug": "continuous-demo"
   },
+  "idempotencyKey": "workflow-approval-decision-001",
   "config": {
     "approvalId": "approval_uuid",
     "action": "approved",

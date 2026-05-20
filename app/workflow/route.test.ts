@@ -483,6 +483,39 @@ describe("/workflow route scope", () => {
     expect(mocks.transitionWorkflowRun).not.toHaveBeenCalled();
   });
 
+  it("rejects workflow approval decisions without an idempotency key before dispatch", async () => {
+    mocks.env.CONTROL_PLANE_ALLOWED_TENANTS = "continuous-demo";
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/workflow", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "approval.decide",
+          workflow: {
+            tenantSlug: "continuous-demo",
+          },
+          config: {
+            approvalId: "approval-1",
+            action: "approved",
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toEqual({
+      code: "invalid_workflow_approval_decision",
+      message: "A string idempotency key is required.",
+    });
+    expect(mocks.decideApproval).not.toHaveBeenCalled();
+  });
+
   it("executes workflow steps through the canonical command envelope", async () => {
     mocks.env.CONTROL_PLANE_ALLOWED_TENANTS = "continuous-demo";
     mocks.executeWorkflowSteps.mockResolvedValue({

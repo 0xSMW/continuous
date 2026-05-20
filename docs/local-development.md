@@ -281,6 +281,7 @@ curl -X POST http://localhost:3000/workflow \
   -d "{
     \"command\": \"approval.decide\",
     \"workflow\": {\"tenantSlug\": \"continuous-demo\"},
+    \"idempotencyKey\": \"local-workflow-approval-decision-$APPROVAL_ID\",
     \"config\": {\"approvalId\": \"$APPROVAL_ID\", \"action\": \"approved\"}
   }"
 ```

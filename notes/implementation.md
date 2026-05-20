@@ -147,6 +147,7 @@
 | Expanded app-server Revenue proof | The CI integration suite now runs Revenue `lead.classify` and `response.draft` through `continuous.worker.command`, scores the split-command eval fixtures, and verifies generic worker ledger records in addition to the existing app-server `lead.read -> run` proof |
 | Constrained adapter auth metadata | `adapter.upsert` now normalizes `config.auth` to a non-secret `authMode`, rejects credential-shaped values, and emits only `authMode` in adapter responses, events, and audit records while managed credential refs stay on connections |
 | Hardened split Revenue actions | `lead.read`, `lead.classify`, and `response.draft` now check worker budget capacity before reserving units, and empty run/classify/draft configs fail before any synthetic lead defaults or worker-run records are written |
+| Hardened workflow approvals and local reads | `/workflow command=approval.decide` now requires the same top-level idempotency key discipline as other workflow mutations, local `worker.view` reads fail closed in production unless explicitly trusted, and deploy token scopes now include the registered Finance `payment_draft.prepare` command |
 
 ### Tradeoffs
 

@@ -257,6 +257,36 @@ describe("worker tool contract", () => {
     ).rejects.toThrow("Worker command must be run");
   });
 
+  it("disables local worker reads in production unless explicitly trusted", async () => {
+    process.env.APP_ENV = "production";
+    delete process.env.CONTINUOUS_TRUSTED_LOCAL_WORKER_TOOLS;
+
+    await expect(
+      executeWorkerTool("worker.view", {
+        view: "snapshot",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        config: {},
+      }),
+    ).rejects.toThrow(
+      "worker.view is a trusted local read surface and is disabled in production unless CONTINUOUS_TRUSTED_LOCAL_WORKER_TOOLS=true.",
+    );
+
+    process.env.CONTINUOUS_TRUSTED_LOCAL_WORKER_TOOLS = "true";
+    await expect(
+      executeWorkerTool("worker.view", {
+        view: "missing",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        config: {},
+      }),
+    ).rejects.toThrow("Worker view must be snapshot or approvals.");
+  });
+
   it("exposes registry-backed repo-owned worker tools", () => {
     expect(workerTools.map((tool) => tool.name)).toEqual([
       "worker.view",

@@ -290,6 +290,17 @@ export function assertTrustedLocalWorkerMutation(surface: string) {
   }
 }
 
+export function assertTrustedLocalWorkerRead(surface: string) {
+  if (
+    process.env.APP_ENV === "production" &&
+    process.env.CONTINUOUS_TRUSTED_LOCAL_WORKER_TOOLS !== "true"
+  ) {
+    throw new Error(
+      `${surface} is a trusted local read surface and is disabled in production unless CONTINUOUS_TRUSTED_LOCAL_WORKER_TOOLS=true.`,
+    );
+  }
+}
+
 function workerToolEnvelope(name: string) {
   if (name === "worker.command") {
     return {
@@ -339,6 +350,8 @@ export async function executeWorkerTool(name: string, payload: JsonObject = {}) 
 
   if (name === "worker.view") {
     const view = stringValue(payload.view) ?? "snapshot";
+    assertTrustedLocalWorkerRead("worker.view");
+
     const result = await executeWorkerView({
       view,
       target,

@@ -444,6 +444,7 @@ describe("future worker contracts", () => {
     expect(deployScript).toContain("core:control_plane.credential.upsert");
     expect(deployScript).toContain("core:control_plane.credential.revoke");
     expect(deployScript).toContain("core:control_plane.session.review");
+    expect(deployScript).toContain("worker:payment_draft.prepare");
     expect(deployScript).toContain("scripts/rotate-control-plane-token-on-host.sh");
     expect(deployScript).toContain("preserving the existing bootstrap token");
     expect(deployScript).toContain('SITE_HOST="$SITE_HOST"');
@@ -452,6 +453,7 @@ describe("future worker contracts", () => {
     expect(deployWorkflow).toContain("core:control_plane.credential.upsert");
     expect(deployWorkflow).toContain("core:control_plane.credential.revoke");
     expect(deployWorkflow).toContain("core:control_plane.session.review");
+    expect(deployWorkflow).toContain("worker:payment_draft.prepare");
     expect(deployWorkflow).toContain("scripts/attest-control-plane-on-host.sh");
     expect(deployWorkflow).toContain("scripts/rotate-control-plane-token-on-host.sh");
     expect(deployWorkflow).toContain("preserving the existing bootstrap token");

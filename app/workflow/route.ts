@@ -626,12 +626,18 @@ export async function POST(request: Request) {
   if (command === "approval.decide") {
     const approvalId = optionalString(config.approvalId);
     const action = normalizeApprovalDecision(config.action);
+    const idempotency = normalizeIdempotencyKey(
+      request.headers.get("idempotency-key") ?? body.idempotencyKey,
+    );
 
-    if (!approvalId || !action) {
+    if (!approvalId || !action || !idempotency.ok) {
       return errorResponse(
         {
           code: "invalid_workflow_approval_decision",
-          message: "config.approvalId and config.action are required for approval.decide.",
+          message:
+            approvalId && action
+              ? idempotency.message
+              : "config.approvalId, config.action, and idempotencyKey are required for approval.decide.",
         },
         400,
       );
