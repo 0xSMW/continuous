@@ -250,12 +250,16 @@ describe("future worker contracts", () => {
     expect(deployScript).toContain("core:control_plane.credential.revoke");
     expect(deployScript).toContain("core:control_plane.session.review");
     expect(deployScript).toContain("scripts/rotate-control-plane-token-on-host.sh");
+    expect(deployScript).toContain("preserving the existing bootstrap token");
+    expect(deployScript).toContain('SITE_HOST="$SITE_HOST"');
     expect(deployWorkflow).toContain("core:control_plane.token_rotation.attest");
     expect(deployWorkflow).toContain("core:control_plane.credential.upsert");
     expect(deployWorkflow).toContain("core:control_plane.credential.revoke");
     expect(deployWorkflow).toContain("core:control_plane.session.review");
     expect(deployWorkflow).toContain("scripts/attest-control-plane-on-host.sh");
     expect(deployWorkflow).toContain("scripts/rotate-control-plane-token-on-host.sh");
+    expect(deployWorkflow).toContain("preserving the existing bootstrap token");
+    expect(deployWorkflow).toContain('SITE_HOST="$SITE_HOST"');
   });
 
   it("defines Core-record handoffs for planned worker expansion", () => {

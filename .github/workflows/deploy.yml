@@ -146,7 +146,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "cloud-init status --wait >/dev/null 2>&1 || true; command -v docker >/dev/null; docker compose version >/dev/null; command -v rsync >/dev/null; mkdir -p '$DEPLOY_PATH'"
+          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "cloud-init status --wait >/dev/null 2>&1 || true; command -v docker >/dev/null; docker compose version >/dev/null; command -v rsync >/dev/null; command -v jq >/dev/null; command -v curl >/dev/null; command -v sha256sum >/dev/null; command -v base64 >/dev/null; command -v openssl >/dev/null; mkdir -p '$DEPLOY_PATH'"
           rsync -az --delete \
             -e "ssh -i ~/.ssh/deploy_key" \
             --exclude ".git" \
@@ -173,9 +173,12 @@ jobs:
             APP_URL="https://$first_host"
           fi
           app_url="${APP_URL:-https://continuoushq.com}"
+          site_host="${app_url#https://}"
+          site_host="${site_host%%/*}"
+          site_host="${site_host%%:*}"
           app_tag="${APP_TAG_INPUT:-sha-${GITHUB_SHA::12}}"
           ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" \
-            "APP_DIR='$DEPLOY_PATH' SITE_HOSTS='$SITE_HOSTS' ACME_EMAIL='$ACME_EMAIL' APP_URL='$app_url' WORKER_OPERATOR_EMAIL='$WORKER_OPERATOR_EMAIL' APP_IMAGE='continuous-app' APP_TAG='$app_tag' ROLLBACK_APP_TAG='$ROLLBACK_APP_TAG' bash -s" <<'REMOTE'
+            "APP_DIR='$DEPLOY_PATH' SITE_HOSTS='$SITE_HOSTS' SITE_HOST='$site_host' ACME_EMAIL='$ACME_EMAIL' APP_URL='$app_url' WORKER_OPERATOR_EMAIL='$WORKER_OPERATOR_EMAIL' APP_IMAGE='continuous-app' APP_TAG='$app_tag' ROLLBACK_APP_TAG='$ROLLBACK_APP_TAG' bash -s" <<'REMOTE'
           set -euo pipefail
           cd "$APP_DIR"
           install -m 0755 -d logs/caddy logs/observability
@@ -286,16 +289,24 @@ jobs:
           previous_worker_token="$(grep '^WORKER_RUN_TOKEN=' .env | cut -d= -f2- || true)"
           worker_token="$(openssl rand -hex 32)"
           if [ -n "$previous_worker_token" ] && docker compose ps --status running app | grep -q app; then
-            TOKEN_ROTATION_OUTPUT="$(
+            TOKEN_ROTATION_OUTPUT=""
+            if TOKEN_ROTATION_OUTPUT="$(
               APP_DIR="$APP_DIR" \
+                SITE_HOST="$SITE_HOST" \
                 NEXT_WORKER_RUN_TOKEN="$worker_token" \
                 CONTROL_PLANE_ROTATION_RUN_ID="$(date -u +%Y%m%d%H%M%S)" \
                 "$APP_DIR/scripts/rotate-control-plane-token-on-host.sh"
-            )"
-            printf '%s\n' "$TOKEN_ROTATION_OUTPUT"
-            printf '%s\n' "$TOKEN_ROTATION_OUTPUT" | /usr/bin/jq -e \
+            )" && printf '%s\n' "$TOKEN_ROTATION_OUTPUT" | /usr/bin/jq -e \
               '.control_plane_token_rotation_status == "ok" and (.tokenRotationAttestationId | length > 0)' \
-              >/dev/null
+              >/dev/null; then
+              printf '%s\n' "$TOKEN_ROTATION_OUTPUT"
+            else
+              if [ -n "$TOKEN_ROTATION_OUTPUT" ]; then
+                printf '%s\n' "$TOKEN_ROTATION_OUTPUT" >&2
+              fi
+              echo "Pre-deploy token rotation could not be attested; preserving the existing bootstrap token for this recovery deploy." >&2
+              worker_token="$previous_worker_token"
+            fi
           else
             echo "No running app found for pre-deploy token rotation; writing a fresh bootstrap token without rotation attestation."
           fi

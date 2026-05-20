@@ -358,10 +358,13 @@ request audit row, and the generated session review view.
 Deploy rotates the bootstrap control-plane token before the new app starts by
 running `scripts/rotate-control-plane-token-on-host.sh` against the currently
 running app. That records `control_plane.token_rotation.attest` and writes the
-non-secret rotation attestation id into this file. After the new app is up,
-deploy smoke runs `scripts/attest-control-plane-on-host.sh`; that script records
-the current bootstrap credential inventory row, revokes a disposable drill
-credential, reviews recent bootstrap sessions, and writes the non-secret
+non-secret rotation attestation id into this file. If a previous failed deploy
+left `.env` rotated before the managed credential row was updated, deploy
+preserves the current bootstrap token for that recovery deploy instead of
+minting another un-attested token. After the new app is up, deploy smoke runs
+`scripts/attest-control-plane-on-host.sh`; that script records the current
+bootstrap credential inventory row, revokes a disposable drill credential,
+reviews recent bootstrap sessions, and writes the non-secret
 credential/auth/session evidence ids into this file. These scripts do not attest
 recovery drills, object-storage backups, alerting, or non-root host access.
 

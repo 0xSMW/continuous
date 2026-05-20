@@ -25,10 +25,14 @@ fi
 
 if [ -z "$APP_URL" ]; then
   first_host="${SITE_HOSTS%%,*}"
+  first_host="$(printf '%s' "$first_host" | xargs)"
   first_host="${first_host#http://}"
   first_host="${first_host#https://}"
   APP_URL="https://$first_host"
 fi
+SITE_HOST="${APP_URL#https://}"
+SITE_HOST="${SITE_HOST%%/*}"
+SITE_HOST="${SITE_HOST%%:*}"
 
 if [[ "$SITE_HOSTS" == *"http://"* || "$APP_URL" == http://* ]]; then
   echo "Plain HTTP deploys are disabled. Set HTTPS SITE_HOSTS and APP_URL." >&2
@@ -63,7 +67,7 @@ for attempt in $(seq 1 60); do
 done
 
 ssh "$REMOTE" "mkdir -p $(quote "$APP_DIR")"
-ssh "$REMOTE" "cloud-init status --wait >/dev/null 2>&1 || true; command -v docker >/dev/null; docker compose version >/dev/null; command -v rsync >/dev/null"
+ssh "$REMOTE" "cloud-init status --wait >/dev/null 2>&1 || true; command -v docker >/dev/null; docker compose version >/dev/null; command -v rsync >/dev/null; command -v jq >/dev/null; command -v curl >/dev/null; command -v sha256sum >/dev/null; command -v base64 >/dev/null; command -v openssl >/dev/null"
 
 rsync -az --delete \
   --exclude ".git" \
@@ -77,7 +81,7 @@ rsync -az --delete \
   ./ "$REMOTE:$APP_DIR/"
 
 ssh "$REMOTE" \
-  "APP_DIR=$(quote "$APP_DIR") SITE_HOSTS=$(quote "$SITE_HOSTS") ACME_EMAIL=$(quote "$ACME_EMAIL") APP_URL=$(quote "$APP_URL") WORKER_OPERATOR_EMAIL=$(quote "$WORKER_OPERATOR_EMAIL") POSTGRES_DB=$(quote "$POSTGRES_DB") POSTGRES_USER=$(quote "$POSTGRES_USER") APP_IMAGE=$(quote "$APP_IMAGE") APP_TAG=$(quote "$APP_TAG") bash -s" <<'REMOTE_SCRIPT'
+  "APP_DIR=$(quote "$APP_DIR") SITE_HOSTS=$(quote "$SITE_HOSTS") SITE_HOST=$(quote "$SITE_HOST") ACME_EMAIL=$(quote "$ACME_EMAIL") APP_URL=$(quote "$APP_URL") WORKER_OPERATOR_EMAIL=$(quote "$WORKER_OPERATOR_EMAIL") POSTGRES_DB=$(quote "$POSTGRES_DB") POSTGRES_USER=$(quote "$POSTGRES_USER") APP_IMAGE=$(quote "$APP_IMAGE") APP_TAG=$(quote "$APP_TAG") bash -s" <<'REMOTE_SCRIPT'
 set -euo pipefail
 
 cd "$APP_DIR"
@@ -164,16 +168,24 @@ set_env APP_TAG "$APP_TAG"
 previous_worker_token="$(grep '^WORKER_RUN_TOKEN=' .env | cut -d= -f2- || true)"
 worker_token="$(openssl rand -hex 32)"
 if [ -n "$previous_worker_token" ] && docker compose ps --status running app | grep -q app; then
-  TOKEN_ROTATION_OUTPUT="$(
+  TOKEN_ROTATION_OUTPUT=""
+  if TOKEN_ROTATION_OUTPUT="$(
     APP_DIR="$APP_DIR" \
+      SITE_HOST="$SITE_HOST" \
       NEXT_WORKER_RUN_TOKEN="$worker_token" \
       CONTROL_PLANE_ROTATION_RUN_ID="$(date -u +%Y%m%d%H%M%S)" \
       "$APP_DIR/scripts/rotate-control-plane-token-on-host.sh"
-  )"
-  printf '%s\n' "$TOKEN_ROTATION_OUTPUT"
-  printf '%s\n' "$TOKEN_ROTATION_OUTPUT" | /usr/bin/jq -e \
+  )" && printf '%s\n' "$TOKEN_ROTATION_OUTPUT" | /usr/bin/jq -e \
     '.control_plane_token_rotation_status == "ok" and (.tokenRotationAttestationId | length > 0)' \
-    >/dev/null
+    >/dev/null; then
+    printf '%s\n' "$TOKEN_ROTATION_OUTPUT"
+  else
+    if [ -n "$TOKEN_ROTATION_OUTPUT" ]; then
+      printf '%s\n' "$TOKEN_ROTATION_OUTPUT" >&2
+    fi
+    echo "Pre-deploy token rotation could not be attested; preserving the existing bootstrap token for this recovery deploy." >&2
+    worker_token="$previous_worker_token"
+  fi
 else
   echo "No running app found for pre-deploy token rotation; writing a fresh bootstrap token without rotation attestation."
 fi
