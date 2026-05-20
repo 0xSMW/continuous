@@ -257,8 +257,14 @@ describe("/worker route", () => {
           command: "run",
           worker: {
             role: "revenue_operations",
+            tenantSlug: "continuous-demo",
           },
-          config: {},
+          config: {
+            intake: {
+              source: "website_form",
+              sourceEventId: "header-key-form-001",
+            },
+          },
         }),
       }),
     );

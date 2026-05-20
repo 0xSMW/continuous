@@ -1,4 +1,4 @@
-import { count, sql } from "drizzle-orm";
+import { count, eq, sql, type SQL } from "drizzle-orm";
 import type { AnyPgTable } from "drizzle-orm/pg-core";
 
 import {
@@ -154,11 +154,36 @@ async function tableCount(db: Database, table: AnyPgTable) {
   return rows[0]?.value ?? 0;
 }
 
-export async function getCoreSummary(): Promise<CoreSummary> {
+async function tableCountWhere(db: Database, table: AnyPgTable, condition: SQL) {
+  const rows = await db.select({ value: count() }).from(table).where(condition);
+  return rows[0]?.value ?? 0;
+}
+
+function tenantCondition(table: AnyPgTable, tenantId: string) {
+  return sql`${table}.tenant_id = ${tenantId}`;
+}
+
+async function tenantTableCount(db: Database, table: AnyPgTable, tenantId: string | null) {
+  return tenantId ? tableCountWhere(db, table, tenantCondition(table, tenantId)) : tableCount(db, table);
+}
+
+export async function getCoreSummary(options: { tenantSlug?: string } = {}): Promise<CoreSummary> {
   const db = await getDb();
+  const tenantRows = options.tenantSlug
+    ? await db
+        .select({ id: tenants.id, name: tenants.name })
+        .from(tenants)
+        .where(eq(tenants.slug, options.tenantSlug))
+        .limit(1)
+    : await db.select({ id: tenants.id, name: tenants.name }).from(tenants).limit(1);
+
+  if (options.tenantSlug && !tenantRows[0]) {
+    throw new Error(`Tenant ${options.tenantSlug} was not found.`);
+  }
+
+  const tenantId = options.tenantSlug ? (tenantRows[0]?.id ?? null) : null;
+  const tenantCount = tenantId ? 1 : await tableCount(db, tenants);
   const [
-    tenantRows,
-    tenantCount,
     legalEntityCount,
     peopleCount,
     employmentCount,
@@ -220,66 +245,64 @@ export async function getCoreSummary(): Promise<CoreSummary> {
     activeTasks,
     recentEvents,
   ] = await Promise.all([
-    db.select({ name: tenants.name }).from(tenants).limit(1),
-    tableCount(db, tenants),
-    tableCount(db, legalEntities),
-    tableCount(db, people),
-    tableCount(db, employments),
-    tableCount(db, compensationAgreements),
-    tableCount(db, paySchedules),
-    tableCount(db, payrollRuns),
-    tableCount(db, payrollStatements),
-    tableCount(db, payrollLines),
-    tableCount(db, payrollLiabilities),
-    tableCount(db, payrollTraces),
+    tenantTableCount(db, legalEntities, tenantId),
+    tenantTableCount(db, people, tenantId),
+    tenantTableCount(db, employments, tenantId),
+    tenantTableCount(db, compensationAgreements, tenantId),
+    tenantTableCount(db, paySchedules, tenantId),
+    tenantTableCount(db, payrollRuns, tenantId),
+    tenantTableCount(db, payrollStatements, tenantId),
+    tenantTableCount(db, payrollLines, tenantId),
+    tenantTableCount(db, payrollLiabilities, tenantId),
+    tenantTableCount(db, payrollTraces, tenantId),
     tableCount(db, rulePacks),
-    tableCount(db, obligations),
-    tableCount(db, filingRequirements),
-    tableCount(db, filingDrafts),
-    tableCount(db, bankAccounts),
-    tableCount(db, paymentInstructions),
+    tenantTableCount(db, obligations, tenantId),
+    tenantTableCount(db, filingRequirements, tenantId),
+    tenantTableCount(db, filingDrafts, tenantId),
+    tenantTableCount(db, bankAccounts, tenantId),
+    tenantTableCount(db, paymentInstructions, tenantId),
     tableCount(db, workflowDefinitions),
-    tableCount(db, workflowRuns),
-    tableCount(db, workflowSteps),
-    tableCount(db, workerRuns),
-    tableCount(db, approvalRequests),
-    tableCount(db, auditEvents),
-    tableCount(db, objects),
-    tableCount(db, objectLinks),
-    tableCount(db, objectVersions),
-    tableCount(db, documents),
-    tableCount(db, decisions),
-    tableCount(db, evaluations),
-    tableCount(db, entityIdentifiers),
-    tableCount(db, customers),
-    tableCount(db, customerSignals),
-    tableCount(db, leads),
-    tableCount(db, offers),
-    tableCount(db, quotes),
-    tableCount(db, jobs),
-    tableCount(db, invoices),
-    tableCount(db, payments),
-    tableCount(db, tasks),
-    tableCount(db, evidence),
-    tableCount(db, evidencePackets),
-    tableCount(db, events),
+    tenantTableCount(db, workflowRuns, tenantId),
+    tenantTableCount(db, workflowSteps, tenantId),
+    tenantTableCount(db, workerRuns, tenantId),
+    tenantTableCount(db, approvalRequests, tenantId),
+    tenantTableCount(db, auditEvents, tenantId),
+    tenantTableCount(db, objects, tenantId),
+    tenantTableCount(db, objectLinks, tenantId),
+    tenantTableCount(db, objectVersions, tenantId),
+    tenantTableCount(db, documents, tenantId),
+    tenantTableCount(db, decisions, tenantId),
+    tenantTableCount(db, evaluations, tenantId),
+    tenantTableCount(db, entityIdentifiers, tenantId),
+    tenantTableCount(db, customers, tenantId),
+    tenantTableCount(db, customerSignals, tenantId),
+    tenantTableCount(db, leads, tenantId),
+    tenantTableCount(db, offers, tenantId),
+    tenantTableCount(db, quotes, tenantId),
+    tenantTableCount(db, jobs, tenantId),
+    tenantTableCount(db, invoices, tenantId),
+    tenantTableCount(db, payments, tenantId),
+    tenantTableCount(db, tasks, tenantId),
+    tenantTableCount(db, evidence, tenantId),
+    tenantTableCount(db, evidencePackets, tenantId),
+    tenantTableCount(db, events, tenantId),
     tableCount(db, capabilities),
-    tableCount(db, capabilityGrants),
-    tableCount(db, workers),
+    tenantTableCount(db, capabilityGrants, tenantId),
+    tenantTableCount(db, workers, tenantId),
     tableCount(db, modelProviders),
-    tableCount(db, modelRoutes),
-    tableCount(db, budgetPolicies),
-    tableCount(db, budgetPools),
-    tableCount(db, budgetAccounts),
-    tableCount(db, budgetAllocations),
-    tableCount(db, budgetReservations),
-    tableCount(db, usageEvents),
-    tableCount(db, generatedViews),
+    tenantTableCount(db, modelRoutes, tenantId),
+    tenantTableCount(db, budgetPolicies, tenantId),
+    tenantTableCount(db, budgetPools, tenantId),
+    tenantTableCount(db, budgetAccounts, tenantId),
+    tenantTableCount(db, budgetAllocations, tenantId),
+    tenantTableCount(db, budgetReservations, tenantId),
+    tenantTableCount(db, usageEvents, tenantId),
+    tenantTableCount(db, generatedViews, tenantId),
     tableCount(db, adapters),
-    tableCount(db, connections),
-    tableCount(db, adapterRuns),
-    tableCount(db, adapterActions),
-    tableCount(db, inferences),
+    tenantTableCount(db, connections, tenantId),
+    tenantTableCount(db, adapterRuns, tenantId),
+    tenantTableCount(db, adapterActions, tenantId),
+    tenantTableCount(db, inferences, tenantId),
     db
       .select({
         id: tasks.id,
@@ -289,7 +312,11 @@ export async function getCoreSummary(): Promise<CoreSummary> {
         ownerRef: tasks.ownerRef,
       })
       .from(tasks)
-      .where(sql`${tasks.state} in ('active', 'waiting', 'approval_required', 'blocked')`)
+      .where(
+        tenantId
+          ? sql`${tasks.tenantId} = ${tenantId} and ${tasks.state} in ('active', 'waiting', 'approval_required', 'blocked')`
+          : sql`${tasks.state} in ('active', 'waiting', 'approval_required', 'blocked')`,
+      )
       .orderBy(sql`${tasks.updatedAt} desc`)
       .limit(5),
     db
@@ -301,6 +328,7 @@ export async function getCoreSummary(): Promise<CoreSummary> {
         occurredAt: events.occurredAt,
       })
       .from(events)
+      .where(tenantId ? sql`${events.tenantId} = ${tenantId}` : sql`true`)
       .orderBy(sql`${events.occurredAt} desc`)
       .limit(5),
   ]);
@@ -385,12 +413,12 @@ export async function getCoreSummary(): Promise<CoreSummary> {
   };
 }
 
-export async function getCoreSummarySafe(): Promise<
+export async function getCoreSummarySafe(options: { tenantSlug?: string } = {}): Promise<
   | { ok: true; summary: CoreSummary; error: null }
   | { ok: false; summary: CoreSummary; error: string }
 > {
   try {
-    return { ok: true, summary: await getCoreSummary(), error: null };
+    return { ok: true, summary: await getCoreSummary(options), error: null };
   } catch (error) {
     return {
       ok: false,

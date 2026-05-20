@@ -163,6 +163,36 @@ describe("control-plane scope", () => {
     });
   });
 
+  it("requires tenant and worker role even when allowlists are empty", () => {
+    const scope = controlPlaneScopeFromEnv({});
+
+    expect(
+      authorizeControlPlaneScope({
+        scope,
+        requireTenant: true,
+      }),
+    ).toEqual({
+      ok: false,
+      status: 403,
+      code: "control_plane_tenant_required",
+      message: "tenantSlug is required for scoped control-plane access.",
+    });
+
+    expect(
+      authorizeControlPlaneScope({
+        scope,
+        tenantSlug: "continuous-demo",
+        requireTenant: true,
+        requireWorkerRole: true,
+      }),
+    ).toEqual({
+      ok: false,
+      status: 403,
+      code: "control_plane_worker_role_required",
+      message: "worker.role is required for scoped worker access.",
+    });
+  });
+
   it("rejects out-of-scope tenants and worker roles", () => {
     const scope = controlPlaneScopeFromEnv({
       allowedTenants: "continuous-demo",

@@ -506,6 +506,82 @@ export const workerTools = [
     },
   },
   {
+    name: "worker.finance.cash_forecast.generate",
+    description: "Generate a cash forecast packet from account, invoice, and payment evidence without moving money.",
+    registry: {
+      role: "finance_operations",
+      surface: "command",
+      command: "cash_forecast.generate",
+      idempotency: "required",
+      externalExecution: "blocked",
+      requiresTenant: true,
+    },
+    inputSchema: {
+      type: "object",
+      properties: {
+        worker: { $ref: "#/$defs/workerTarget" },
+        idempotencyKey: { type: "string" },
+        config: {
+          type: "object",
+          description:
+            "Finance cash forecast config. Put forecast window, account refs, optional inflows/outflows, balances, evidence refs, and policy under config; external execution and money movement remain blocked.",
+          properties: {
+            window: {
+              type: "object",
+              properties: {
+                from: { type: "string" },
+                to: { type: "string" },
+              },
+              required: ["from", "to"],
+              additionalProperties: true,
+            },
+            accounts: {
+              type: "array",
+              minItems: 1,
+              items: { type: "string" },
+            },
+            sourceRefs: { $ref: "#/$defs/sourceRefs" },
+            startingBalanceCents: { type: "number" },
+            expectedInflowCents: { type: "number", minimum: 0 },
+            expectedOutflowCents: { type: "number", minimum: 0 },
+            inflows: {
+              type: "array",
+              items: {
+                type: "object",
+                additionalProperties: true,
+              },
+            },
+            outflows: {
+              type: "array",
+              items: {
+                type: "object",
+                additionalProperties: true,
+              },
+            },
+            currency: { type: "string" },
+            confidence: { type: "string" },
+            accountsStale: { type: "boolean" },
+            policy: {
+              type: "object",
+              additionalProperties: true,
+            },
+            evidenceIds: {
+              type: "array",
+              items: { type: "string" },
+            },
+            sourceEvidenceIds: {
+              type: "array",
+              items: { type: "string" },
+            },
+          },
+          required: ["window", "accounts"],
+          additionalProperties: true,
+        },
+      },
+      required: ["worker", "idempotencyKey", "config"],
+    },
+  },
+  {
     name: "worker.continue",
     description: "Continue a worker-owned approval outcome with structured config.",
     registry: {
@@ -1032,6 +1108,16 @@ export async function executeWorkerTool(name: string, payload: JsonObject = {}) 
   if (name === "worker.finance.ar_followup.draft") {
     return executeWorkerCommand({
       command: "ar_followup.draft",
+      target,
+      operatorEmail,
+      config,
+      idempotencyKey: payload.idempotencyKey,
+    });
+  }
+
+  if (name === "worker.finance.cash_forecast.generate") {
+    return executeWorkerCommand({
+      command: "cash_forecast.generate",
       target,
       operatorEmail,
       config,

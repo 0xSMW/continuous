@@ -150,8 +150,11 @@ describe("future worker contracts", () => {
     expect(source).toContain("`worker.finance.invoice.prepare`");
     expect(source).toContain("`ar_followup.draft`");
     expect(source).toContain("`worker.finance.ar_followup.draft`");
+    expect(source).toContain("`cash_forecast.generate`");
+    expect(source).toContain("`worker.finance.cash_forecast.generate`");
     expect(source).toContain("cash packet");
     expect(source).toContain("AR follow-up draft");
+    expect(source).toContain("cash forecast");
     expect(source).toContain("accounting dry-run");
     expect(source).not.toMatch(/\/api\/[a-z0-9-]+-worker/);
   });

@@ -168,6 +168,7 @@ const ids = {
   workflowPromiseToDelivery: "66666666-6666-4666-8666-000000000022",
   workflowInvoiceDraft: "66666666-6666-4666-8666-000000000023",
   workflowArFollowup: "66666666-6666-4666-8666-000000000024",
+  workflowCashForecast: "66666666-6666-4666-8666-000000000025",
   workflowOpenNewState: "66666666-6666-4666-8666-000000000009",
   workflowCompensationChange: "66666666-6666-4666-8666-000000000010",
   workflowLocationChange: "66666666-6666-4666-8666-000000000011",
@@ -247,6 +248,7 @@ const capIds = {
   achDraftPrepare: "10000000-0000-4000-8000-000000000014",
   workerRead: "10000000-0000-4000-8000-000000000015",
   exceptionRoute: "10000000-0000-4000-8000-000000000016",
+  cashForecastGenerate: "10000000-0000-4000-8000-000000000017",
 };
 
 const leadToCashStates = {
@@ -399,6 +401,7 @@ async function seed() {
         kpis: {
           invoices_prepared: 0,
           ar_followups_drafted: 0,
+          cash_forecasts_generated: 0,
           owner_review_packets: 0,
           cash_packets_prepared: 0,
         },
@@ -489,6 +492,17 @@ async function seed() {
         description: "Prepare payment collection details without moving money autonomously.",
         rules: { approval_required: true },
         evidence: { required: ["invoice_draft", "manager_approval"] },
+      },
+      {
+        id: capIds.cashForecastGenerate,
+        key: "cash_forecast.generate",
+        name: "Generate cash forecast",
+        class: "draft",
+        risk: "high",
+        sideEffect: "internal",
+        description: "Generate cash forecast packets without external execution or money movement.",
+        rules: { sensitive_cash_reveal: "approval_required", money_movement: "blocked" },
+        evidence: { required: ["account_snapshot", "cash_forecast", "cash_packet"] },
       },
       {
         id: capIds.ownerBriefGenerate,
@@ -650,6 +664,7 @@ async function seed() {
       [
         capIds.invoicePrepare,
         capIds.paymentLinkPrepare,
+        capIds.cashForecastGenerate,
         capIds.achDraftPrepare,
         capIds.approvalRequest,
         capIds.documentPacketPrepare,
@@ -1576,6 +1591,28 @@ async function seed() {
         approvals: { required: ["finance_ar_followup_approval"], states: { approval_pending: ["finance_ar_followup_approval"] } },
         evidence: { packet: "cash_packet", required: ["invoice_snapshot", "ar_followup_draft", "approval_request"] },
         tests: { required: ["invoice_context", "no_external_send", "payment_link_blocked", "money_movement_blocked"] },
+      },
+      {
+        id: ids.workflowCashForecast,
+        key: "cash_forecast",
+        name: "Cash forecast",
+        purpose:
+          "Turn account, invoice, and payment evidence into an owner-reviewable cash forecast while external execution and money movement remain blocked.",
+        domain: "finance",
+        states: {
+          order: ["draft", "source_snapshot", "forecast_ready", "review_ready", "published", "stale", "blocked"],
+        },
+        transitions: {
+          draft: ["source_snapshot", "blocked"],
+          source_snapshot: ["forecast_ready", "stale", "blocked"],
+          forecast_ready: ["review_ready", "blocked"],
+          review_ready: ["published", "stale", "blocked"],
+          stale: ["source_snapshot", "blocked"],
+        },
+        objects: { required: ["cash_forecast"], optional: ["bank_account", "invoice", "payment"] },
+        approvals: { required: ["finance_cash_forecast_approval"], states: { review_ready: ["finance_cash_forecast_approval"] } },
+        evidence: { packet: "cash_packet", required: ["account_snapshot", "cash_forecast", "approval_request"] },
+        tests: { required: ["source_accounts", "cash_packet", "money_movement_blocked", "idempotent_replay"] },
       },
     ])
     .onConflictDoNothing();

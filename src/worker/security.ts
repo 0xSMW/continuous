@@ -288,16 +288,16 @@ export function authorizeControlPlaneScope(input: {
   const tenantSlug = optionalScopeValue(input.tenantSlug);
   const workerRole = optionalScopeValue(input.workerRole);
 
-  if (input.scope.tenantSlugs.length > 0) {
-    if (!tenantSlug && input.requireTenant) {
-      return {
-        ok: false,
-        status: 403,
-        code: "control_plane_tenant_required",
-        message: "tenantSlug is required for scoped control-plane access.",
-      };
-    }
+  if (!tenantSlug && input.requireTenant) {
+    return {
+      ok: false,
+      status: 403,
+      code: "control_plane_tenant_required",
+      message: "tenantSlug is required for scoped control-plane access.",
+    };
+  }
 
+  if (input.scope.tenantSlugs.length > 0) {
     if (tenantSlug && !allows(input.scope.tenantSlugs, tenantSlug)) {
       return {
         ok: false,
@@ -308,16 +308,16 @@ export function authorizeControlPlaneScope(input: {
     }
   }
 
-  if (input.scope.workerRoles.length > 0) {
-    if (!workerRole && input.requireWorkerRole) {
-      return {
-        ok: false,
-        status: 403,
-        code: "control_plane_worker_role_required",
-        message: "worker.role is required for scoped worker access.",
-      };
-    }
+  if (!workerRole && input.requireWorkerRole) {
+    return {
+      ok: false,
+      status: 403,
+      code: "control_plane_worker_role_required",
+      message: "worker.role is required for scoped worker access.",
+    };
+  }
 
+  if (input.scope.workerRoles.length > 0) {
     if (workerRole && !allows(input.scope.workerRoles, workerRole)) {
       return {
         ok: false,

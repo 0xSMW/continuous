@@ -60,6 +60,14 @@ describe("app-server worker tools", () => {
           command.externalExecution === "blocked",
       ),
     ).toBe(true);
+    expect(
+      schema.registry.commands.some(
+        (command) =>
+          command.role === "finance_operations" &&
+          command.name === "cash_forecast.generate" &&
+          command.externalExecution === "blocked",
+      ),
+    ).toBe(true);
   });
 
   it("requires a clean canonical command envelope before dispatch", async () => {
@@ -221,5 +229,23 @@ describe("app-server worker tools", () => {
         },
       }),
     ).rejects.toThrow("config.tonePolicy is required for ar_followup.draft.");
+
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.command", {
+        command: "cash_forecast.generate",
+        operatorEmail: "owner@continuoushq.com",
+        worker: {
+          role: "finance_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "app-server-finance-cash-forecast-schema",
+        config: {
+          window: {
+            from: "2026-05-01T00:00:00.000Z",
+            to: "2026-06-01T00:00:00.000Z",
+          },
+        },
+      }),
+    ).rejects.toThrow("config.accounts is required for cash_forecast.generate.");
   });
 });

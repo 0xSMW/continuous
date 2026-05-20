@@ -36,6 +36,7 @@ import {
 import {
   draftFinanceArFollowup,
   financeWorkerRole,
+  generateFinanceCashForecast,
   getFinanceWorkerSnapshotSafe,
   prepareFinanceInvoice,
 } from "./finance";
@@ -344,8 +345,10 @@ const leadReadConfig: WorkerConfigSchema = {
 };
 const workerRunConfig: WorkerConfigSchema = {
   type: "object",
+  oneRequired: ["intake", "leadPacket", "lead"],
   properties: {
     intake: jsonObjectConfig,
+    lead: jsonObjectConfig,
     leadPacket: jsonObjectConfig,
     pricing: {
       type: "object",
@@ -548,6 +551,51 @@ const financeArFollowupDraftConfig: WorkerConfigSchema = {
   },
   additionalProperties: true,
 };
+const financeCashForecastGenerateConfig: WorkerConfigSchema = {
+  type: "object",
+  required: ["window", "accounts"],
+  properties: {
+    window: {
+      type: "object",
+      required: ["from", "to"],
+      properties: {
+        from: { type: "string" },
+        to: { type: "string" },
+      },
+      additionalProperties: true,
+    },
+    accounts: {
+      type: "array",
+      minItems: 1,
+      items: { type: "string" },
+    },
+    sourceRefs: jsonObjectConfig,
+    startingBalanceCents: { type: "number" },
+    expectedInflowCents: { type: "number", minimum: 0 },
+    expectedOutflowCents: { type: "number", minimum: 0 },
+    inflows: {
+      type: "array",
+      items: jsonObjectConfig,
+    },
+    outflows: {
+      type: "array",
+      items: jsonObjectConfig,
+    },
+    currency: { type: "string" },
+    confidence: { type: "string" },
+    accountsStale: { type: "boolean" },
+    policy: jsonObjectConfig,
+    evidenceIds: {
+      type: "array",
+      items: { type: "string" },
+    },
+    sourceEvidenceIds: {
+      type: "array",
+      items: { type: "string" },
+    },
+  },
+  additionalProperties: true,
+};
 
 const revenueDefinition: WorkerDefinition = {
   role: revenueWorkerRole,
@@ -558,6 +606,7 @@ const revenueDefinition: WorkerDefinition = {
       idempotency: "required",
       sideEffects: "internal",
       externalExecution: "blocked",
+      requiresTenant: true,
       configSchema: workerRunConfig,
       async handle(context) {
         if (!context.idempotencyKey) {
@@ -669,6 +718,7 @@ const revenueDefinition: WorkerDefinition = {
       idempotency: "required",
       sideEffects: "internal",
       externalExecution: "blocked",
+      requiresTenant: true,
       configSchema: {
         type: "object",
         required: ["approvalId"],
@@ -711,6 +761,7 @@ const revenueDefinition: WorkerDefinition = {
       idempotency: "none",
       sideEffects: "internal",
       externalExecution: "blocked",
+      requiresTenant: true,
       configSchema: {
         type: "object",
         required: ["approvalId", "action"],
@@ -887,6 +938,32 @@ const financeDefinition: WorkerDefinition = {
         }
 
         return draftFinanceArFollowup({
+          idempotencyKey: context.idempotencyKey,
+          tenantSlug: context.target.tenantSlug,
+          workerId: context.target.workerId,
+          operatorEmail: context.operatorEmail,
+          config: context.config,
+        });
+      },
+    },
+    "cash_forecast.generate": {
+      name: "cash_forecast.generate",
+      description: "Generate a cash forecast review packet without external execution or money movement.",
+      idempotency: "required",
+      sideEffects: "internal",
+      externalExecution: "blocked",
+      requiresTenant: true,
+      configSchema: financeCashForecastGenerateConfig,
+      async handle(context) {
+        if (!context.idempotencyKey) {
+          throw new PlatformUnavailableError(
+            "invalid_idempotency_key",
+            "A string idempotency key is required.",
+            400,
+          );
+        }
+
+        return generateFinanceCashForecast({
           idempotencyKey: context.idempotencyKey,
           tenantSlug: context.target.tenantSlug,
           workerId: context.target.workerId,

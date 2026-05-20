@@ -123,6 +123,7 @@ describe("worker tool contract", () => {
       "worker.dispatch.exception.route",
       "worker.finance.invoice.prepare",
       "worker.finance.ar_followup.draft",
+      "worker.finance.cash_forecast.generate",
       "worker.continue",
       "worker.approvals.list",
       "worker.approvals.decide",
@@ -179,8 +180,16 @@ describe("worker tool contract", () => {
         }),
         expect.objectContaining({
           role: "revenue_operations",
+          name: "run",
+          idempotency: "required",
+          requiresTenant: true,
+          externalExecution: "blocked",
+        }),
+        expect.objectContaining({
+          role: "revenue_operations",
           name: "continue",
           idempotency: "required",
+          requiresTenant: true,
           externalExecution: "blocked",
         }),
         expect.objectContaining({
@@ -257,6 +266,13 @@ describe("worker tool contract", () => {
         expect.objectContaining({
           role: "finance_operations",
           name: "ar_followup.draft",
+          idempotency: "required",
+          requiresTenant: true,
+          externalExecution: "blocked",
+        }),
+        expect.objectContaining({
+          role: "finance_operations",
+          name: "cash_forecast.generate",
           idempotency: "required",
           requiresTenant: true,
           externalExecution: "blocked",
@@ -353,6 +369,18 @@ describe("worker tool contract", () => {
               tonePolicy: expect.objectContaining({ type: "string" }),
               sourceRefs: expect.objectContaining({ type: "object" }),
               messageContext: expect.objectContaining({ type: "object" }),
+            }),
+          }),
+        }),
+        expect.objectContaining({
+          role: "finance_operations",
+          name: "cash_forecast.generate",
+          configSchema: expect.objectContaining({
+            required: ["window", "accounts"],
+            properties: expect.objectContaining({
+              window: expect.objectContaining({ type: "object" }),
+              accounts: expect.objectContaining({ type: "array", minItems: 1 }),
+              policy: expect.objectContaining({ type: "object" }),
             }),
           }),
         }),
@@ -483,13 +511,32 @@ describe("worker tool contract", () => {
       executeWorkerTool("worker.run", {
         worker: {
           role: "revenue_operations",
+          tenantSlug: "continuous-demo",
         },
         idempotencyKey: "bad key!",
-        config: {},
+        config: {
+          intake: {
+            source: "website_form",
+            sourceEventId: "form-001",
+          },
+        },
       }),
     ).rejects.toThrow(
       "Idempotency key may only contain letters, numbers, dot, underscore, colon, or dash.",
     );
+  });
+
+  it("requires explicit Revenue run intake or lead payload", async () => {
+    await expect(
+      executeWorkerTool("worker.run", {
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "revenue-run-empty-config-001",
+        config: {},
+      }),
+    ).rejects.toThrow("config.intake, leadPacket or lead is required for run.");
   });
 
   it("validates lead read idempotency before invoking the worker", async () => {
@@ -556,6 +603,7 @@ describe("worker tool contract", () => {
       executeWorkerTool("worker.continue", {
         worker: {
           role: "revenue_operations",
+          tenantSlug: "continuous-demo",
         },
         idempotencyKey: "bad key!",
         config: {
@@ -780,6 +828,43 @@ describe("worker tool contract", () => {
     ).rejects.toThrow("config.tonePolicy is required for ar_followup.draft.");
   });
 
+  it("validates finance cash forecast envelopes before invoking the worker", async () => {
+    await expect(
+      executeWorkerTool("worker.finance.cash_forecast.generate", {
+        worker: {
+          role: "finance_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "bad key!",
+        config: {
+          window: {
+            from: "2026-05-01T00:00:00.000Z",
+            to: "2026-06-01T00:00:00.000Z",
+          },
+          accounts: ["Operating account"],
+        },
+      }),
+    ).rejects.toThrow(
+      "Idempotency key may only contain letters, numbers, dot, underscore, colon, or dash.",
+    );
+
+    await expect(
+      executeWorkerTool("worker.finance.cash_forecast.generate", {
+        worker: {
+          role: "finance_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "finance-cash-forecast-schema-001",
+        config: {
+          window: {
+            from: "2026-05-01T00:00:00.000Z",
+            to: "2026-06-01T00:00:00.000Z",
+          },
+        },
+      }),
+    ).rejects.toThrow("config.accounts is required for cash_forecast.generate.");
+  });
+
   it("requires tenant scope for adapter reconciliation", async () => {
     await expect(
       executeWorkerTool("worker.adapters.reconcile", {
@@ -831,6 +916,7 @@ describe("worker tool contract", () => {
       executeWorkerTool("worker.approvals.decide", {
         worker: {
           role: "revenue_operations",
+          tenantSlug: "continuous-demo",
         },
         config: "approval-id",
       }),

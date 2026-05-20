@@ -33,6 +33,11 @@ invoice id, keeps `tonePolicy`, channel, message context, and approval policy
 under `config`, prepares an AR follow-up draft, cash packet, approval request,
 and generated review view, and still blocks customer sends, payment links, and
 money movement.
+Finance `cash_forecast.generate` stays on the same command path with forecast
+window, account refs, optional cash drivers, and approval policy under
+`config`, then writes a cash forecast object, cash packet, approval request,
+generated review view, workflow, budget, and audit proof while external
+execution and money movement remain blocked.
 
 ```sh
 bun run app-server:worker-tools
@@ -86,6 +91,10 @@ bun run worker:tool worker.finance.invoice.prepare --payload='{"worker":{"role":
 
 ```sh
 bun run worker:tool worker.finance.ar_followup.draft --payload='{"worker":{"role":"finance_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-finance-ar-followup-001","config":{"invoiceId":"invoice_row_or_invoice_object_uuid","tonePolicy":"friendly_first_reminder","channel":"email","policy":{"requireOwnerApproval":true,"externalSend":"blocked","moneyMovement":"blocked"}}}'
+```
+
+```sh
+bun run worker:tool worker.finance.cash_forecast.generate --payload='{"worker":{"role":"finance_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-finance-cash-forecast-001","config":{"window":{"from":"2026-05-01T00:00:00.000Z","to":"2026-06-01T00:00:00.000Z"},"accounts":["Operating account"],"startingBalanceCents":500000,"policy":{"requireOwnerApproval":true,"moneyMovement":"blocked"}}}'
 ```
 
 ```http

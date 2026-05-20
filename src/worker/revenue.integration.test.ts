@@ -6425,6 +6425,129 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(arFollowupReplayResult.workerRunId).toBe(arFollowupResult.workerRunId);
     expect(arFollowupReplayResult.arFollowupObjectId).toBe(arFollowupResult.arFollowupObjectId);
 
+    const cashForecastResponse = await executeWorkerCommand({
+      command: "cash_forecast.generate",
+      target: {
+        role: "finance_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: `ci-finance-cash-forecast-${runId}`,
+      config: {
+        window: {
+          from: "2026-05-01T00:00:00.000Z",
+          to: "2026-06-01T00:00:00.000Z",
+        },
+        accounts: ["Operating account"],
+        startingBalanceCents: 500000,
+        expectedInflowCents: 24900,
+        expectedOutflowCents: 336000,
+        policy: {
+          requireOwnerApproval: true,
+          moneyMovement: "blocked",
+        },
+      },
+    });
+    const cashForecastResult = cashForecastResponse.result as Awaited<
+      ReturnType<typeof import("./finance").generateFinanceCashForecast>
+    >;
+    const cashForecastOutput = objectValue(cashForecastResult.output);
+    const [cashForecastRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(eq(workerRuns.id, cashForecastResult.workerRunId))
+      .limit(1);
+    const [cashForecastObject] = await db
+      .select()
+      .from(objects)
+      .where(eq(objects.id, cashForecastResult.cashForecastObjectId ?? ""))
+      .limit(1);
+    const [cashForecastApproval] = await db
+      .select()
+      .from(approvalRequests)
+      .where(eq(approvalRequests.id, cashForecastResult.approvalRequestId ?? ""))
+      .limit(1);
+    const [cashForecastPacket] = await db
+      .select()
+      .from(evidencePackets)
+      .where(eq(evidencePackets.id, cashForecastResult.packetId ?? ""))
+      .limit(1);
+    const [cashForecastDocument] = await db
+      .select()
+      .from(documents)
+      .where(eq(documents.id, cashForecastResult.documentId ?? ""))
+      .limit(1);
+    const [cashForecastWorkflow] = await db
+      .select()
+      .from(workflowRuns)
+      .where(eq(workflowRuns.id, cashForecastResult.workflowRunId ?? ""))
+      .limit(1);
+    const [cashForecastView] = await db
+      .select()
+      .from(generatedViews)
+      .where(and(eq(generatedViews.tenantId, tenantId), eq(generatedViews.key, "finance.cash.review")))
+      .limit(1);
+
+    expect(cashForecastResponse.command).toBe("cash_forecast.generate");
+    expect(cashForecastResponse.worker.role).toBe("finance_operations");
+    expect(cashForecastResult.created).toBe(true);
+    expect(cashForecastResult.workflowStepIds).toHaveLength(3);
+    expect(cashForecastOutput.externalExecution).toBe("blocked");
+    expect(cashForecastOutput.externalMutation).toBe(false);
+    expect(cashForecastOutput.externalSend).toBe(false);
+    expect(cashForecastOutput.moneyMovement).toBe("blocked");
+    expect(cashForecastOutput.requiresApproval).toBe(true);
+    expect(cashForecastOutput.startingBalanceCents).toBe(500000);
+    expect(cashForecastOutput.expectedInflowCents).toBe(24900);
+    expect(cashForecastOutput.expectedOutflowCents).toBe(336000);
+    expect(cashForecastOutput.endingBalanceCents).toBe(188900);
+    expect(cashForecastRun?.source).toBe("continuous.finance_worker");
+    expect(cashForecastRun?.state).toBe("done");
+    expect(cashForecastObject?.type).toBe("cash_forecast");
+    expect(cashForecastObject?.state).toBe("review_ready");
+    expect(cashForecastWorkflow?.state).toBe("review_ready");
+    expect(cashForecastApproval?.state).toBe("pending");
+    expect(cashForecastApproval?.kind).toBe("finance_cash_forecast_approval");
+    expect(cashForecastPacket?.kind).toBe("cash_packet");
+    expect(cashForecastDocument?.kind).toBe("finance_cash_forecast");
+    expect(cashForecastView?.key).toBe("finance.cash.review");
+    expect(
+      cashForecastResult.snapshot.cashForecasts.some(
+        (forecast) => forecast.id === cashForecastResult.cashForecastObjectId,
+      ),
+    ).toBe(true);
+
+    const cashForecastReplay = await executeWorkerCommand({
+      command: "cash_forecast.generate",
+      target: {
+        role: "finance_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: `ci-finance-cash-forecast-${runId}`,
+      config: {
+        window: {
+          from: "2026-05-01T00:00:00.000Z",
+          to: "2026-06-01T00:00:00.000Z",
+        },
+        accounts: ["Operating account"],
+        startingBalanceCents: 500000,
+        expectedInflowCents: 24900,
+        expectedOutflowCents: 336000,
+        policy: {
+          requireOwnerApproval: true,
+          moneyMovement: "blocked",
+        },
+      },
+    });
+    const cashForecastReplayResult = cashForecastReplay.result as Awaited<
+      ReturnType<typeof import("./finance").generateFinanceCashForecast>
+    >;
+
+    expect(cashForecastReplayResult.created).toBe(false);
+    expect(cashForecastReplayResult.workerRunId).toBe(cashForecastResult.workerRunId);
+    expect(cashForecastReplayResult.cashForecastObjectId).toBe(cashForecastResult.cashForecastObjectId);
+
     const exceptionResponse = await executeWorkerCommand({
       command: "exception.route",
       target: {

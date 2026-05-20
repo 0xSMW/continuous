@@ -56,11 +56,14 @@ async function readBody(request: Request) {
   }
 }
 
-function parseSubject(value: unknown): ApprovalSubject | null {
+function parseSubject(
+  value: unknown,
+  defaultSubject: ApprovalSubject | null = "all",
+): ApprovalSubject | null | undefined {
   const subject = optionalString(value);
 
   if (!subject) {
-    return "all";
+    return defaultSubject ?? undefined;
   }
 
   return approvalSubjects.has(subject as ApprovalSubject) ? (subject as ApprovalSubject) : null;
@@ -218,7 +221,7 @@ export async function POST(request: Request) {
   const configResult = configObject(body.config);
   const config = configResult.ok ? configResult.value : {};
   const tenantSlug = optionalString(approval.tenantSlug);
-  const subject = parseSubject(approval.subject ?? config.subject);
+  const subject = parseSubject(approval.subject ?? config.subject, null);
   const auth = authorizeControlPlaneAccess({
     enabled: env.WORKER_RUN_ENABLED,
     appEnv: env.APP_ENV,
@@ -263,7 +266,17 @@ export async function POST(request: Request) {
     return guardErrorResponse(scope);
   }
 
-  if (!subject) {
+  if (subject === undefined) {
+    return errorResponse(
+      {
+        code: "approval_subject_required",
+        message: "approval.subject is required for approval.decide.",
+      },
+      400,
+    );
+  }
+
+  if (subject === null) {
     return errorResponse(
       {
         code: "invalid_approval_subject",

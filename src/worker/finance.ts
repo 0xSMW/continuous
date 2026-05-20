@@ -11,6 +11,7 @@ import {
   adapters,
   approvalRequests,
   auditEvents,
+  bankAccounts,
   budgetAccounts,
   budgetReservations,
   capabilities,
@@ -26,6 +27,7 @@ import {
   objectLinks,
   objects,
   objectVersions,
+  paymentInstructions,
   tasks,
   tenants,
   usageEvents,
@@ -45,10 +47,13 @@ export const financeWorkerRole = "finance_operations";
 const financeSource = "continuous.finance_worker";
 const invoicePrepareCapabilityKey = "invoice.prepare";
 const arFollowupDraftCapabilityKey = "payment_link.prepare";
+const cashForecastGenerateCapabilityKey = "cash_forecast.generate";
 const invoiceDraftWorkflowKey = "invoice_draft";
 const arFollowupWorkflowKey = "ar_followup";
+const cashForecastWorkflowKey = "cash_forecast";
 const invoicePrepareUnits = 3600;
 const arFollowupDraftUnits = 2600;
+const cashForecastGenerateUnits = 3100;
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -123,6 +128,25 @@ export type FinanceArFollowupDraftResult = {
   snapshot: FinanceWorkerSnapshot;
 };
 
+export type FinanceCashForecastGenerateResult = {
+  created: boolean;
+  idempotencyKey: string;
+  workerRunId: string;
+  taskId: string | null;
+  eventId: string | null;
+  cashForecastObjectId: string | null;
+  approvalRequestId: string | null;
+  evidenceId: string | null;
+  forecastEvidenceId: string | null;
+  packetId: string | null;
+  documentId: string | null;
+  workflowRunId: string | null;
+  workflowStepIds: string[];
+  financeCashViewId: string | null;
+  output: JsonObject;
+  snapshot: FinanceWorkerSnapshot;
+};
+
 export type FinanceWorkerSnapshot = {
   worker: {
     id: string;
@@ -162,6 +186,12 @@ export type FinanceWorkerSnapshot = {
     state: string;
     data: JsonObject;
   }>;
+  cashForecasts: Array<{
+    id: string;
+    name: string;
+    state: string;
+    data: JsonObject;
+  }>;
   approvals: Array<{
     id: string;
     state: string;
@@ -192,6 +222,10 @@ function optionalString(value: unknown) {
 
 function numberValue(value: unknown, fallback = 0) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function optionalNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function booleanValue(value: unknown, fallback = false) {
@@ -760,6 +794,311 @@ async function loadArFollowupRefs(db: Database, tenantId: string, config: JsonOb
   };
 }
 
+function normalizeForecastWindow(config: JsonObject) {
+  const window = objectValue(config.window);
+  const from = optionalString(window.from);
+  const to = optionalString(window.to);
+
+  if (!from || !to) {
+    throw new PlatformUnavailableError(
+      "invalid_worker_command_config",
+      "config.window.from and config.window.to are required for cash_forecast.generate.",
+      400,
+    );
+  }
+
+  const fromMs = Date.parse(from);
+  const toMs = Date.parse(to);
+
+  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || fromMs >= toMs) {
+    throw new PlatformUnavailableError(
+      "invalid_worker_command_config",
+      "config.window must be a valid increasing ISO timestamp range for cash_forecast.generate.",
+      400,
+    );
+  }
+
+  return { from, to, fromMs, toMs };
+}
+
+function moneyItems(value: unknown, source: string, fallbackCurrency: string) {
+  return Array.isArray(value)
+    ? value
+        .filter((item): item is JsonObject => Boolean(item && typeof item === "object" && !Array.isArray(item)))
+        .map((item) => {
+          const amountCents = numberValue(item.amountCents, numberValue(item.amount_cents));
+          const label =
+            optionalString(item.label) ??
+            optionalString(item.description) ??
+            optionalString(item.name) ??
+            source;
+          const currency = optionalString(item.currency) ?? fallbackCurrency;
+          const dueAt = optionalString(item.dueAt) ?? optionalString(item.due_at) ?? null;
+          const objectId = optionalString(item.objectId);
+
+          return {
+            label,
+            amountCents,
+            currency,
+            dueAt,
+            source,
+            ...(objectId ? { objectId } : {}),
+          } satisfies JsonObject;
+        })
+        .filter((item) => numberValue(item.amountCents) > 0)
+    : [];
+}
+
+function isWithinWindowOrUndated(value: unknown, window: { fromMs: number; toMs: number }) {
+  const dueAt = optionalString(value);
+
+  if (!dueAt) {
+    return true;
+  }
+
+  const dueMs = Date.parse(dueAt);
+
+  return !Number.isFinite(dueMs) || (dueMs >= window.fromMs && dueMs <= window.toMs);
+}
+
+async function loadCashForecastRefs(db: Database, tenantId: string, config: JsonObject) {
+  const sourceRefs = objectValue(config.sourceRefs);
+  const window = normalizeForecastWindow(config);
+  const accounts = Array.isArray(config.accounts)
+    ? config.accounts
+        .map((account) => optionalString(account))
+        .filter((account): account is string => Boolean(account))
+    : [];
+
+  if (accounts.length === 0) {
+    throw new PlatformUnavailableError(
+      "invalid_worker_command_config",
+      "config.accounts is required for cash_forecast.generate.",
+      400,
+    );
+  }
+
+  const accountRefs: JsonObject[] = [];
+
+  for (const account of accounts) {
+    if (uuidPattern.test(account)) {
+      const [bankRow] = await db
+        .select({
+          id: bankAccounts.id,
+          name: bankAccounts.name,
+          purpose: bankAccounts.purpose,
+          state: bankAccounts.state,
+          data: bankAccounts.data,
+        })
+        .from(bankAccounts)
+        .where(and(eq(bankAccounts.tenantId, tenantId), eq(bankAccounts.id, account)))
+        .limit(1);
+      const accountObject = bankRow ? null : await getObjectById(db, tenantId, account);
+
+      if (accountObject && accountObject.type !== "bank_account") {
+        throw new PlatformUnavailableError(
+          "finance_account_not_found",
+          "Finance cash forecast accounts must reference tenant-scoped bank account records.",
+          404,
+        );
+      }
+
+      if (!bankRow && !accountObject) {
+        throw new PlatformUnavailableError(
+          "finance_account_not_found",
+          "Finance cash forecast requires tenant-scoped account refs.",
+          404,
+        );
+      }
+
+      if (bankRow) {
+        accountRefs.push({
+          id: bankRow.id,
+          name: bankRow.name,
+          purpose: bankRow.purpose,
+          state: bankRow.state,
+          data: bankRow.data,
+          verified: bankRow.state === "verified",
+          source: "bank_accounts",
+        });
+      } else if (accountObject) {
+        accountRefs.push({
+          id: accountObject.id,
+          name: accountObject.name,
+          state: accountObject.state,
+          data: accountObject.data,
+          verified: accountObject.state === "verified",
+          source: "objects",
+        });
+      }
+      continue;
+    }
+
+    const [bankRow] = await db
+      .select({
+        id: bankAccounts.id,
+        name: bankAccounts.name,
+        purpose: bankAccounts.purpose,
+        state: bankAccounts.state,
+        data: bankAccounts.data,
+      })
+      .from(bankAccounts)
+      .where(and(eq(bankAccounts.tenantId, tenantId), eq(bankAccounts.name, account)))
+      .limit(1);
+
+    accountRefs.push(
+      bankRow
+        ? {
+            id: bankRow.id,
+            name: bankRow.name,
+            purpose: bankRow.purpose,
+            state: bankRow.state,
+            data: bankRow.data,
+            verified: bankRow.state === "verified",
+            source: "bank_accounts",
+          }
+        : {
+            ref: account,
+            name: account,
+            state: "unverified",
+            data: {},
+            verified: false,
+            source: "config",
+          },
+    );
+  }
+
+  const sourceEvidenceIds = Array.from(
+    new Set([
+      ...stringList(config.evidenceIds),
+      ...stringList(sourceRefs.evidenceIds),
+      ...stringList(config.sourceEvidenceIds),
+      ...stringList(sourceRefs.sourceEvidenceIds),
+    ]),
+  );
+  const sourceEvidence = await loadEvidenceRefs(db, tenantId, sourceEvidenceIds, "config.sourceRefs.evidenceIds");
+  const currency = optionalString(config.currency) ?? "USD";
+  const manualInflows = moneyItems(config.inflows, "config.inflows", currency);
+  const manualOutflows = moneyItems(config.outflows, "config.outflows", currency);
+  const invoiceRows = await db
+    .select({
+      id: invoices.id,
+      objectId: invoices.objectId,
+      state: invoices.state,
+      data: invoices.data,
+    })
+    .from(invoices)
+    .where(and(eq(invoices.tenantId, tenantId), sql`${invoices.state} not in ('paid', 'void')`))
+    .limit(50);
+  const invoiceInflows = invoiceRows
+    .map((invoice) => {
+      const data = objectValue(invoice.data);
+      const amountCents = numberValue(data.totalCents, numberValue(data.total_cents));
+      const dueAt = optionalString(data.dueAt) ?? optionalString(data.due_at) ?? null;
+
+      return {
+        label: optionalString(data.invoiceNumber) ?? `invoice:${invoice.id}`,
+        amountCents,
+        currency: optionalString(data.currency) ?? currency,
+        dueAt,
+        source: "invoice",
+        invoiceId: invoice.id,
+        ...(invoice.objectId ? { objectId: invoice.objectId } : {}),
+      } satisfies JsonObject;
+    })
+    .filter((item) => numberValue(item.amountCents) > 0 && isWithinWindowOrUndated(item.dueAt, window));
+  const paymentInstructionRows = await db
+    .select({
+      id: paymentInstructions.id,
+      objectId: paymentInstructions.objectId,
+      state: paymentInstructions.state,
+      amountCents: paymentInstructions.amountCents,
+      currency: paymentInstructions.currency,
+      data: paymentInstructions.data,
+    })
+    .from(paymentInstructions)
+    .where(and(eq(paymentInstructions.tenantId, tenantId), sql`${paymentInstructions.state} not in ('paid', 'void', 'cancelled')`))
+    .limit(50);
+  const paymentOutflows = paymentInstructionRows
+    .map((payment) => {
+      const data = objectValue(payment.data);
+      const dueAt = optionalString(data.dueAt) ?? optionalString(data.due_at) ?? null;
+
+      return {
+        label: optionalString(data.label) ?? optionalString(data.reason) ?? `payment_instruction:${payment.id}`,
+        amountCents: numberValue(payment.amountCents),
+        currency: payment.currency,
+        dueAt,
+        source: "payment_instruction",
+        paymentInstructionId: payment.id,
+        ...(payment.objectId ? { objectId: payment.objectId } : {}),
+      } satisfies JsonObject;
+    })
+    .filter((item) => numberValue(item.amountCents) > 0 && isWithinWindowOrUndated(item.dueAt, window));
+  const configuredStartingBalance = optionalNumber(config.startingBalanceCents);
+  const accountBalanceCents = accountRefs.reduce((total, account) => {
+    const data = objectValue(account.data);
+
+    return (
+      total +
+      numberValue(data.currentBalanceCents, numberValue(data.current_balance_cents, numberValue(data.balanceCents)))
+    );
+  }, 0);
+  const hasAccountBalance = accountRefs.some((account) => {
+    const data = objectValue(account.data);
+
+    return (
+      optionalNumber(data.currentBalanceCents) !== undefined ||
+      optionalNumber(data.current_balance_cents) !== undefined ||
+      optionalNumber(data.balanceCents) !== undefined
+    );
+  });
+  const startingBalanceCents = configuredStartingBalance ?? accountBalanceCents;
+  const expectedInflowCents =
+    optionalNumber(config.expectedInflowCents) ??
+    [...manualInflows, ...invoiceInflows].reduce((total, item) => total + numberValue(item.amountCents), 0);
+  const expectedOutflowCents =
+    optionalNumber(config.expectedOutflowCents) ??
+    [...manualOutflows, ...paymentOutflows].reduce((total, item) => total + numberValue(item.amountCents), 0);
+  const netChangeCents = expectedInflowCents - expectedOutflowCents;
+  const endingBalanceCents = startingBalanceCents + netChangeCents;
+  const unverifiedAccounts = accountRefs.filter((account) => account.verified !== true);
+  const blockers = [
+    ...(configuredStartingBalance === undefined && !hasAccountBalance ? ["starting_balance_missing"] : []),
+    ...(unverifiedAccounts.length > 0 ? ["account_ref_unverified"] : []),
+    ...(booleanValue(config.accountsStale) ? ["accounts_stale"] : []),
+    ...(endingBalanceCents < 0 ? ["negative_cash_projection"] : []),
+  ];
+  const confidence =
+    optionalString(config.confidence) ??
+    (blockers.includes("accounts_stale") || blockers.includes("account_ref_unverified")
+      ? "low"
+      : blockers.length > 0
+        ? "medium"
+        : "high");
+
+  return {
+    sourceRefs,
+    window,
+    accounts,
+    accountRefs,
+    sourceEvidenceIds: sourceEvidence.map((row) => row.id),
+    manualInflows,
+    manualOutflows,
+    invoiceInflows,
+    paymentOutflows,
+    startingBalanceCents,
+    expectedInflowCents,
+    expectedOutflowCents,
+    netChangeCents,
+    endingBalanceCents,
+    currency,
+    confidence,
+    blockers,
+    policy: objectValue(config.policy),
+  };
+}
+
 async function replayedInvoicePrepare(
   db: Database,
   context: FinanceContext,
@@ -825,6 +1164,39 @@ async function replayedArFollowupDraft(
     workflowStepIds: getWorkflowStepIds(data),
     financeArFollowupViewId:
       optionalString(data.financeArFollowupViewId) ?? optionalString(output.financeArFollowupViewId) ?? null,
+    output,
+    snapshot: await getFinanceWorkerSnapshot(db, {
+      role: financeWorkerRole,
+      tenantSlug: context.worker.tenantSlug,
+      workerId: context.worker.id,
+    }),
+  };
+}
+
+async function replayedCashForecastGenerate(
+  db: Database,
+  context: FinanceContext,
+  run: typeof workerRuns.$inferSelect,
+): Promise<FinanceCashForecastGenerateResult> {
+  const data = objectValue(run.data);
+  const output = outputData(data);
+
+  return {
+    created: false,
+    idempotencyKey: run.idempotencyKey,
+    workerRunId: run.id,
+    taskId: run.taskId,
+    eventId: run.eventId ?? optionalString(data.eventId) ?? null,
+    cashForecastObjectId:
+      optionalString(data.cashForecastObjectId) ?? optionalString(output.cashForecastObjectId) ?? null,
+    approvalRequestId: optionalString(data.approvalRequestId) ?? optionalString(output.approvalRequestId) ?? null,
+    evidenceId: optionalString(data.evidenceId) ?? optionalString(output.evidenceId) ?? null,
+    forecastEvidenceId: optionalString(data.forecastEvidenceId) ?? optionalString(output.forecastEvidenceId) ?? null,
+    packetId: optionalString(data.packetId) ?? optionalString(output.packetId) ?? null,
+    documentId: optionalString(data.documentId) ?? optionalString(output.documentId) ?? null,
+    workflowRunId: optionalString(data.workflowRunId) ?? optionalString(output.workflowRunId) ?? null,
+    workflowStepIds: getWorkflowStepIds(data),
+    financeCashViewId: optionalString(data.financeCashViewId) ?? optionalString(output.financeCashViewId) ?? null,
     output,
     snapshot: await getFinanceWorkerSnapshot(db, {
       role: financeWorkerRole,
@@ -2684,6 +3056,848 @@ export async function draftFinanceArFollowup(input: {
   };
 }
 
+export async function generateFinanceCashForecast(input: {
+  idempotencyKey: string;
+  tenantSlug?: string;
+  workerId?: string;
+  operatorEmail: string;
+  config?: JsonObject;
+  db?: Database;
+}): Promise<FinanceCashForecastGenerateResult> {
+  const db = input.db ?? defaultDb;
+  const context = await loadFinanceContext({
+    db,
+    selector: { role: financeWorkerRole, tenantSlug: input.tenantSlug, workerId: input.workerId },
+    operatorEmail: input.operatorEmail,
+    capabilityKey: cashForecastGenerateCapabilityKey,
+    capabilityLabel: "cash_forecast.generate",
+  });
+  const config = input.config ?? {};
+  const refs = await loadCashForecastRefs(db, context.worker.tenantId, config);
+  const forecastState = refs.blockers.length === 0 ? "review_ready" : "stale";
+  const taskState = refs.blockers.length === 0 ? "approval_required" : "blocked";
+  const workflowState = refs.blockers.length === 0 ? "review_ready" : "stale";
+  const inputHash = hashObject({
+    schemaVersion: "finance.cash_forecast.generate.v1",
+    tenantId: context.worker.tenantId,
+    workerId: context.worker.id,
+    idempotencyKey: input.idempotencyKey,
+    config,
+    window: { from: refs.window.from, to: refs.window.to },
+    accounts: refs.accounts,
+    sourceEvidenceIds: refs.sourceEvidenceIds,
+    startingBalanceCents: refs.startingBalanceCents,
+    expectedInflowCents: refs.expectedInflowCents,
+    expectedOutflowCents: refs.expectedOutflowCents,
+    currency: refs.currency,
+  });
+  const now = new Date();
+
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${financeSource}:${input.idempotencyKey}`}))`,
+    );
+
+    const [existingRun] = await tx
+      .select()
+      .from(workerRuns)
+      .where(
+        and(
+          eq(workerRuns.tenantId, context.worker.tenantId),
+          eq(workerRuns.source, financeSource),
+          eq(workerRuns.idempotencyKey, input.idempotencyKey),
+        ),
+      )
+      .limit(1);
+
+    if (existingRun) {
+      const existingInput = objectValue(objectValue(existingRun.data).input);
+      const existingHash = optionalString(existingInput.inputHash);
+
+      if (existingHash && existingHash !== inputHash) {
+        throw new PlatformUnavailableError(
+          "worker_idempotency_conflict",
+          "A Finance cash forecast already exists for this idempotency key with different input.",
+          409,
+        );
+      }
+
+      return { replay: existingRun };
+    }
+
+    const [definition] = await tx
+      .select({ id: workflowDefinitions.id })
+      .from(workflowDefinitions)
+      .where(and(eq(workflowDefinitions.key, cashForecastWorkflowKey), eq(workflowDefinitions.active, true)))
+      .orderBy(desc(workflowDefinitions.createdAt))
+      .limit(1);
+
+    if (!definition) {
+      throw new PlatformUnavailableError(
+        "worker_workflow_definition_missing",
+        "Finance Operations Worker requires the cash_forecast workflow definition.",
+        409,
+      );
+    }
+
+    const forecastData = {
+      window: { from: refs.window.from, to: refs.window.to },
+      accounts: refs.accountRefs,
+      sourceRefs: refs.sourceRefs,
+      sourceEvidenceIds: refs.sourceEvidenceIds,
+      inflows: [...refs.manualInflows, ...refs.invoiceInflows],
+      outflows: [...refs.manualOutflows, ...refs.paymentOutflows],
+      startingBalanceCents: refs.startingBalanceCents,
+      expectedInflowCents: refs.expectedInflowCents,
+      expectedOutflowCents: refs.expectedOutflowCents,
+      netChangeCents: refs.netChangeCents,
+      endingBalanceCents: refs.endingBalanceCents,
+      currency: refs.currency,
+      confidence: refs.confidence,
+      blockers: refs.blockers,
+      policy: refs.policy,
+      externalExecution: "blocked",
+      externalMutation: false,
+      externalSend: false,
+      moneyMovement: "blocked",
+    } satisfies JsonObject;
+
+    const [cashForecast] = await tx
+      .insert(objects)
+      .values({
+        tenantId: context.worker.tenantId,
+        type: "cash_forecast",
+        name: `Cash forecast ${refs.window.from.slice(0, 10)} to ${refs.window.to.slice(0, 10)}`,
+        state: forecastState,
+        source: financeSource,
+        externalId: `finance-cash-forecast:${input.idempotencyKey}`,
+        data: forecastData,
+        createdByUserId: context.operator.id,
+        createdByWorkerId: context.worker.id,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: objects.id });
+
+    await tx.insert(objectVersions).values({
+      tenantId: context.worker.tenantId,
+      objectId: cashForecast.id,
+      version: 1,
+      data: forecastData,
+      changedByType: "worker",
+      changedById: context.worker.id,
+      reason: "finance cash forecast",
+      createdAt: now,
+    });
+
+    const linkValues = [
+      ...refs.accountRefs
+        .filter((account) => account.source === "objects" && optionalString(account.id))
+        .map((account) => ({
+          tenantId: context.worker.tenantId,
+          fromId: cashForecast.id,
+          toId: optionalString(account.id) ?? cashForecast.id,
+          type: "summarizes_account",
+          data: { source: financeSource },
+          effectiveAt: now,
+        })),
+      ...refs.invoiceInflows
+        .map((item) => optionalString(item.objectId))
+        .filter((objectId): objectId is string => Boolean(objectId))
+        .map((objectId) => ({
+          tenantId: context.worker.tenantId,
+          fromId: cashForecast.id,
+          toId: objectId,
+          type: "uses_invoice",
+          data: { source: financeSource },
+          effectiveAt: now,
+        })),
+    ];
+
+    if (linkValues.length > 0) {
+      await tx.insert(objectLinks).values(linkValues).onConflictDoNothing();
+    }
+
+    const [task] = await tx
+      .insert(tasks)
+      .values({
+        tenantId: context.worker.tenantId,
+        objectId: cashForecast.id,
+        capabilityId: context.capabilityId,
+        title: `Review cash forecast for ${refs.window.from.slice(0, 10)} to ${refs.window.to.slice(0, 10)}`,
+        state: taskState,
+        priority: refs.blockers.includes("negative_cash_projection") ? "high" : "normal",
+        ownerType: "worker",
+        ownerId: context.worker.id,
+        ownerRef: `worker:${context.worker.id}`,
+        reviewerUserId: context.reviewerUserId,
+        evidence: {
+          required: ["account_snapshot", "cash_forecast", "cash_packet"],
+          blockers: refs.blockers,
+          sourceEvidenceIds: refs.sourceEvidenceIds,
+        },
+        outcome: {
+          status: refs.blockers.length > 0 ? "cash_forecast_blocked" : "cash_forecast_review_needed",
+          externalExecution: "blocked",
+          moneyMovement: "blocked",
+        },
+        cost: { units: cashForecastGenerateUnits },
+        kpi: { cash_forecasts_generated: 1 },
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: tasks.id });
+
+    const runInput = {
+      command: "cash_forecast.generate",
+      inputHash,
+      config,
+      cashForecastObjectId: cashForecast.id,
+      window: { from: refs.window.from, to: refs.window.to },
+      accounts: refs.accounts,
+      sourceEvidenceIds: refs.sourceEvidenceIds,
+      startingBalanceCents: refs.startingBalanceCents,
+      expectedInflowCents: refs.expectedInflowCents,
+      expectedOutflowCents: refs.expectedOutflowCents,
+      currency: refs.currency,
+    } satisfies JsonObject;
+
+    const [workerRun] = await tx
+      .insert(workerRuns)
+      .values({
+        tenantId: context.worker.tenantId,
+        workerId: context.worker.id,
+        taskId: task.id,
+        capabilityId: context.capabilityId,
+        connectionId: context.accountingConnectionId,
+        budgetAccountId: context.budgetAccountId,
+        source: financeSource,
+        idempotencyKey: input.idempotencyKey,
+        state: "running",
+        mode: "simulation",
+        data: {
+          input: runInput,
+          output: {},
+        },
+        startedAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: workerRuns.id });
+
+    const [workflowRun] = await tx
+      .insert(workflowRuns)
+      .values({
+        tenantId: context.worker.tenantId,
+        definitionId: definition.id,
+        objectId: cashForecast.id,
+        workerId: context.worker.id,
+        state: workflowState,
+        idempotencyKey: input.idempotencyKey,
+        data: {
+          workerRunId: workerRun.id,
+          cashForecastObjectId: cashForecast.id,
+          window: { from: refs.window.from, to: refs.window.to },
+          inputHash,
+          externalExecution: "blocked",
+          moneyMovement: "blocked",
+        },
+        blockers: { open: refs.blockers },
+        metrics: {
+          budgetUnits: cashForecastGenerateUnits,
+          expectedInflowCents: refs.expectedInflowCents,
+          expectedOutflowCents: refs.expectedOutflowCents,
+          endingBalanceCents: refs.endingBalanceCents,
+          blockerCount: refs.blockers.length,
+        },
+        startedAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: workflowRuns.id });
+
+    const [reservation] = await tx
+      .insert(budgetReservations)
+      .values({
+        tenantId: context.worker.tenantId,
+        accountId: context.budgetAccountId,
+        taskId: task.id,
+        units: cashForecastGenerateUnits,
+        state: "used",
+        expiresAt: new Date(now.getTime() + 15 * 60 * 1000),
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: budgetReservations.id });
+
+    const [inference] = await tx
+      .insert(inferences)
+      .values({
+        tenantId: context.worker.tenantId,
+        budgetAccountId: context.budgetAccountId,
+        taskId: task.id,
+        capabilityId: context.capabilityId,
+        actorType: "worker",
+        actorId: context.worker.id,
+        promptHash: traceHash(input.idempotencyKey, "finance-cash-forecast"),
+        request: {
+          mode: "deterministic",
+          objective: "Generate a cash forecast from tenant-scoped account, invoice, and payment evidence.",
+          window: { from: refs.window.from, to: refs.window.to },
+          accounts: refs.accounts,
+          inputHash,
+        },
+        result: {
+          cashForecastObjectId: cashForecast.id,
+          startingBalanceCents: refs.startingBalanceCents,
+          expectedInflowCents: refs.expectedInflowCents,
+          expectedOutflowCents: refs.expectedOutflowCents,
+          endingBalanceCents: refs.endingBalanceCents,
+          confidence: refs.confidence,
+          blockers: refs.blockers,
+        },
+        safety: {
+          externalExecution: "blocked",
+          externalMutation: false,
+          externalSend: false,
+          moneyMovement: "blocked",
+        },
+        promptTokens: 250,
+        completionTokens: 120,
+        units: cashForecastGenerateUnits,
+        costUsd: "0.000000",
+        latencyMs: 75,
+        createdAt: now,
+      })
+      .returning({ id: inferences.id });
+
+    const [usage] = await tx
+      .insert(usageEvents)
+      .values({
+        tenantId: context.worker.tenantId,
+        accountId: context.budgetAccountId,
+        reservationId: reservation.id,
+        inferenceId: inference.id,
+        taskId: task.id,
+        capabilityId: context.capabilityId,
+        actorType: "worker",
+        actorId: context.worker.id,
+        units: cashForecastGenerateUnits,
+        costUsd: "0.000000",
+        data: {
+          mode: "deterministic",
+          workerRunId: workerRun.id,
+          workflowRunId: workflowRun.id,
+          cashForecastObjectId: cashForecast.id,
+        },
+        createdAt: now,
+      })
+      .returning({ id: usageEvents.id });
+
+    const [event] = await tx
+      .insert(events)
+      .values({
+        tenantId: context.worker.tenantId,
+        type: "finance_worker.cash_forecast_generate.completed",
+        source: financeSource,
+        actorType: "worker",
+        actorId: context.worker.id,
+        actorRef: `worker:${context.worker.id}`,
+        objectId: cashForecast.id,
+        taskId: task.id,
+        capabilityId: context.capabilityId,
+        connectionId: context.accountingConnectionId,
+        idempotencyKey: input.idempotencyKey,
+        data: {
+          workerRunId: workerRun.id,
+          workflowRunId: workflowRun.id,
+          cashForecastObjectId: cashForecast.id,
+          window: { from: refs.window.from, to: refs.window.to },
+          confidence: refs.confidence,
+          externalExecution: "blocked",
+          externalMutation: false,
+          externalSend: false,
+          moneyMovement: "blocked",
+          inputHash,
+        },
+        occurredAt: now,
+        createdAt: now,
+      })
+      .returning({ id: events.id });
+
+    await tx.update(workerRuns).set({ eventId: event.id, updatedAt: now }).where(eq(workerRuns.id, workerRun.id));
+
+    const [traceEvidence] = await tx
+      .insert(evidence)
+      .values({
+        tenantId: context.worker.tenantId,
+        kind: "trace",
+        name: "Finance cash forecast trace",
+        objectId: cashForecast.id,
+        taskId: task.id,
+        eventId: event.id,
+        capabilityId: context.capabilityId,
+        actorType: "worker",
+        actorId: context.worker.id,
+        hash: inputHash,
+        data: {
+          inputHash,
+          cashForecastObjectId: cashForecast.id,
+          window: { from: refs.window.from, to: refs.window.to },
+          sourceEvidenceIds: refs.sourceEvidenceIds,
+          externalExecution: "blocked",
+          moneyMovement: "blocked",
+        },
+        createdAt: now,
+      })
+      .returning({ id: evidence.id });
+
+    const [forecastEvidence] = await tx
+      .insert(evidence)
+      .values({
+        tenantId: context.worker.tenantId,
+        kind: "draft",
+        name: "Cash forecast",
+        objectId: cashForecast.id,
+        taskId: task.id,
+        eventId: event.id,
+        capabilityId: context.capabilityId,
+        actorType: "worker",
+        actorId: context.worker.id,
+        hash: traceHash(input.idempotencyKey, "cash_forecast"),
+        data: forecastData,
+        createdAt: now,
+      })
+      .returning({ id: evidence.id });
+
+    const [document] = await tx
+      .insert(documents)
+      .values({
+        tenantId: context.worker.tenantId,
+        objectId: cashForecast.id,
+        workflowRunId: workflowRun.id,
+        kind: "finance_cash_forecast",
+        name: `Cash forecast ${refs.window.from.slice(0, 10)} to ${refs.window.to.slice(0, 10)}`,
+        state: forecastState,
+        sensitivity: "high",
+        hash: traceHash(input.idempotencyKey, "document"),
+        data: forecastData,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: documents.id });
+
+    const [packet] = await tx
+      .insert(evidencePackets)
+      .values({
+        tenantId: context.worker.tenantId,
+        documentId: document.id,
+        objectId: cashForecast.id,
+        taskId: task.id,
+        workflowRunId: workflowRun.id,
+        eventId: event.id,
+        capabilityId: context.capabilityId,
+        kind: "cash_packet",
+        name: "Finance cash forecast evidence packet",
+        state: refs.blockers.length > 0 ? "blocked" : "review_ready",
+        sensitivity: "high",
+        evidenceIds: { ids: [traceEvidence.id, forecastEvidence.id, ...refs.sourceEvidenceIds] },
+        documentIds: { ids: [document.id] },
+        data: {
+          cashForecastObjectId: cashForecast.id,
+          window: { from: refs.window.from, to: refs.window.to },
+          startingBalanceCents: refs.startingBalanceCents,
+          expectedInflowCents: refs.expectedInflowCents,
+          expectedOutflowCents: refs.expectedOutflowCents,
+          endingBalanceCents: refs.endingBalanceCents,
+          currency: refs.currency,
+          confidence: refs.confidence,
+          workflowRunId: workflowRun.id,
+          externalExecution: "blocked",
+          externalMutation: false,
+          externalSend: false,
+          moneyMovement: "blocked",
+        },
+        hash: traceHash(input.idempotencyKey, "cash_forecast_packet"),
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: evidencePackets.id });
+
+    const [approval] = await tx
+      .insert(approvalRequests)
+      .values({
+        tenantId: context.worker.tenantId,
+        taskId: task.id,
+        workerRunId: workerRun.id,
+        workflowRunId: workflowRun.id,
+        eventId: event.id,
+        objectId: cashForecast.id,
+        capabilityId: context.capabilityId,
+        requesterType: "worker",
+        requesterId: context.worker.id,
+        requesterRef: `worker:${context.worker.id}`,
+        reviewerUserId: context.reviewerUserId,
+        kind: "finance_cash_forecast_approval",
+        state: "pending",
+        priority: refs.blockers.includes("negative_cash_projection") ? "high" : "normal",
+        risk: refs.blockers.length > 0 ? "high" : "medium",
+        title: `Approve cash forecast for ${refs.window.from.slice(0, 10)} to ${refs.window.to.slice(0, 10)}`,
+        summary:
+          "Finance Operations Worker generated a cash forecast from scoped account, invoice, and payment evidence; external execution and money movement remain blocked.",
+        requestedAction: {
+          action: refs.blockers.length > 0 ? "request_revision" : "publish_forecast",
+          cashForecastObjectId: cashForecast.id,
+          window: { from: refs.window.from, to: refs.window.to },
+          startingBalanceCents: refs.startingBalanceCents,
+          expectedInflowCents: refs.expectedInflowCents,
+          expectedOutflowCents: refs.expectedOutflowCents,
+          endingBalanceCents: refs.endingBalanceCents,
+          currency: refs.currency,
+          confidence: refs.confidence,
+          blockers: refs.blockers,
+          externalExecution: "blocked",
+          moneyMovement: "blocked",
+        },
+        evidence: {
+          packetId: packet.id,
+          documentId: document.id,
+          traceEvidenceId: traceEvidence.id,
+          forecastEvidenceId: forecastEvidence.id,
+          sourceEvidenceIds: refs.sourceEvidenceIds,
+        },
+        policy: {
+          sensitiveCashReveal: "approval_required",
+          paymentDraft: "blocked",
+          moneyMovement: "blocked",
+          externalExecution: "blocked",
+        },
+        data: {
+          workerRunId: workerRun.id,
+          workflowRunId: workflowRun.id,
+          cashForecastObjectId: cashForecast.id,
+        },
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: approvalRequests.id });
+
+    const stepRows = await tx
+      .insert(workflowSteps)
+      .values([
+        {
+          tenantId: context.worker.tenantId,
+          definitionId: definition.id,
+          workflowRunId: workflowRun.id,
+          eventId: event.id,
+          objectId: cashForecast.id,
+          workerId: context.worker.id,
+          capabilityId: context.capabilityId,
+          kind: "handoff",
+          name: "Cash source snapshot accepted",
+          state: "done",
+          toState: "source_snapshot",
+          idempotencyKey: `${input.idempotencyKey}:source_snapshot`,
+          input: { accounts: refs.accounts, window: { from: refs.window.from, to: refs.window.to } },
+          output: { accountCount: refs.accountRefs.length, sourceEvidenceIds: refs.sourceEvidenceIds },
+          startedAt: now,
+          completedAt: now,
+          updatedAt: now,
+        },
+        {
+          tenantId: context.worker.tenantId,
+          definitionId: definition.id,
+          workflowRunId: workflowRun.id,
+          eventId: event.id,
+          objectId: cashForecast.id,
+          workerId: context.worker.id,
+          capabilityId: context.capabilityId,
+          kind: "worker_action",
+          name: "Cash forecast generated",
+          state: "done",
+          fromState: "source_snapshot",
+          toState: refs.blockers.length > 0 ? "stale" : "forecast_ready",
+          idempotencyKey: `${input.idempotencyKey}:forecast_ready`,
+          input: { cashForecastObjectId: cashForecast.id },
+          output: { forecastEvidenceId: forecastEvidence.id, endingBalanceCents: refs.endingBalanceCents },
+          startedAt: now,
+          completedAt: now,
+          updatedAt: now,
+        },
+        {
+          tenantId: context.worker.tenantId,
+          definitionId: definition.id,
+          workflowRunId: workflowRun.id,
+          eventId: event.id,
+          approvalRequestId: approval.id,
+          objectId: cashForecast.id,
+          workerId: context.worker.id,
+          capabilityId: context.capabilityId,
+          kind: "approval_request",
+          name: "Cash forecast review requested",
+          state: "done",
+          fromState: refs.blockers.length > 0 ? "stale" : "forecast_ready",
+          toState: workflowState,
+          idempotencyKey: `${input.idempotencyKey}:approval_requested`,
+          input: { approvalRequestId: approval.id },
+          output: { packetId: packet.id, documentId: document.id },
+          startedAt: now,
+          completedAt: now,
+          updatedAt: now,
+        },
+      ])
+      .returning({ id: workflowSteps.id });
+
+    const workflowStepIds = stepRows.map((step) => step.id);
+    const viewKey = "finance.cash.review";
+    const viewVersion = "1.0.0";
+    const viewValues = {
+      capabilityId: context.capabilityId,
+      key: viewKey,
+      version: viewVersion,
+      name: "Finance cash forecast review",
+      purpose: "Let an operator review a cash forecast, source freshness, and blocked money-movement posture.",
+      surface: "web",
+      objectType: "cash_forecast",
+      taskState: taskState as "approval_required" | "blocked",
+      contract: {
+        sections: ["ForecastSummary", "SourceAccounts", "CashDrivers", "EvidenceTimeline", "ActionBar"],
+        externalExecution: "blocked",
+        moneyMovement: "blocked",
+      } as JsonObject,
+      actions: {
+        decisionSurface: "/approval",
+        decisionCommand: "approval.decide",
+        valid: ["approved", "revision_requested", "rejected"],
+        cashActions: ["publish_forecast", "request_revision", "route_risk"],
+        externalExecution: "blocked",
+        moneyMovement: "blocked",
+      } as JsonObject,
+      data: {
+        latest: {
+          approvalRequestId: approval.id,
+          workerRunId: workerRun.id,
+          workflowRunId: workflowRun.id,
+          taskId: task.id,
+          cashForecastObjectId: cashForecast.id,
+          packetId: packet.id,
+          documentId: document.id,
+          traceEvidenceId: traceEvidence.id,
+          forecastEvidenceId: forecastEvidence.id,
+          window: { from: refs.window.from, to: refs.window.to },
+          startingBalanceCents: refs.startingBalanceCents,
+          expectedInflowCents: refs.expectedInflowCents,
+          expectedOutflowCents: refs.expectedOutflowCents,
+          endingBalanceCents: refs.endingBalanceCents,
+          currency: refs.currency,
+          confidence: refs.confidence,
+          blockers: refs.blockers,
+          externalExecution: "blocked",
+          externalMutation: false,
+          externalSend: false,
+          moneyMovement: "blocked",
+        },
+      } as JsonObject,
+      mask: {
+        account_numbers: "redacted",
+        payment_fields: "blocked",
+        moneyMovement: "blocked",
+      } as JsonObject,
+      active: true,
+      updatedAt: now,
+    };
+    const [existingView] = await tx
+      .select({ id: generatedViews.id })
+      .from(generatedViews)
+      .where(
+        and(
+          eq(generatedViews.tenantId, context.worker.tenantId),
+          eq(generatedViews.key, viewKey),
+          eq(generatedViews.version, viewVersion),
+        ),
+      )
+      .limit(1);
+    const [view] = existingView
+      ? await tx
+          .update(generatedViews)
+          .set(viewValues)
+          .where(eq(generatedViews.id, existingView.id))
+          .returning({ id: generatedViews.id })
+      : await tx
+          .insert(generatedViews)
+          .values({
+            tenantId: context.worker.tenantId,
+            ...viewValues,
+            createdAt: now,
+          })
+          .returning({ id: generatedViews.id });
+
+    await tx.insert(events).values({
+      tenantId: context.worker.tenantId,
+      type: existingView ? "view.updated" : "view.published",
+      source: financeSource,
+      actorType: "worker",
+      actorId: context.worker.id,
+      actorRef: `worker:${context.worker.id}`,
+      objectId: cashForecast.id,
+      taskId: task.id,
+      capabilityId: context.capabilityId,
+      idempotencyKey: `${input.idempotencyKey}:finance_cash_view`,
+      data: {
+        key: viewKey,
+        version: viewVersion,
+        viewId: view.id,
+        workerRunId: workerRun.id,
+        workflowRunId: workflowRun.id,
+      },
+      occurredAt: now,
+      createdAt: now,
+    });
+
+    await tx.insert(auditEvents).values({
+      tenantId: context.worker.tenantId,
+      type: "finance_worker.cash_forecast_generate.completed",
+      source: financeSource,
+      actorType: "worker",
+      actorId: context.worker.id,
+      actorRef: `worker:${context.worker.id}`,
+      targetType: "worker_run",
+      targetId: workerRun.id,
+      taskId: task.id,
+      workerRunId: workerRun.id,
+      approvalRequestId: approval.id,
+      eventId: event.id,
+      objectId: cashForecast.id,
+      capabilityId: context.capabilityId,
+      risk: refs.blockers.length > 0 ? "high" : "medium",
+      idempotencyKey: `${input.idempotencyKey}:audit`,
+      data: {
+        operatorEmail: context.operator.email,
+        inputHash,
+        cashForecastObjectId: cashForecast.id,
+        window: { from: refs.window.from, to: refs.window.to },
+        confidence: refs.confidence,
+        externalExecution: "blocked",
+        externalMutation: false,
+        externalSend: false,
+        moneyMovement: "blocked",
+      },
+      createdAt: now,
+    });
+
+    const output = {
+      cashForecastObjectId: cashForecast.id,
+      approvalRequestId: approval.id,
+      evidenceId: traceEvidence.id,
+      forecastEvidenceId: forecastEvidence.id,
+      packetId: packet.id,
+      documentId: document.id,
+      workflowRunId: workflowRun.id,
+      workflowStepIds,
+      financeCashViewId: view.id,
+      state: forecastState,
+      window: { from: refs.window.from, to: refs.window.to },
+      accounts: refs.accountRefs,
+      startingBalanceCents: refs.startingBalanceCents,
+      expectedInflowCents: refs.expectedInflowCents,
+      expectedOutflowCents: refs.expectedOutflowCents,
+      netChangeCents: refs.netChangeCents,
+      endingBalanceCents: refs.endingBalanceCents,
+      currency: refs.currency,
+      confidence: refs.confidence,
+      blockers: refs.blockers,
+      externalExecution: "blocked",
+      externalMutation: false,
+      externalSend: false,
+      moneyMovement: "blocked",
+      requiresApproval: true,
+    } satisfies JsonObject;
+
+    await tx
+      .update(workerRuns)
+      .set({
+        state: "done",
+        eventId: event.id,
+        data: {
+          input: runInput,
+          output,
+          eventId: event.id,
+          taskId: task.id,
+          cashForecastObjectId: cashForecast.id,
+          approvalRequestId: approval.id,
+          evidenceId: traceEvidence.id,
+          forecastEvidenceId: forecastEvidence.id,
+          packetId: packet.id,
+          documentId: document.id,
+          workflowRunId: workflowRun.id,
+          workflowStepIds,
+          financeCashViewId: view.id,
+          reservationId: reservation.id,
+          inferenceId: inference.id,
+          usageEventId: usage.id,
+        },
+        endedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(workerRuns.id, workerRun.id));
+
+    await tx
+      .update(workers)
+      .set({
+        kpis: {
+          ...context.worker.kpis,
+          cash_forecasts_generated: numberValue(context.worker.kpis.cash_forecasts_generated) + 1,
+          cash_packets_prepared: numberValue(context.worker.kpis.cash_packets_prepared) + 1,
+          owner_review_packets: numberValue(context.worker.kpis.owner_review_packets) + 1,
+        },
+        updatedAt: now,
+      })
+      .where(eq(workers.id, context.worker.id));
+
+    return {
+      replay: null,
+      workerRunId: workerRun.id,
+      taskId: task.id,
+      eventId: event.id,
+      cashForecastObjectId: cashForecast.id,
+      approvalRequestId: approval.id,
+      evidenceId: traceEvidence.id,
+      forecastEvidenceId: forecastEvidence.id,
+      packetId: packet.id,
+      documentId: document.id,
+      workflowRunId: workflowRun.id,
+      workflowStepIds,
+      financeCashViewId: view.id,
+      output,
+    };
+  });
+
+  if (result.replay) {
+    return replayedCashForecastGenerate(db, context, result.replay);
+  }
+
+  return {
+    created: true,
+    idempotencyKey: input.idempotencyKey,
+    workerRunId: result.workerRunId,
+    taskId: result.taskId,
+    eventId: result.eventId,
+    cashForecastObjectId: result.cashForecastObjectId,
+    approvalRequestId: result.approvalRequestId,
+    evidenceId: result.evidenceId,
+    forecastEvidenceId: result.forecastEvidenceId,
+    packetId: result.packetId,
+    documentId: result.documentId,
+    workflowRunId: result.workflowRunId,
+    workflowStepIds: result.workflowStepIds,
+    financeCashViewId: result.financeCashViewId,
+    output: result.output,
+    snapshot: await getFinanceWorkerSnapshot(db, {
+      role: financeWorkerRole,
+      tenantSlug: context.worker.tenantSlug,
+      workerId: context.worker.id,
+    }),
+  };
+}
+
 export async function getFinanceWorkerSnapshot(
   db: Database = defaultDb,
   selector: FinanceWorkerSelector = {},
@@ -2768,6 +3982,17 @@ export async function getFinanceWorkerSnapshot(
     .where(and(eq(objects.tenantId, worker.tenantId), eq(objects.type, "ar_followup")))
     .orderBy(desc(objects.updatedAt))
     .limit(10);
+  const cashForecastRows = await db
+    .select({
+      id: objects.id,
+      name: objects.name,
+      state: objects.state,
+      data: objects.data,
+    })
+    .from(objects)
+    .where(and(eq(objects.tenantId, worker.tenantId), eq(objects.type, "cash_forecast")))
+    .orderBy(desc(objects.updatedAt))
+    .limit(10);
   const approvalRows = await db
     .select({
       id: approvalRequests.id,
@@ -2832,6 +4057,12 @@ export async function getFinanceWorkerSnapshot(
       state: followup.state,
       data: followup.data,
     })),
+    cashForecasts: cashForecastRows.map((forecast) => ({
+      id: forecast.id,
+      name: forecast.name,
+      state: forecast.state,
+      data: forecast.data,
+    })),
     approvals: approvalRows,
     latestRun: latestRun
       ? {
@@ -2871,6 +4102,7 @@ export async function getFinanceWorkerSnapshotSafe(selector: FinanceWorkerSelect
         },
         invoices: [],
         arFollowups: [],
+        cashForecasts: [],
         approvals: [],
         latestRun: null,
       },

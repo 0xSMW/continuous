@@ -3,7 +3,8 @@
 This contract defines the finance worker for invoice drafts, AR follow-up,
 expense coding, cash forecast, and payment draft preparation. V1 never moves
 money and never sends external payment communications without approval.
-The first executable slices are `invoice.prepare` and `ar_followup.draft`; the
+The first executable slices are `invoice.prepare`, `ar_followup.draft`, and
+`cash_forecast.generate`; the
 remaining Finance commands stay contract-defined until their runtime handlers
 are promoted through the same generic worker registry.
 
@@ -67,6 +68,32 @@ AR follow-up uses the same envelope:
 }
 ```
 
+Cash forecast uses the same envelope with account and cash-driver refs inside
+`config`:
+
+```json
+{
+  "command": "cash_forecast.generate",
+  "worker": {
+    "role": "finance_operations",
+    "tenantSlug": "continuous-demo"
+  },
+  "idempotencyKey": "finance-cash-forecast-001",
+  "config": {
+    "window": {
+      "from": "2026-05-01T00:00:00.000Z",
+      "to": "2026-06-01T00:00:00.000Z"
+    },
+    "accounts": ["Operating account"],
+    "startingBalanceCents": 500000,
+    "policy": {
+      "requireOwnerApproval": true,
+      "moneyMovement": "blocked"
+    }
+  }
+}
+```
+
 ## Registry Entries
 
 | Command or view | Tool alias | Required config | Idempotency | Side effects | External execution |
@@ -75,7 +102,7 @@ AR follow-up uses the same envelope:
 | `invoice.prepare` | `worker.finance.invoice.prepare` | `jobId`, `closeoutId`, or `sourceRefs` | Required | Invoice draft, cash packet, approval request, accounting dry-run receipt | Dry-run |
 | `ar_followup.draft` | `worker.finance.ar_followup.draft` | `invoiceId`, `tonePolicy` | Required | AR follow-up draft, cash packet, approval request, generated review view | Blocked |
 | `expense_code.propose` | `worker.finance.expense_code.propose` | `receiptId` or `expenseId` | Required | Coding proposal and evidence | Blocked |
-| `cash_forecast.generate` | `worker.finance.cash_forecast.generate` | `window`, `accounts[]` | Required | Forecast object and packet | Blocked |
+| `cash_forecast.generate` | `worker.finance.cash_forecast.generate` | `window`, `accounts[]` | Required | Forecast object, cash packet, approval request, generated review view | Blocked |
 | `payment_draft.prepare` | `worker.finance.payment_draft.prepare` | `billId` or `paymentId` | Required | Payment instruction draft only | Blocked |
 | `approval.decide` | `worker.approvals.decide` | `approvalId`, `action`, optional `note` | None | Approval/task/workflow evidence only | Blocked |
 

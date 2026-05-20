@@ -13,8 +13,7 @@ raising autonomy or permitting external sends.
 | `worker.tenantSlug` | No | Required when an operator email spans tenants |
 | `worker.id` | No | Required when multiple Revenue Workers match |
 | `config.source` plus direct `config.records[]` / `config.record` or `config.reader` | Required for `lead.read` | Reads direct, connection-buffered, or read-only API-polled website-form, inbox, or CRM lead records into persisted Core source object/event/evidence rows |
-| `config.intake` | Preferred for useful runs | References persisted Core lead source identity or object/event/evidence rows used to derive classification, draft, quote, evidence, and approval packet |
-| `config.leadPacket` | Fallback only | Direct source payload for operator tests and controlled evals |
+| `config.intake`, `config.leadPacket`, or `config.lead` | Required for `run`, `lead.classify`, and `response.draft` | Prefer persisted Core lead source identity or object/event/evidence rows in `config.intake`; direct payloads are explicit operator/test fallbacks |
 
 ## API Shape
 
@@ -153,7 +152,8 @@ Approval decisions use the same route:
 {
   "command": "approval.decide",
   "worker": {
-    "role": "revenue_operations"
+    "role": "revenue_operations",
+    "tenantSlug": "continuous-demo"
   },
   "config": {
     "approvalId": "approval_uuid",
@@ -227,9 +227,9 @@ and local toolbox aliases resolve to the same handlers and validation rules.
 | `GET view=snapshot` | `worker.snapshot` | None | None | Read-only | Blocked |
 | `GET view=approvals` | `worker.approvals.list` | Optional `state` | None | Read-only | Blocked |
 | `lead.read` | `worker.lead.read` | `source`, direct `records[]` / `record`, or `reader` referencing an active connection | Required | Core lead object/event/evidence, worker run, budget/usage, connection cursor proof, audit | Blocked |
-| `lead.classify` | `worker.lead.classify` | `config.intake` preferred, `config.leadPacket` fallback | Required | Classification worker run, budget/usage, inference, trace evidence, audit | Blocked |
-| `response.draft` | `worker.response.draft` | `config.intake` preferred, `config.leadPacket` fallback | Required | Draft worker run, budget/usage, inference, draft evidence, audit | Blocked |
-| `run` | `worker.run` | `config.intake` preferred, `config.leadPacket` fallback | Required | Internal records, budget, approval, dry-run adapter receipt | Blocked |
+| `lead.classify` | `worker.lead.classify` | One of `config.intake`, `config.leadPacket`, or `config.lead` | Required | Classification worker run, budget/usage, inference, trace evidence, audit | Blocked |
+| `response.draft` | `worker.response.draft` | One of `config.intake`, `config.leadPacket`, or `config.lead` | Required | Draft worker run, budget/usage, inference, draft evidence, audit | Blocked |
+| `run` | `worker.run` | One of `config.intake`, `config.leadPacket`, or `config.lead` | Required | Internal records, budget, approval, dry-run adapter receipt | Blocked |
 | `continue` | `worker.continue` | `approvalId` | Required | Approved execution packet, revised approval packet, or rejected stop packet, workflow step, task outcome, audit/evidence | Blocked |
 | `approval.decide` | `worker.approvals.decide` | `approvalId`, `action`, optional `note` | None | Approval/task/workflow evidence only | Blocked |
 | `adapters.reconcile` | `worker.adapters.reconcile` | Tenant-scoped `worker.tenantSlug`, optional integer `limit` | None | Adapter reconciliation audit/evidence plus retry/review system tasks | Blocked |
@@ -267,7 +267,8 @@ For `command=lead.read`, use:
 | `intake.objectId` | Internal workflows | Core `objects.id` for the lead spine |
 | `intake.eventId` | Internal workflows | Core `events.id` for the `lead.received` event |
 | `intake.evidenceId` | Internal workflows | Core `evidence.id` for the source snapshot |
-| `leadPacket.*` | No | Backward-compatible direct payload alias for evals and operator tests |
+| `leadPacket.*` | Explicit fallback | Backward-compatible direct payload alias for evals and operator tests |
+| `lead.*` | Explicit fallback | Direct payload alias for controlled local tooling that cannot yet persist intake |
 | `pricing.baseCents` | No | Optional deterministic quote override for evals and controlled tests |
 
 If `config.intake` includes a source selector or Core row references, do not

@@ -90,8 +90,12 @@ Invoice preparation consumes Dispatch closeout refs from `config.sourceRefs`,
 creates an invoice draft, cash packet, approval request, and accounting dry-run
 receipt. AR follow-up consumes persisted invoice refs from `config.invoiceId`,
 creates a blocked draft, cash packet, approval request, and generated review
-view. Both keep sends, payment links, and money movement blocked. Remaining
-Finance work is cash forecast, payment draft, and live credential readiness.
+view. Cash forecast is registered as `/worker command=cash_forecast.generate`;
+it consumes forecast windows, account refs, and cash-driver inputs from
+`config`, writes a cash forecast object, cash packet, approval request, and
+generated review view. These commands keep sends, payment links, external
+execution, and money movement blocked. Remaining Finance work is payment draft
+and live credential readiness.
 
 | Dependency | Implementation target |
 |---|---|

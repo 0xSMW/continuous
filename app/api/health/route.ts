@@ -11,10 +11,23 @@ export async function GET() {
     counts: result.summary.counts,
   });
 
-  return Response.json(health, {
-    status: health.status === "down" ? 503 : 200,
-    headers: {
-      "Cache-Control": "no-store",
+  return Response.json(
+    {
+      service: health.service,
+      status: health.status,
+      checkedAt: health.checkedAt,
+      mode: health.mode,
+      version: health.version,
+      checks: health.checks.map((check) => ({
+        id: check.id,
+        state: check.state,
+      })),
     },
-  });
+    {
+      status: health.status === "down" ? 503 : 200,
+      headers: {
+        "Cache-Control": "no-store",
+      },
+    },
+  );
 }

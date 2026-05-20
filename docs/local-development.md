@@ -264,7 +264,7 @@ curl -X POST http://localhost:3000/worker \
   -H "content-type: application/json" \
   -d "{
     \"command\": \"approval.decide\",
-    \"worker\": {\"role\": \"revenue_operations\"},
+    \"worker\": {\"role\": \"revenue_operations\", \"tenantSlug\": \"continuous-demo\"},
     \"config\": {\"approvalId\": \"$APPROVAL_ID\", \"action\": \"approved\"}
 }"
 ```

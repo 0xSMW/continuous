@@ -176,7 +176,7 @@ export async function GET(request: Request) {
     return guardErrorResponse(scope);
   }
 
-  const result = await getCoreSummarySafe();
+  const result = await getCoreSummarySafe({ tenantSlug });
   const health = getHealth({
     dbOk: result.ok,
     dbError: result.error,
