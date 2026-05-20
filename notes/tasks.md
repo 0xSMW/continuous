@@ -10,7 +10,7 @@
 - Extend approved payroll handoffs into scoped live credential checks, rollback paths, and dual-control execution workers before any submission or money movement.
 - Extend customer-signal workflows, generated views, and eval fixtures beyond the seeded SatisfactionSignal, FeedbackItem, Complaint, Testimonial, and Review primitives.
 - Wire implementation handlers, retries, approvals, packets, and generated views into the expanded operating workflow catalog.
-- Extend capability-backed workflow execution into domain-specific handlers; scheduled command drain now covers workflow steps plus Revenue adapter retry/reconciliation.
+- Extend capability-backed and packet-backed workflow execution into additional domain-specific handlers; scheduled command drain now covers workflow steps plus Revenue adapter retry/reconciliation.
 - Add more specialized Core commands for adapter intents and rule changes.
 - Extend `packet.prepare` coverage into new-hire, contractor, payroll, filing, termination, AI action, and rule-change workflow packet tests.
 - Extend the shared approval inbox beyond the first token-gated UI into richer evidence detail, filters, and subject-specific continuation prompts.

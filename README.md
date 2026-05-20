@@ -69,7 +69,9 @@ Then open `http://localhost:3000`.
 - `/workflow` is the canonical workflow control-plane API. Use `GET /workflow`
   for definitions/runs/steps, `GET /workflow?view=approvals` for workflow
   approvals, and `POST /workflow` with `command=start`, `command=transition`,
-  `command=steps.execute`, or `command=approval.decide`.
+  `command=steps.execute`, or `command=approval.decide`. Queued workflow
+  execution can now prepare durable Core packets from packet-backed step kinds
+  without adding packet-specific business-process routes.
 - `worker-scheduler` is the internal production drain for queued platform work.
   It posts the same `/workflow` `steps.execute` envelope and `/worker`
   `adapters.retry` / `adapters.reconcile` envelopes on a cadence; it does not

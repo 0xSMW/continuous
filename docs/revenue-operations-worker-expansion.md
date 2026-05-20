@@ -19,6 +19,7 @@ state, workflow state, and object versioning without external sends or money mov
 | Continuation API | `POST /worker` with `command=continue`, `idempotencyKey`, and `config.approvalId`; V1 turns `approved` decisions into blocked no-send execution packets, `revision_requested` decisions into revised packets plus fresh pending owner approval, and `rejected` decisions into closed no-send stop packets |
 | Adapter reconciliation API | `POST /worker` with `command=adapters.reconcile` and `command=adapters.retry`, tenant-scoped and bearer-token required |
 | Scheduled internal drain | `worker-scheduler` posts `/workflow` `steps.execute`, `/worker` `adapters.retry`, and `/worker` `adapters.reconcile` on the internal Compose network with the same command envelopes |
+| Workflow packet execution | Queued `packet_prepare` steps can prepare Core packets through `/workflow` execution, carrying packet content under `workflow_steps.input.packet` and writing packet/document/event/audit/evidence/task proof |
 | Operator run | `bun run worker:tool worker.run` or `continuous.worker.command` with the same worker/config payload |
 | Command registry | `/worker`, `worker:*` local tool aliases, and app-server worker commands share role, config, idempotency, tenant, and external-execution validation |
 | External execution | Disabled; adapter runtime records dry-run receipts, reconciliation states, retry execution receipts, retry/review system tasks, and workflow-level retry/review/post-retry steps only |

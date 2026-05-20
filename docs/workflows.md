@@ -224,6 +224,13 @@ completion, and leaves failed work on the same step ledger with retry metadata.
 an active grant for the worker or task owner actor before they can complete; the
 executor records the capability key, grant, actor, task, and blocked external
 execution posture in the step output and task outcome.
+`packet_prepare`, `document_packet_prepare`, and `evidence_packet_prepare`
+steps reuse Core `packet.prepare` semantics from the workflow executor: the step
+payload provides packet content under `input.packet`, while tenant, operator,
+workflow, task, event, and idempotency metadata come from the claimed workflow
+step. Packet steps create the linked document, evidence packet, packet event,
+audit event, trace evidence, workflow step output, and task `lastWorkflowPacket`
+outcome without adding a packet-specific route.
 Production deploys run the internal `worker-scheduler` service, which posts the
 same canonical command envelope to `/workflow` on a cadence so queued,
 retryable, or expired workflow steps continue moving without a worker-family

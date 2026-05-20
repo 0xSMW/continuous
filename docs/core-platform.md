@@ -222,6 +222,10 @@ views. `customer_signal.record` adds satisfaction, feedback, complaint,
 testimonial, and review records as typed customer signals. `payroll.preview.record`
 writes pay statements, payroll lines, liabilities, calculation traces, audit
 events, and trace evidence without submission or money movement.
+Queued workflow execution can also prepare durable Core packets from
+`packet_prepare`, `document_packet_prepare`, or `evidence_packet_prepare` steps,
+linking the packet, document, event, audit, trace evidence, and task outcome
+through the same workflow ledger.
 `payroll.preview.packet.prepare` turns those preview artifacts into variance
 reports, pay statement documents, an approval packet, approval request, and
 blocked funding/tax handoff drafts. A shared approval decision applies the

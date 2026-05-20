@@ -25,6 +25,7 @@ import { PlatformUnavailableError } from "./errors";
 import { loadOperatorContext, type OperatorContext } from "./operators";
 
 type Database = typeof defaultDb;
+type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 type QueryClient = Pick<Database, "execute" | "select">;
 type ActorType = "user" | "worker" | "adapter" | "system";
 type EvidenceKind = "snapshot" | "draft" | "approval" | "receipt" | "trace" | "export" | "note";
@@ -158,6 +159,20 @@ export type CorePacketPrepareInput = {
   hash?: string;
   retainedUntil?: string;
   db?: Database;
+};
+
+type CorePacketPrepareForOperatorInput = Omit<
+  CorePacketPrepareInput,
+  "operatorEmail" | "tenantSlug" | "db"
+>;
+
+export type CorePacketPrepareResult = {
+  prepared: boolean;
+  packetId: string;
+  documentId: string | null;
+  eventId: string | null;
+  auditEventId: string;
+  evidenceId: string | null;
 };
 
 export type CoreDecisionRecordInput = {
@@ -1183,8 +1198,11 @@ export async function createCoreDocument(input: CoreDocumentCreateInput) {
   });
 }
 
-export async function prepareCorePacket(input: CorePacketPrepareInput) {
-  const db = input.db ?? defaultDb;
+export async function prepareCorePacketForOperator(
+  tx: Transaction,
+  operator: OperatorContext,
+  input: CorePacketPrepareForOperatorInput,
+): Promise<CorePacketPrepareResult> {
   const kind = requiredString(input.kind, "config.kind");
   const name = requiredString(input.name, "config.name");
   const state = cleanString(input.state) ?? "prepared";
@@ -1197,6 +1215,194 @@ export async function prepareCorePacket(input: CorePacketPrepareInput) {
   const evidenceIds = uuidList(input.evidenceIds, "config.evidenceIds");
   const documentIds = uuidList(input.documentIds, "config.documentIds");
   const retainedUntil = optionalDate(input.retainedUntil, "config.retainedUntil");
+
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtext(${operator.tenantId}), hashtext(${`${packetSource}:${input.idempotencyKey}`}))`,
+  );
+
+  const [existingAudit] = await tx
+    .select({
+      auditEventId: auditEvents.id,
+      targetId: auditEvents.targetId,
+      eventId: auditEvents.eventId,
+    })
+    .from(auditEvents)
+    .where(
+      and(
+        eq(auditEvents.tenantId, operator.tenantId),
+        eq(auditEvents.source, packetSource),
+        eq(auditEvents.idempotencyKey, `${input.idempotencyKey}:packet_prepared`),
+        eq(auditEvents.targetType, "evidence_packet"),
+      ),
+    )
+    .limit(1);
+
+  if (existingAudit?.targetId) {
+    const [packet] = await tx
+      .select()
+      .from(evidencePackets)
+      .where(and(eq(evidencePackets.tenantId, operator.tenantId), eq(evidencePackets.id, existingAudit.targetId)))
+      .limit(1);
+
+    if (packet) {
+      return {
+        prepared: false,
+        packetId: packet.id,
+        documentId: packet.documentId,
+        eventId: existingAudit.eventId,
+        auditEventId: existingAudit.auditEventId,
+        evidenceId: await evidenceForAudit(tx, operator.tenantId, existingAudit.auditEventId),
+      };
+    }
+  }
+
+  await Promise.all([
+    assertObject(tx, operator.tenantId, objectId),
+    assertTask(tx, operator.tenantId, taskId),
+    assertWorkflowRun(tx, operator.tenantId, workflowRunId),
+    assertEvent(tx, operator.tenantId, eventId),
+    assertCapability(tx, capabilityId),
+    assertEvidenceItems(tx, operator.tenantId, evidenceIds),
+    assertDocuments(tx, operator.tenantId, documentIds),
+  ]);
+
+  const now = new Date();
+  const packetData = {
+    ...jsonObject(input.data),
+    sections: jsonObject(input.sections),
+    evidenceIds,
+    documentIds,
+    externalExecution: "blocked",
+  };
+  const [document] = await tx
+    .insert(documents)
+    .values({
+      tenantId: operator.tenantId,
+      objectId,
+      workflowRunId,
+      kind,
+      name,
+      state,
+      sensitivity,
+      hash: cleanString(input.hash),
+      data: packetData,
+      retainedUntil,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .returning({ id: documents.id });
+  const [packet] = await tx
+    .insert(evidencePackets)
+    .values({
+      tenantId: operator.tenantId,
+      documentId: document.id,
+      objectId,
+      taskId,
+      workflowRunId,
+      eventId,
+      capabilityId,
+      kind,
+      name,
+      state,
+      sensitivity,
+      evidenceIds: { ids: evidenceIds },
+      documentIds: { ids: documentIds },
+      data: packetData,
+      hash: cleanString(input.hash),
+      retainedUntil,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .returning({ id: evidencePackets.id });
+  const [event] = await tx
+    .insert(events)
+    .values({
+      tenantId: operator.tenantId,
+      type: "packet.prepared",
+      source: packetSource,
+      actorType: "user",
+      actorId: operator.userId,
+      actorRef: operator.actorRef,
+      objectId,
+      taskId,
+      capabilityId,
+      idempotencyKey: `${input.idempotencyKey}:packet_prepared`,
+      data: {
+        packetId: packet.id,
+        documentId: document.id,
+        workflowRunId: workflowRunId ?? null,
+        evidenceCount: evidenceIds.length,
+        documentCount: documentIds.length,
+        kind,
+        name,
+        state,
+      },
+      occurredAt: now,
+    })
+    .returning({ id: events.id });
+  const [audit] = await tx
+    .insert(auditEvents)
+    .values({
+      tenantId: operator.tenantId,
+      type: "packet.prepared",
+      source: packetSource,
+      actorType: "user",
+      actorId: operator.userId,
+      actorRef: operator.actorRef,
+      targetType: "evidence_packet",
+      targetId: packet.id,
+      taskId,
+      eventId: event.id,
+      objectId,
+      capabilityId,
+      risk: sensitivity,
+      idempotencyKey: `${input.idempotencyKey}:packet_prepared`,
+      data: {
+        packetId: packet.id,
+        documentId: document.id,
+        evidenceIds,
+        documentIds,
+        externalExecution: "blocked",
+      },
+    })
+    .returning({ id: auditEvents.id });
+  const [proof] = await tx
+    .insert(evidence)
+    .values({
+      tenantId: operator.tenantId,
+      kind: "trace",
+      name: `Packet prepared: ${name}`,
+      objectId,
+      taskId,
+      eventId: event.id,
+      capabilityId,
+      actorType: "user",
+      actorId: operator.userId,
+      hash: `${packetSource}:${packet.id}:${now.toISOString()}`,
+      data: {
+        packetId: packet.id,
+        documentId: document.id,
+        auditEventId: audit.id,
+        evidenceIds,
+        documentIds,
+        externalExecution: "blocked",
+      },
+      retainedUntil,
+    })
+    .returning({ id: evidence.id });
+
+  return {
+    prepared: true,
+    packetId: packet.id,
+    documentId: document.id,
+    eventId: event.id,
+    auditEventId: audit.id,
+    evidenceId: proof.id,
+  };
+}
+
+export async function prepareCorePacket(input: CorePacketPrepareInput) {
+  const db = input.db ?? defaultDb;
   const operator = await loadOperatorContext({
     db,
     operatorEmail: input.operatorEmail,
@@ -1204,189 +1410,7 @@ export async function prepareCorePacket(input: CorePacketPrepareInput) {
   });
 
   return db.transaction(async (tx) => {
-    await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtext(${operator.tenantId}), hashtext(${`${packetSource}:${input.idempotencyKey}`}))`,
-    );
-
-    const [existingAudit] = await tx
-      .select({
-        auditEventId: auditEvents.id,
-        targetId: auditEvents.targetId,
-        eventId: auditEvents.eventId,
-      })
-      .from(auditEvents)
-      .where(
-        and(
-          eq(auditEvents.tenantId, operator.tenantId),
-          eq(auditEvents.source, packetSource),
-          eq(auditEvents.idempotencyKey, `${input.idempotencyKey}:packet_prepared`),
-          eq(auditEvents.targetType, "evidence_packet"),
-        ),
-      )
-      .limit(1);
-
-    if (existingAudit?.targetId) {
-      const [packet] = await tx
-        .select()
-        .from(evidencePackets)
-        .where(and(eq(evidencePackets.tenantId, operator.tenantId), eq(evidencePackets.id, existingAudit.targetId)))
-        .limit(1);
-
-      if (packet) {
-        return {
-          prepared: false,
-          packetId: packet.id,
-          documentId: packet.documentId,
-          eventId: existingAudit.eventId,
-          auditEventId: existingAudit.auditEventId,
-          evidenceId: await evidenceForAudit(tx, operator.tenantId, existingAudit.auditEventId),
-        };
-      }
-    }
-
-    await Promise.all([
-      assertObject(tx, operator.tenantId, objectId),
-      assertTask(tx, operator.tenantId, taskId),
-      assertWorkflowRun(tx, operator.tenantId, workflowRunId),
-      assertEvent(tx, operator.tenantId, eventId),
-      assertCapability(tx, capabilityId),
-      assertEvidenceItems(tx, operator.tenantId, evidenceIds),
-      assertDocuments(tx, operator.tenantId, documentIds),
-    ]);
-
-    const now = new Date();
-    const packetData = {
-      ...jsonObject(input.data),
-      sections: jsonObject(input.sections),
-      evidenceIds,
-      documentIds,
-      externalExecution: "blocked",
-    };
-    const [document] = await tx
-      .insert(documents)
-      .values({
-        tenantId: operator.tenantId,
-        objectId,
-        workflowRunId,
-        kind,
-        name,
-        state,
-        sensitivity,
-        hash: cleanString(input.hash),
-        data: packetData,
-        retainedUntil,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning({ id: documents.id });
-    const [packet] = await tx
-      .insert(evidencePackets)
-      .values({
-        tenantId: operator.tenantId,
-        documentId: document.id,
-        objectId,
-        taskId,
-        workflowRunId,
-        eventId,
-        capabilityId,
-        kind,
-        name,
-        state,
-        sensitivity,
-        evidenceIds: { ids: evidenceIds },
-        documentIds: { ids: documentIds },
-        data: packetData,
-        hash: cleanString(input.hash),
-        retainedUntil,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning({ id: evidencePackets.id });
-    const [event] = await tx
-      .insert(events)
-      .values({
-        tenantId: operator.tenantId,
-        type: "packet.prepared",
-        source: packetSource,
-        actorType: "user",
-        actorId: operator.userId,
-        actorRef: operator.actorRef,
-        objectId,
-        taskId,
-        capabilityId,
-        idempotencyKey: `${input.idempotencyKey}:packet_prepared`,
-        data: {
-          packetId: packet.id,
-          documentId: document.id,
-          workflowRunId: workflowRunId ?? null,
-          evidenceCount: evidenceIds.length,
-          documentCount: documentIds.length,
-          kind,
-          name,
-          state,
-        },
-        occurredAt: now,
-      })
-      .returning({ id: events.id });
-    const [audit] = await tx
-      .insert(auditEvents)
-      .values({
-        tenantId: operator.tenantId,
-        type: "packet.prepared",
-        source: packetSource,
-        actorType: "user",
-        actorId: operator.userId,
-        actorRef: operator.actorRef,
-        targetType: "evidence_packet",
-        targetId: packet.id,
-        taskId,
-        eventId: event.id,
-        objectId,
-        capabilityId,
-        risk: sensitivity,
-        idempotencyKey: `${input.idempotencyKey}:packet_prepared`,
-        data: {
-          packetId: packet.id,
-          documentId: document.id,
-          evidenceIds,
-          documentIds,
-          externalExecution: "blocked",
-        },
-      })
-      .returning({ id: auditEvents.id });
-    const [proof] = await tx
-      .insert(evidence)
-      .values({
-        tenantId: operator.tenantId,
-        kind: "trace",
-        name: `Packet prepared: ${name}`,
-        objectId,
-        taskId,
-        eventId: event.id,
-        capabilityId,
-        actorType: "user",
-        actorId: operator.userId,
-        hash: `${packetSource}:${packet.id}:${now.toISOString()}`,
-        data: {
-          packetId: packet.id,
-          documentId: document.id,
-          auditEventId: audit.id,
-          evidenceIds,
-          documentIds,
-          externalExecution: "blocked",
-        },
-        retainedUntil,
-      })
-      .returning({ id: evidence.id });
-
-    return {
-      prepared: true,
-      packetId: packet.id,
-      documentId: document.id,
-      eventId: event.id,
-      auditEventId: audit.id,
-      evidenceId: proof.id,
-    };
+    return prepareCorePacketForOperator(tx, operator, input);
   });
 }
 

@@ -1991,6 +1991,125 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(taskCapabilityOutcome.workflowStepId).toBe(capabilityStep.id);
     expect(taskCapabilityOutcome.evidenceId).toBe(capabilityResult?.evidenceId);
 
+    const packetTask = await createCoreTask({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-workflow-packet-task-${runId}`,
+      title: "Prepare workflow packet from queued step",
+      state: "active",
+      db,
+    });
+    const packetStart = await startWorkflowRun({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      workflowKey: "run_payroll",
+      idempotencyKey: `ci-workflow-packet-run-${runId}`,
+      initialState: "calculating",
+      data: {
+        source: "workflow_packet_ci",
+      },
+      db,
+    });
+    const [packetRun] = await db
+      .select()
+      .from(workflowRuns)
+      .where(eq(workflowRuns.id, packetStart.run.id))
+      .limit(1);
+    const [packetStep] = await db
+      .insert(workflowSteps)
+      .values({
+        tenantId: packetRun?.tenantId ?? "",
+        definitionId: packetRun?.definitionId ?? "",
+        workflowRunId: packetStart.run.id,
+        taskId: packetTask.taskId,
+        kind: "packet_prepare",
+        name: "CI prepare payroll workflow packet",
+        state: "queued",
+        priority: "urgent",
+        risk: "medium",
+        fromState: "calculating",
+        toState: "awaiting_approval",
+        attempt: 1,
+        maxAttempts: 2,
+        idempotencyKey: `ci-workflow-packet-step-${runId}`,
+        input: {
+          packet: {
+            kind: "payroll_packet",
+            name: "CI queued workflow payroll packet",
+            state: "review_ready",
+            evidenceIds: [String(capabilityResult?.evidenceId)],
+            sections: {
+              summary: "Workflow executor prepared this packet from a queued step.",
+            },
+            data: {
+              source: "workflow_packet_ci",
+            },
+          },
+        },
+      })
+      .returning();
+
+    const packetExecution = await executeWorkflowSteps({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      limit: 1,
+      leaseOwner: `ci-workflow-packet:${runId}`,
+      db,
+    });
+    const [packetResult] = packetExecution.results;
+    const [executedPacketStep] = await db
+      .select()
+      .from(workflowSteps)
+      .where(eq(workflowSteps.id, packetStep.id))
+      .limit(1);
+    const [executedPacketRun] = await db
+      .select()
+      .from(workflowRuns)
+      .where(eq(workflowRuns.id, packetStart.run.id))
+      .limit(1);
+    const packetStepOutput = objectValue(executedPacketStep?.output);
+    const packetPreparation = objectValue(packetStepOutput.packetPreparation);
+    const [workflowPacket] = await db
+      .select()
+      .from(evidencePackets)
+      .where(eq(evidencePackets.id, String(packetPreparation.packetId ?? "")))
+      .limit(1);
+    const [workflowPacketDocument] = await db
+      .select()
+      .from(documents)
+      .where(eq(documents.id, String(packetPreparation.documentId ?? "")))
+      .limit(1);
+    const [packetTaskRow] = await db
+      .select()
+      .from(tasks)
+      .where(eq(tasks.id, packetTask.taskId))
+      .limit(1);
+    const packetEvidenceIds = objectValue(workflowPacket?.evidenceIds).ids;
+    const packetTaskOutcome = objectValue(objectValue(packetTaskRow?.outcome).lastWorkflowPacket);
+
+    expect(packetExecution.processed).toBe(1);
+    expect(packetExecution.completed).toBe(1);
+    expect(packetResult?.stepId).toBe(packetStep.id);
+    expect(executedPacketStep?.state).toBe("done");
+    expect(executedPacketRun?.state).toBe("awaiting_approval");
+    expect(packetPreparation.packetId).toBeTruthy();
+    expect(packetPreparation.documentId).toBeTruthy();
+    expect(packetPreparation.externalExecution).toBe("blocked");
+    expect(workflowPacket?.kind).toBe("payroll_packet");
+    expect(workflowPacket?.workflowRunId).toBe(packetStart.run.id);
+    expect(workflowPacket?.taskId).toBe(packetTask.taskId);
+    expect(workflowPacket?.eventId).toBe(packetResult?.eventId);
+    expect(workflowPacket?.state).toBe("review_ready");
+    expect(workflowPacketDocument?.kind).toBe("payroll_packet");
+    expect(stringList(packetEvidenceIds)).toEqual(
+      expect.arrayContaining([String(capabilityResult?.evidenceId), String(packetResult?.evidenceId)]),
+    );
+    expect(objectValue(objectValue(workflowPacket?.data).sections).summary).toContain(
+      "queued step",
+    );
+    expect(packetTaskOutcome.packetId).toBe(packetPreparation.packetId);
+    expect(packetTaskOutcome.workflowStepId).toBe(packetStep.id);
+
     const retryStart = await startWorkflowRun({
       operatorEmail: "owner@continuoushq.com",
       tenantSlug: "continuous-demo",

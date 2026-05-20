@@ -15,7 +15,9 @@ import {
   type JsonObject,
 } from "../db/schema";
 import { RevenueWorkerUnavailableError } from "../worker/revenue";
+import { PlatformUnavailableError } from "./errors";
 import { loadOperatorContext } from "./operators";
+import { prepareCorePacketForOperator } from "./primitives";
 
 type Database = typeof defaultDb;
 
@@ -152,6 +154,10 @@ function isTerminalWorkflowState(
 
 function jsonObject(value: unknown): JsonObject {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonObject) : {};
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function definitionRecord(row: typeof workflowDefinitions.$inferSelect): WorkflowDefinitionRecord {
@@ -295,7 +301,15 @@ const executableWorkflowStepKinds = new Set([
   "workflow_transition",
   "worker_transition",
   "capability_execution",
+  "packet_prepare",
+  "document_packet_prepare",
+  "evidence_packet_prepare",
   "seed_state",
+]);
+const packetWorkflowStepKinds = new Set([
+  "packet_prepare",
+  "document_packet_prepare",
+  "evidence_packet_prepare",
 ]);
 
 class WorkflowStepLeaseLostError extends Error {
@@ -320,7 +334,9 @@ function errorData(error: unknown, attempt: number, maxAttempts: number): JsonOb
         ? error.code
         : error instanceof WorkflowStepLeaseLostError
           ? error.code
-          : "workflow_step_execution_failed",
+          : error instanceof PlatformUnavailableError
+            ? error.code
+            : "workflow_step_execution_failed",
     attempt,
     maxAttempts,
     retryable: attempt < maxAttempts,
@@ -574,6 +590,17 @@ async function completeWorkflowStep(input: {
     }
 
     const currentFromState = run.state;
+    const lastExecutedStep = {
+      stepId: step.id,
+      kind: step.kind,
+      name: step.name,
+      fromState: currentFromState,
+      toState: step.toState,
+      executedBy: executionActor.ref,
+      triggeredBy: input.operator.actorRef,
+      executedAt: input.now.toISOString(),
+      ...(capabilityExecution ? { capabilityExecution } : {}),
+    };
 
     if (currentFromState !== step.toState) {
       if (step.fromState && currentFromState !== step.fromState) {
@@ -598,17 +625,7 @@ async function completeWorkflowStep(input: {
           state: step.toState,
           data: {
             ...run.data,
-            lastExecutedStep: {
-              stepId: step.id,
-              kind: step.kind,
-              name: step.name,
-              fromState: currentFromState,
-              toState: step.toState,
-              executedBy: executionActor.ref,
-              triggeredBy: input.operator.actorRef,
-              executedAt: input.now.toISOString(),
-              ...(capabilityExecution ? { capabilityExecution } : {}),
-            },
+            lastExecutedStep,
           },
           updatedAt: input.now,
           completedAt: isTerminalWorkflowState(definitionView, step.toState) ? input.now : run.completedAt,
@@ -686,12 +703,111 @@ async function completeWorkflowStep(input: {
         },
       })
       .returning({ id: evidence.id });
+    let packetPreparation: Awaited<ReturnType<typeof prepareCorePacketForOperator>> | null = null;
+
+    if (packetWorkflowStepKinds.has(step.kind)) {
+      const packetInput = jsonObject(step.input.packet ?? step.input.corePacket ?? {});
+      const definitionEvidence = jsonObject(definition.evidence);
+      const evidenceIds = Array.from(
+        new Set([...stringArray(packetInput.evidenceIds), proof.id]),
+      );
+      const packetTaskId = stringValue(packetInput.taskId) ?? step.taskId ?? undefined;
+
+      packetPreparation = await prepareCorePacketForOperator(tx, input.operator, {
+        idempotencyKey: `${step.id}:packet_prepare`,
+        kind:
+          stringValue(packetInput.kind) ??
+          stringValue(definitionEvidence.packet) ??
+          `${definition.key}_packet`,
+        name: stringValue(packetInput.name) ?? `${definition.name}: ${step.name}`,
+        state: stringValue(packetInput.state) ?? "prepared",
+        sensitivity: stringValue(packetInput.sensitivity) ?? step.risk,
+        objectId: stringValue(packetInput.objectId) ?? step.objectId ?? run.objectId ?? undefined,
+        taskId: packetTaskId,
+        workflowRunId: stringValue(packetInput.workflowRunId) ?? run.id,
+        eventId: stringValue(packetInput.eventId) ?? event.id,
+        capabilityId: stringValue(packetInput.capabilityId) ?? step.capabilityId ?? undefined,
+        evidenceIds,
+        documentIds: packetInput.documentIds,
+        sections: jsonObject(packetInput.sections),
+        data: {
+          ...jsonObject(packetInput.data),
+          workflowRunId: run.id,
+          workflowStepId: step.id,
+          workflowKey: definition.key,
+          workflowStepKind: step.kind,
+          source: source,
+          externalExecution: "blocked",
+        },
+        hash: stringValue(packetInput.hash),
+        retainedUntil: stringValue(packetInput.retainedUntil),
+      });
+
+      const packetData = {
+        ...packetPreparation,
+        workflowRunId: run.id,
+        workflowStepId: step.id,
+        workflowKey: definition.key,
+        preparedAt: input.now.toISOString(),
+        externalExecution: "blocked",
+      };
+
+      await tx
+        .update(workflowRuns)
+        .set({
+          data: {
+            ...run.data,
+            lastExecutedStep: {
+              ...lastExecutedStep,
+              packetPreparation: packetData,
+            },
+            lastPacketPreparation: packetData,
+          },
+          updatedAt: input.now,
+        })
+        .where(eq(workflowRuns.id, run.id));
+
+      if (packetTaskId) {
+        const packetTask =
+          task?.id === packetTaskId
+            ? task
+            : (
+                await tx
+                  .select()
+                  .from(tasks)
+                  .where(and(eq(tasks.tenantId, input.operator.tenantId), eq(tasks.id, packetTaskId)))
+                  .limit(1)
+              )[0] ?? null;
+
+        if (packetTask) {
+          await tx
+            .update(tasks)
+            .set({
+              outcome: {
+                ...packetTask.outcome,
+                lastWorkflowPacket: packetData,
+              },
+              updatedAt: input.now,
+            })
+            .where(and(eq(tasks.tenantId, input.operator.tenantId), eq(tasks.id, packetTask.id)));
+        }
+      }
+    }
+
     const output = {
       ...step.output,
       ...executionData,
       eventId: event.id,
       auditEventId: audit.id,
       evidenceId: proof.id,
+      ...(packetPreparation
+        ? {
+            packetPreparation: {
+              ...packetPreparation,
+              externalExecution: "blocked",
+            },
+          }
+        : {}),
     };
 
     if (capabilityExecution && task) {
