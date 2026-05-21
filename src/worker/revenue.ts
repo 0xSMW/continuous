@@ -7910,7 +7910,8 @@ export async function continueRevenueWorker(input: {
       run.mode !== "continuation" ||
       stringValue(existingInput.command) !== "continue" ||
       existingApprovalId !== approvalId ||
-      (existingHash && existingHash !== inputHash)
+      !existingHash ||
+      existingHash !== inputHash
     ) {
       throw new RevenueWorkerUnavailableError(
         "worker_continuation_idempotency_conflict",
