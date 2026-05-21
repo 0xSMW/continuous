@@ -560,6 +560,40 @@ describe("/workflow route scope", () => {
     expect(mocks.decideApproval).not.toHaveBeenCalled();
   });
 
+  it("does not treat idempotency-key as a workflow approval payload fallback", async () => {
+    mocks.env.CONTROL_PLANE_ALLOWED_TENANTS = "continuous-demo";
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/workflow", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+          "idempotency-key": "header-workflow-approval-key-001",
+        },
+        body: JSON.stringify({
+          command: "approval.decide",
+          workflow: {
+            tenantSlug: "continuous-demo",
+          },
+          config: {
+            approvalId: "approval-1",
+            action: "approved",
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toEqual({
+      code: "invalid_workflow_approval_decision",
+      message: "A string idempotency key is required.",
+    });
+    expect(mocks.decideApproval).not.toHaveBeenCalled();
+  });
+
   it("executes workflow steps through the canonical command envelope", async () => {
     mocks.env.CONTROL_PLANE_ALLOWED_TENANTS = "continuous-demo";
     mocks.executeWorkflowSteps.mockResolvedValue({
@@ -844,5 +878,14 @@ describe("/workflow route scope", () => {
     expect(transition.status).toBe(409);
     expect(steps.status).toBe(423);
     expect(approval.status).toBe(422);
+    expect(mocks.decideApproval).toHaveBeenCalledWith({
+      approvalId: "approval-1",
+      idempotencyKey: "workflow-approval-failure-map",
+      operatorEmail: "operator@example.com",
+      tenantSlug: "continuous-demo",
+      action: "approved",
+      note: undefined,
+      subject: "workflow",
+    });
   });
 });

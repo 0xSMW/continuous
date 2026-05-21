@@ -659,6 +659,7 @@ export async function POST(request: Request) {
     try {
       const result = await decideApproval({
         approvalId,
+        idempotencyKey: idempotency.key,
         operatorEmail: auth.operatorEmail,
         tenantSlug,
         action,

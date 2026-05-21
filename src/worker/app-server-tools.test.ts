@@ -18,9 +18,9 @@ const runtimeContractRoles = [
   "compliance_operations",
   "systems_operations",
   "offer_pricing_operations",
+  "customer_experience_operations",
 ];
 const plannedContractRoles = [
-  "customer_experience_operations",
   "asset_supply_operations",
   "growth_operations",
   "vertical_packages",
@@ -133,6 +133,12 @@ describe("app-server worker tools", () => {
     expect(registry.commands).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
+          role: "customer_experience_operations",
+          name: "recovery.draft",
+          apiRoute: "/worker",
+          externalExecution: "blocked",
+        }),
+        expect.objectContaining({
           role: "offer_pricing_operations",
           name: "margin.review.prepare",
           apiRoute: "/worker",
@@ -146,6 +152,11 @@ describe("app-server worker tools", () => {
     );
     expect(registry.views).toEqual(
       expect.arrayContaining([
+        expect.objectContaining({
+          role: "customer_experience_operations",
+          name: "signals",
+          apiRoute: "/worker",
+        }),
         expect.objectContaining({
           role: "offer_pricing_operations",
           name: "snapshot",
@@ -174,13 +185,18 @@ describe("app-server worker tools", () => {
     expect(
       registry.plannedFutureWorkerViews.some((view) => view.role === "systems_operations"),
     ).toBe(false);
+    expect(
+      registry.plannedFutureWorkerCommands.some(
+        (command) => command.role === "customer_experience_operations",
+      ),
+    ).toBe(false);
+    expect(
+      registry.plannedFutureWorkerViews.some(
+        (view) => view.role === "customer_experience_operations",
+      ),
+    ).toBe(false);
     expect(registry.plannedFutureWorkerCommands).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({
-          role: "customer_experience_operations",
-          name: "recovery.draft",
-          apiRoute: "/worker",
-        }),
         expect.objectContaining({
           role: "asset_supply_operations",
           name: "reorder.plan",

@@ -195,7 +195,7 @@ waves that compose the first seven workers instead of creating private APIs.
 | Wave | Worker family | First packaged outcome | Entry gate |
 |---|---|---|---|
 | 8 | Offer and Pricing Worker | Runtime `margin.review.prepare` command and `price_policy` view for price book, quote-line, margin, and discount packets; change-order packets remain follow-up | Revenue quote evidence, margin rules, and approval policies are available as Core records |
-| 9 | Customer Experience Worker | Complaint, testimonial, review, promise, and customer-update packets | Revenue/Dispatch customer messages and customer-signal records have source evidence and approval posture |
+| 9 | Customer Experience Worker | Runtime `recovery.draft` command and `signals` view for source-backed recovery packets; escalation and review-response packets remain follow-up | Revenue/Dispatch customer messages and customer-signal records have source evidence and approval posture |
 | 10 | Asset and Supply Worker | Inventory, vendor, purchase, maintenance, and stockout packets | Dispatch closeout, Finance cash, and Systems sync refs prove asset/vendor state without purchase mutation |
 | 11 | Growth Worker | Campaign, channel, audience, content draft, and attribution packets | Customer signal, review, budget, and source-claim evidence can block external publish until approval |
 | 12 | Vertical packaged workers | Quote-to-Cash Field, Knowledge Delivery, Inventory/Replenishment, Compliance QA, and Maintenance bundles | The package declares which existing family commands it composes, which Core refs are accepted, and which approvals block execution |
@@ -210,6 +210,12 @@ Offer and Pricing now has its first runtime slice after Systems:
 `view: "price_policy"`, the `revenue.quote_to_pricing` handoff fixture, and a
 generated pricing review packet. Price publishing, customer sends, quote
 mutation, and change-order execution remain blocked follow-up gates.
+
+Customer Experience now has its first runtime slice:
+`worker.role=customer_experience_operations`, `command=recovery.draft`,
+`view: "signals"`, the `customer.signal_to_experience` handoff fixture, and a
+generated customer-signals review packet. Customer sends, refunds, concessions,
+review responses, and promise mutations remain blocked follow-up gates.
 
 ## Expansion Rule
 

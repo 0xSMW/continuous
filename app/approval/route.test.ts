@@ -260,6 +260,7 @@ describe("/approval route", () => {
             tenantSlug: "continuous-demo",
             subject: "core",
           },
+          idempotencyKey: "approval-decision-001",
           config: {
             action: "approved",
             note: "Looks correct.",
@@ -287,12 +288,82 @@ describe("/approval route", () => {
     );
     expect(mocks.decideApproval).toHaveBeenCalledWith({
       approvalId: "77777777-7777-4777-8777-000000000001",
+      idempotencyKey: "approval-decision-001",
       operatorEmail: "operator@example.com",
       tenantSlug: "continuous-demo",
       action: "approved",
       note: "Looks correct.",
       subject: "core",
     });
+  });
+
+  it("rejects approval decisions without a payload idempotency key before dispatch", async () => {
+    mocks.env.CONTROL_PLANE_ALLOWED_TENANTS = "continuous-demo";
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/approval", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "approval.decide",
+          approval: {
+            id: "77777777-7777-4777-8777-000000000001",
+            tenantSlug: "continuous-demo",
+            subject: "core",
+          },
+          config: {
+            action: "approved",
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toEqual({
+      code: "invalid_approval_decision",
+      message: "A string idempotency key is required.",
+    });
+    expect(mocks.decideApproval).not.toHaveBeenCalled();
+  });
+
+  it("does not treat idempotency-key as an approval payload fallback", async () => {
+    mocks.env.CONTROL_PLANE_ALLOWED_TENANTS = "continuous-demo";
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/approval", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+          "idempotency-key": "header-approval-key-001",
+        },
+        body: JSON.stringify({
+          command: "approval.decide",
+          approval: {
+            id: "77777777-7777-4777-8777-000000000001",
+            tenantSlug: "continuous-demo",
+            subject: "core",
+          },
+          config: {
+            action: "approved",
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toEqual({
+      code: "invalid_approval_decision",
+      message: "A string idempotency key is required.",
+    });
+    expect(mocks.decideApproval).not.toHaveBeenCalled();
   });
 
   it("rejects unauthorized approval commands before reading the request body", async () => {

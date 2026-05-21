@@ -55,7 +55,7 @@ inside `config` and use the shared `/worker` command envelope.
 | `customer_update.draft` | `worker.command` | `config.jobId`, `config.updateKind` | Required | Draft message, evidence packet, approval request | Blocked |
 | `closeout.prepare` | `worker.command` | `config.workOrderId`, optional keyed `config.sourceRefs` | Required | Closeout document, QA checklist, evidence packet, approval request, Finance handoff refs | Blocked |
 | `exception.route` | `worker.command` | `config.jobId`, `config.reason`, `config.severity`, optional keyed `config.sourceRefs` | Required | Blocked exception task, decision record, document, and evidence packet | Blocked |
-| `approval.decide` | `worker.command` | `config.approvalId`, `config.action`, optional `config.note` | None | Approval/task/workflow evidence only | Blocked |
+| `approval.decide` | `worker.command` | `config.approvalId`, `config.action`, optional `config.note` | Required | Approval/task/workflow evidence only | Blocked |
 
 ## Core Object Map
 

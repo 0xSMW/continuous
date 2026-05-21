@@ -114,6 +114,14 @@ export type ApprovalRequestResult = {
   approval: ApprovalRecord;
 };
 
+type ApprovalDecisionReplay = {
+  evidenceId: string | null;
+  taskState: string;
+  workflowRunState: string | null;
+  workflowStepId: string | null;
+  payrollHandoff: JsonObject | null;
+};
+
 function approvalSubject(row: typeof approvalRequests.$inferSelect): ApprovalRecord["subject"] {
   if (row.workerRunId) {
     return { type: "worker_run", id: row.workerRunId };
@@ -478,6 +486,57 @@ function payrollDraftStateForDecision(action: ApprovalDecisionAction) {
 
 function uuidList(value: unknown) {
   return stringArray(value).filter((item) => uuidPattern.test(item));
+}
+
+function requiredUuidList(value: unknown, field: string) {
+  const values = stringArray(value);
+
+  if (values.length === 0) {
+    throw new PlatformUnavailableError(
+      "payroll_approval_artifact_required",
+      `${field} must include at least one UUID.`,
+      409,
+    );
+  }
+
+  const invalid = values.find((item) => !uuidPattern.test(item));
+
+  if (invalid) {
+    throw new PlatformUnavailableError(
+      "payroll_approval_artifact_invalid",
+      `${field} contains an invalid UUID.`,
+      409,
+    );
+  }
+
+  return [...new Set(values)];
+}
+
+function requirePayrollArtifactRef(value: string | undefined, code: string, message: string) {
+  if (!value) {
+    throw new PlatformUnavailableError(code, message, 409);
+  }
+
+  return value;
+}
+
+function assertBlockedArtifact(data: unknown, code: string, message: string) {
+  if (objectValue(data).externalExecution !== "blocked") {
+    throw new PlatformUnavailableError(code, message, 409);
+  }
+}
+
+function replayFromAudit(data: unknown, fallback: ApprovalDecisionReplay): ApprovalDecisionReplay {
+  const replay = objectValue(objectValue(data).replay);
+  const payrollHandoff = objectValue(replay.payrollHandoff);
+
+  return {
+    evidenceId: uuidValue(replay.evidenceId) ?? fallback.evidenceId,
+    taskState: stringValue(replay.taskState) ?? fallback.taskState,
+    workflowRunState: stringValue(replay.workflowRunState) ?? fallback.workflowRunState,
+    workflowStepId: uuidValue(replay.workflowStepId) ?? fallback.workflowStepId,
+    payrollHandoff: Object.keys(payrollHandoff).length > 0 ? payrollHandoff : fallback.payrollHandoff,
+  };
 }
 
 export function normalizeApprovalDecision(value: unknown): ApprovalDecisionAction | null {
@@ -915,6 +974,7 @@ export async function requestApproval(input: ApprovalRequestInput): Promise<Appr
 
 export async function decideApproval(input: {
   approvalId: string;
+  idempotencyKey: string;
   operatorEmail: string;
   tenantSlug?: string;
   action: ApprovalDecisionAction;
@@ -930,7 +990,16 @@ export async function decideApproval(input: {
   });
   const subject = input.subject ?? "core";
   const now = new Date();
+  const note = input.note ?? "";
   const taskState = taskStateForDecision(input.action);
+  const idempotency = coreIdempotencyFingerprint("approval.decide", {
+    approvalId: input.approvalId,
+    subject,
+    action: input.action,
+    note,
+    decidedByUserId: operator.userId,
+  });
+  const decisionIdempotencyKey = `${input.idempotencyKey}:approval_decided`;
 
   return db.transaction(async (tx) => {
     await tx.execute(
@@ -961,6 +1030,63 @@ export async function decideApproval(input: {
       );
     }
 
+    const [existingDecision] = await tx
+      .select({
+        auditEventId: auditEvents.id,
+        targetId: auditEvents.targetId,
+        data: auditEvents.data,
+      })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.tenantId, operator.tenantId),
+          eq(auditEvents.source, source),
+          eq(auditEvents.idempotencyKey, decisionIdempotencyKey),
+          eq(auditEvents.targetType, "approval_request"),
+        ),
+      )
+      .limit(1);
+
+    if (existingDecision) {
+      assertCoreIdempotencyReplay({
+        command: "approval.decide",
+        fingerprint: idempotency,
+        storedData: existingDecision.data,
+      });
+
+      if (existingDecision.targetId !== approval.id) {
+        throw new PlatformUnavailableError(
+          "core_command_idempotency_conflict",
+          "An approval.decide command already exists for this idempotency key with a different approval target.",
+          409,
+        );
+      }
+
+      const [approvalEvidence] = await tx
+        .select({ id: evidence.id })
+        .from(evidence)
+        .where(
+          and(
+            eq(evidence.tenantId, operator.tenantId),
+            sql`${evidence.data}->>'auditEventId' = ${existingDecision.auditEventId}`,
+          ),
+        )
+        .limit(1);
+      const replay = replayFromAudit(existingDecision.data, {
+        evidenceId: approvalEvidence?.id ?? null,
+        taskState,
+        workflowRunState: null,
+        workflowStepId: null,
+        payrollHandoff: null,
+      });
+
+      return {
+        approval: approvalRecord(approval),
+        auditEventId: existingDecision.auditEventId,
+        ...replay,
+      };
+    }
+
     if (approval.state !== "pending") {
       throw new PlatformUnavailableError(
         "approval_already_decided",
@@ -979,11 +1105,12 @@ export async function decideApproval(input: {
 
     const decision = {
       action: input.action,
-      note: input.note ?? "",
+      note,
       decidedByUserId: operator.userId,
       decidedByEmail: operator.email,
       decidedAt: now.toISOString(),
       externalExecution: "blocked",
+      idempotency,
     };
 
     await tx
@@ -997,6 +1124,13 @@ export async function decideApproval(input: {
       })
       .where(eq(approvalRequests.id, approval.id));
 
+    const auditData: JsonObject = {
+      ...decision,
+      subject: approvalSubject(approval),
+      workflowRunId: approval.workflowRunId,
+      workerRunId: approval.workerRunId,
+      idempotency,
+    };
     const [audit] = await tx
       .insert(auditEvents)
       .values({
@@ -1015,12 +1149,8 @@ export async function decideApproval(input: {
         objectId: approval.objectId,
         capabilityId: approval.capabilityId,
         risk: approval.risk,
-        data: {
-          ...decision,
-          subject: approvalSubject(approval),
-          workflowRunId: approval.workflowRunId,
-          workerRunId: approval.workerRunId,
-        },
+        idempotencyKey: decisionIdempotencyKey,
+        data: auditData,
       })
       .returning({ id: auditEvents.id });
 
@@ -1309,21 +1439,126 @@ export async function decideApproval(input: {
         );
       }
 
-      const packetId = uuidValue(approvalData.packetId ?? approvalEvidenceData.packetId);
+      const packetId = requirePayrollArtifactRef(
+        uuidValue(approvalData.packetId ?? approvalEvidenceData.packetId),
+        "payroll_approval_packet_required",
+        "Payroll approval is missing its evidence packet reference.",
+      );
       let packetDocumentId = uuidValue(approvalData.packetDocumentId ?? approvalEvidenceData.packetDocumentId);
-      const filingDraftId = uuidValue(approvalData.filingDraftId ?? approvalEvidenceData.filingDraftId);
-      const paymentInstructionIds = uuidList(
+      const filingDraftId = requirePayrollArtifactRef(
+        uuidValue(approvalData.filingDraftId ?? approvalEvidenceData.filingDraftId),
+        "payroll_approval_filing_draft_required",
+        "Payroll approval is missing its filing draft reference.",
+      );
+      const paymentInstructionIds = requiredUuidList(
         approvalEvidenceData.paymentInstructionIds ?? approvalData.paymentInstructionIds,
+        "paymentInstructionIds",
       );
 
-      if (packetId && !packetDocumentId) {
-        const [packetRef] = await tx
-          .select({ documentId: evidencePackets.documentId })
-          .from(evidencePackets)
-          .where(and(eq(evidencePackets.tenantId, operator.tenantId), eq(evidencePackets.id, packetId)))
-          .limit(1);
+      const [packetRef] = await tx
+        .select({ id: evidencePackets.id, documentId: evidencePackets.documentId, data: evidencePackets.data })
+        .from(evidencePackets)
+        .where(and(eq(evidencePackets.tenantId, operator.tenantId), eq(evidencePackets.id, packetId)))
+        .limit(1);
 
-        packetDocumentId = uuidValue(packetRef?.documentId);
+      if (!packetRef) {
+        throw new PlatformUnavailableError(
+          "payroll_approval_packet_not_found",
+          "Payroll approval evidence packet does not exist in this tenant.",
+          404,
+        );
+      }
+
+      assertBlockedArtifact(
+        packetRef.data,
+        "payroll_approval_packet_unblocked",
+        "Payroll approval evidence packet is not blocked for external execution.",
+      );
+
+      const linkedPacketDocumentId = requirePayrollArtifactRef(
+        uuidValue(packetRef.documentId),
+        "payroll_approval_packet_document_required",
+        "Payroll approval evidence packet is missing its packet document reference.",
+      );
+
+      if (packetDocumentId && packetDocumentId !== linkedPacketDocumentId) {
+        throw new PlatformUnavailableError(
+          "payroll_approval_packet_document_mismatch",
+          "Payroll approval packet document does not match the evidence packet.",
+          409,
+        );
+      }
+
+      packetDocumentId = linkedPacketDocumentId;
+
+      const [packetDocument] = await tx
+        .select({ id: documents.id, data: documents.data })
+        .from(documents)
+        .where(and(eq(documents.tenantId, operator.tenantId), eq(documents.id, packetDocumentId)))
+        .limit(1);
+
+      if (!packetDocument) {
+        throw new PlatformUnavailableError(
+          "payroll_approval_packet_document_not_found",
+          "Payroll approval packet document does not exist in this tenant.",
+          404,
+        );
+      }
+
+      assertBlockedArtifact(
+        packetDocument.data,
+        "payroll_approval_packet_document_unblocked",
+        "Payroll approval packet document is not blocked for external execution.",
+      );
+
+      const [filingDraft] = await tx
+        .select({ id: filingDrafts.id, data: filingDrafts.data })
+        .from(filingDrafts)
+        .where(and(eq(filingDrafts.tenantId, operator.tenantId), eq(filingDrafts.id, filingDraftId)))
+        .limit(1);
+
+      if (!filingDraft) {
+        throw new PlatformUnavailableError(
+          "payroll_approval_filing_draft_not_found",
+          "Payroll approval filing draft does not exist in this tenant.",
+          404,
+        );
+      }
+
+      assertBlockedArtifact(
+        filingDraft.data,
+        "payroll_approval_filing_draft_unblocked",
+        "Payroll approval filing draft is not blocked for external execution.",
+      );
+
+      const paymentDrafts = await tx
+        .select({ id: paymentInstructions.id, data: paymentInstructions.data })
+        .from(paymentInstructions)
+        .where(
+          and(
+            eq(paymentInstructions.tenantId, operator.tenantId),
+            inArray(paymentInstructions.id, paymentInstructionIds),
+          ),
+        );
+
+      if (paymentDrafts.length !== paymentInstructionIds.length) {
+        throw new PlatformUnavailableError(
+          "payroll_approval_payment_instruction_not_found",
+          "Payroll approval payment instructions must all exist in this tenant.",
+          404,
+        );
+      }
+
+      for (const paymentDraft of paymentDrafts) {
+        const paymentData = objectValue(paymentDraft.data);
+
+        if (paymentData.externalExecution !== "blocked" || paymentData.moneyMovement !== "blocked") {
+          throw new PlatformUnavailableError(
+            "payroll_approval_payment_instruction_unblocked",
+            "Payroll approval payment instructions must still block external execution and money movement.",
+            409,
+          );
+        }
       }
 
       const payrollRunState = payrollRunStateForDecision(input.action);
@@ -1347,7 +1582,7 @@ export async function decideApproval(input: {
 
       payrollHandoff = handoff;
 
-      await tx
+      const [updatedPayrollRun] = await tx
         .update(payrollRuns)
         .set({
           state: payrollRunState,
@@ -1358,55 +1593,92 @@ export async function decideApproval(input: {
           },
           updatedAt: now,
         })
-        .where(and(eq(payrollRuns.tenantId, operator.tenantId), eq(payrollRuns.id, payrollRun.id)));
+        .where(and(eq(payrollRuns.tenantId, operator.tenantId), eq(payrollRuns.id, payrollRun.id)))
+        .returning({ id: payrollRuns.id });
 
-      if (paymentInstructionIds.length > 0) {
-        await tx
-          .update(paymentInstructions)
-          .set({
-            state: draftState,
-            data: sql`jsonb_set(jsonb_set(jsonb_set(${paymentInstructions.data}, '{approvalDecision}', ${JSON.stringify(decision)}::jsonb, true), '{handoff}', ${JSON.stringify(handoff)}::jsonb, true), '{externalExecution}', '"blocked"'::jsonb, true)`,
-            updatedAt: now,
-          })
-          .where(
-            and(
-              eq(paymentInstructions.tenantId, operator.tenantId),
-              inArray(paymentInstructions.id, paymentInstructionIds),
-            ),
-          );
+      if (!updatedPayrollRun) {
+        throw new PlatformUnavailableError(
+          "payroll_approval_run_update_failed",
+          "Payroll approval could not update the payroll run.",
+          409,
+        );
       }
 
-      if (filingDraftId) {
-        await tx
-          .update(filingDrafts)
-          .set({
-            state: draftState,
-            data: sql`jsonb_set(jsonb_set(jsonb_set(${filingDrafts.data}, '{approvalDecision}', ${JSON.stringify(decision)}::jsonb, true), '{handoff}', ${JSON.stringify(handoff)}::jsonb, true), '{externalExecution}', '"blocked"'::jsonb, true)`,
-            updatedAt: now,
-          })
-          .where(and(eq(filingDrafts.tenantId, operator.tenantId), eq(filingDrafts.id, filingDraftId)));
+      const updatedPaymentDrafts = await tx
+        .update(paymentInstructions)
+        .set({
+          state: draftState,
+          data: sql`jsonb_set(jsonb_set(jsonb_set(${paymentInstructions.data}, '{approvalDecision}', ${JSON.stringify(decision)}::jsonb, true), '{handoff}', ${JSON.stringify(handoff)}::jsonb, true), '{externalExecution}', '"blocked"'::jsonb, true)`,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(paymentInstructions.tenantId, operator.tenantId),
+            inArray(paymentInstructions.id, paymentInstructionIds),
+          ),
+        )
+        .returning({ id: paymentInstructions.id });
+
+      if (updatedPaymentDrafts.length !== paymentInstructionIds.length) {
+        throw new PlatformUnavailableError(
+          "payroll_approval_payment_instruction_update_failed",
+          "Payroll approval could not update every payment instruction.",
+          409,
+        );
       }
 
-      if (packetId) {
-        await tx
-          .update(evidencePackets)
-          .set({
-            state: input.action,
-            data: sql`jsonb_set(jsonb_set(${evidencePackets.data}, '{approvalDecision}', ${JSON.stringify(decision)}::jsonb, true), '{handoff}', ${JSON.stringify(handoff)}::jsonb, true)`,
-            updatedAt: now,
-          })
-          .where(and(eq(evidencePackets.tenantId, operator.tenantId), eq(evidencePackets.id, packetId)));
+      const [updatedFilingDraft] = await tx
+        .update(filingDrafts)
+        .set({
+          state: draftState,
+          data: sql`jsonb_set(jsonb_set(jsonb_set(${filingDrafts.data}, '{approvalDecision}', ${JSON.stringify(decision)}::jsonb, true), '{handoff}', ${JSON.stringify(handoff)}::jsonb, true), '{externalExecution}', '"blocked"'::jsonb, true)`,
+          updatedAt: now,
+        })
+        .where(and(eq(filingDrafts.tenantId, operator.tenantId), eq(filingDrafts.id, filingDraftId)))
+        .returning({ id: filingDrafts.id });
+
+      if (!updatedFilingDraft) {
+        throw new PlatformUnavailableError(
+          "payroll_approval_filing_draft_update_failed",
+          "Payroll approval could not update the filing draft.",
+          409,
+        );
       }
 
-      if (packetDocumentId) {
-        await tx
-          .update(documents)
-          .set({
-            state: input.action,
-            data: sql`jsonb_set(jsonb_set(${documents.data}, '{approvalDecision}', ${JSON.stringify(decision)}::jsonb, true), '{handoff}', ${JSON.stringify(handoff)}::jsonb, true)`,
-            updatedAt: now,
-          })
-          .where(and(eq(documents.tenantId, operator.tenantId), eq(documents.id, packetDocumentId)));
+      const [updatedPacket] = await tx
+        .update(evidencePackets)
+        .set({
+          state: input.action,
+          data: sql`jsonb_set(jsonb_set(${evidencePackets.data}, '{approvalDecision}', ${JSON.stringify(decision)}::jsonb, true), '{handoff}', ${JSON.stringify(handoff)}::jsonb, true)`,
+          updatedAt: now,
+        })
+        .where(and(eq(evidencePackets.tenantId, operator.tenantId), eq(evidencePackets.id, packetId)))
+        .returning({ id: evidencePackets.id });
+
+      if (!updatedPacket) {
+        throw new PlatformUnavailableError(
+          "payroll_approval_packet_update_failed",
+          "Payroll approval could not update the evidence packet.",
+          409,
+        );
+      }
+
+      const [updatedPacketDocument] = await tx
+        .update(documents)
+        .set({
+          state: input.action,
+          data: sql`jsonb_set(jsonb_set(${documents.data}, '{approvalDecision}', ${JSON.stringify(decision)}::jsonb, true), '{handoff}', ${JSON.stringify(handoff)}::jsonb, true)`,
+          updatedAt: now,
+        })
+        .where(and(eq(documents.tenantId, operator.tenantId), eq(documents.id, packetDocumentId)))
+        .returning({ id: documents.id });
+
+      if (!updatedPacketDocument) {
+        throw new PlatformUnavailableError(
+          "payroll_approval_packet_document_update_failed",
+          "Payroll approval could not update the packet document.",
+          409,
+        );
       }
 
       const [payrollEvent] = await tx
@@ -1466,15 +1738,35 @@ export async function decideApproval(input: {
       .from(approvalRequests)
       .where(eq(approvalRequests.id, approval.id))
       .limit(1);
-
-    return {
-      approval: approvalRecord(updatedApproval ?? approval),
-      auditEventId: audit.id,
+    const replay: ApprovalDecisionReplay = {
       evidenceId: approvalEvidence.id,
       taskState,
       workflowRunState,
       workflowStepId,
       payrollHandoff,
+    };
+    const replayData: JsonObject = {
+      evidenceId: replay.evidenceId,
+      taskState: replay.taskState,
+      workflowRunState: replay.workflowRunState,
+      workflowStepId: replay.workflowStepId,
+      payrollHandoff: replay.payrollHandoff,
+    };
+
+    await tx
+      .update(auditEvents)
+      .set({
+        data: {
+          ...auditData,
+          replay: replayData,
+        },
+      })
+      .where(eq(auditEvents.id, audit.id));
+
+    return {
+      approval: approvalRecord(updatedApproval ?? approval),
+      auditEventId: audit.id,
+      ...replay,
     };
   });
 }

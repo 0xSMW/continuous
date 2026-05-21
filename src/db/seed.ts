@@ -77,6 +77,7 @@ const ids = {
   systemsWorker: "aaaaaaaa-aaaa-4aaa-8aaa-000000000006",
   complianceWorker: "aaaaaaaa-aaaa-4aaa-8aaa-000000000007",
   offerPricingWorker: "aaaaaaaa-aaaa-4aaa-8aaa-000000000008",
+  customerExperienceWorker: "aaaaaaaa-aaaa-4aaa-8aaa-000000000009",
   adapter: "56565656-5656-4565-8565-565656565656",
   dispatchAdapter: "56565656-5656-4565-8565-000000000002",
   financeAdapter: "56565656-5656-4565-8565-000000000003",
@@ -104,6 +105,8 @@ const ids = {
   complianceBudgetAllocation: "bbbbbbbb-bbbb-4bbb-8bbb-000000000017",
   offerPricingBudgetAccount: "bbbbbbbb-bbbb-4bbb-8bbb-000000000018",
   offerPricingBudgetAllocation: "bbbbbbbb-bbbb-4bbb-8bbb-000000000019",
+  customerExperienceBudgetAccount: "bbbbbbbb-bbbb-4bbb-8bbb-000000000020",
+  customerExperienceBudgetAllocation: "bbbbbbbb-bbbb-4bbb-8bbb-000000000021",
   systemsWorkerReadGrant: "10101010-1010-4010-8010-000000000001",
   systemsApprovalGrant: "10101010-1010-4010-8010-000000000002",
   systemsDocumentGrant: "10101010-1010-4010-8010-000000000003",
@@ -194,6 +197,7 @@ const ids = {
   workflowCashForecast: "66666666-6666-4666-8666-000000000025",
   workflowPaymentDraft: "66666666-6666-4666-8666-000000000026",
   workflowPricingMarginReview: "66666666-6666-4666-8666-000000000027",
+  workflowCustomerRecovery: "66666666-6666-4666-8666-000000000028",
   workflowOpenNewState: "66666666-6666-4666-8666-000000000009",
   workflowCompensationChange: "66666666-6666-4666-8666-000000000010",
   workflowLocationChange: "66666666-6666-4666-8666-000000000011",
@@ -279,6 +283,7 @@ const capIds = {
   marginReviewPrepare: "10000000-0000-4000-8000-000000000019",
   arFollowupDraft: "10000000-0000-4000-8000-000000000020",
   paymentDraftPrepare: "10000000-0000-4000-8000-000000000021",
+  recoveryDraft: "10000000-0000-4000-8000-000000000022",
 };
 
 const revenueExcludedCapabilityIds = new Set([
@@ -575,6 +580,39 @@ async function seed() {
           price_policy_views_generated: 0,
         },
       },
+      {
+        id: ids.customerExperienceWorker,
+        tenantId: ids.tenant,
+        managerUserId: ids.owner,
+        kind: "synthetic",
+        state: "training",
+        name: "Customer Experience Worker",
+        role: "customer_experience_operations",
+        mission:
+          "Turn customer signals, complaints, promises, testimonials, and reviews into recovery packets while customer sends stay blocked.",
+        autonomyLevel: 2,
+        scope: {
+          flows: ["customer_recovery", "signal_triage", "promise_followup", "review_response"],
+          systems: ["inbox", "helpdesk", "reviews", "booking_history"],
+        },
+        memory: {
+          customer_context: "tenant_scoped",
+          private_messages: "source_handles_only",
+        },
+        policy: {
+          external_execution: "blocked",
+          customer_send: "blocked",
+          refund: "blocked",
+          concession: "approval_required",
+          restricted_data: "redacted_by_default",
+        },
+        kpis: {
+          recovery_drafts_prepared: 0,
+          signals_triaged: 0,
+          escalation_tasks_created: 0,
+          approval_requests_created: 0,
+        },
+      },
     ])
     .onConflictDoNothing();
 
@@ -792,6 +830,18 @@ async function seed() {
         rules: { price_publish: "blocked", customer_send: "blocked", approval_required: true },
         evidence: { required: ["quote_lines", "margin_rule", "discount_policy", "source_quote_packet"] },
       },
+      {
+        id: capIds.recoveryDraft,
+        key: "recovery.draft",
+        name: "Draft customer recovery",
+        class: "draft",
+        risk: "medium",
+        sideEffect: "internal",
+        description:
+          "Prepare customer recovery drafts from source-backed signals without sending messages, issuing refunds, or promising concessions.",
+        rules: { customer_send: "blocked", refund: "blocked", approval_required: true },
+        evidence: { required: ["customer_signal", "source_refs", "recovery_draft", "approval_request"] },
+      },
     ])
     .onConflictDoNothing();
 
@@ -858,6 +908,36 @@ async function seed() {
           price_publish: "blocked",
           customer_send: "blocked",
           quote_mutation: "blocked",
+        },
+      })),
+    )
+    .onConflictDoNothing();
+
+  await db
+    .insert(capabilityGrants)
+    .values(
+      [
+        capIds.recoveryDraft,
+        capIds.approvalRequest,
+        capIds.documentPacketPrepare,
+        capIds.workerRead,
+      ].map((capabilityId) => ({
+        tenantId: ids.tenant,
+        capabilityId,
+        actorType: "worker" as const,
+        actorId: ids.customerExperienceWorker,
+        scope: {
+          tenant_id: ids.tenant,
+          objects: ["customer", "conversation", "promise", "satisfaction_signal", "complaint", "testimonial", "review"],
+        },
+        policy: {
+          mode: "review_only",
+          autonomy_level: 2,
+          external_execution: "blocked",
+          customer_send: "blocked",
+          refund: "blocked",
+          concession: "approval_required",
+          restricted_data: "redacted_by_default",
         },
       })),
     )
@@ -1227,6 +1307,14 @@ async function seed() {
         target: "worker",
         targetId: ids.systemsWorker,
       },
+      {
+        id: ids.customerExperienceBudgetAccount,
+        tenantId: ids.tenant,
+        policyId: ids.budgetPolicy,
+        name: "Customer Experience Worker monthly intelligence budget",
+        target: "worker",
+        targetId: ids.customerExperienceWorker,
+      },
     ])
     .onConflictDoNothing();
 
@@ -1301,6 +1389,15 @@ async function seed() {
         tenantId: ids.tenant,
         poolId: ids.budgetPool,
         accountId: ids.systemsBudgetAccount,
+        units: 1000000,
+        startsAt: now,
+        endsAt: nextMonth,
+      },
+      {
+        id: ids.customerExperienceBudgetAllocation,
+        tenantId: ids.tenant,
+        poolId: ids.budgetPool,
+        accountId: ids.customerExperienceBudgetAccount,
         units: 1000000,
         startsAt: now,
         endsAt: nextMonth,
@@ -2064,6 +2161,33 @@ async function seed() {
         tests: { required: ["quote_lines", "margin_rule", "discount_policy", "no_external_send"] },
       },
       {
+        id: ids.workflowCustomerRecovery,
+        key: "customer_recovery",
+        name: "Customer recovery",
+        purpose:
+          "Turn source-backed customer signals into recovery drafts, owner approvals, and no-send proof.",
+        domain: "customer_experience",
+        states: {
+          order: ["signal_open", "facts_review", "draft_prepared", "approval_pending", "ready_to_send", "blocked"],
+        },
+        transitions: {
+          signal_open: ["facts_review", "blocked"],
+          facts_review: ["draft_prepared", "blocked"],
+          draft_prepared: ["approval_pending", "blocked"],
+          approval_pending: ["ready_to_send", "blocked", "rejected"],
+        },
+        objects: { required: ["customer", "satisfaction_signal", "complaint", "recovery_draft"] },
+        approvals: {
+          required: ["customer_recovery_approval"],
+          states: { approval_pending: ["customer_recovery_approval"] },
+        },
+        evidence: {
+          packet: "customer_experience_packet",
+          required: ["customer_signal", "recovery_draft", "no_send_proof"],
+        },
+        tests: { required: ["customer_ref", "source_refs", "approval_request", "no_external_send"] },
+      },
+      {
         id: ids.workflowDailyOwnerBrief,
         key: "daily_owner_brief",
         name: "Daily owner brief",
@@ -2577,7 +2701,7 @@ async function seed() {
       objectId: ids.customerObject,
       state: "active",
       externalId: "seed-customer",
-      data: { segment: "local_field_service" },
+      data: { name: "Avery Home Services", segment: "local_field_service" },
     })
     .onConflictDoNothing();
 

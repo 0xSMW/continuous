@@ -12,7 +12,7 @@ issue refunds, alter bookings, or publish review responses.
 | Worker role | `customer_experience_operations` |
 | First outcome | Recovery draft with complaint packet, escalation task, source refs, and generated signal view |
 | Autonomy level | `2` |
-| Runtime status | Planned contract |
+| Runtime status | Runtime first slice |
 | External execution | `blocked` |
 
 ## API Shape
@@ -66,8 +66,8 @@ fields. Operation inputs and read filters stay under `config`.
 | `view: "snapshot"` payload | `worker.view` | `worker.role`, `config` | None | Read-only | Blocked |
 | `view: "signals"` payload | `worker.view` | `worker.role`, optional signal filters under `config` | None | Read-only | Blocked |
 | `recovery.draft` | `worker.command` | `config.sourceRefs`, `config.policy` | Required | Recovery draft, complaint packet, approval task, generated view | Blocked |
-| `escalation.route` | `worker.command` | `config.signalId`, `config.severity`, optional `config.sourceRefs` | Required | Escalation task and evidence only | Blocked |
-| `approval.decide` | `worker.command` | `config.approvalId`, `config.action`, optional `config.note` | None | Approval/task/workflow evidence only | Blocked |
+| `approval.decide` | `worker.command` | `config.approvalId`, `config.action`, optional `config.note` | Required | Approval/task/workflow evidence only | Blocked |
+| `escalation.route` | planned follow-up | `config.signalId`, `config.severity`, optional `config.sourceRefs` | Required | Escalation task and evidence only | Blocked |
 
 ## Core Object Map
 

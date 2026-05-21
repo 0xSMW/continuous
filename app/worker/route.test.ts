@@ -218,6 +218,84 @@ describe("/worker route", () => {
     });
   });
 
+  it("routes Customer Experience commands without a family-specific API path", async () => {
+    const commandResult = {
+      worker: {
+        role: "customer_experience_operations",
+        id: null,
+        tenantSlug: "continuous-demo",
+      },
+      command: "recovery.draft",
+      result: {
+        recoveryObjectId: "recovery-object-1",
+        externalExecution: "blocked",
+        externalSend: false,
+      },
+    };
+    mocks.executeWorkerCommand.mockResolvedValue(commandResult);
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/worker", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "recovery.draft",
+          worker: {
+            role: "customer_experience_operations",
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "customer-recovery-001",
+          config: {
+            sourceRefs: {
+              customerObjectId: "customer-object-1",
+              customerSignalObjectId: "signal-object-1",
+              evidencePacketId: "packet-1",
+            },
+            policy: {
+              tone: "calm",
+              requiresOwnerApproval: true,
+              allowExternalSend: false,
+            },
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      api: "continuous.worker.v1",
+      data: commandResult,
+      error: null,
+    });
+    expect(mocks.executeWorkerCommand).toHaveBeenCalledWith({
+      command: "recovery.draft",
+      target: {
+        role: "customer_experience_operations",
+        id: undefined,
+        tenantSlug: "continuous-demo",
+      },
+      config: {
+        sourceRefs: {
+          customerObjectId: "customer-object-1",
+          customerSignalObjectId: "signal-object-1",
+          evidencePacketId: "packet-1",
+        },
+        policy: {
+          tone: "calm",
+          requiresOwnerApproval: true,
+          allowExternalSend: false,
+        },
+      },
+      idempotencyKey: "customer-recovery-001",
+      operatorEmail: "operator@example.com",
+    });
+  });
+
   it("routes payment-link preparation through the canonical worker envelope", async () => {
     const commandResult = {
       worker: {

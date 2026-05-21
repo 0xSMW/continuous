@@ -66,7 +66,7 @@ inputs and read filters stay under `config`.
 | `view: "snapshot"` payload | `worker.view` | `worker.role`, `config` | None | Read-only | Blocked |
 | `view: "price_policy"` payload | `worker.view` | `worker.role`, optional `config.quoteObjectId`, optional `config.priceBookId` | None | Read-only | Blocked |
 | `margin.review.prepare` | `worker.command` | `config.sourceRefs.quoteObjectId`, `config.sourceRefs.evidencePacketId`, and `config.policy` | Required | Margin verdict, discount approval packet, generated view, audit/evidence | Blocked |
-| `approval.decide` | `worker.command` | `config.approvalId`, `config.action`, optional `config.note` | None | Approval/task/workflow evidence only | Blocked |
+| `approval.decide` | `worker.command` | `config.approvalId`, `config.action`, optional `config.note` | Required | Approval/task/workflow evidence only | Blocked |
 
 ## Core Object Map
 

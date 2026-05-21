@@ -65,7 +65,7 @@ const contracts = [
     path: "docs/customer-experience-worker-v1-contract.md",
     role: "customer_experience_operations",
     evidencePacket: "customer_experience_packet",
-    runtime: false,
+    runtime: true,
   },
   {
     path: "docs/asset-supply-worker-v1-contract.md",
@@ -757,12 +757,6 @@ describe("future worker contracts", () => {
         (command) => command.role === "vertical_packages" && command.name === "package.flow.prepare",
       )?.configSchema.required,
     ).toEqual(["packageKey", "sourceRefs", "policy"]);
-    expect(
-      plannedWorkerCommands().find(
-        (command) =>
-          command.role === "customer_experience_operations" && command.name === "recovery.draft",
-      )?.configSchema.properties?.sourceRefs.required,
-    ).toEqual(["customerObjectId", "customerSignalObjectId", "evidencePacketId"]);
     expect(
       plannedWorkerCommands().find(
         (command) => command.role === "asset_supply_operations" && command.name === "reorder.plan",

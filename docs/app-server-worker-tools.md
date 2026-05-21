@@ -36,6 +36,10 @@ packet; live provider payment-link creation and money movement remain blocked.
 Deploy smoke also exercises Offer and Pricing `margin.review.prepare` plus the
 `price_policy` view through `POST /app-server`, proving a post-Revenue worker
 can use the same dynamic-tool envelope without a worker-specific route.
+Customer Experience `recovery.draft` and `signals` are runtime-registered the
+same way: customer, signal, evidence, channel, and no-send policy selectors
+live under `config`, while the app-server tool still sends only `command`,
+`worker`, `idempotencyKey`, and `config`.
 Revenue `readiness` is exposed through `continuous.worker.view` with the same
 `view`, `worker`, and `config` payload as `/worker`; it returns dry-run launch
 checks, latest quote-review proof refs, and live credential blockers without a
@@ -79,10 +83,10 @@ packets, approval requests, workflow/budget/audit proof, and keeps agency
 submission and legal advice blocked. Obligation scan, notice response, license
 renewal, evidence binder export, live credentials, broader rule sources, and
 receipt capture remain follow-ups.
-Customer Experience, Asset and Supply, Growth, and Vertical Packaged Worker
-contracts are discoverable as planned future-worker metadata. Their first
-commands still use `/worker`, keep operation inputs under `config`, and remain
-non-executable until runtime handlers are registered.
+Asset and Supply, Growth, and Vertical Packaged Worker contracts are
+discoverable as planned future-worker metadata. Their first commands still use
+`/worker`, keep operation inputs under `config`, and remain non-executable
+until runtime handlers are registered.
 
 ```sh
 export WORKER_OPERATOR_EMAIL=owner@continuoushq.com

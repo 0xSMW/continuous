@@ -219,7 +219,9 @@ Direct `transition` commands require an idempotency key, record a durable
 state-transition fields, replay matching retries, return a conflict for the
 same key with different input, write events, audit events, and transition
 evidence, and create a pending approval packet when a definition moves into an
-approval state. `steps.execute` claims queued,
+approval state. `approval.decide` follows the same replay contract: matching
+decision retries return the stored proof and changed decision input conflicts
+before advancing the workflow. `steps.execute` claims queued,
 retryable failed, or expired leased steps, runs generic transition-style
 handlers, advances valid transitions, records event/audit/evidence proof on
 completion, and leaves failed work on the same step ledger with retry metadata.
@@ -276,6 +278,7 @@ Workflow approvals use the same platform approval ledger as worker approvals:
 ```
 
 `GET /workflow?view=approvals` lists workflow-scoped approvals only. A workflow
-approval decision writes approval evidence and an audit event; when the
-definition allows `awaiting_approval -> approved`, an approved decision advances
-the run to `approved`.
+approval decision writes approval evidence and an audit event; matching retries
+return the stored decision proof, changed retries fail, and when the definition
+allows `awaiting_approval -> approved`, an approved decision advances the run to
+`approved`.

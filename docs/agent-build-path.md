@@ -40,7 +40,7 @@ Useful app surfaces for worker development:
 | `/core` | Operator-gated, tenant-scoped persisted primitive summary |
 | `POST /core` | Canonical Core command surface with `command`, `core`, `config`, and `idempotencyKey` payload fields for tasks, task transitions, workers, entity setup, approvals, capability grants, budget ledger operations, objects, object links, events, evidence, documents, packets, decisions, generated views, adapter intents, rule changes, customer signals, and payroll preview artifacts |
 | `/approval?view=inbox` | Shared operator-gated approval inbox across Core, workflow, and worker subjects |
-| `POST /approval` | Shared approval decision surface with `command`, explicit `approval.subject`, and `config` payload fields |
+| `POST /approval` | Shared approval decision surface with `command`, top-level `idempotencyKey`, explicit `approval.subject`, and `config` payload fields |
 | `POST /worker` with `view`, `worker`, and `config` | Canonical operator-gated worker read surface |
 | `POST /worker` with `command`, `worker`, `config`, and `idempotencyKey` | Canonical worker command surface |
 | `POST /app-server` with `tool`, `arguments`, `callId`, `threadId`, and `turnId` | Authenticated generic dynamic-tool bridge; worker command/view payloads stay under `arguments` and route through the `/worker` registry |

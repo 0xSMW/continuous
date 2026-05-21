@@ -62,7 +62,7 @@ inputs and read filters stay under `config`.
 | `data_quality.remediate` | `worker.command` | `config.issueId`, `config.policy` | Required | Proposed object updates and evidence | Dry-run |
 | `permission.review` | `worker.command` | `config.connectionId` or `config.grantId` | Required | Permission audit packet | Blocked |
 | `automation.plan` | `worker.command` | `config.workflowKey`, `config.trigger` | Required | Automation proposal only | Blocked |
-| `approval.decide` | `worker.command` | `config.approvalId`, `config.action`, optional `config.note` | None | Approval/task/workflow evidence only | Blocked |
+| `approval.decide` | `worker.command` | `config.approvalId`, `config.action`, optional `config.note` | Required | Approval/task/workflow evidence only | Blocked |
 
 ## Runtime Posture
 

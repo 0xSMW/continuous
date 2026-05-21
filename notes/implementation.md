@@ -28,6 +28,8 @@
 | Hardened the worker API contract | Route-level tests now assert the generic `/worker` payload envelope, body `idempotencyKey` precedence, GET selector mapping, and malformed command config rejection |
 | Removed worker idempotency header fallback | `POST /worker` now treats the payload `idempotencyKey` as the only command idempotency source; `idempotency-key` headers no longer bypass the canonical command envelope |
 | Removed Core and workflow idempotency header fallback | `POST /core` and `POST /workflow` now treat the payload `idempotencyKey` as the only command idempotency source, keeping command identity inside the canonical envelope |
+| Made approval decisions idempotent | `/approval`, `/workflow`, and worker `approval.decide` commands now require payload idempotency keys, replay matching decisions from stored audit/evidence proof, and reject changed decision input before state changes |
+| Made payroll approval application fail closed | Payroll approval decisions now require packet, packet document, filing draft, and payment instruction refs to exist, match, and remain blocked before any payroll handoff or applied audit proof is written |
 | Tightened control-plane command examples | Local/deploy docs and host credential attestation now use exact route-qualified `allowedCommands` lists instead of route-wide command wildcards |
 | Reasserted generic worker URL shape | Contract tests now generically classify any worker-family URL shape as non-canonical; worker families must use `/worker` with structured command/read envelopes instead of adding family-specific routes |
 | Closed worker URL naming escape hatches | Contract tests now reject both hyphenated and underscored worker-family API names, keeping role naming in payload selectors instead of route names |
@@ -377,6 +379,14 @@ pricing-margin workflow definition, quote-line fixture, margin rule, discount
 policy, source quote evidence packet, runtime handler, integration test, and
 deploy app-server smoke. The public view name is `price_policy`, and all
 operation-specific inputs stay under `config`.
+
+Customer Experience is now a runtime worker family, not just a planned catalog
+candidate. Its first slice is `worker.role=customer_experience_operations`,
+`command=recovery.draft`, and `view: "signals"` on `/worker`, consuming
+`customer.signal_to_experience` Core refs and writing recovery objects,
+packet/document/evidence, approval, workflow steps, generated `customer.signals`
+view, budget, and audit proof while customer sends, refunds, concessions, and
+review publishing stay blocked.
 
 Managed control-plane credential inventory now fails closed when durable
 tenant, route, access, command, or worker-role scope lists are omitted or empty.

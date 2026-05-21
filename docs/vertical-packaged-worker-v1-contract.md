@@ -66,7 +66,7 @@ fields. Operation inputs and read filters stay under `config`.
 | `view: "snapshot"` payload | `worker.view` | `worker.role`, `config` | None | Read-only | Blocked |
 | `view: "package_readiness"` payload | `worker.view` | `worker.role`, `config.packageKey` | None | Read-only | Blocked |
 | `package.flow.prepare` | `worker.command` | `config.packageKey`, `config.sourceRefs`, `config.policy` | Required | Package readiness packet, family flow plan, generated view, approval task | Blocked |
-| `approval.decide` | `worker.command` | `config.approvalId`, `config.action`, optional `config.note` | None | Approval/task/workflow evidence only | Blocked |
+| `approval.decide` | `worker.command` | `config.approvalId`, `config.action`, optional `config.note` | Required | Approval/task/workflow evidence only | Blocked |
 
 ## Core Object Map
 

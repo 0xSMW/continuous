@@ -66,7 +66,7 @@ inputs and read filters stay under `config`.
 | `view: "campaigns"` payload | `worker.view` | `worker.role`, optional campaign filters under `config` | None | Read-only | Blocked |
 | `campaign.draft` | `worker.command` | `config.sourceRefs`, `config.policy` | Required | Campaign draft, claim packet, approval task, generated view | Blocked |
 | `attribution.review` | `worker.command` | `config.campaignId`, `config.window`, optional `config.sourceRefs` | Required | Attribution packet and ROI review only | Blocked |
-| `approval.decide` | `worker.command` | `config.approvalId`, `config.action`, optional `config.note` | None | Approval/task/workflow evidence only | Blocked |
+| `approval.decide` | `worker.command` | `config.approvalId`, `config.action`, optional `config.note` | Required | Approval/task/workflow evidence only | Blocked |
 
 ## Core Object Map
 

@@ -32,9 +32,9 @@ const runtimeContractRoles = [
   "compliance_operations",
   "systems_operations",
   "offer_pricing_operations",
+  "customer_experience_operations",
 ];
 const plannedContractRoles = [
-  "customer_experience_operations",
   "asset_supply_operations",
   "growth_operations",
   "vertical_packages",
@@ -719,7 +719,7 @@ describe("worker tool contract", () => {
         expect.objectContaining({
           role: "compliance_operations",
           name: "approval.decide",
-          idempotency: "none",
+          idempotency: "required",
           requiresTenant: true,
           externalExecution: "blocked",
         }),
@@ -1059,6 +1059,21 @@ describe("worker tool contract", () => {
     expect(workerToolSchema.registry.commands).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
+          role: "customer_experience_operations",
+          name: "recovery.draft",
+          apiRoute: "/worker",
+          configSchema: expect.objectContaining({
+            required: ["sourceRefs", "policy"],
+            properties: expect.objectContaining({
+              sourceRefs: expect.objectContaining({
+                required: ["customerObjectId", "customerSignalObjectId", "evidencePacketId"],
+              }),
+              policy: expect.objectContaining({ type: "object" }),
+            }),
+            additionalProperties: false,
+          }),
+        }),
+        expect.objectContaining({
           role: "offer_pricing_operations",
           name: "margin.review.prepare",
           apiRoute: "/worker",
@@ -1089,6 +1104,18 @@ describe("worker tool contract", () => {
     );
     expect(workerToolSchema.registry.views).toEqual(
       expect.arrayContaining([
+        expect.objectContaining({
+          role: "customer_experience_operations",
+          name: "signals",
+          apiRoute: "/worker",
+          configSchema: expect.objectContaining({
+            properties: expect.objectContaining({
+              state: expect.objectContaining({ type: "string" }),
+              severity: expect.objectContaining({ type: "string" }),
+            }),
+            additionalProperties: false,
+          }),
+        }),
         expect.objectContaining({
           role: "offer_pricing_operations",
           name: "snapshot",
@@ -1128,20 +1155,18 @@ describe("worker tool contract", () => {
         (view) => view.role === "systems_operations",
       ),
     ).toBe(false);
+    expect(
+      workerToolSchema.registry.plannedFutureWorkerCommands.some(
+        (command) => command.role === "customer_experience_operations",
+      ),
+    ).toBe(false);
+    expect(
+      workerToolSchema.registry.plannedFutureWorkerViews.some(
+        (view) => view.role === "customer_experience_operations",
+      ),
+    ).toBe(false);
     expect(workerToolSchema.registry.plannedFutureWorkerCommands).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({
-          role: "customer_experience_operations",
-          name: "recovery.draft",
-          apiRoute: "/worker",
-          configSchema: expect.objectContaining({
-            required: ["sourceRefs", "policy"],
-            properties: expect.objectContaining({
-              sourceRefs: expect.objectContaining({ type: "object" }),
-              policy: expect.objectContaining({ type: "object" }),
-            }),
-          }),
-        }),
         expect.objectContaining({
           role: "asset_supply_operations",
           name: "reorder.plan",
@@ -1209,7 +1234,6 @@ describe("worker tool contract", () => {
       }
     }
     for (const command of [
-      ["customer_experience_operations", "recovery.draft"],
       ["asset_supply_operations", "reorder.plan"],
       ["growth_operations", "campaign.draft"],
       ["vertical_packages", "package.flow.prepare"],
@@ -1455,7 +1479,7 @@ describe("worker tool contract", () => {
         workerRole: "customer_experience_operations",
         firstCommand: "recovery.draft",
         firstView: "signals",
-        status: "candidate",
+        status: "runtime",
         contractPath: "docs/customer-experience-worker-v1-contract.md",
         evidencePacket: "customer_experience_packet",
       }),
@@ -2095,6 +2119,7 @@ describe("worker tool contract", () => {
           role: "revenue_operations",
           tenantSlug: "continuous-demo",
         },
+        idempotencyKey: "approval-decide-config-001",
         config: "approval-id",
       }),
     ).rejects.toThrow("config is required and must be an object.");
@@ -2289,6 +2314,7 @@ describe("worker tool contract", () => {
           role: "revenue_operations",
           tenantSlug: "continuous-demo",
         },
+        idempotencyKey: "approval-decide-app-server-schema-001",
         config: {
           approvalId: "approval-1",
         },

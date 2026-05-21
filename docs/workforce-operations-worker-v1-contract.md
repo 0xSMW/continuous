@@ -47,7 +47,7 @@ handlers are implemented.
 | `view: "snapshot"` payload | `worker.view` | `worker.role`, `config` | None | Read-only | Blocked |
 | `hire.packet.prepare` | `worker.command` | `config.personId`, `config.positionId`, `config.workLocationId` | Required | Packet, document checklist, approval request | Blocked |
 | `payroll_input.prepare` | `worker.command` | `config.employmentId`, `config.period` | Required | Payroll input packet plus Core `payroll.preview.record` and `payroll.preview.packet.prepare` handoff | Dry-run |
-| `approval.decide` | `worker.command` | `config.approvalId`, `config.action`, optional `config.note` | None | Approval/task/workflow evidence only | Blocked |
+| `approval.decide` | `worker.command` | `config.approvalId`, `config.action`, optional `config.note` | Required | Approval/task/workflow evidence only | Blocked |
 
 ### Planned Follow-Up
 

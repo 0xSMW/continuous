@@ -183,8 +183,8 @@ registered behind one shared worker surface:
 | `GET /core?tenantSlug=...` | Tenant-scoped Core summary for active tasks, recent events, approvals, workers, capabilities, graph counts, and ledger counts |
 | `POST /worker` with payload `view: "snapshot"` | Operator-only snapshot of worker state, active tasks, controls, budget usage, and recent events |
 | `POST /worker` with payload `view: "approvals"` | Operator-only approval queue for worker decisions |
-| `POST /worker` | Canonical worker command surface for Revenue `lead.read`, `lead.classify`, `response.draft`, `quote.prepare`, `payment_link.prepare`, `run`, `continue`, `approval.decide`, `adapters.reconcile`, and `adapters.retry`; Owner `brief.generate`, `decision_queue.prepare`, `anomaly.triage`, `approval.decide`, and `continue`; Dispatch `schedule.propose`, `customer_update.draft`, `closeout.prepare`, and `exception.route`; Finance `invoice.prepare`, `ar_followup.draft`, `cash_forecast.generate`, and `payment_draft.prepare`; Workforce `hire.packet.prepare` and `payroll_input.prepare`; Compliance `filing.prepare`; and Systems `connector.health.scan`, `sync.repair.plan`, `data_quality.remediate`, `permission.review`, and `automation.plan`; invalid credentials fail before body reads, command bodies are capped at 1 MiB, and worker role, tenant selection, idempotency, and operation config live in structured payload fields |
-| `/approval` | Shared operator approval inbox and decision surface across Core, workflow, and worker subjects; `POST /approval` uses auth-before-body, 1 MiB bounded command reads, and structured `approval` / `config` payloads |
+| `POST /worker` | Canonical worker command surface for Revenue `lead.read`, `lead.classify`, `response.draft`, `quote.prepare`, `payment_link.prepare`, `run`, `continue`, `approval.decide`, `adapters.reconcile`, and `adapters.retry`; Owner `brief.generate`, `decision_queue.prepare`, `anomaly.triage`, `approval.decide`, and `continue`; Dispatch `schedule.propose`, `customer_update.draft`, `closeout.prepare`, and `exception.route`; Finance `invoice.prepare`, `ar_followup.draft`, `cash_forecast.generate`, and `payment_draft.prepare`; Workforce `hire.packet.prepare` and `payroll_input.prepare`; Compliance `filing.prepare`; Systems `connector.health.scan`, `sync.repair.plan`, `data_quality.remediate`, `permission.review`, and `automation.plan`; Offer and Pricing `margin.review.prepare`; and Customer Experience `recovery.draft`; invalid credentials fail before body reads, command bodies are capped at 1 MiB, and worker role, tenant selection, idempotency, and operation config live in structured payload fields |
+| `/approval` | Shared operator approval inbox and decision surface across Core, workflow, and worker subjects; `POST /approval` uses auth-before-body, 1 MiB bounded command reads, top-level idempotency keys for decision replay, and structured `approval` / `config` payloads |
 | `/workflow` | Canonical workflow command surface for listing definitions/runs/steps and executing validated `start` / `transition` / `steps.execute` / `approval.decide` commands; `POST /workflow` uses auth-before-body, 1 MiB bounded command reads, top-level idempotency keys for mutation replay boundaries, and structured `workflow` / `config` payloads |
 | `/workflow?view=approvals` | Operator-only approval queue for workflow decisions backed by the shared approval service |
 | `worker-scheduler` | Internal production runner that calls the same `/workflow` and `/worker` command envelopes to drain workflow steps, poll Revenue lead sources through `command=lead.read`, hand returned selectors to `command=run`, and run Revenue adapter retry/reconciliation work |
@@ -198,9 +198,11 @@ route names per worker.
 Approvals are platform records, not worker-specific records. Core, worker, and
 workflow approvals share `approval_requests`, `audit_events`, and evidence;
 `/approval` lists and decides those shared records with auth-before-body POST
-handling plus structured `approval` and `config` payloads. Decision calls must send an explicit `approval.subject`
-of `core`, `worker`, `workflow`, or `task`; `all` is only an inbox filter, never
-a decision subject.
+handling plus structured `approval` and `config` payloads. Decision calls must
+send an explicit top-level `idempotencyKey` plus `approval.subject` of `core`,
+`worker`, `workflow`, or `task`; `all` is only an inbox filter, never a decision
+subject. Matching retries return the stored decision/evidence ids, while changed
+subject/action/note/target input fails before state changes.
 
 `command=lead.read` accepts direct source records or a read-only active
 connection reference, including scheduler-triggered API polling when the
@@ -272,8 +274,10 @@ evidence, workflow output, and task outcome through the same workflow ledger.
 reports, pay statement documents, an approval packet, approval request, and
 blocked funding/tax handoff drafts. A shared approval decision applies the
 payroll outcome to the payroll run, funding drafts, tax draft, filing draft,
-packet document, evidence packet, audit trail, and handoff metadata while
-external execution, submission, and money movement remain blocked. Every
+packet document, evidence packet, audit trail, and handoff metadata only after
+every referenced artifact is present, linked, tenant-scoped, and still blocked;
+otherwise the transaction rolls back before any applied proof is written.
+External execution, submission, and money movement remain blocked. Every
 `external_action.record` captures receipt/outcome facts for payment
 instructions, payments, and filing drafts after a human or adapter-controlled
 process produces a result; it updates the Core target state and writes receipt

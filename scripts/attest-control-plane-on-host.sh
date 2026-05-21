@@ -72,6 +72,8 @@ CONTROL_PLANE_ALLOWED_COMMANDS_JSON='[
   "worker:filing.prepare",
   "worker:margin.review.prepare",
   "worker:view.price_policy",
+  "worker:recovery.draft",
+  "worker:view.signals",
   "worker:continue",
   "worker:approval.decide",
   "worker:adapters.reconcile",
@@ -115,6 +117,8 @@ CONTROL_PLANE_ALLOWED_COMMANDS_JSON='[
   "app_server:worker.command.filing.prepare",
   "app_server:worker.command.margin.review.prepare",
   "app_server:worker.view.price_policy",
+  "app_server:worker.command.recovery.draft",
+  "app_server:worker.view.signals",
   "app_server:worker.command.continue",
   "app_server:worker.command.approval.decide",
   "app_server:worker.command.adapters.reconcile",
@@ -222,7 +226,8 @@ BOOTSTRAP_PAYLOAD="$(
           "workforce_operations",
           "compliance_operations",
           "systems_operations",
-          "offer_pricing_operations"
+          "offer_pricing_operations",
+          "customer_experience_operations"
         ],
         allowedRoutes: ["core", "worker", "workflow", "approval", "app_server"],
         allowedAccess: ["read", "write"],

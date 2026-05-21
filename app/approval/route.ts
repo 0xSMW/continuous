@@ -9,6 +9,7 @@ import { env } from "../../src/env";
 import {
   authorizeControlPlaneAccess,
   authorizeControlPlaneScope,
+  normalizeIdempotencyKey,
 } from "../../src/worker/security";
 import {
   authorizeManagedControlPlaneCredential,
@@ -445,6 +446,7 @@ export async function POST(request: Request) {
   if (command === "approval.decide") {
     const approvalId = optionalString(approval.id);
     const action = normalizeApprovalDecision(config.action);
+    const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
 
     if (!approvalId || !action) {
       return errorResponse(
@@ -466,9 +468,20 @@ export async function POST(request: Request) {
       );
     }
 
+    if (!idempotency.ok) {
+      return errorResponse(
+        {
+          code: "invalid_approval_decision",
+          message: idempotency.message,
+        },
+        400,
+      );
+    }
+
     try {
       const result = await decideApproval({
         approvalId,
+        idempotencyKey: idempotency.key,
         operatorEmail: auth.operatorEmail,
         tenantSlug,
         action,

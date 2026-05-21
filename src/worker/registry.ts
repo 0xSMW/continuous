@@ -65,6 +65,12 @@ import {
   prepareOfferPricingMarginReview,
 } from "./offer-pricing";
 import {
+  customerExperienceWorkerRole,
+  getCustomerExperienceWorkerSnapshotSafe,
+  listCustomerExperienceSignals,
+  prepareCustomerRecoveryDraft,
+} from "./customer-experience";
+import {
   getSystemsRepairs,
   getSystemsWorkerSnapshotSafe,
   planSystemsAutomation,
@@ -904,6 +910,57 @@ const offerPricingPricePolicyViewConfig: WorkerConfigSchema = {
   },
   additionalProperties: false,
 };
+const customerExperienceSourceRefsConfig: WorkerConfigSchema = {
+  type: "object",
+  required: ["customerObjectId", "customerSignalObjectId", "evidencePacketId"],
+  properties: {
+    customerObjectId: { type: "string" },
+    customerSignalObjectId: { type: "string" },
+    customerSignalId: { type: "string" },
+    signalObjectId: { type: "string" },
+    signalId: { type: "string" },
+    conversationObjectId: { type: "string" },
+    promiseObjectId: { type: "string" },
+    reviewObjectId: { type: "string" },
+    evidencePacketId: { type: "string" },
+    eventId: { type: "string" },
+    sourceEvidenceIds: {
+      type: "array",
+      items: { type: "string" },
+    },
+  },
+  additionalProperties: false,
+};
+const customerExperienceRecoveryConfig: WorkerConfigSchema = {
+  type: "object",
+  required: ["sourceRefs", "policy"],
+  properties: {
+    sourceRefs: customerExperienceSourceRefsConfig,
+    policy: {
+      type: "object",
+      properties: {
+        tone: { type: "string" },
+        channel: { type: "string" },
+        requiresOwnerApproval: { type: "boolean" },
+        allowExternalSend: { type: "boolean" },
+        blockers: {
+          type: "array",
+          items: { type: "string" },
+        },
+      },
+      additionalProperties: true,
+    },
+  },
+  additionalProperties: false,
+};
+const customerExperienceSignalsViewConfig: WorkerConfigSchema = {
+  type: "object",
+  properties: {
+    state: { type: "string" },
+    severity: { type: "string" },
+  },
+  additionalProperties: false,
+};
 const systemsConnectorHealthConfig: WorkerConfigSchema = {
   type: "object",
   required: ["checks"],
@@ -1217,7 +1274,7 @@ const revenueDefinition: WorkerDefinition = {
     "approval.decide": {
       name: "approval.decide",
       description: "Decide a worker approval request without executing external actions.",
-      idempotency: "none",
+      idempotency: "required",
       sideEffects: "internal",
       externalExecution: "blocked",
       requiresTenant: true,
@@ -1248,6 +1305,7 @@ const revenueDefinition: WorkerDefinition = {
 
         return decideApproval({
           approvalId,
+          idempotencyKey: context.idempotencyKey!,
           operatorEmail: context.operatorEmail,
           tenantSlug: context.target.tenantSlug,
           action,
@@ -1484,7 +1542,7 @@ const financeDefinition: WorkerDefinition = {
     "approval.decide": {
       name: "approval.decide",
       description: "Decide a finance approval request without executing external sends or money movement.",
-      idempotency: "none",
+      idempotency: "required",
       sideEffects: "internal",
       externalExecution: "blocked",
       requiresTenant: true,
@@ -1515,6 +1573,7 @@ const financeDefinition: WorkerDefinition = {
 
         return decideApproval({
           approvalId,
+          idempotencyKey: context.idempotencyKey!,
           operatorEmail: context.operatorEmail,
           tenantSlug: context.target.tenantSlug,
           action,
@@ -1604,7 +1663,7 @@ const offerPricingDefinition: WorkerDefinition = {
     "approval.decide": {
       name: "approval.decide",
       description: "Record pricing approval decisions without external execution.",
-      idempotency: "none",
+      idempotency: "required",
       sideEffects: "internal",
       externalExecution: "blocked",
       requiresTenant: true,
@@ -1635,6 +1694,7 @@ const offerPricingDefinition: WorkerDefinition = {
 
         return decideApproval({
           approvalId,
+          idempotencyKey: context.idempotencyKey!,
           operatorEmail: context.operatorEmail,
           tenantSlug: context.target.tenantSlug,
           action,
@@ -1717,6 +1777,126 @@ const workerDefinitions: Record<string, WorkerDefinition> = {
   [revenueDefinition.role]: revenueDefinition,
   [financeDefinition.role]: financeDefinition,
   [offerPricingDefinition.role]: offerPricingDefinition,
+  [customerExperienceWorkerRole]: {
+    role: customerExperienceWorkerRole,
+    commands: {
+      "recovery.draft": {
+        name: "recovery.draft",
+        description: "Prepare a source-backed customer recovery draft and complaint packet without sending externally.",
+        idempotency: "required",
+        sideEffects: "internal",
+        externalExecution: "blocked",
+        requiresTenant: true,
+        configSchema: customerExperienceRecoveryConfig,
+        async handle(context) {
+          if (!context.idempotencyKey) {
+            throw new PlatformUnavailableError(
+              "invalid_idempotency_key",
+              "A string idempotency key is required.",
+              400,
+            );
+          }
+
+          return prepareCustomerRecoveryDraft({
+            idempotencyKey: context.idempotencyKey,
+            tenantSlug: context.target.tenantSlug,
+            workerId: context.target.workerId,
+            operatorEmail: context.operatorEmail,
+            config: context.config,
+          });
+        },
+      },
+      "approval.decide": {
+        name: "approval.decide",
+        description: "Decide a customer-experience approval request without executing external actions.",
+        idempotency: "required",
+        sideEffects: "internal",
+        externalExecution: "blocked",
+        requiresTenant: true,
+        configSchema: {
+          type: "object",
+          required: ["approvalId", "action"],
+          properties: {
+            approvalId: { type: "string" },
+            action: {
+              type: "string",
+              enum: ["approved", "rejected", "revision_requested"],
+            },
+            note: { type: "string" },
+          },
+          additionalProperties: true,
+        },
+        async handle(context) {
+          const approvalId = optionalString(context.config.approvalId);
+          const action = normalizeApprovalDecision(context.config.action);
+
+          if (!approvalId || !action) {
+            throw new PlatformUnavailableError(
+              "invalid_worker_command_config",
+              "config.approvalId and config.action are required for approval.decide.",
+              400,
+            );
+          }
+
+          return decideApproval({
+            approvalId,
+            idempotencyKey: context.idempotencyKey!,
+            operatorEmail: context.operatorEmail,
+            tenantSlug: context.target.tenantSlug,
+            action,
+            note: optionalString(context.config.note),
+            subject: "worker",
+          });
+        },
+      },
+    },
+    views: {
+      snapshot: {
+        name: "snapshot",
+        description: "Read the Customer Experience Worker runtime snapshot.",
+        configSchema: emptyViewConfig,
+        async handle(context) {
+          const result = await getCustomerExperienceWorkerSnapshotSafe({
+            tenantSlug: context.target.tenantSlug,
+            workerId: context.target.workerId,
+            role: context.target.role,
+          });
+
+          return {
+            status: result.ok ? 200 : 500,
+            data: {
+              worker: responseTarget(context.target),
+              view: "snapshot",
+              snapshot: result.snapshot,
+            },
+            error: result.error,
+          };
+        },
+      },
+      signals: {
+        name: "signals",
+        description: "Read customer signals, recovery drafts, approvals, and no-send blockers.",
+        configSchema: customerExperienceSignalsViewConfig,
+        async handle(context) {
+          const signals = await listCustomerExperienceSignals({
+            tenantSlug: context.target.tenantSlug,
+            workerId: context.target.workerId,
+            operatorEmail: context.operatorEmail,
+            config: context.config,
+          });
+
+          return {
+            data: {
+              worker: responseTarget(context.target),
+              view: "signals",
+              signals,
+            },
+            error: null,
+          };
+        },
+      },
+    },
+  },
   [workforceWorkerRole]: {
     role: workforceWorkerRole,
     commands: {
@@ -1775,7 +1955,7 @@ const workerDefinitions: Record<string, WorkerDefinition> = {
       "approval.decide": {
         name: "approval.decide",
         description: "Decide a workforce approval request without executing external actions.",
-        idempotency: "none",
+        idempotency: "required",
         sideEffects: "internal",
         externalExecution: "blocked",
         requiresTenant: true,
@@ -1806,6 +1986,7 @@ const workerDefinitions: Record<string, WorkerDefinition> = {
 
           return decideApproval({
             approvalId,
+            idempotencyKey: context.idempotencyKey!,
             operatorEmail: context.operatorEmail,
             tenantSlug: context.target.tenantSlug,
             action,
@@ -1893,7 +2074,7 @@ const workerDefinitions: Record<string, WorkerDefinition> = {
       "approval.decide": {
         name: "approval.decide",
         description: "Decide a compliance approval request without agency submission.",
-        idempotency: "none",
+        idempotency: "required",
         sideEffects: "internal",
         externalExecution: "blocked",
         requiresTenant: true,
@@ -1924,6 +2105,7 @@ const workerDefinitions: Record<string, WorkerDefinition> = {
 
           return decideApproval({
             approvalId,
+            idempotencyKey: context.idempotencyKey!,
             operatorEmail: context.operatorEmail,
             tenantSlug: context.target.tenantSlug,
             action,
@@ -2138,7 +2320,7 @@ const workerDefinitions: Record<string, WorkerDefinition> = {
       "approval.decide": {
         name: "approval.decide",
         description: "Decide a systems approval request without executing external actions.",
-        idempotency: "none",
+        idempotency: "required",
         sideEffects: "internal",
         externalExecution: "blocked",
         requiresTenant: true,
@@ -2169,6 +2351,7 @@ const workerDefinitions: Record<string, WorkerDefinition> = {
 
           return decideApproval({
             approvalId,
+            idempotencyKey: context.idempotencyKey!,
             operatorEmail: context.operatorEmail,
             tenantSlug: context.target.tenantSlug,
             action,
@@ -2335,7 +2518,7 @@ const workerDefinitions: Record<string, WorkerDefinition> = {
       "approval.decide": {
         name: "approval.decide",
         description: "Decide an owner worker approval request without executing external actions.",
-        idempotency: "none",
+        idempotency: "required",
         sideEffects: "internal",
         externalExecution: "blocked",
         requiresTenant: true,
@@ -2366,6 +2549,7 @@ const workerDefinitions: Record<string, WorkerDefinition> = {
 
           return decideApproval({
             approvalId,
+            idempotencyKey: context.idempotencyKey!,
             operatorEmail: context.operatorEmail,
             tenantSlug: context.target.tenantSlug,
             action,
@@ -2597,7 +2781,7 @@ const workerDefinitions: Record<string, WorkerDefinition> = {
       "approval.decide": {
         name: "approval.decide",
         description: "Decide a dispatch approval request without executing external actions.",
-        idempotency: "none",
+        idempotency: "required",
         sideEffects: "internal",
         externalExecution: "blocked",
         requiresTenant: true,
@@ -2628,6 +2812,7 @@ const workerDefinitions: Record<string, WorkerDefinition> = {
 
           return decideApproval({
             approvalId,
+            idempotencyKey: context.idempotencyKey!,
             operatorEmail: context.operatorEmail,
             tenantSlug: context.target.tenantSlug,
             action,

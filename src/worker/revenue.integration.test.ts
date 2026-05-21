@@ -1624,8 +1624,10 @@ maybeDescribe("Revenue Worker integration eval", () => {
       status: 409,
     });
 
+    const approvalDecisionIdempotencyKey = `ci-payroll-approval-decision-${runId}`;
     const decision = await decideApproval({
       approvalId: first.approvalRequestId ?? "",
+      idempotencyKey: approvalDecisionIdempotencyKey,
       operatorEmail: "owner@continuoushq.com",
       tenantSlug: "continuous-demo",
       action: "approved",
@@ -1705,6 +1707,115 @@ maybeDescribe("Revenue Worker integration eval", () => {
     );
     expect(handoffEvent?.source).toBe("continuous.approvals");
     expect(handoffAudit?.risk).toBe("high");
+
+    const replayedDecision = await decideApproval({
+      approvalId: first.approvalRequestId ?? "",
+      idempotencyKey: approvalDecisionIdempotencyKey,
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      action: "approved",
+      note: "CI payroll preview approval; execution remains blocked.",
+      subject: "core",
+      db,
+    });
+    const [decisionAuditCount] = await db
+      .select({ value: count() })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.source, "continuous.approvals"),
+          eq(auditEvents.idempotencyKey, `${approvalDecisionIdempotencyKey}:approval_decided`),
+        ),
+      );
+
+    expect(replayedDecision.auditEventId).toBe(decision.auditEventId);
+    expect(replayedDecision.evidenceId).toBe(decision.evidenceId);
+    expect(objectValue(replayedDecision.payrollHandoff).approvalRequestId).toBe(first.approvalRequestId);
+    expect(decisionAuditCount.value).toBe(1);
+    await expect(
+      decideApproval({
+        approvalId: first.approvalRequestId ?? "",
+        idempotencyKey: approvalDecisionIdempotencyKey,
+        operatorEmail: "owner@continuoushq.com",
+        tenantSlug: "continuous-demo",
+        action: "approved",
+        note: "Changed approval note must conflict.",
+        subject: "core",
+        db,
+      }),
+    ).rejects.toMatchObject({
+      code: "core_command_idempotency_conflict",
+      status: 409,
+    });
+  }, 120_000);
+
+  it("fails closed when payroll approval artifacts are missing", async () => {
+    const runId = randomUUID();
+    const payrollRunId = "55555555-5555-4555-8555-000000000007";
+    const [beforePayrollRun] = await db
+      .select()
+      .from(payrollRuns)
+      .where(eq(payrollRuns.id, payrollRunId))
+      .limit(1);
+    const approvalResult = await requestApproval({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-payroll-missing-artifacts-request-${runId}`,
+      kind: "payroll_preview_approval",
+      title: "Approve payroll packet with missing artifacts",
+      summary: "This malformed approval should stay pending and leave payroll untouched.",
+      priority: "high",
+      risk: "high",
+      evidence: {
+        payrollRunId,
+      },
+      data: {
+        payrollRunId,
+        externalExecution: "blocked",
+      },
+      db,
+    });
+
+    await expect(
+      decideApproval({
+        approvalId: approvalResult.approvalRequestId,
+        idempotencyKey: `ci-payroll-missing-artifacts-decision-${runId}`,
+        operatorEmail: "owner@continuoushq.com",
+        tenantSlug: "continuous-demo",
+        action: "approved",
+        note: "This must fail closed before payroll handoff.",
+        subject: "core",
+        db,
+      }),
+    ).rejects.toMatchObject({
+      code: "payroll_approval_packet_required",
+      status: 409,
+    });
+
+    const [approval] = await db
+      .select()
+      .from(approvalRequests)
+      .where(eq(approvalRequests.id, approvalResult.approvalRequestId))
+      .limit(1);
+    const [afterPayrollRun] = await db
+      .select()
+      .from(payrollRuns)
+      .where(eq(payrollRuns.id, payrollRunId))
+      .limit(1);
+    const [appliedEventCount] = await db
+      .select({ value: count() })
+      .from(events)
+      .where(
+        and(
+          eq(events.type, "payroll.preview.approval.applied"),
+          sql`${events.data}->>'approvalRequestId' = ${approvalResult.approvalRequestId}`,
+        ),
+      );
+
+    expect(approval?.state).toBe("pending");
+    expect(afterPayrollRun?.state).toBe(beforePayrollRun?.state);
+    expect(objectValue(afterPayrollRun?.data).handoff).toEqual(objectValue(beforePayrollRun?.data).handoff);
+    expect(appliedEventCount.value).toBe(0);
   }, 120_000);
 
   it("transitions headless core tasks and requests approval packets", async () => {
@@ -1844,6 +1955,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
     await expect(
       decideApproval({
         approvalId: approvalResult.approvalRequestId,
+        idempotencyKey: `ci-core-approval-forbidden-${runId}`,
         operatorEmail: nonReviewerEmail,
         tenantSlug: "continuous-demo",
         action: "approved",
@@ -3704,8 +3816,10 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(approval?.workflowRunId).toBe(first.workflowRunId);
     expect(approval?.workerRunId).toBe(first.workerRunId);
 
+    const approvalDecisionIdempotencyKey = `ci-worker-approval-decision-${runId}`;
     const decision = await decideApproval({
       approvalId: first.approvalRequestId ?? "",
+      idempotencyKey: approvalDecisionIdempotencyKey,
       operatorEmail: "owner@continuoushq.com",
       tenantSlug: "continuous-demo",
       action: "approved",
@@ -3766,6 +3880,56 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(adapterAction?.mode).toBe("dry_run");
     expect(adapterReceipt.externalMutation).toBe(false);
     expect(objectValue(adapterReceipt.continuation).externalExecution).toBe("blocked");
+
+    const decisionReplay = await decideApproval({
+      approvalId: first.approvalRequestId ?? "",
+      idempotencyKey: approvalDecisionIdempotencyKey,
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      action: "approved",
+      note: "CI approval continuation check",
+      subject: "worker",
+      db,
+    });
+    const [approvalDecisionAuditCount] = await db
+      .select({ value: count() })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.source, "continuous.approvals"),
+          eq(auditEvents.idempotencyKey, `${approvalDecisionIdempotencyKey}:approval_decided`),
+        ),
+      );
+    const [approvalDecisionStepCount] = await db
+      .select({ value: count() })
+      .from(workflowSteps)
+      .where(
+        and(
+          eq(workflowSteps.kind, "approval_decision"),
+          eq(workflowSteps.approvalRequestId, first.approvalRequestId ?? ""),
+        ),
+      );
+
+    expect(decisionReplay.auditEventId).toBe(decision.auditEventId);
+    expect(decisionReplay.evidenceId).toBe(decision.evidenceId);
+    expect(decisionReplay.workflowStepId).toBe(decision.workflowStepId);
+    expect(approvalDecisionAuditCount.value).toBe(1);
+    expect(approvalDecisionStepCount.value).toBe(1);
+    await expect(
+      decideApproval({
+        approvalId: first.approvalRequestId ?? "",
+        idempotencyKey: approvalDecisionIdempotencyKey,
+        operatorEmail: "owner@continuoushq.com",
+        tenantSlug: "continuous-demo",
+        action: "rejected",
+        note: "Changed action must conflict.",
+        subject: "worker",
+        db,
+      }),
+    ).rejects.toMatchObject({
+      code: "core_command_idempotency_conflict",
+      status: 409,
+    });
 
     const approvedContinuation = await continueRevenueWorker({
       approvalId: first.approvalRequestId ?? "",
@@ -3960,6 +4124,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
 
     await decideApproval({
       approvalId: first.approvalRequestId ?? "",
+      idempotencyKey: `ci-worker-controlled-send-approval-${runId}`,
       operatorEmail: "owner@continuoushq.com",
       tenantSlug: "continuous-demo",
       action: "approved",
@@ -5316,6 +5481,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
 
     const decision = await decideApproval({
       approvalId: first.approvalRequestId ?? "",
+      idempotencyKey: `ci-worker-revision-approval-${runId}`,
       operatorEmail: "owner@continuoushq.com",
       tenantSlug: "continuous-demo",
       action: "revision_requested",
@@ -5543,6 +5709,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
 
     const decision = await decideApproval({
       approvalId: first.approvalRequestId ?? "",
+      idempotencyKey: `ci-worker-rejected-approval-${runId}`,
       operatorEmail: "owner@continuoushq.com",
       tenantSlug: "continuous-demo",
       action: "rejected",
@@ -7451,6 +7618,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
 
     await decideApproval({
       approvalId: first.approvalRequestId ?? "",
+      idempotencyKey: `ci-worker-adapter-workflow-approval-${runId}`,
       operatorEmail: "owner@continuoushq.com",
       tenantSlug: "continuous-demo",
       action: "approved",
@@ -8180,6 +8348,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
 
     await decideApproval({
       approvalId: approvedBriefResult.approvalRequestId ?? "",
+      idempotencyKey: `ci-owner-approved-approval-${approvedRunId}`,
       operatorEmail: "owner@continuoushq.com",
       tenantSlug: "continuous-demo",
       action: "approved",
@@ -8296,6 +8465,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
 
     await decideApproval({
       approvalId: revisionBriefResult.approvalRequestId ?? "",
+      idempotencyKey: `ci-owner-revision-approval-${revisionRunId}`,
       operatorEmail: "owner@continuoushq.com",
       tenantSlug: "continuous-demo",
       action: "revision_requested",

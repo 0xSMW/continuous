@@ -67,7 +67,7 @@ Operation inputs and read filters stay under `config`.
 | `view: "stockouts"` payload | `worker.view` | `worker.role`, optional stockout filters under `config` | None | Read-only | Blocked |
 | `reorder.plan` | `worker.command` | `config.sourceRefs`, `config.policy` | Required | Reorder draft, purchase packet, cash impact, approval task | Dry-run |
 | `maintenance.plan` | `worker.command` | `config.assetId`, `config.policy`, optional `config.sourceRefs` | Required | Maintenance packet and vendor draft only | Dry-run |
-| `approval.decide` | `worker.command` | `config.approvalId`, `config.action`, optional `config.note` | None | Approval/task/workflow evidence only | Blocked |
+| `approval.decide` | `worker.command` | `config.approvalId`, `config.action`, optional `config.note` | Required | Approval/task/workflow evidence only | Blocked |
 
 ## Core Object Map
 

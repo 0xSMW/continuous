@@ -76,7 +76,7 @@ route.
 | Role | Worker role allowed to execute the command |
 | Target requirements | Required `worker` fields, especially `tenantSlug` for tenant-scoped jobs |
 | Config schema | Required fields, validation errors, and defaults |
-| Idempotency | `required` for replayable work, `none` only for already-guarded decisions |
+| Idempotency | `required` for replayable work and all approval decisions; `none` only for read-like maintenance commands with separate guards |
 | Side effects | Internal-only, dry-run, approved-only, or blocked external execution |
 | Output | Stable result fields and evidence/audit ids |
 

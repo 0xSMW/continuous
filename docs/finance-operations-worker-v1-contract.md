@@ -131,7 +131,7 @@ payment links, refunds, settlements, or bank writes:
 | `ar_followup.draft` | `worker.command` | `config.invoiceId`, `config.tonePolicy` | Required | AR follow-up draft, cash packet, approval request, generated review view | Blocked |
 | `cash_forecast.generate` | `worker.command` | `config.window`, `config.accounts[]` | Required | Forecast object, cash packet, approval request, generated review view | Blocked |
 | `payment_draft.prepare` | `worker.command` | `config.billId`, `config.paymentId`, or `config.sourceRefs` | Required | Payment object, Payment instruction draft, cash packet, dual-control approval request, generated review view | Blocked |
-| `approval.decide` | `worker.command` | `config.approvalId`, `config.action`, optional `config.note` | None | Approval/task/workflow evidence only | Blocked |
+| `approval.decide` | `worker.command` | `config.approvalId`, `config.action`, optional `config.note` | Required | Approval/task/workflow evidence only | Blocked |
 
 Planned follow-up command:
 
