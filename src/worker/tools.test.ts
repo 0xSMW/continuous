@@ -47,6 +47,21 @@ const contractRoles = [
   "vertical_packages",
 ];
 type JsonRecord = Record<string, unknown>;
+type ConfigSchema = {
+  type: "object" | "array" | "string" | "number" | "boolean";
+  required?: string[];
+  oneRequired?: string[];
+  oneRequiredPaths?: string[][];
+  properties?: Record<string, ConfigSchema>;
+  items?: ConfigSchema;
+  enum?: string[];
+  minItems?: number;
+  maxItems?: number;
+  minimum?: number;
+  maximum?: number;
+  integer?: boolean;
+  additionalProperties?: boolean;
+};
 
 beforeEach(() => {
   process.env.WORKER_OPERATOR_EMAIL = "owner@continuoushq.com";
@@ -88,6 +103,116 @@ function objectValue(value: unknown): JsonRecord {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as JsonRecord)
     : {};
+}
+
+function hasSchemaPath(record: JsonRecord, path: string[]) {
+  let value: unknown = record;
+
+  for (const segment of path) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return false;
+    }
+
+    value = (value as JsonRecord)[segment];
+  }
+
+  return value !== undefined && value !== null && value !== "";
+}
+
+function expectTemplateMatchesSchema(schema: ConfigSchema, value: unknown, path = "config"): void {
+  if (schema.type === "object") {
+    expect(value && typeof value === "object" && !Array.isArray(value), `${path} must be an object`).toBe(true);
+    const record = objectValue(value);
+
+    for (const field of schema.required ?? []) {
+      expect(record[field], `${path}.${field} is required`).not.toBeUndefined();
+      expect(record[field], `${path}.${field} is required`).not.toBeNull();
+      expect(record[field], `${path}.${field} is required`).not.toBe("");
+    }
+
+    if (schema.oneRequired) {
+      expect(
+        schema.oneRequired.some((field) => record[field] !== undefined && record[field] !== null && record[field] !== ""),
+        `${path}.${schema.oneRequired.join(" or ")} is required`,
+      ).toBe(true);
+    }
+
+    if (schema.oneRequiredPaths) {
+      expect(
+        schema.oneRequiredPaths.some((fieldPath) => hasSchemaPath(record, fieldPath)),
+        `${path}.${schema.oneRequiredPaths.map((fieldPath) => fieldPath.join(".")).join(" or ")} is required`,
+      ).toBe(true);
+    }
+
+    if (schema.additionalProperties === false && schema.properties) {
+      const allowed = new Set(Object.keys(schema.properties));
+      expect(
+        Object.keys(record).filter((field) => !allowed.has(field)),
+        `${path} has unsupported fields`,
+      ).toEqual([]);
+    }
+
+    for (const [field, fieldSchema] of Object.entries(schema.properties ?? {})) {
+      if (record[field] !== undefined && record[field] !== null) {
+        expectTemplateMatchesSchema(fieldSchema, record[field], `${path}.${field}`);
+      }
+    }
+
+    return;
+  }
+
+  if (schema.type === "array") {
+    expect(Array.isArray(value), `${path} must be an array`).toBe(true);
+    const items = Array.isArray(value) ? value : [];
+
+    if (schema.minItems !== undefined) {
+      expect(items.length, `${path} must have at least ${schema.minItems} item(s)`).toBeGreaterThanOrEqual(
+        schema.minItems,
+      );
+    }
+
+    if (schema.maxItems !== undefined) {
+      expect(items.length, `${path} must have at most ${schema.maxItems} item(s)`).toBeLessThanOrEqual(
+        schema.maxItems,
+      );
+    }
+
+    if (schema.items) {
+      items.forEach((item, index) => expectTemplateMatchesSchema(schema.items!, item, `${path}[${index}]`));
+    }
+
+    return;
+  }
+
+  if (schema.type === "string") {
+    expect(typeof value === "string" && value.trim().length > 0, `${path} must be a non-empty string`).toBe(true);
+
+    if (schema.enum) {
+      expect(schema.enum, `${path} must be one of the allowed values`).toContain(value);
+    }
+
+    return;
+  }
+
+  if (schema.type === "number") {
+    expect(typeof value === "number" && !Number.isNaN(value), `${path} must be a number`).toBe(true);
+
+    if (schema.integer) {
+      expect(Number.isInteger(value), `${path} must be an integer`).toBe(true);
+    }
+
+    if (schema.minimum !== undefined) {
+      expect(value as number, `${path} must be >= ${schema.minimum}`).toBeGreaterThanOrEqual(schema.minimum);
+    }
+
+    if (schema.maximum !== undefined) {
+      expect(value as number, `${path} must be <= ${schema.maximum}`).toBeLessThanOrEqual(schema.maximum);
+    }
+
+    return;
+  }
+
+  expect(typeof value, `${path} must be a boolean`).toBe("boolean");
 }
 
 function workerFamilyApiEntries(dir: string): string[] {
@@ -1531,6 +1656,12 @@ describe("worker tool contract", () => {
     const waves = new Set(expansion.map((entry) => entry.wave));
     const byKey = new Map(expansion.map((entry) => [entry.key, entry]));
     const promotionByKey = new Map(promotionPlan.map((entry) => [entry.key, entry]));
+    const commandSchemas = new Map(
+      [...registeredWorkerCommands(), ...plannedWorkerCommands()].map((command) => [
+        `${command.role}:${command.name}`,
+        command.configSchema,
+      ]),
+    );
 
     expect(expansion).toBe(workerExpansionCatalog);
     expect(promotionPlan).toBe(workerExpansionPromotionPlan);
@@ -1573,7 +1704,6 @@ describe("worker tool contract", () => {
     expect(
       promotionByKey.get("asset_supply_operations")?.commandPayloadTemplate.payload.config.sourceRefs,
     ).toEqual({
-      handoff: "dispatch.asset_need_to_supply",
       workOrderObjectId: "<workOrderObjectId>",
       materialObjectId: "<materialObjectId>",
       evidencePacketId: "<evidencePacketId>",
@@ -1592,7 +1722,6 @@ describe("worker tool contract", () => {
     ).toEqual(
       expect.objectContaining({
         sourceRefs: expect.objectContaining({
-          handoff: "revenue.quote_to_pricing",
           quoteObjectId: "<quoteObjectId>",
           evidencePacketId: "<evidencePacketId>",
         }),
@@ -1608,7 +1737,6 @@ describe("worker tool contract", () => {
     ).toEqual(
       expect.objectContaining({
         sourceRefs: expect.objectContaining({
-          handoff: "customer.signal_to_experience",
           customerObjectId: "<customerObjectId>",
           customerSignalObjectId: "<customerSignalObjectId>",
           evidencePacketId: "<evidencePacketId>",
@@ -1624,7 +1752,6 @@ describe("worker tool contract", () => {
     ).toEqual(
       expect.objectContaining({
         sourceRefs: expect.objectContaining({
-          handoff: "customer.signal_to_growth",
           customerSignalObjectId: "<customerSignalObjectId>",
           evidencePacketId: "<evidencePacketId>",
         }),
@@ -1648,7 +1775,6 @@ describe("worker tool contract", () => {
         config: expect.objectContaining({
           packageKey: "quote_to_cash_field",
           sourceRefs: expect.objectContaining({
-            handoff: "systems.connection_to_packaged_worker",
             connectionId: "<connectionId>",
             permissionGrantId: "<permissionGrantId>",
           }),
@@ -1761,6 +1887,14 @@ describe("worker tool contract", () => {
       expect(promotion.commandPayloadTemplate.payload.worker.role).toBe(entry.workerRole);
       expect(objectValue(promotion.commandPayloadTemplate.payload.config)).not.toEqual({});
       expect(JSON.stringify(promotion.commandPayloadTemplate.payload.config)).not.toContain("requiredCoreRefs");
+      expect(JSON.stringify(promotion.commandPayloadTemplate.payload.config)).not.toContain('"handoff"');
+      const commandSchema = commandSchemas.get(`${promotion.workerRole}:${promotion.firstCommand}`);
+
+      expect(commandSchema).toBeTruthy();
+      if (!commandSchema) {
+        throw new Error(`Missing command schema for ${promotion.workerRole}:${promotion.firstCommand}`);
+      }
+      expectTemplateMatchesSchema(commandSchema as ConfigSchema, promotion.commandPayloadTemplate.payload.config);
       expect(promotion.viewPayloadTemplate.apiRoute).toBe("/worker");
       expect(promotion.viewPayloadTemplate.tool).toBe("continuous.worker.view");
       expect(promotion.viewPayloadTemplate.payload.view).toBe(entry.firstView);

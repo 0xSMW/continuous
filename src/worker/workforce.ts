@@ -4,6 +4,7 @@ import { and, count, desc, eq, or, sql } from "drizzle-orm";
 
 import { PlatformUnavailableError } from "../core/errors";
 import { loadOperatorContext } from "../core/operators";
+import { completeCoreWorkerRun, startCoreWorkerRun } from "../core/worker-runs";
 import { db as defaultDb } from "../db/client";
 import {
   approvalRequests,
@@ -42,6 +43,7 @@ type QueryClient = Pick<Database, "select">;
 export const workforceWorkerRole = "workforce_operations";
 
 const workforceSource = "continuous.worker";
+const coreWorkerRunSource = "continuous.core.worker_runs";
 const documentPacketCapabilityKey = "document_packet.prepare";
 const payrollPreviewCapabilityKey = "payroll_preview.prepare";
 const hireWorkflowKey = "hire_employee";
@@ -231,7 +233,13 @@ function hashObject(value: unknown) {
 }
 
 function outputData(data: JsonObject) {
-  return objectValue(data.output);
+  const output = objectValue(data.output);
+
+  if (Object.keys(output).length > 0) {
+    return output;
+  }
+
+  return objectValue(objectValue(data.pendingCompletion).output);
 }
 
 function getWorkflowStepIds(data: JsonObject) {
@@ -897,7 +905,7 @@ async function resultFromReplay(input: {
     idempotencyKey: input.workerRun.idempotencyKey,
     workerRunId: input.workerRun.id,
     taskId: input.workerRun.taskId,
-    eventId: input.workerRun.eventId,
+    eventId: optionalString(output.eventId) ?? input.workerRun.eventId,
     objectId: optionalString(output.objectId) ?? null,
     personId: optionalString(output.personId) ?? null,
     personObjectId: optionalString(output.personObjectId) ?? null,
@@ -976,10 +984,59 @@ export async function prepareWorkforceHirePacket(input: {
     blockers,
   });
   const now = new Date();
+  const coreRun = await startCoreWorkerRun({
+    operatorEmail: input.operatorEmail,
+    tenantSlug: context.worker.tenantSlug,
+    idempotencyKey: input.idempotencyKey,
+    worker: {
+      id: context.worker.id,
+      role: workforceWorkerRole,
+    },
+    command: "hire.packet.prepare",
+    mode: "simulation",
+    capabilityId: context.capabilityId,
+    budgetAccountId: context.budgetAccountId,
+    units: hirePacketUnits,
+    input: {
+      inputHash,
+      config,
+      personId: person?.id ?? null,
+      personObjectId: personObject?.id ?? null,
+      employmentId: employment?.id ?? null,
+      employmentObjectId: existingEmploymentObject?.id ?? null,
+      workLocationObjectId: workLocationObject?.id ?? null,
+      positionObjectId: positionObject?.id ?? null,
+      blockers,
+    },
+    policy: {
+      ...objectValue(config.policy),
+      externalExecution: "blocked",
+      documentSubmission: "blocked",
+      payrollSubmission: "blocked",
+      restrictedData: "redacted",
+    },
+    evidence: {
+      command: "hire.packet.prepare",
+      required: ["person", "work_location", "new_hire_packet", "owner_approval"],
+      restrictedDocuments: "redacted",
+      externalExecution: "blocked",
+    },
+    db,
+  });
+  const coreBudget = objectValue(coreRun.budget);
+  const coreReservationId = optionalString(coreBudget.reservationId);
+
+  if (!coreReservationId) {
+    throw new PlatformUnavailableError(
+      "worker_run_budget_reservation_missing",
+      "Core worker.run.start did not return a Workforce hire budget reservation.",
+      409,
+    );
+  }
 
   const result = await db.transaction(async (tx) => {
     await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${workforceSource}:${input.idempotencyKey}`}))`,
+      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${coreWorkerRunSource}:workforce:hire:${input.idempotencyKey}`}))`,
     );
 
     const [existingRun] = await tx
@@ -988,24 +1045,34 @@ export async function prepareWorkforceHirePacket(input: {
       .where(
         and(
           eq(workerRuns.tenantId, context.worker.tenantId),
-          eq(workerRuns.source, workforceSource),
-          eq(workerRuns.idempotencyKey, input.idempotencyKey),
+          eq(workerRuns.id, coreRun.workerRunId),
         ),
       )
       .limit(1);
 
-    if (existingRun) {
-      const existingInput = objectValue(objectValue(existingRun.data).input);
-      const existingHash = optionalString(existingInput.inputHash);
+    if (!existingRun) {
+      throw new PlatformUnavailableError(
+        "worker_run_missing",
+        "Core worker.run.start did not return a persisted Workforce hire worker run.",
+        409,
+      );
+    }
 
-      if (existingHash && existingHash !== inputHash) {
-        throw new PlatformUnavailableError(
-          "worker_idempotency_conflict",
-          "A Workforce hire packet already exists for this idempotency key with different input.",
-          409,
-        );
-      }
+    const existingInput = objectValue(objectValue(existingRun.data).input);
+    const existingRequest = objectValue(existingInput.request);
+    const existingHash = optionalString(existingRequest.inputHash) ?? optionalString(existingInput.inputHash);
 
+    if (existingHash && existingHash !== inputHash) {
+      throw new PlatformUnavailableError(
+        "worker_idempotency_conflict",
+        "A Workforce hire packet already exists for this idempotency key with different input.",
+        409,
+      );
+    }
+
+    const existingOutput = outputData(existingRun.data);
+
+    if (optionalString(existingOutput.workerRunId)) {
       return { replay: existingRun };
     }
 
@@ -1040,11 +1107,11 @@ export async function prepareWorkforceHirePacket(input: {
       payrollBlockers: blockers,
       sourceRefs: objectValue(config.sourceRefs),
       policy: {
+        ...objectValue(config.policy),
         externalExecution: "blocked",
         documentSubmission: "blocked",
         payrollSubmission: "blocked",
         restrictedData: "redacted",
-        ...objectValue(config.policy),
       },
       externalExecution: "blocked",
       blockers,
@@ -1129,6 +1196,7 @@ export async function prepareWorkforceHirePacket(input: {
         tenantId: context.worker.tenantId,
         objectId: employmentObject.id,
         capabilityId: context.capabilityId,
+        workerRunId: coreRun.workerRunId,
         title: "Review workforce hire packet",
         state: packetState === "blocked" ? "blocked" : "approval_required",
         priority: blockers.length > 0 ? "high" : "normal",
@@ -1149,31 +1217,6 @@ export async function prepareWorkforceHirePacket(input: {
         updatedAt: now,
       })
       .returning({ id: tasks.id });
-
-    const [run] = await tx
-      .insert(workerRuns)
-      .values({
-        tenantId: context.worker.tenantId,
-        workerId: context.worker.id,
-        taskId: task.id,
-        capabilityId: context.capabilityId,
-        budgetAccountId: context.budgetAccountId,
-        source: workforceSource,
-        idempotencyKey: input.idempotencyKey,
-        state: "running",
-        mode: "simulation",
-        data: {
-          input: {
-            command: "hire.packet.prepare",
-            inputHash,
-            config,
-          },
-        },
-        startedAt: now,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning({ id: workerRuns.id });
 
     const [workflowRun] = await tx
       .insert(workflowRuns)
@@ -1283,7 +1326,7 @@ export async function prepareWorkforceHirePacket(input: {
       .values({
         tenantId: context.worker.tenantId,
         taskId: task.id,
-        workerRunId: run.id,
+        workerRunId: coreRun.workerRunId,
         workflowRunId: workflowRun.id,
         eventId: event.id,
         objectId: employmentObject.id,
@@ -1306,6 +1349,7 @@ export async function prepareWorkforceHirePacket(input: {
           packetId: packet.id,
           documentId: document.id,
           evidenceIds: [traceEvidence.id],
+          budgetReservationId: coreReservationId,
           blockers,
         },
         policy: packetData.policy,
@@ -1395,6 +1439,7 @@ export async function prepareWorkforceHirePacket(input: {
           approvalRequestId: approval.id,
           packetId: packet.id,
           documentId: document.id,
+          budgetReservationId: coreReservationId,
           blockers,
           documentChecklist: checklist,
           restrictedDocuments: restrictedProof,
@@ -1407,23 +1452,9 @@ export async function prepareWorkforceHirePacket(input: {
       now,
     });
 
-    await tx.insert(usageEvents).values({
-      tenantId: context.worker.tenantId,
-      accountId: context.budgetAccountId,
-      taskId: task.id,
-      capabilityId: context.capabilityId,
-      actorType: "worker",
-      actorId: context.worker.id,
-      units: hirePacketUnits,
-      data: {
-        command: "hire.packet.prepare",
-        mode: "simulation",
-      },
-      createdAt: now,
-    });
-
     const output = {
       command: "hire.packet.prepare",
+      workerRunId: coreRun.workerRunId,
       objectId: employmentObject.id,
       personId: person?.id ?? null,
       personObjectId: personObject?.id ?? null,
@@ -1436,6 +1467,7 @@ export async function prepareWorkforceHirePacket(input: {
       workflowRunId: workflowRun.id,
       workflowStepIds,
       generatedViewId,
+      budgetReservationId: coreReservationId,
       blockers,
       documentChecklist: checklist,
       restrictedDocuments: restrictedProof,
@@ -1454,6 +1486,8 @@ export async function prepareWorkforceHirePacket(input: {
       targetId: employmentObject.id,
       taskId: task.id,
       eventId: event.id,
+      workerRunId: coreRun.workerRunId,
+      approvalRequestId: approval.id,
       capabilityId: context.capabilityId,
       risk: "high",
       idempotencyKey: `${input.idempotencyKey}:hire_packet_prepared`,
@@ -1465,23 +1499,21 @@ export async function prepareWorkforceHirePacket(input: {
       .update(workerRuns)
       .set({
         eventId: event.id,
-        state: "done",
+        taskId: task.id,
         data: {
-          input: {
-            command: "hire.packet.prepare",
-            inputHash,
-            config,
-          },
+          ...objectValue(existingRun.data),
+          businessEventId: event.id,
+          taskId: task.id,
+          workflowRunId: workflowRun.id,
           output,
           workflowStepIds,
         },
-        endedAt: now,
         updatedAt: now,
       })
-      .where(eq(workerRuns.id, run.id));
+      .where(eq(workerRuns.id, coreRun.workerRunId));
 
     return {
-      runId: run.id,
+      runId: coreRun.workerRunId,
       taskId: task.id,
       eventId: event.id,
       objectId: employmentObject.id,
@@ -1501,6 +1533,38 @@ export async function prepareWorkforceHirePacket(input: {
   });
 
   if ("replay" in result && result.replay) {
+    const replayOutput = outputData(objectValue(result.replay.data));
+
+    if (result.replay.state === "running" && optionalString(replayOutput.workerRunId)) {
+      await completeCoreWorkerRun({
+        operatorEmail: input.operatorEmail,
+        tenantSlug: context.worker.tenantSlug,
+        idempotencyKey: input.idempotencyKey,
+        worker: {
+          id: context.worker.id,
+          role: workforceWorkerRole,
+        },
+        workerRunId: coreRun.workerRunId,
+        state: "done",
+        reason: "Workforce Operations prepared a hire packet with external execution, payroll submission, and restricted raw-document storage blocked.",
+        output: replayOutput,
+        costUsd: 0,
+        evidence: {
+          command: "hire.packet.prepare",
+          eventId: optionalString(replayOutput.eventId) ?? null,
+          evidenceId: optionalString(replayOutput.evidenceId) ?? null,
+          packetId: optionalString(replayOutput.packetId) ?? null,
+          documentId: optionalString(replayOutput.documentId) ?? null,
+          approvalRequestId: optionalString(replayOutput.approvalRequestId) ?? null,
+          workflowRunId: optionalString(replayOutput.workflowRunId) ?? null,
+          externalExecution: "blocked",
+          payrollSubmission: "blocked",
+          restrictedDocuments: "redacted",
+        },
+        db,
+      });
+    }
+
     return resultFromReplay({
       db,
       workerId: context.worker.id,
@@ -1508,6 +1572,34 @@ export async function prepareWorkforceHirePacket(input: {
       created: false,
     });
   }
+
+  await completeCoreWorkerRun({
+    operatorEmail: input.operatorEmail,
+    tenantSlug: context.worker.tenantSlug,
+    idempotencyKey: input.idempotencyKey,
+    worker: {
+      id: context.worker.id,
+      role: workforceWorkerRole,
+    },
+    workerRunId: coreRun.workerRunId,
+    state: "done",
+    reason: "Workforce Operations prepared a hire packet with external execution, payroll submission, and restricted raw-document storage blocked.",
+    output: result.output,
+    costUsd: 0,
+    evidence: {
+      command: "hire.packet.prepare",
+      eventId: result.eventId,
+      evidenceId: result.evidenceId,
+      packetId: result.packetId,
+      documentId: result.documentId,
+      approvalRequestId: result.approvalRequestId,
+      workflowRunId: result.workflowRunId,
+      externalExecution: "blocked",
+      payrollSubmission: "blocked",
+      restrictedDocuments: "redacted",
+    },
+    db,
+  });
 
   const snapshot = await snapshotForWorker(db, await loadWorkforceWorker(db, { workerId: context.worker.id }));
 
@@ -1591,10 +1683,58 @@ export async function prepareWorkforcePayrollInput(input: {
     blockers,
   });
   const now = new Date();
+  const coreRun = await startCoreWorkerRun({
+    operatorEmail: input.operatorEmail,
+    tenantSlug: context.worker.tenantSlug,
+    idempotencyKey: input.idempotencyKey,
+    worker: {
+      id: context.worker.id,
+      role: workforceWorkerRole,
+    },
+    command: "payroll_input.prepare",
+    mode: "dry_run",
+    capabilityId: context.capabilityId,
+    budgetAccountId: context.budgetAccountId,
+    units: payrollInputUnits,
+    input: {
+      inputHash,
+      config,
+      employmentId: employment?.id ?? null,
+      employmentObjectId: employmentObject?.id ?? null,
+      payrollRunId: payrollRun?.id ?? null,
+      period,
+      blockers,
+    },
+    policy: {
+      ...objectValue(config.policy),
+      externalExecution: "dry_run",
+      payrollSubmission: "blocked",
+      moneyMovement: "blocked",
+      taxFiling: "blocked",
+    },
+    evidence: {
+      command: "payroll_input.prepare",
+      required: ["employment", "payroll_input_packet", "owner_approval"],
+      externalExecution: "dry_run",
+      payrollSubmission: "blocked",
+      moneyMovement: "blocked",
+    },
+    db,
+  });
+  const coreBudget = objectValue(coreRun.budget);
+  const coreReservationId = optionalString(coreBudget.reservationId);
+
+  if (!coreReservationId) {
+    throw new PlatformUnavailableError(
+      "worker_run_budget_reservation_missing",
+      "Core worker.run.start did not return a Workforce payroll input budget reservation.",
+      409,
+    );
+  }
 
   const result = await db.transaction(async (tx) => {
     await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${workforceSource}:${input.idempotencyKey}`}))`,
+      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${coreWorkerRunSource}:workforce:payroll_input:${input.idempotencyKey}`}))`,
     );
 
     const [existingRun] = await tx
@@ -1603,24 +1743,34 @@ export async function prepareWorkforcePayrollInput(input: {
       .where(
         and(
           eq(workerRuns.tenantId, context.worker.tenantId),
-          eq(workerRuns.source, workforceSource),
-          eq(workerRuns.idempotencyKey, input.idempotencyKey),
+          eq(workerRuns.id, coreRun.workerRunId),
         ),
       )
       .limit(1);
 
-    if (existingRun) {
-      const existingInput = objectValue(objectValue(existingRun.data).input);
-      const existingHash = optionalString(existingInput.inputHash);
+    if (!existingRun) {
+      throw new PlatformUnavailableError(
+        "worker_run_missing",
+        "Core worker.run.start did not return a persisted Workforce payroll input worker run.",
+        409,
+      );
+    }
 
-      if (existingHash && existingHash !== inputHash) {
-        throw new PlatformUnavailableError(
-          "worker_idempotency_conflict",
-          "A Workforce payroll input packet already exists for this idempotency key with different input.",
-          409,
-        );
-      }
+    const existingInput = objectValue(objectValue(existingRun.data).input);
+    const existingRequest = objectValue(existingInput.request);
+    const existingHash = optionalString(existingRequest.inputHash) ?? optionalString(existingInput.inputHash);
 
+    if (existingHash && existingHash !== inputHash) {
+      throw new PlatformUnavailableError(
+        "worker_idempotency_conflict",
+        "A Workforce payroll input packet already exists for this idempotency key with different input.",
+        409,
+      );
+    }
+
+    const existingOutput = outputData(existingRun.data);
+
+    if (optionalString(existingOutput.workerRunId)) {
       return { replay: existingRun };
     }
 
@@ -1652,11 +1802,11 @@ export async function prepareWorkforcePayrollInput(input: {
       blockers,
       sourceRefs: objectValue(config.sourceRefs),
       policy: {
+        ...objectValue(config.policy),
         externalExecution: "dry_run",
         payrollSubmission: "blocked",
         moneyMovement: "blocked",
         taxFiling: "blocked",
-        ...objectValue(config.policy),
       },
       externalExecution: "dry_run",
       preparedAt: now.toISOString(),
@@ -1710,6 +1860,7 @@ export async function prepareWorkforcePayrollInput(input: {
         tenantId: context.worker.tenantId,
         objectId: payrollInputObject.id,
         capabilityId: context.capabilityId,
+        workerRunId: coreRun.workerRunId,
         title: "Review payroll input readiness",
         state: objectState === "blocked" ? "blocked" : "approval_required",
         priority: blockers.length > 0 ? "high" : "normal",
@@ -1731,31 +1882,6 @@ export async function prepareWorkforcePayrollInput(input: {
         updatedAt: now,
       })
       .returning({ id: tasks.id });
-
-    const [run] = await tx
-      .insert(workerRuns)
-      .values({
-        tenantId: context.worker.tenantId,
-        workerId: context.worker.id,
-        taskId: task.id,
-        capabilityId: context.capabilityId,
-        budgetAccountId: context.budgetAccountId,
-        source: workforceSource,
-        idempotencyKey: input.idempotencyKey,
-        state: "running",
-        mode: "dry_run",
-        data: {
-          input: {
-            command: "payroll_input.prepare",
-            inputHash,
-            config,
-          },
-        },
-        startedAt: now,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning({ id: workerRuns.id });
 
     const [workflowRun] = await tx
       .insert(workflowRuns)
@@ -1860,7 +1986,7 @@ export async function prepareWorkforcePayrollInput(input: {
       .values({
         tenantId: context.worker.tenantId,
         taskId: task.id,
-        workerRunId: run.id,
+        workerRunId: coreRun.workerRunId,
         workflowRunId: workflowRun.id,
         eventId: event.id,
         objectId: payrollInputObject.id,
@@ -1886,6 +2012,7 @@ export async function prepareWorkforcePayrollInput(input: {
           documentId: document.id,
           evidenceIds: [traceEvidence.id],
           payrollRunId: payrollRun?.id ?? null,
+          budgetReservationId: coreReservationId,
           blockers,
         },
         policy: payrollInputData.policy,
@@ -1976,6 +2103,7 @@ export async function prepareWorkforcePayrollInput(input: {
           packetId: packet.id,
           documentId: document.id,
           payrollRunId: payrollRun?.id ?? null,
+          budgetReservationId: coreReservationId,
           blockers,
           period,
         },
@@ -1987,23 +2115,9 @@ export async function prepareWorkforcePayrollInput(input: {
       now,
     });
 
-    await tx.insert(usageEvents).values({
-      tenantId: context.worker.tenantId,
-      accountId: context.budgetAccountId,
-      taskId: task.id,
-      capabilityId: context.capabilityId,
-      actorType: "worker",
-      actorId: context.worker.id,
-      units: payrollInputUnits,
-      data: {
-        command: "payroll_input.prepare",
-        mode: "dry_run",
-      },
-      createdAt: now,
-    });
-
     const output = {
       command: "payroll_input.prepare",
+      workerRunId: coreRun.workerRunId,
       objectId: payrollInputObject.id,
       employmentId: employment?.id ?? null,
       employmentObjectId: employmentObject?.id ?? null,
@@ -2015,6 +2129,7 @@ export async function prepareWorkforcePayrollInput(input: {
       workflowRunId: workflowRun.id,
       workflowStepIds,
       generatedViewId,
+      budgetReservationId: coreReservationId,
       blockers,
       period,
       externalExecution: "dry_run",
@@ -2033,6 +2148,8 @@ export async function prepareWorkforcePayrollInput(input: {
       targetId: payrollInputObject.id,
       taskId: task.id,
       eventId: event.id,
+      workerRunId: coreRun.workerRunId,
+      approvalRequestId: approval.id,
       capabilityId: context.capabilityId,
       risk: "high",
       idempotencyKey: `${input.idempotencyKey}:payroll_input_prepared`,
@@ -2044,23 +2161,21 @@ export async function prepareWorkforcePayrollInput(input: {
       .update(workerRuns)
       .set({
         eventId: event.id,
-        state: "done",
+        taskId: task.id,
         data: {
-          input: {
-            command: "payroll_input.prepare",
-            inputHash,
-            config,
-          },
+          ...objectValue(existingRun.data),
+          businessEventId: event.id,
+          taskId: task.id,
+          workflowRunId: workflowRun.id,
           output,
           workflowStepIds,
         },
-        endedAt: now,
         updatedAt: now,
       })
-      .where(eq(workerRuns.id, run.id));
+      .where(eq(workerRuns.id, coreRun.workerRunId));
 
     return {
-      runId: run.id,
+      runId: coreRun.workerRunId,
       taskId: task.id,
       eventId: event.id,
       objectId: payrollInputObject.id,
@@ -2079,6 +2194,38 @@ export async function prepareWorkforcePayrollInput(input: {
   });
 
   if ("replay" in result && result.replay) {
+    const replayOutput = outputData(objectValue(result.replay.data));
+
+    if (result.replay.state === "running" && optionalString(replayOutput.workerRunId)) {
+      await completeCoreWorkerRun({
+        operatorEmail: input.operatorEmail,
+        tenantSlug: context.worker.tenantSlug,
+        idempotencyKey: input.idempotencyKey,
+        worker: {
+          id: context.worker.id,
+          role: workforceWorkerRole,
+        },
+        workerRunId: coreRun.workerRunId,
+        state: "done",
+        reason: "Workforce Operations prepared a payroll input packet with payroll submission, tax filing, and money movement blocked.",
+        output: replayOutput,
+        costUsd: 0,
+        evidence: {
+          command: "payroll_input.prepare",
+          eventId: optionalString(replayOutput.eventId) ?? null,
+          evidenceId: optionalString(replayOutput.evidenceId) ?? null,
+          packetId: optionalString(replayOutput.packetId) ?? null,
+          documentId: optionalString(replayOutput.documentId) ?? null,
+          approvalRequestId: optionalString(replayOutput.approvalRequestId) ?? null,
+          workflowRunId: optionalString(replayOutput.workflowRunId) ?? null,
+          externalExecution: "dry_run",
+          payrollSubmission: "blocked",
+          moneyMovement: "blocked",
+        },
+        db,
+      });
+    }
+
     return resultFromReplay({
       db,
       workerId: context.worker.id,
@@ -2086,6 +2233,34 @@ export async function prepareWorkforcePayrollInput(input: {
       created: false,
     });
   }
+
+  await completeCoreWorkerRun({
+    operatorEmail: input.operatorEmail,
+    tenantSlug: context.worker.tenantSlug,
+    idempotencyKey: input.idempotencyKey,
+    worker: {
+      id: context.worker.id,
+      role: workforceWorkerRole,
+    },
+    workerRunId: coreRun.workerRunId,
+    state: "done",
+    reason: "Workforce Operations prepared a payroll input packet with payroll submission, tax filing, and money movement blocked.",
+    output: result.output,
+    costUsd: 0,
+    evidence: {
+      command: "payroll_input.prepare",
+      eventId: result.eventId,
+      evidenceId: result.evidenceId,
+      packetId: result.packetId,
+      documentId: result.documentId,
+      approvalRequestId: result.approvalRequestId,
+      workflowRunId: result.workflowRunId,
+      externalExecution: "dry_run",
+      payrollSubmission: "blocked",
+      moneyMovement: "blocked",
+    },
+    db,
+  });
 
   const snapshot = await snapshotForWorker(db, await loadWorkforceWorker(db, { workerId: context.worker.id }));
 

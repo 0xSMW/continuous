@@ -2446,8 +2446,8 @@ export async function prepareFinanceInvoice(input: {
         data: {
           ...objectValue(completedRun?.data),
           output: settledOutput,
-          reservationId: optionalString(settledOutput.reservationId),
-          usageEventId: optionalString(settledOutput.usageEventId),
+          reservationId: optionalString(settledOutput.reservationId) ?? null,
+          usageEventId: optionalString(settledOutput.usageEventId) ?? null,
         },
         updatedAt: new Date(),
       })

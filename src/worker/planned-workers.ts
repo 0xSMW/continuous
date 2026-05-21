@@ -2651,10 +2651,6 @@ function expansionExecutionState(
   return "schema_only_until_handler_registered";
 }
 
-function handoffRef(entry: WorkerExpansionCatalogEntry): Record<string, string> {
-  return entry.incomingHandoff ? { handoff: entry.incomingHandoff } : {};
-}
-
 function expansionPromotionConfig(entry: WorkerExpansionCatalogEntry): WorkerCommandConfigTemplate {
   switch (entry.firstCommand) {
     case "lead.read":
@@ -2672,13 +2668,12 @@ function expansionPromotionConfig(entry: WorkerExpansionCatalogEntry): WorkerCom
           from: "<fromIso>",
           to: "<toIso>",
         },
-        scopes: ["tasks", "approvals", "cash", "worker_health"],
+        scopes: ["tasks", "approvals", "cash", "workers"],
         includeEvidence: true,
       };
     case "schedule.propose":
       return {
         sourceRefs: {
-          ...handoffRef(entry),
           jobId: "<jobId>",
           workOrderId: "<workOrderId>",
           evidencePacketId: "<evidencePacketId>",
@@ -2692,7 +2687,6 @@ function expansionPromotionConfig(entry: WorkerExpansionCatalogEntry): WorkerCom
     case "invoice.prepare":
       return {
         sourceRefs: {
-          ...handoffRef(entry),
           jobId: "<jobId>",
           closeoutId: "<closeoutId>",
           customerObjectId: "<customerObjectId>",
@@ -2718,8 +2712,8 @@ function expansionPromotionConfig(entry: WorkerExpansionCatalogEntry): WorkerCom
       return {
         filingRequirementId: "<filingRequirementId>",
         period: {
-          start: "<periodStart>",
-          end: "<periodEnd>",
+          from: "<periodStart>",
+          to: "<periodEnd>",
         },
         sourceRefs: {
           rulePackId: "<rulePackId>",
@@ -2733,11 +2727,9 @@ function expansionPromotionConfig(entry: WorkerExpansionCatalogEntry): WorkerCom
       };
     case "connector.health.scan":
       return {
+        connectionId: "<connectionId>",
+        grantId: "<permissionGrantId>",
         checks: ["scopes", "sync_lag", "schema_drift", "error_rate"],
-        sourceRefs: {
-          connectionId: "<connectionId>",
-          permissionGrantId: "<permissionGrantId>",
-        },
         policy: {
           allowPermissionChange: false,
           allowRepairApply: false,
@@ -2746,7 +2738,6 @@ function expansionPromotionConfig(entry: WorkerExpansionCatalogEntry): WorkerCom
     case "margin.review.prepare":
       return {
         sourceRefs: {
-          ...handoffRef(entry),
           quoteObjectId: "<quoteObjectId>",
           evidencePacketId: "<evidencePacketId>",
         },
@@ -2759,7 +2750,6 @@ function expansionPromotionConfig(entry: WorkerExpansionCatalogEntry): WorkerCom
     case "recovery.draft":
       return {
         sourceRefs: {
-          ...handoffRef(entry),
           customerObjectId: "<customerObjectId>",
           customerSignalObjectId: "<customerSignalObjectId>",
           evidencePacketId: "<evidencePacketId>",
@@ -2772,7 +2762,6 @@ function expansionPromotionConfig(entry: WorkerExpansionCatalogEntry): WorkerCom
     case "reorder.plan":
       return {
         sourceRefs: {
-          ...handoffRef(entry),
           workOrderObjectId: "<workOrderObjectId>",
           materialObjectId: "<materialObjectId>",
           evidencePacketId: "<evidencePacketId>",
@@ -2786,7 +2775,6 @@ function expansionPromotionConfig(entry: WorkerExpansionCatalogEntry): WorkerCom
     case "campaign.draft":
       return {
         sourceRefs: {
-          ...handoffRef(entry),
           customerSignalObjectId: "<customerSignalObjectId>",
           evidencePacketId: "<evidencePacketId>",
         },
@@ -2801,7 +2789,6 @@ function expansionPromotionConfig(entry: WorkerExpansionCatalogEntry): WorkerCom
       return {
         packageKey: entry.packageKey ?? "vertical_packages",
         sourceRefs: {
-          ...handoffRef(entry),
           connectionId: "<connectionId>",
           permissionGrantId: "<permissionGrantId>",
         },
@@ -2812,7 +2799,6 @@ function expansionPromotionConfig(entry: WorkerExpansionCatalogEntry): WorkerCom
       };
     default:
       return {
-        sourceRefs: handoffRef(entry),
         policy: {
           requiresOwnerApproval: true,
         },

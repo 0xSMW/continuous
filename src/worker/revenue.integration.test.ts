@@ -10543,6 +10543,30 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .from(generatedViews)
       .where(and(eq(generatedViews.tenantId, tenantId), eq(generatedViews.key, "workforce.hire.review")))
       .limit(1);
+    const [localHireRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(
+        and(
+          eq(workerRuns.tenantId, tenantId),
+          eq(workerRuns.source, "continuous.worker"),
+          eq(workerRuns.idempotencyKey, `ci-workforce-hire-${runId}`),
+        ),
+      )
+      .limit(1);
+    const hireRunData = objectValue(hireRun?.data);
+    const hireCompletion = objectValue(hireRunData.completion);
+    const hireBudget = objectValue(hireCompletion.budget);
+    const [hireReservation] = await db
+      .select()
+      .from(budgetReservations)
+      .where(eq(budgetReservations.id, stringValue(hireBudget.reservationId)))
+      .limit(1);
+    const [hireUsage] = await db
+      .select()
+      .from(usageEvents)
+      .where(eq(usageEvents.id, stringValue(hireBudget.usageEventId)))
+      .limit(1);
 
     expect(hireResponse.command).toBe("hire.packet.prepare");
     expect(hireResponse.worker.role).toBe("workforce_operations");
@@ -10552,6 +10576,18 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(hireOutput.externalExecution).toBe("blocked");
     expect(objectValue(hireOutput.restrictedDocuments).rawContentStored).toBe(false);
     expect(hireRun?.state).toBe("done");
+    expect(hireRun?.source).toBe("continuous.core.worker_runs");
+    expect(objectValue(hireRunData.input).command).toBe("hire.packet.prepare");
+    expect(objectValue(hireRunData.output).command).toBe("hire.packet.prepare");
+    expect(hireRunData.businessEventId).toBe(hireResult.eventId);
+    expect(hireBudget.state).toBe("used");
+    expect(hireBudget.reservationId).toBe(hireOutput.budgetReservationId);
+    expect(hireBudget.usageEventId).toBeTruthy();
+    expect(hireReservation?.state).toBe("used");
+    expect(hireUsage?.reservationId).toBe(hireOutput.budgetReservationId);
+    expect(hireUsage?.actorId).toBe(hireRun?.workerId);
+    expect(hireUsage?.taskId).toBe(hireResult.taskId);
+    expect(localHireRun).toBeUndefined();
     expect(hireObject?.type).toBe("employment");
     expect(hireApproval?.kind).toBe("workforce_hire_packet_approval");
     expect(hireApproval?.state).toBe("pending");
@@ -10630,6 +10666,35 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .from(generatedViews)
       .where(and(eq(generatedViews.tenantId, tenantId), eq(generatedViews.key, "workforce.payroll_input.review")))
       .limit(1);
+    const [payrollWorkerRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(eq(workerRuns.id, payrollResult.workerRunId))
+      .limit(1);
+    const [localPayrollRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(
+        and(
+          eq(workerRuns.tenantId, tenantId),
+          eq(workerRuns.source, "continuous.worker"),
+          eq(workerRuns.idempotencyKey, `ci-workforce-payroll-input-${runId}`),
+        ),
+      )
+      .limit(1);
+    const payrollRunData = objectValue(payrollWorkerRun?.data);
+    const payrollCompletion = objectValue(payrollRunData.completion);
+    const payrollBudget = objectValue(payrollCompletion.budget);
+    const [payrollReservation] = await db
+      .select()
+      .from(budgetReservations)
+      .where(eq(budgetReservations.id, stringValue(payrollBudget.reservationId)))
+      .limit(1);
+    const [payrollUsage] = await db
+      .select()
+      .from(usageEvents)
+      .where(eq(usageEvents.id, stringValue(payrollBudget.usageEventId)))
+      .limit(1);
 
     expect(payrollResponse.command).toBe("payroll_input.prepare");
     expect(payrollResponse.worker.role).toBe("workforce_operations");
@@ -10638,6 +10703,20 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(payrollResult.externalExecution).toBe("dry_run");
     expect(payrollOutput.payrollSubmission).toBe("blocked");
     expect(payrollOutput.moneyMovement).toBe("blocked");
+    expect(payrollWorkerRun?.source).toBe("continuous.core.worker_runs");
+    expect(payrollWorkerRun?.state).toBe("done");
+    expect(payrollWorkerRun?.mode).toBe("dry_run");
+    expect(objectValue(payrollRunData.input).command).toBe("payroll_input.prepare");
+    expect(objectValue(payrollRunData.output).command).toBe("payroll_input.prepare");
+    expect(payrollRunData.businessEventId).toBe(payrollResult.eventId);
+    expect(payrollBudget.state).toBe("used");
+    expect(payrollBudget.reservationId).toBe(payrollOutput.budgetReservationId);
+    expect(payrollBudget.usageEventId).toBeTruthy();
+    expect(payrollReservation?.state).toBe("used");
+    expect(payrollUsage?.reservationId).toBe(payrollOutput.budgetReservationId);
+    expect(payrollUsage?.actorId).toBe(payrollWorkerRun?.workerId);
+    expect(payrollUsage?.taskId).toBe(payrollResult.taskId);
+    expect(localPayrollRun).toBeUndefined();
     expect(payrollObject?.type).toBe("payroll_input");
     expect(payrollApproval?.kind).toBe("workforce_payroll_input_approval");
     expect(payrollPacket?.kind).toBe("workforce_packet");
