@@ -54,6 +54,12 @@ const contracts = [
     evidencePacket: "systems_packet",
     runtime: true,
   },
+  {
+    path: "docs/offer-pricing-worker-v1-contract.md",
+    role: "offer_pricing_operations",
+    evidencePacket: "pricing_review_packet",
+    runtime: false,
+  },
 ] as const;
 
 const runtimeRoles = new Set<string>(
@@ -246,6 +252,7 @@ describe("future worker contracts", () => {
       "workforce_operations",
       "compliance_operations",
       "systems_operations",
+      "offer_pricing_operations",
     ]);
     expect(new Set(workerContracts.map((contract) => contract.apiRoute))).toEqual(
       new Set([workerApiRoute]),
@@ -259,7 +266,12 @@ describe("future worker contracts", () => {
       "compliance_operations",
       "systems_operations",
     ]);
-    expect(plannedWorkerContracts).toEqual([]);
+    expect(plannedWorkerContracts.map((contract) => contract.role)).toEqual([
+      "offer_pricing_operations",
+    ]);
+    expect(workerContractForRole("offer_pricing_operations")?.contractPath).toBe(
+      "docs/offer-pricing-worker-v1-contract.md",
+    );
     expect(workerContractForRole("revenue_operations")?.contractPath).toBe(
       "docs/revenue-operations-worker-v1-contract.md",
     );
@@ -594,19 +606,55 @@ describe("future worker contracts", () => {
     }
   });
 
-  it("has no planned command metadata once contract-backed workers are runtime", () => {
+  it("publishes planned command metadata for contract-backed non-runtime workers", () => {
     const commandRoles = new Set(plannedWorkerCommands().map((command) => command.role));
     const viewRoles = new Set(plannedWorkerViews().map((view) => view.role));
     const plannedContracts = contracts.filter((contract) => !runtimeRoles.has(contract.role));
 
-    expect(plannedContracts).toEqual([]);
     expect(plannedWorkerContracts.map((contract) => contract.role)).toEqual(
       plannedContracts.map((contract) => contract.role),
     );
-    expect(plannedWorkerCommands()).toEqual([]);
-    expect(plannedWorkerViews()).toEqual([]);
-    expect(commandRoles.size).toBe(0);
-    expect(viewRoles.size).toBe(0);
+    expect(plannedWorkerCommands()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "offer_pricing_operations",
+          name: "margin.review.prepare",
+          apiRoute: workerApiRoute,
+          configSchema: expect.objectContaining({
+            required: ["sourceRefs", "policy"],
+            properties: expect.objectContaining({
+              sourceRefs: expect.objectContaining({
+                required: ["quoteObjectId", "evidencePacketId"],
+              }),
+              policy: expect.objectContaining({
+                required: ["marginRuleId", "discountPolicyId"],
+              }),
+            }),
+          }),
+        }),
+        expect.objectContaining({
+          role: "offer_pricing_operations",
+          name: "approval.decide",
+          apiRoute: workerApiRoute,
+        }),
+      ]),
+    );
+    expect(plannedWorkerViews()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "offer_pricing_operations",
+          name: "snapshot",
+          apiRoute: workerApiRoute,
+        }),
+        expect.objectContaining({
+          role: "offer_pricing_operations",
+          name: "price_policy",
+          apiRoute: workerApiRoute,
+        }),
+      ]),
+    );
+    expect(commandRoles).toEqual(new Set(plannedContracts.map((contract) => contract.role)));
+    expect(viewRoles).toEqual(new Set(plannedContracts.map((contract) => contract.role)));
 
     for (const contract of plannedContracts) {
       const planned = plannedWorkerContracts.find((item) => item.role === contract.role);

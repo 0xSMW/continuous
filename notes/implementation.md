@@ -350,3 +350,9 @@ Revenue Operations now exposes a generic `/worker` `view: "readiness"` read
 surface. It reports worker registration, capability, budget, workflow, latest
 dry-run proof, quote-review view refs, and live credential gates without adding
 Revenue-specific URLs or app-server tool names.
+
+Offer and Pricing is now a planned contract-backed worker family, not just a
+catalog candidate. Its first slice is `worker.role=offer_pricing_operations`,
+`command=margin.review.prepare`, and `view: "price_policy"` on `/worker`,
+consuming `revenue.quote_to_pricing` Core refs while price publish, quote
+mutation, and customer sends stay blocked.

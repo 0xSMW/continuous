@@ -961,7 +961,9 @@ describe("worker tool contract", () => {
             (view) => view.role === "systems_operations",
           );
 
-    expect(workerToolSchema.registry.plannedContracts.map((contract) => contract.role)).toEqual([]);
+    expect(workerToolSchema.registry.plannedContracts.map((contract) => contract.role)).toEqual([
+      "offer_pricing_operations",
+    ]);
     expect(workerToolSchema.registry.contracts.map((contract) => contract.role)).toEqual([
       "revenue_operations",
       "owner_chief_of_staff",
@@ -970,6 +972,7 @@ describe("worker tool contract", () => {
       "workforce_operations",
       "compliance_operations",
       "systems_operations",
+      "offer_pricing_operations",
     ]);
     expect(workerToolSchema.registry.runtimeContracts.map((contract) => contract.role)).toEqual([
       "revenue_operations",
@@ -980,8 +983,45 @@ describe("worker tool contract", () => {
       "compliance_operations",
       "systems_operations",
     ]);
-    expect(workerToolSchema.registry.plannedFutureWorkerCommands).toEqual([]);
-    expect(workerToolSchema.registry.plannedFutureWorkerViews).toEqual([]);
+    expect(workerToolSchema.registry.plannedFutureWorkerCommands).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "offer_pricing_operations",
+          name: "margin.review.prepare",
+          apiRoute: "/worker",
+          configSchema: expect.objectContaining({
+            required: ["sourceRefs", "policy"],
+            properties: expect.objectContaining({
+              sourceRefs: expect.objectContaining({
+                required: ["quoteObjectId", "evidencePacketId"],
+              }),
+              policy: expect.objectContaining({
+                required: ["marginRuleId", "discountPolicyId"],
+              }),
+            }),
+          }),
+        }),
+        expect.objectContaining({
+          role: "offer_pricing_operations",
+          name: "approval.decide",
+          apiRoute: "/worker",
+        }),
+      ]),
+    );
+    expect(workerToolSchema.registry.plannedFutureWorkerViews).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "offer_pricing_operations",
+          name: "snapshot",
+          apiRoute: "/worker",
+        }),
+        expect.objectContaining({
+          role: "offer_pricing_operations",
+          name: "price_policy",
+          apiRoute: "/worker",
+        }),
+      ]),
+    );
     expect(
       workerToolSchema.registry.plannedFutureWorkerCommands.some(
         (command) => command.role === "systems_operations",
@@ -1235,7 +1275,9 @@ describe("worker tool contract", () => {
         firstCommand: "margin.review.prepare",
         firstView: "price_policy",
         incomingHandoff: "revenue.quote_to_pricing",
-        status: "candidate",
+        status: "planned_contract",
+        contractPath: "docs/offer-pricing-worker-v1-contract.md",
+        evidencePacket: "pricing_review_packet",
       }),
     );
     expect(byKey.get("vertical_packages")).toEqual(

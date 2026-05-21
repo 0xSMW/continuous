@@ -91,6 +91,7 @@ describe("app-server worker tools", () => {
       "workforce_operations",
       "compliance_operations",
       "systems_operations",
+      "offer_pricing_operations",
     ]);
     expect(registry.contracts.every((contract) => contract.apiRoute === "/worker")).toBe(true);
     expect(registry.commands.every((command) => command.apiRoute === "/worker")).toBe(true);
@@ -123,11 +124,37 @@ describe("app-server worker tools", () => {
       "compliance_operations",
       "systems_operations",
     ]);
-    expect(plannedRoles).toEqual([]);
+    expect(plannedRoles).toEqual(["offer_pricing_operations"]);
     expect(registry.plannedCommands).toEqual(registry.followUpCommands);
     expect(registry.plannedViews).toEqual(registry.followUpViews);
-    expect(registry.plannedFutureWorkerCommands).toEqual([]);
-    expect(registry.plannedFutureWorkerViews).toEqual([]);
+    expect(registry.plannedFutureWorkerCommands).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "offer_pricing_operations",
+          name: "margin.review.prepare",
+          apiRoute: "/worker",
+        }),
+        expect.objectContaining({
+          role: "offer_pricing_operations",
+          name: "approval.decide",
+          apiRoute: "/worker",
+        }),
+      ]),
+    );
+    expect(registry.plannedFutureWorkerViews).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "offer_pricing_operations",
+          name: "snapshot",
+          apiRoute: "/worker",
+        }),
+        expect.objectContaining({
+          role: "offer_pricing_operations",
+          name: "price_policy",
+          apiRoute: "/worker",
+        }),
+      ]),
+    );
     expect(revenueFollowUpCommands.map((command) => command.name)).toEqual(["payment_link.prepare"]);
     expect(
       registry.plannedFutureWorkerCommands.some(

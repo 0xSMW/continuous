@@ -51,7 +51,7 @@ packets.
 | Strategy family | First packaged worker | Current coverage | First Core object spine | First promotion gate |
 |---|---|---|---|---|
 | Owner / General Management | Owner Chief-of-Staff Worker | Runtime started | Task, decision, KPI, anomaly, approval, worker run | Broader factuality evals, stale-source handling, read-only generated brief views |
-| Offer, Product, and Pricing | Offer and Pricing Worker | Not yet planned in runtime docs | Offer, product/service, price book, margin rule, discount policy, quote line | Quote/margin policy fixture, approval for discounts, price-change evidence packet |
+| Offer, Product, and Pricing | Offer and Pricing Worker | Planned contract | Offer, product/service, price book, margin rule, discount policy, quote line | Quote/margin policy fixture, approval for discounts, price-change evidence packet |
 | Growth and Brand | Growth Worker | Not yet planned in runtime docs | Campaign, channel, audience, content draft, attribution event, review source | No external publish without approval, source-backed claims, budget and ROI ledger |
 | Sales and Revenue Capture | Revenue Operations Worker | Runtime live | Lead, customer, offer, quote, booking, job, invoice, payment, review | First controlled external send with receipt, rollback/escalation, connector readiness |
 | Customer / Client / Patient Experience | Customer Experience Worker | Partially covered by Dispatch customer updates and Revenue follow-up | Customer, conversation, promise, satisfaction signal, complaint, testimonial, review | Approved outbound message gate, escalation routing, complaint evidence packet |
@@ -70,7 +70,7 @@ decisions; changing the order should update this table before code.
 
 | Wave | Candidate worker | First command/view | Core spine | Incoming handoff | Acceptance checks | First blocker |
 |---:|---|---|---|---|---|---|
-| 8 | Offer and Pricing Worker | `margin.review.prepare`, `view: "price_policy"` | Offer, price book, quote line, margin rule, discount policy | `revenue.quote_to_pricing` | Quote lines have source evidence, margin policy exists, external send remains blocked | Pricing/margin policy fixture and discount approval packet |
+| 8 | Offer and Pricing Worker | `POST /worker` with `command: "margin.review.prepare"` and `view: "price_policy"` | Offer, price book, quote line, margin rule, discount policy | `revenue.quote_to_pricing` | Quote lines have source evidence, margin policy exists, external send remains blocked | Pricing/margin policy fixture and discount approval packet |
 | 9 | Customer Experience Worker | `recovery.draft`, `view: "signals"` | Customer, conversation, promise, satisfaction signal, complaint, review | `customer.signal_to_experience` | Signal type/source/severity are present, customer ref is tenant-scoped, outbound recovery is blocked | Approved send gate and complaint evidence packet |
 | 10 | Asset and Supply Worker | `reorder.plan`, `view: "stockouts"` | Vendor, inventory item, purchase order, asset, facility, maintenance event | `dispatch.asset_need_to_supply` | Need is tied to job/work order, purchase action is unapproved, cash impact is visible | Dry-run purchase/maintenance receipt and rollback plan |
 | 11 | Growth Worker | `campaign.draft`, `view: "campaigns"` | Campaign, channel, audience, content draft, attribution event, budget reservation | `growth.campaign_to_owner_review` | Claims have source refs, budget is reserved, audience/channel are explicit | External publish approval and ROI ledger fixture |
@@ -118,6 +118,7 @@ Implementation-grade contracts:
 | Workforce | [Workforce Operations Worker V1 Contract](workforce-operations-worker-v1-contract.md) |
 | Compliance | [Compliance Operations Worker V1 Contract](compliance-operations-worker-v1-contract.md) |
 | Systems | [Systems Operations Worker V1 Contract](systems-operations-worker-v1-contract.md) |
+| Offer and Pricing | [Offer and Pricing Worker V1 Contract](offer-pricing-worker-v1-contract.md) |
 
 | Worker | Core objects | Capabilities | Workflows | Adapters | Evidence packet | Eval gate |
 |---|---|---|---|---|---|---|
