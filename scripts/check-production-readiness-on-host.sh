@@ -33,6 +33,10 @@ bool_enabled() {
   [ "$1" = "true" ]
 }
 
+json_escape() {
+  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
 env_value() {
   local file="$1"
   local name="$2"
@@ -107,6 +111,51 @@ require_env_equals() {
     record_ok "env_value:$file:$name=$expected"
   else
     record_failure "env_value_unexpected:$file:$name"
+  fi
+}
+
+check_alert_webhook() {
+  webhook_url="$(env_value "$OBSERVABILITY_ENV_FILE" ALERT_WEBHOOK_URL)"
+  webhook_timeout="$(env_value "$OBSERVABILITY_ENV_FILE" ALERT_WEBHOOK_TIMEOUT_SECONDS)"
+  webhook_timeout="${webhook_timeout:-8}"
+
+  if [ -z "$webhook_url" ]; then
+    record_failure "env_value_missing:$OBSERVABILITY_ENV_FILE:ALERT_WEBHOOK_URL"
+    return
+  fi
+
+  if [[ ! "$webhook_url" =~ ^https:// ]]; then
+    record_failure "alert_webhook_not_https"
+    return
+  fi
+
+  if ! [[ "$webhook_timeout" =~ ^[0-9]+$ ]] || [ "$webhook_timeout" -lt 1 ] || [ "$webhook_timeout" -gt 60 ]; then
+    record_failure "alert_webhook_timeout_invalid"
+    return
+  fi
+
+  if ! command -v curl >/dev/null 2>&1; then
+    record_failure "alert_webhook_curl_missing"
+    return
+  fi
+
+  webhook_host="$(hostname -f 2>/dev/null || hostname)"
+  payload="$(
+    printf '{"text":"Continuous production readiness alert webhook probe from %s","service":"continuous","status":"readiness_probe","host":"%s","checkedAt":"%s","details":"%s"}' \
+      "$(json_escape "$webhook_host")" \
+      "$(json_escape "$webhook_host")" \
+      "$CHECKED_AT" \
+      "strict readiness verifying alert delivery"
+  )"
+
+  if curl -fsS \
+    --max-time "$webhook_timeout" \
+    -H "content-type: application/json" \
+    -d "$payload" \
+    "$webhook_url" >/dev/null; then
+    record_ok "alert_webhook_reachable"
+  else
+    record_failure "alert_webhook_probe_failed"
   fi
 }
 
@@ -279,7 +328,7 @@ if bool_enabled "$REQUIRE_OBSERVABILITY_TIMER"; then
   require_env_equals "$OBSERVABILITY_ENV_FILE" CHECK_SYSTEMD_FAILED true
 
   if bool_enabled "$REQUIRE_ALERT_WEBHOOK"; then
-    require_env_value "$OBSERVABILITY_ENV_FILE" ALERT_WEBHOOK_URL
+    check_alert_webhook
   else
     record_ok "alert_webhook_check_skipped"
   fi

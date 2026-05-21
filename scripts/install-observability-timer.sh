@@ -7,6 +7,7 @@ SSH_KEY="${SSH_KEY:-}"
 APP_DIR="${APP_DIR:-/opt/continuous}"
 READINESS_USER="${READINESS_USER:-${DEPLOY_USER_NAME:-}}"
 OBSERVABILITY_TIMER_INTERVAL="${OBSERVABILITY_TIMER_INTERVAL:-15min}"
+REQUIRE_ALERT_WEBHOOK="${REQUIRE_ALERT_WEBHOOK:-false}"
 REMOTE="$SSH_USER@$HOST"
 SSH_ARGS=(-o BatchMode=yes -o ConnectTimeout=10)
 
@@ -17,6 +18,16 @@ fi
 if [ -z "$HOST" ]; then
   echo "Set HOST to the droplet IP or hostname." >&2
   echo "Example: HOST=45.55.53.92 ./scripts/install-observability-timer.sh" >&2
+  exit 1
+fi
+
+if [ "$REQUIRE_ALERT_WEBHOOK" = "true" ] && [ -z "${ALERT_WEBHOOK_URL:-}" ]; then
+  echo "Set ALERT_WEBHOOK_URL when REQUIRE_ALERT_WEBHOOK=true." >&2
+  exit 1
+fi
+
+if [ -n "${ALERT_WEBHOOK_URL:-}" ] && [[ ! "$ALERT_WEBHOOK_URL" =~ ^https:// ]]; then
+  echo "ALERT_WEBHOOK_URL must be an https URL." >&2
   exit 1
 fi
 

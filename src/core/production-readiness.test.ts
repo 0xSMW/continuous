@@ -31,6 +31,7 @@ describe("production readiness operations", () => {
     const readiness = read("scripts/check-production-readiness-on-host.sh");
     const attest = read("scripts/attest-non-root-access-on-host.sh");
     const install = read("scripts/install-non-root-access.sh");
+    const observabilityInstall = read("scripts/install-observability-timer.sh");
     const recoveryAttest = read("scripts/attest-recovery-drill-on-host.sh");
     const recoveryAttestRemote = read("scripts/attest-recovery-drill.sh");
     const deployWorkflow = read(".github/workflows/deploy.yml");
@@ -41,6 +42,11 @@ describe("production readiness operations", () => {
     expect(readiness).toContain("NON_ROOT_ACCESS_USER");
     expect(readiness).toContain("attest-non-root-access-on-host.sh");
     expect(readiness).toContain("non_root_access_live_check");
+    expect(readiness).toContain("check_alert_webhook");
+    expect(readiness).toContain("alert_webhook_reachable");
+    expect(readiness).toContain("alert_webhook_not_https");
+    expect(readiness).toContain("alert_webhook_probe_failed");
+    expect(readiness).toContain("production readiness alert webhook probe");
     expect(readiness).toContain("awk -v name=\"$name\"");
     expect(readiness).toContain("(export[[:space:]]+)?");
     expect(readiness).toContain("Decode simple backslash");
@@ -57,6 +63,9 @@ describe("production readiness operations", () => {
 
     expect(install).toContain("DEPLOY_PUBLIC_KEY");
     expect(install).toContain("COPY_AUTHORIZED_KEYS_FROM_USER");
+    expect(observabilityInstall).toContain("REQUIRE_ALERT_WEBHOOK");
+    expect(observabilityInstall).toContain("Set ALERT_WEBHOOK_URL when REQUIRE_ALERT_WEBHOOK=true.");
+    expect(observabilityInstall).toContain("ALERT_WEBHOOK_URL must be an https URL.");
     expect(install).toContain("usermod --append --groups docker");
     expect(install).toContain("delegate_readiness_file");
     expect(install).toContain("chown \"$DEPLOY_USER_NAME:$DEPLOY_USER_NAME\" \"$READINESS_ENV_FILE\"");
@@ -109,6 +118,9 @@ describe("production readiness operations", () => {
     expect(deploymentDocs).toContain("deploy workflow defaults to `continuous-deploy`");
     expect(deploymentDocs).toContain("scripts/attest-recovery-drill.sh");
     expect(deploymentDocs).toContain("strict readiness gate re-checks the report artifact and checksum");
+    expect(deploymentDocs).toContain("compact POST readiness");
+    expect(deploymentDocs).toContain("REQUIRE_ALERT_WEBHOOK=true");
+    expect(deploymentDocs).toContain("real HTTPS `ALERT_WEBHOOK_URL`");
     expect(deploymentDocs).toContain("delegates ownership of that");
     expect(deploymentDocs).toContain("rejects `DEPLOY_USER=root` before opening a customer-data deploy");
     expect(deploymentDocs).toContain("it no longer accepts a");

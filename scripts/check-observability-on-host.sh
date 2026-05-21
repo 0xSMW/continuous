@@ -35,12 +35,18 @@ send_alert() {
     return
   fi
 
+  if [[ ! "$ALERT_WEBHOOK_URL" =~ ^https:// ]]; then
+    return
+  fi
+
   detail="$(
     printf '%s; ' "${failures[@]}" \
       | sed 's/; $//'
   )"
   payload="$(
-    printf '{"service":"continuous","status":"failed","host":"%s","checkedAt":"%s","details":"%s"}' \
+    printf '{"text":"Continuous production observability failed on %s: %s","service":"continuous","status":"failed","host":"%s","checkedAt":"%s","details":"%s"}' \
+      "$(json_escape "$(hostname -f 2>/dev/null || hostname)")" \
+      "$(json_escape "$detail")" \
       "$(json_escape "$(hostname -f 2>/dev/null || hostname)")" \
       "$CHECKED_AT" \
       "$(json_escape "$detail")"
@@ -73,6 +79,14 @@ cd "$APP_DIR" 2>/dev/null || {
   send_alert
   exit 1
 }
+
+if [ -n "$ALERT_WEBHOOK_URL" ]; then
+  if [[ "$ALERT_WEBHOOK_URL" =~ ^https:// ]]; then
+    record_ok "alert_webhook_https"
+  else
+    record_failure "alert_webhook_not_https"
+  fi
+fi
 
 if [ ! -f .env ]; then
   record_failure "env_missing:$APP_DIR/.env"

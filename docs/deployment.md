@@ -498,8 +498,10 @@ The gate runs on the droplet and requires:
   settings without printing secret values;
 - the latest local dump and object-storage manifest to be fresh;
 - the observability timer to be enabled and active with
-  `REQUIRE_BACKUP_FRESH=true`, `CHECK_SYSTEMD_FAILED=true`, and a non-empty
-  `ALERT_WEBHOOK_URL`;
+  `REQUIRE_BACKUP_FRESH=true`, `CHECK_SYSTEMD_FAILED=true`, and a reachable
+  HTTPS `ALERT_WEBHOOK_URL`; the strict gate sends a compact POST readiness
+  probe so an empty, non-HTTPS, or dead alert destination cannot pass as
+  customer-data ready;
 - strict host observability to pass, including failed systemd unit checks;
 - `/etc/continuous/production-readiness.env` to attest the completed recovery
   drill, token rotation, managed credential inventory, credential revocation,
@@ -806,6 +808,7 @@ Install the recurring timer after selecting an alert destination:
 ```sh
 HOST=45.55.53.92 \
   READINESS_USER=continuous-deploy \
+  REQUIRE_ALERT_WEBHOOK=true \
   ALERT_WEBHOOK_URL=... \
   REQUIRE_BACKUP_FRESH=true \
   CHECK_SYSTEMD_FAILED=true \
@@ -814,10 +817,12 @@ HOST=45.55.53.92 \
 
 The timer stores private configuration in `/etc/continuous/observability.env`,
 runs every 15 minutes by default, appends output to
-`logs/observability/check.log`, and sends a compact JSON webhook only on
-failure when `ALERT_WEBHOOK_URL` is set. `READINESS_USER` lets the non-root
-readiness gate verify the alerting and strict-check settings without exposing
-the webhook URL in logs.
+`logs/observability/check.log`, and sends a compact JSON webhook with a `text`
+field only on failure when `ALERT_WEBHOOK_URL` is set. Passing
+`REQUIRE_ALERT_WEBHOOK=true` to the installer fails fast when the URL is omitted,
+and the installer rejects non-HTTPS webhook URLs. `READINESS_USER` lets the
+non-root readiness gate verify the alerting and strict-check settings without
+exposing the webhook URL in logs.
 
 ## Database Backup And Restore
 
@@ -975,9 +980,10 @@ strict readiness gate re-checks the report artifact and checksum on every run.
   measured recovery timing, then run `scripts/attest-recovery-drill.sh` so the
   strict gate verifies the report artifact before using the production droplet
   for customer data.
-- Install `scripts/install-observability-timer.sh` with `ALERT_WEBHOOK_URL`
-  after choosing an alert destination; deploy smoke already verifies the same
-  host checks without requiring a webhook.
+- Install `scripts/install-observability-timer.sh` with `REQUIRE_ALERT_WEBHOOK=true`
+  and a real HTTPS `ALERT_WEBHOOK_URL` after choosing an alert destination;
+  deploy smoke already verifies the same host checks without requiring a
+  webhook, and strict readiness sends a live webhook probe.
 - Run `scripts/install-non-root-access.sh`, then verify one deploy with the
   default non-root account before setting any production `DEPLOY_USER`
   override.
