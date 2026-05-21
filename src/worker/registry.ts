@@ -117,6 +117,7 @@ type WorkerViewContext = {
 type WorkerViewDefinition = {
   name: string;
   description: string;
+  configSchema?: WorkerConfigSchema;
   handle: (context: WorkerViewContext) => Promise<WorkerViewResult>;
 };
 
@@ -244,26 +245,32 @@ function describeFields(fields: string[]) {
   return `${fields.slice(0, -1).join(", ")} or ${fields[fields.length - 1]}`;
 }
 
-function failConfig(message: string): never {
-  throw new PlatformUnavailableError("invalid_worker_command_config", message, 400);
+function failConfig(message: string, code = "invalid_worker_command_config"): never {
+  throw new PlatformUnavailableError(code, message, 400);
 }
 
-function validateConfigSchema(commandName: string, schema: WorkerConfigSchema, value: unknown, path = "config") {
+function validateConfigSchema(
+  operationName: string,
+  schema: WorkerConfigSchema,
+  value: unknown,
+  path = "config",
+  errorCode = "invalid_worker_command_config",
+) {
   if (schema.type === "object") {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
-      failConfig(`${path} must be an object.`);
+      failConfig(`${path} must be an object.`, errorCode);
     }
 
     const record = value as Record<string, unknown>;
 
     for (const field of schema.required ?? []) {
       if (record[field] === undefined || record[field] === null || record[field] === "") {
-        failConfig(`${path}.${field} is required for ${commandName}.`);
+        failConfig(`${path}.${field} is required for ${operationName}.`, errorCode);
       }
     }
 
     if (schema.oneRequired && !schema.oneRequired.some((field) => record[field] !== undefined && record[field] !== null)) {
-      failConfig(`${path}.${describeFields(schema.oneRequired)} is required for ${commandName}.`);
+      failConfig(`${path}.${describeFields(schema.oneRequired)} is required for ${operationName}.`, errorCode);
     }
 
     if (schema.additionalProperties === false && schema.properties) {
@@ -271,13 +278,13 @@ function validateConfigSchema(commandName: string, schema: WorkerConfigSchema, v
       const unexpected = Object.keys(record).filter((field) => !allowed.has(field));
 
       if (unexpected.length > 0) {
-        failConfig(`${path} contains unsupported fields: ${unexpected.join(", ")}.`);
+        failConfig(`${path} contains unsupported fields: ${unexpected.join(", ")}.`, errorCode);
       }
     }
 
     for (const [field, fieldSchema] of Object.entries(schema.properties ?? {})) {
       if (record[field] !== undefined && record[field] !== null) {
-        validateConfigSchema(commandName, fieldSchema, record[field], `${path}.${field}`);
+        validateConfigSchema(operationName, fieldSchema, record[field], `${path}.${field}`, errorCode);
       }
     }
 
@@ -286,19 +293,21 @@ function validateConfigSchema(commandName: string, schema: WorkerConfigSchema, v
 
   if (schema.type === "array") {
     if (!Array.isArray(value)) {
-      failConfig(`${path} must be an array.`);
+      failConfig(`${path} must be an array.`, errorCode);
     }
 
     if (schema.minItems !== undefined && value.length < schema.minItems) {
-      failConfig(`${path} must contain at least ${schema.minItems} item${schema.minItems === 1 ? "" : "s"}.`);
+      failConfig(`${path} must contain at least ${schema.minItems} item${schema.minItems === 1 ? "" : "s"}.`, errorCode);
     }
 
     if (schema.maxItems !== undefined && value.length > schema.maxItems) {
-      failConfig(`${path} must contain at most ${schema.maxItems} items.`);
+      failConfig(`${path} must contain at most ${schema.maxItems} items.`, errorCode);
     }
 
     if (schema.items) {
-      value.forEach((item, index) => validateConfigSchema(commandName, schema.items!, item, `${path}[${index}]`));
+      value.forEach((item, index) =>
+        validateConfigSchema(operationName, schema.items!, item, `${path}[${index}]`, errorCode),
+      );
     }
 
     return;
@@ -306,11 +315,11 @@ function validateConfigSchema(commandName: string, schema: WorkerConfigSchema, v
 
   if (schema.type === "string") {
     if (typeof value !== "string" || !value.trim()) {
-      failConfig(`${path} must be a non-empty string.`);
+      failConfig(`${path} must be a non-empty string.`, errorCode);
     }
 
     if (schema.enum && !schema.enum.includes(value)) {
-      failConfig(`${path} must be one of ${schema.enum.join(", ")}.`);
+      failConfig(`${path} must be one of ${schema.enum.join(", ")}.`, errorCode);
     }
 
     return;
@@ -318,36 +327,48 @@ function validateConfigSchema(commandName: string, schema: WorkerConfigSchema, v
 
   if (schema.type === "number") {
     if (typeof value !== "number" || Number.isNaN(value)) {
-      failConfig(`${path} must be a number.`);
+      failConfig(`${path} must be a number.`, errorCode);
     }
 
     if (schema.integer && !Number.isInteger(value)) {
       if (schema.minimum !== undefined && schema.maximum !== undefined) {
-        failConfig(`${path} must be an integer between ${schema.minimum} and ${schema.maximum}.`);
+        failConfig(`${path} must be an integer between ${schema.minimum} and ${schema.maximum}.`, errorCode);
       }
 
-      failConfig(`${path} must be an integer.`);
+      failConfig(`${path} must be an integer.`, errorCode);
     }
 
     if (schema.minimum !== undefined && value < schema.minimum) {
-      failConfig(`${path} must be greater than or equal to ${schema.minimum}.`);
+      failConfig(`${path} must be greater than or equal to ${schema.minimum}.`, errorCode);
     }
 
     if (schema.maximum !== undefined && value > schema.maximum) {
-      failConfig(`${path} must be less than or equal to ${schema.maximum}.`);
+      failConfig(`${path} must be less than or equal to ${schema.maximum}.`, errorCode);
     }
 
     return;
   }
 
   if (typeof value !== "boolean") {
-    failConfig(`${path} must be a boolean.`);
+    failConfig(`${path} must be a boolean.`, errorCode);
   }
 }
 
 const jsonObjectConfig: WorkerConfigSchema = {
   type: "object",
   additionalProperties: true,
+};
+const emptyViewConfig: WorkerConfigSchema = {
+  type: "object",
+  properties: {},
+  additionalProperties: false,
+};
+const stateFilterConfig: WorkerConfigSchema = {
+  type: "object",
+  properties: {
+    state: { type: "string" },
+  },
+  additionalProperties: false,
 };
 const optionalLimitConfig: WorkerConfigSchema = {
   type: "object",
@@ -359,6 +380,27 @@ const optionalLimitConfig: WorkerConfigSchema = {
       minimum: 1,
       maximum: 100,
     },
+  },
+};
+const stateLimitFilterConfig: WorkerConfigSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    state: { type: "string" },
+    limit: {
+      type: "number",
+      integer: true,
+      minimum: 1,
+      maximum: 100,
+    },
+  },
+};
+const compliancePacketViewConfig: WorkerConfigSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    packetId: { type: "string" },
+    filingDraftId: { type: "string" },
   },
 };
 const windowConfig: WorkerConfigSchema = {
@@ -1119,6 +1161,7 @@ const revenueDefinition: WorkerDefinition = {
     snapshot: {
       name: "snapshot",
       description: "Read the worker runtime snapshot.",
+      configSchema: emptyViewConfig,
       async handle(context) {
         const result = await getRevenueWorkerSnapshotSafe({
           tenantSlug: context.target.tenantSlug,
@@ -1140,6 +1183,7 @@ const revenueDefinition: WorkerDefinition = {
     approvals: {
       name: "approvals",
       description: "List worker approval requests.",
+      configSchema: stateFilterConfig,
       async handle(context) {
         const approvals = await listApprovals({
           operatorEmail: context.operatorEmail,
@@ -1315,6 +1359,7 @@ const financeDefinition: WorkerDefinition = {
     snapshot: {
       name: "snapshot",
       description: "Read the finance worker runtime snapshot.",
+      configSchema: emptyViewConfig,
       async handle(context) {
         const result = await getFinanceWorkerSnapshotSafe({
           tenantSlug: context.target.tenantSlug,
@@ -1336,6 +1381,7 @@ const financeDefinition: WorkerDefinition = {
     approvals: {
       name: "approvals",
       description: "List finance approval requests.",
+      configSchema: stateFilterConfig,
       async handle(context) {
         const approvals = await listApprovals({
           operatorEmail: context.operatorEmail,
@@ -1462,6 +1508,7 @@ const workerDefinitions: Record<string, WorkerDefinition> = {
       snapshot: {
         name: "snapshot",
         description: "Read the workforce worker runtime snapshot.",
+        configSchema: emptyViewConfig,
         async handle(context) {
           const result = await getWorkforceWorkerSnapshotSafe({
             tenantSlug: context.target.tenantSlug,
@@ -1483,6 +1530,7 @@ const workerDefinitions: Record<string, WorkerDefinition> = {
       readiness: {
         name: "readiness",
         description: "Read workforce document, payroll, and approval blockers.",
+        configSchema: emptyViewConfig,
         async handle(context) {
           const readiness = await getWorkforceReadiness({
             tenantSlug: context.target.tenantSlug,
@@ -1578,6 +1626,7 @@ const workerDefinitions: Record<string, WorkerDefinition> = {
       snapshot: {
         name: "snapshot",
         description: "Read the Compliance Operations Worker runtime snapshot.",
+        configSchema: emptyViewConfig,
         async handle(context) {
           const result = await getComplianceWorkerSnapshotSafe({
             tenantSlug: context.target.tenantSlug,
@@ -1599,6 +1648,7 @@ const workerDefinitions: Record<string, WorkerDefinition> = {
       obligations: {
         name: "obligations",
         description: "Read obligations, filings, blockers, and due dates.",
+        configSchema: stateLimitFilterConfig,
         async handle(context) {
           const obligations = await listComplianceObligations({
             tenantSlug: context.target.tenantSlug,
@@ -1620,6 +1670,7 @@ const workerDefinitions: Record<string, WorkerDefinition> = {
       packet: {
         name: "packet",
         description: "Read compliance packet details, rule refs, approvals, redactions, and receipts.",
+        configSchema: compliancePacketViewConfig,
         async handle(context) {
           const packet = await getCompliancePacket({
             tenantSlug: context.target.tenantSlug,
@@ -1820,6 +1871,7 @@ const workerDefinitions: Record<string, WorkerDefinition> = {
       snapshot: {
         name: "snapshot",
         description: "Read the Systems Operations Worker runtime snapshot.",
+        configSchema: emptyViewConfig,
         async handle(context) {
           const result = await getSystemsWorkerSnapshotSafe({
             tenantSlug: context.target.tenantSlug,
@@ -1841,6 +1893,7 @@ const workerDefinitions: Record<string, WorkerDefinition> = {
       health: {
         name: "health",
         description: "Read connector health, sync jobs, data-quality issues, and permission reviews.",
+        configSchema: emptyViewConfig,
         async handle(context) {
           const result = await getSystemsWorkerSnapshotSafe({
             tenantSlug: context.target.tenantSlug,
@@ -1866,6 +1919,7 @@ const workerDefinitions: Record<string, WorkerDefinition> = {
       repairs: {
         name: "repairs",
         description: "Read sync repair plans, dry-run receipts, rollback plans, and approval state.",
+        configSchema: emptyViewConfig,
         async handle(context) {
           const repairs = await getSystemsRepairs({
             tenantSlug: context.target.tenantSlug,
@@ -2057,6 +2111,7 @@ const workerDefinitions: Record<string, WorkerDefinition> = {
       snapshot: {
         name: "snapshot",
         description: "Read the owner chief-of-staff worker runtime snapshot.",
+        configSchema: emptyViewConfig,
         async handle(context) {
           const result = await getOwnerWorkerSnapshotSafe({
             tenantSlug: context.target.tenantSlug,
@@ -2078,6 +2133,7 @@ const workerDefinitions: Record<string, WorkerDefinition> = {
       briefs: {
         name: "briefs",
         description: "List generated owner briefs.",
+        configSchema: stateFilterConfig,
         async handle(context) {
           const briefs = await listOwnerBriefs({
             operatorEmail: context.operatorEmail,
@@ -2099,6 +2155,7 @@ const workerDefinitions: Record<string, WorkerDefinition> = {
       decisions: {
         name: "decisions",
         description: "List owner decision proposals.",
+        configSchema: stateFilterConfig,
         async handle(context) {
           const ownerDecisions = await listOwnerDecisions({
             operatorEmail: context.operatorEmail,
@@ -2273,6 +2330,7 @@ const workerDefinitions: Record<string, WorkerDefinition> = {
       snapshot: {
         name: "snapshot",
         description: "Read the dispatch worker runtime snapshot.",
+        configSchema: emptyViewConfig,
         async handle(context) {
           const result = await getDispatchWorkerSnapshotSafe({
             tenantSlug: context.target.tenantSlug,
@@ -2294,6 +2352,7 @@ const workerDefinitions: Record<string, WorkerDefinition> = {
       board: {
         name: "board",
         description: "Read dispatch schedule proposals, approvals, and dry-run calendar state.",
+        configSchema: emptyViewConfig,
         async handle(context) {
           const result = await getDispatchWorkerSnapshotSafe({
             tenantSlug: context.target.tenantSlug,
@@ -2316,6 +2375,7 @@ const workerDefinitions: Record<string, WorkerDefinition> = {
       exceptions: {
         name: "exceptions",
         description: "Read dispatch exceptions and blocker tasks.",
+        configSchema: emptyViewConfig,
         async handle(context) {
           const result = await getDispatchWorkerSnapshotSafe({
             tenantSlug: context.target.tenantSlug,
@@ -2337,6 +2397,7 @@ const workerDefinitions: Record<string, WorkerDefinition> = {
       approvals: {
         name: "approvals",
         description: "List dispatch approval requests.",
+        configSchema: stateFilterConfig,
         async handle(context) {
           const approvals = await listApprovals({
             operatorEmail: context.operatorEmail,
@@ -2382,6 +2443,7 @@ export function registeredWorkerViews() {
       name: view.name,
       apiRoute: workerApiRoute,
       description: view.description,
+      configSchema: view.configSchema ?? null,
     })),
   );
 }
@@ -2515,6 +2577,10 @@ export async function executeWorkerView(input: {
       unsupportedViewMessage(definition),
       400,
     );
+  }
+
+  if (view.configSchema) {
+    validateConfigSchema(view.name, view.configSchema, config, "config", "invalid_worker_view_config");
   }
 
   return view.handle({

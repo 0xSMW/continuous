@@ -1,9 +1,12 @@
 import type { JsonObject } from "../db/schema";
+import type { DynamicToolCallParams } from "../../generated/app-server/ts/v2/DynamicToolCallParams";
+import type { DynamicToolCallResponse } from "../../generated/app-server/ts/v2/DynamicToolCallResponse";
 import { executeWorkerCommand, executeWorkerView, type WorkerTargetInput } from "./registry";
 import {
   assertTrustedLocalWorkerMutation,
   assertTrustedLocalWorkerRead,
   requiredLocalWorkerOperatorEmail,
+  workerTargetInputSchema,
   workerToolSchema,
 } from "./tools";
 import {
@@ -37,21 +40,8 @@ export type AppServerWorkerTransportContext =
       source: "trusted_local";
     };
 
-export type AppServerDynamicToolCallParams = {
-  tool: string;
-  arguments: unknown;
-  callId: string;
-  threadId: string;
-  turnId: string;
-};
-
-export type AppServerDynamicToolCallResponse = {
-  success: boolean;
-  contentItems: Array<{
-    type: "inputText";
-    text: string;
-  }>;
-};
+export type AppServerDynamicToolCallParams = DynamicToolCallParams;
+export type AppServerDynamicToolCallResponse = DynamicToolCallResponse;
 
 export const appServerWorkerTools = [
   {
@@ -82,16 +72,7 @@ export const appServerWorkerTools = [
       required: ["command", "worker", "config"],
       additionalProperties: false,
       $defs: {
-        workerTarget: {
-          type: "object",
-          properties: {
-            role: { type: "string" },
-            id: { type: "string" },
-            tenantSlug: { type: "string" },
-          },
-          required: ["role"],
-          additionalProperties: false,
-        },
+        workerTarget: workerTargetInputSchema,
       },
     },
   },
@@ -119,16 +100,7 @@ export const appServerWorkerTools = [
       required: ["view", "worker", "config"],
       additionalProperties: false,
       $defs: {
-        workerTarget: {
-          type: "object",
-          properties: {
-            role: { type: "string" },
-            id: { type: "string" },
-            tenantSlug: { type: "string" },
-          },
-          required: ["role"],
-          additionalProperties: false,
-        },
+        workerTarget: workerTargetInputSchema,
       },
     },
   },

@@ -231,6 +231,8 @@ describe("worker tool contract", () => {
     expect(appServerViewDefs.workerTarget.properties).toEqual(
       workerToolSchema.$defs.workerTarget.properties,
     );
+    expect(appServerCommandDefs.workerTarget.required).toEqual(["role"]);
+    expect(appServerViewDefs.workerTarget.required).toEqual(["role"]);
     expect(appServerCommandDefs.workerTarget.additionalProperties).toBe(false);
     expect(appServerViewDefs.workerTarget.additionalProperties).toBe(false);
   });
@@ -844,7 +846,7 @@ describe("worker tool contract", () => {
       ]),
     );
     expect(workerToolSchema.$defs.workerTarget.properties.tenantSlug.type).toBe("string");
-    expect(workerToolSchema.$defs.workerTarget.required).toContain("role");
+    expect(workerToolSchema.$defs.workerTarget.required).toEqual(["role"]);
     for (const tool of workerTools) {
       expect(tool.description.length).toBeGreaterThan(0);
       expect(tool.inputSchema.type).toBe("object");
@@ -1077,8 +1079,28 @@ describe("worker tool contract", () => {
     expect(workerToolSchema.registry.views).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ role: "compliance_operations", name: "snapshot", apiRoute: "/worker" }),
-        expect.objectContaining({ role: "compliance_operations", name: "obligations", apiRoute: "/worker" }),
-        expect.objectContaining({ role: "compliance_operations", name: "packet", apiRoute: "/worker" }),
+        expect.objectContaining({
+          role: "compliance_operations",
+          name: "obligations",
+          apiRoute: "/worker",
+          configSchema: expect.objectContaining({
+            properties: expect.objectContaining({
+              state: expect.objectContaining({ type: "string" }),
+              limit: expect.objectContaining({ type: "number", minimum: 1, maximum: 100 }),
+            }),
+          }),
+        }),
+        expect.objectContaining({
+          role: "compliance_operations",
+          name: "packet",
+          apiRoute: "/worker",
+          configSchema: expect.objectContaining({
+            properties: expect.objectContaining({
+              packetId: expect.objectContaining({ type: "string" }),
+              filingDraftId: expect.objectContaining({ type: "string" }),
+            }),
+          }),
+        }),
       ]),
     );
     expect(systemsViewMetadata).toEqual(

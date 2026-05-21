@@ -497,6 +497,40 @@ describe("/app-server route", () => {
     expect(mocks.executeAppServerWorkerDynamicToolCall).not.toHaveBeenCalled();
   });
 
+  it("rejects non-object app-server arguments before dynamic dispatch", async () => {
+    const { POST } = await import("./route");
+
+    for (const [index, args] of [null, "not-object", []].entries()) {
+      const response = await POST(
+        new Request("http://localhost/app-server", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer test-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            tool: index % 2 === 0 ? "continuous.worker.command" : "continuous.worker.view",
+            arguments: args,
+            callId: `call-non-object-arguments-${index}`,
+            threadId: "thread-001",
+            turnId: "turn-001",
+          }),
+        }),
+      );
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        error: {
+          code: "invalid_app_server_tool_call",
+          message: "App-server dynamic calls require arguments to be an object.",
+        },
+      });
+    }
+
+    expect(mocks.authorizeManagedControlPlaneCredential).not.toHaveBeenCalled();
+    expect(mocks.executeAppServerWorkerDynamicToolCall).not.toHaveBeenCalled();
+  });
+
   it("rejects top-level context and operation fields before dynamic dispatch", async () => {
     const { POST } = await import("./route");
     const response = await POST(
@@ -579,6 +613,112 @@ describe("/app-server route", () => {
         code: "invalid_app_server_tool_call",
         message:
           "continuous.worker.command arguments fields must be command, worker, idempotencyKey, and config. Put worker operation inputs under arguments.config. Unexpected fields: source, records.",
+      },
+    });
+    expect(mocks.authorizeManagedControlPlaneCredential).not.toHaveBeenCalled();
+    expect(mocks.executeAppServerWorkerDynamicToolCall).not.toHaveBeenCalled();
+  });
+
+  it("rejects worker view filters beside arguments.config before dynamic dispatch", async () => {
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/app-server", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          tool: "continuous.worker.view",
+          arguments: {
+            view: "approvals",
+            worker: {
+              role: "revenue_operations",
+              tenantSlug: "continuous-demo",
+            },
+            state: "pending",
+            config: {},
+          },
+          callId: "call-view-filter-outside-config",
+          threadId: "thread-001",
+          turnId: "turn-001",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "invalid_app_server_tool_call",
+        message:
+          "continuous.worker.view arguments fields must be view, worker, and config. Put worker operation inputs under arguments.config. Unexpected fields: state.",
+      },
+    });
+    expect(mocks.authorizeManagedControlPlaneCredential).not.toHaveBeenCalled();
+    expect(mocks.executeAppServerWorkerDynamicToolCall).not.toHaveBeenCalled();
+  });
+
+  it("rejects missing or non-object worker config before dynamic dispatch", async () => {
+    const { POST } = await import("./route");
+    const commandResponse = await POST(
+      new Request("http://localhost/app-server", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          tool: "continuous.worker.command",
+          arguments: {
+            command: "lead.read",
+            worker: {
+              role: "revenue_operations",
+              tenantSlug: "continuous-demo",
+            },
+            idempotencyKey: "app-server-route-missing-config-001",
+          },
+          callId: "call-command-missing-config",
+          threadId: "thread-001",
+          turnId: "turn-001",
+        }),
+      }),
+    );
+    const viewResponse = await POST(
+      new Request("http://localhost/app-server", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          tool: "continuous.worker.view",
+          arguments: {
+            view: "snapshot",
+            worker: {
+              role: "revenue_operations",
+              tenantSlug: "continuous-demo",
+            },
+            config: [],
+          },
+          callId: "call-view-array-config",
+          threadId: "thread-001",
+          turnId: "turn-001",
+        }),
+      }),
+    );
+
+    expect(commandResponse.status).toBe(400);
+    await expect(commandResponse.json()).resolves.toMatchObject({
+      error: {
+        code: "invalid_app_server_tool_call",
+        message: "config is required and must be an object.",
+      },
+    });
+    expect(viewResponse.status).toBe(400);
+    await expect(viewResponse.json()).resolves.toMatchObject({
+      error: {
+        code: "invalid_app_server_tool_call",
+        message: "config is required and must be an object.",
       },
     });
     expect(mocks.authorizeManagedControlPlaneCredential).not.toHaveBeenCalled();

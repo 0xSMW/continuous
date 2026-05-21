@@ -34,6 +34,14 @@ afterEach(() => {
   }
 });
 
+function dynamicToolText(
+  response: Awaited<ReturnType<typeof executeAppServerWorkerDynamicToolCall>>,
+) {
+  const item = response.contentItems[0];
+
+  return item?.type === "inputText" ? item.text : "{}";
+}
+
 describe("app-server worker tools", () => {
   it("exposes schema discovery and registry-backed worker command control", async () => {
     const schema = await executeAppServerWorkerTool("continuous.worker.schema");
@@ -291,8 +299,28 @@ describe("app-server worker tools", () => {
     expect(registry.views).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ role: "compliance_operations", name: "snapshot", apiRoute: "/worker" }),
-        expect.objectContaining({ role: "compliance_operations", name: "obligations", apiRoute: "/worker" }),
-        expect.objectContaining({ role: "compliance_operations", name: "packet", apiRoute: "/worker" }),
+        expect.objectContaining({
+          role: "compliance_operations",
+          name: "obligations",
+          apiRoute: "/worker",
+          configSchema: expect.objectContaining({
+            properties: expect.objectContaining({
+              state: expect.objectContaining({ type: "string" }),
+              limit: expect.objectContaining({ type: "number", minimum: 1, maximum: 100 }),
+            }),
+          }),
+        }),
+        expect.objectContaining({
+          role: "compliance_operations",
+          name: "packet",
+          apiRoute: "/worker",
+          configSchema: expect.objectContaining({
+            properties: expect.objectContaining({
+              packetId: expect.objectContaining({ type: "string" }),
+              filingDraftId: expect.objectContaining({ type: "string" }),
+            }),
+          }),
+        }),
       ]),
     );
     expect(systemsCommandMetadata).toEqual(
@@ -770,7 +798,7 @@ describe("app-server worker tools", () => {
       threadId: "thread-1",
       turnId: "turn-1",
     });
-    const schemaPayload = JSON.parse(schemaResponse.contentItems[0]?.text ?? "{}") as {
+    const schemaPayload = JSON.parse(dynamicToolText(schemaResponse)) as {
       ok?: boolean;
       tool?: string;
       data?: {
@@ -803,6 +831,26 @@ describe("app-server worker tools", () => {
       ]),
     );
 
+    const malformedArgumentsResponse = await executeAppServerWorkerDynamicToolCall({
+      tool: "continuous.worker.view",
+      arguments: [],
+      callId: "dynamic-malformed-arguments-call",
+      threadId: "thread-1",
+      turnId: "turn-malformed",
+    });
+    const malformedArgumentsPayload = JSON.parse(
+      malformedArgumentsResponse.contentItems[0]?.text ?? "{}",
+    ) as {
+      ok?: boolean;
+      error?: string;
+    };
+
+    expect(malformedArgumentsResponse.success).toBe(false);
+    expect(malformedArgumentsPayload.ok).toBe(false);
+    expect(malformedArgumentsPayload.error).toContain(
+      "Dynamic app-server worker tool arguments must be an object.",
+    );
+
     const errorResponse = await executeAppServerWorkerDynamicToolCall({
       tool: "continuous.worker.command",
       arguments: {
@@ -818,7 +866,7 @@ describe("app-server worker tools", () => {
       threadId: "thread-1",
       turnId: "turn-2",
     });
-    const errorPayload = JSON.parse(errorResponse.contentItems[0]?.text ?? "{}") as {
+    const errorPayload = JSON.parse(dynamicToolText(errorResponse)) as {
       ok?: boolean;
       error?: string;
     };
@@ -851,7 +899,7 @@ describe("app-server worker tools", () => {
         allowedWorkerRoles: ["revenue_operations"],
       },
     );
-    const deniedAccessPayload = JSON.parse(deniedAccessResponse.contentItems[0]?.text ?? "{}") as {
+    const deniedAccessPayload = JSON.parse(dynamicToolText(deniedAccessResponse)) as {
       ok?: boolean;
       error?: string;
     };
@@ -884,7 +932,7 @@ describe("app-server worker tools", () => {
         allowedWorkerRoles: ["revenue_operations"],
       },
     );
-    const deniedTenantPayload = JSON.parse(deniedTenantResponse.contentItems[0]?.text ?? "{}") as {
+    const deniedTenantPayload = JSON.parse(dynamicToolText(deniedTenantResponse)) as {
       ok?: boolean;
       error?: string;
     };
@@ -917,7 +965,7 @@ describe("app-server worker tools", () => {
         allowedWorkerRoles: ["finance_operations"],
       },
     );
-    const deniedRolePayload = JSON.parse(deniedRoleResponse.contentItems[0]?.text ?? "{}") as {
+    const deniedRolePayload = JSON.parse(dynamicToolText(deniedRoleResponse)) as {
       ok?: boolean;
       error?: string;
     };

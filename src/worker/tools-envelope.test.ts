@@ -92,6 +92,69 @@ describe("worker tool envelope forwarding", () => {
     expect(mocks.executeWorkerView).not.toHaveBeenCalled();
   });
 
+  it("keeps worker command inputs under config", async () => {
+    mocks.executeWorkerCommand.mockResolvedValue({
+      worker: {
+        role: "revenue_operations",
+        id: null,
+        tenantSlug: "continuous-demo",
+      },
+      command: "lead.read",
+      result: {
+        intake: [],
+      },
+    });
+
+    const { executeWorkerTool } = await import("./tools");
+    await executeWorkerTool("worker.command", {
+      command: "lead.read",
+      worker: {
+        role: "revenue_operations",
+        tenantSlug: "continuous-demo",
+      },
+      idempotencyKey: "local-envelope-command-001",
+      config: {
+        source: "website_form",
+        records: [],
+      },
+    });
+
+    expect(mocks.executeWorkerCommand).toHaveBeenCalledWith({
+      command: "lead.read",
+      target: {
+        role: "revenue_operations",
+        id: undefined,
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: "local-envelope-command-001",
+      config: {
+        source: "website_form",
+        records: [],
+      },
+    });
+  });
+
+  it("rejects top-level worker command inputs", async () => {
+    const { executeWorkerTool } = await import("./tools");
+
+    await expect(
+      executeWorkerTool("worker.command", {
+        command: "lead.read",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "local-envelope-command-002",
+        source: "website_form",
+        config: {},
+      }),
+    ).rejects.toThrow(
+      "Worker tool payload fields must be command, worker, idempotencyKey, and config. Move operation inputs into config. Unexpected fields: source.",
+    );
+    expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
+  });
+
   it("keeps app-server worker view filters under config", async () => {
     mocks.executeWorkerView.mockResolvedValue({
       data: {
@@ -133,6 +196,49 @@ describe("worker tool envelope forwarding", () => {
     expect(result).toMatchObject({
       view: "approvals",
       error: null,
+    });
+  });
+
+  it("keeps app-server worker command inputs under config", async () => {
+    mocks.executeWorkerCommand.mockResolvedValue({
+      worker: {
+        role: "revenue_operations",
+        id: null,
+        tenantSlug: "continuous-demo",
+      },
+      command: "lead.read",
+      result: {
+        intake: [],
+      },
+    });
+
+    const { executeAppServerWorkerTool } = await import("./app-server-tools");
+    await executeAppServerWorkerTool("continuous.worker.command", {
+      command: "lead.read",
+      worker: {
+        role: "revenue_operations",
+        tenantSlug: "continuous-demo",
+      },
+      idempotencyKey: "app-server-envelope-command-001",
+      config: {
+        source: "website_form",
+        records: [],
+      },
+    });
+
+    expect(mocks.executeWorkerCommand).toHaveBeenCalledWith({
+      command: "lead.read",
+      target: {
+        role: "revenue_operations",
+        id: undefined,
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: "app-server-envelope-command-001",
+      config: {
+        source: "website_form",
+        records: [],
+      },
     });
   });
 });

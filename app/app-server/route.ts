@@ -56,6 +56,22 @@ function bodyObject(value: unknown) {
     : {};
 }
 
+function appServerArguments(value: unknown):
+  | { ok: true; args: Record<string, unknown> }
+  | { ok: false; error: { code: string; message: string } } {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return { ok: true, args: value as Record<string, unknown> };
+  }
+
+  return {
+    ok: false,
+    error: {
+      code: "invalid_app_server_tool_call",
+      message: "App-server dynamic calls require arguments to be an object.",
+    },
+  };
+}
+
 function appServerWorkerArgumentsEnvelopeError(
   subject: string,
   allowedDescription: string,
@@ -212,7 +228,16 @@ function appServerBridgeTarget(body: Record<string, unknown>):
     };
   }
 
-  const args = bodyObject(body.arguments);
+  const argumentsResult = appServerArguments(body.arguments);
+
+  if (!argumentsResult.ok) {
+    return {
+      ok: false,
+      error: argumentsResult.error,
+    };
+  }
+
+  const args = argumentsResult.args;
   const worker = bodyObject(args.worker);
   const tenantSlug = optionalString(worker.tenantSlug);
   const workerRole = optionalString(worker.role);

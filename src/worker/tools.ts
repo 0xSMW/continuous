@@ -27,6 +27,17 @@ import {
   workerViewEnvelopeFieldSet,
 } from "./envelope";
 
+export const workerTargetInputSchema = {
+  type: "object",
+  properties: {
+    role: { type: "string" },
+    id: { type: "string" },
+    tenantSlug: { type: "string" },
+  },
+  required: ["role"],
+  additionalProperties: false,
+} satisfies JsonObject;
+
 export const workerTools = [
   {
     name: "worker.view",
@@ -125,14 +136,7 @@ export const workerToolSchema = {
   },
   $defs: {
     workerTarget: {
-      type: "object",
-      properties: {
-        role: { type: "string" },
-        id: { type: "string" },
-        tenantSlug: { type: "string" },
-      },
-      required: ["role"],
-      additionalProperties: false,
+      ...workerTargetInputSchema,
     },
     leadPacket: {
       type: "object",

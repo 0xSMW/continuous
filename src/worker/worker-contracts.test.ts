@@ -298,6 +298,9 @@ describe("future worker contracts", () => {
       'export const workerCommandEnvelopeFields = ["command", "worker", "idempotencyKey", "config"] as const;',
     );
     expect(read("src/worker/envelope.ts")).toContain(
+      'export const workerViewEnvelopeFields = ["view", "worker", "config"] as const;',
+    );
+    expect(read("src/worker/envelope.ts")).toContain(
       'export const workerTargetEnvelopeFields = ["role", "id", "tenantSlug"] as const;',
     );
     expect(read("app/worker/route.ts")).not.toContain('request.headers.get("idempotency-key")');
