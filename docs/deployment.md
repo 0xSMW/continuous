@@ -730,7 +730,9 @@ HOST=45.55.53.92 \
 The backup script writes a `.sha256` sidecar next to the droplet dump and next
 to any local copy. It can also upload the verified dump, checksum sidecar, and
 `latest.json` manifest to an S3-compatible object store such as DigitalOcean
-Spaces:
+Spaces. The one-shot operator script streams one-shot backup environment
+variables over stdin to the host shell, so object-storage access keys are not
+placed in the SSH command line:
 
 ```sh
 HOST=45.55.53.92 \

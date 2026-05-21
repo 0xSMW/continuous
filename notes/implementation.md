@@ -400,3 +400,9 @@ direct registry dispatch. Canonical operations stay simple, such as `run`,
 reserved route prefixes, and family-worker command names are rejected before
 registry dispatch. Worker operation inputs still belong under `config` on
 `/worker` and under `arguments.config` on the app-server bridge.
+
+The one-shot Postgres backup operator script now streams backup configuration
+to the remote host over stdin before invoking `backup-db-on-host.sh`. This keeps
+S3-compatible object-storage credentials out of SSH command arguments while
+preserving the verified dump, checksum sidecar, optional local copy, and object
+storage upload path.

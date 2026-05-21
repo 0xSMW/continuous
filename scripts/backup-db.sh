@@ -28,32 +28,30 @@ if [[ "$BACKUP_NAME" != *.dump ]]; then
   BACKUP_NAME="$BACKUP_NAME.dump"
 fi
 
-quote() {
-  printf "%q" "$1"
+remote_env_script() {
+  printf 'set -euo pipefail\n'
+  printf 'export APP_DIR=%q\n' "$APP_DIR"
+  printf 'export REMOTE_BACKUP_DIR=%q\n' "$REMOTE_BACKUP_DIR"
+  printf 'export BACKUP_NAME=%q\n' "$BACKUP_NAME"
+  printf 'export RETENTION_DAYS=%q\n' "$RETENTION_DAYS"
+  printf 'export BACKUP_OBJECT_STORAGE_ENABLED=%q\n' "$BACKUP_OBJECT_STORAGE_ENABLED"
+  printf 'export BACKUP_S3_ENDPOINT=%q\n' "${BACKUP_S3_ENDPOINT:-}"
+  printf 'export BACKUP_S3_BUCKET=%q\n' "${BACKUP_S3_BUCKET:-}"
+  printf 'export BACKUP_S3_REGION=%q\n' "${BACKUP_S3_REGION:-}"
+  printf 'export BACKUP_S3_PREFIX=%q\n' "${BACKUP_S3_PREFIX:-}"
+  printf 'export BACKUP_S3_ACCESS_KEY_ID=%q\n' "${BACKUP_S3_ACCESS_KEY_ID:-}"
+  printf 'export BACKUP_S3_SECRET_ACCESS_KEY=%q\n' "${BACKUP_S3_SECRET_ACCESS_KEY:-}"
+  printf 'export BACKUP_S3_DRY_RUN=%q\n' "${BACKUP_S3_DRY_RUN:-}"
+  printf 'export AWS_ENDPOINT_URL_S3=%q\n' "${AWS_ENDPOINT_URL_S3:-}"
+  printf 'export AWS_REGION=%q\n' "${AWS_REGION:-}"
+  printf 'export AWS_ACCESS_KEY_ID=%q\n' "${AWS_ACCESS_KEY_ID:-}"
+  printf 'export AWS_SECRET_ACCESS_KEY=%q\n' "${AWS_SECRET_ACCESS_KEY:-}"
+  printf 'cd "$APP_DIR"\n'
+  printf 'exec bash ./scripts/backup-db-on-host.sh\n'
 }
 
-remote_env=(
-  "APP_DIR=$(quote "$APP_DIR")"
-  "REMOTE_BACKUP_DIR=$(quote "$REMOTE_BACKUP_DIR")"
-  "BACKUP_NAME=$(quote "$BACKUP_NAME")"
-  "RETENTION_DAYS=$(quote "$RETENTION_DAYS")"
-  "BACKUP_OBJECT_STORAGE_ENABLED=$(quote "$BACKUP_OBJECT_STORAGE_ENABLED")"
-  "BACKUP_S3_ENDPOINT=$(quote "${BACKUP_S3_ENDPOINT:-}")"
-  "BACKUP_S3_BUCKET=$(quote "${BACKUP_S3_BUCKET:-}")"
-  "BACKUP_S3_REGION=$(quote "${BACKUP_S3_REGION:-}")"
-  "BACKUP_S3_PREFIX=$(quote "${BACKUP_S3_PREFIX:-}")"
-  "BACKUP_S3_ACCESS_KEY_ID=$(quote "${BACKUP_S3_ACCESS_KEY_ID:-}")"
-  "BACKUP_S3_SECRET_ACCESS_KEY=$(quote "${BACKUP_S3_SECRET_ACCESS_KEY:-}")"
-  "BACKUP_S3_DRY_RUN=$(quote "${BACKUP_S3_DRY_RUN:-}")"
-  "AWS_ENDPOINT_URL_S3=$(quote "${AWS_ENDPOINT_URL_S3:-}")"
-  "AWS_REGION=$(quote "${AWS_REGION:-}")"
-  "AWS_ACCESS_KEY_ID=$(quote "${AWS_ACCESS_KEY_ID:-}")"
-  "AWS_SECRET_ACCESS_KEY=$(quote "${AWS_SECRET_ACCESS_KEY:-}")"
-)
-
 remote_output="$(
-  ssh "${SSH_ARGS[@]}" "$REMOTE" \
-    "cd $(quote "$APP_DIR") && ${remote_env[*]} bash ./scripts/backup-db-on-host.sh"
+  remote_env_script | ssh "${SSH_ARGS[@]}" "$REMOTE" "bash -s"
 )"
 
 printf '%s\n' "$remote_output"

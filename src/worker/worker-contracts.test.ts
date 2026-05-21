@@ -517,6 +517,7 @@ describe("future worker contracts", () => {
     const attestationScript = read("scripts/attest-control-plane-on-host.sh");
     const coreWorkerLifecycleSmokeScript = read("scripts/smoke-core-worker-lifecycle-on-host.sh");
     const rotationScript = read("scripts/rotate-control-plane-token-on-host.sh");
+    const backupScript = read("scripts/backup-db.sh");
 
     expect(deployment).toContain("control_plane.token_rotation.attest");
     expect(deployment).toContain("control_plane.credential.upsert");
@@ -544,6 +545,11 @@ describe("future worker contracts", () => {
     expect(observabilityScript).toContain("caddy_access_log_present:docker_stdout");
     expect(observabilityScript).not.toContain("logs --tail=400 caddy 2>/dev/null | grep -q");
     expect(deployment).toContain("structured Docker stdout logs");
+    expect(deployment).toContain("streams one-shot backup environment variables over stdin");
+    expect(backupScript).toContain("remote_env_script | ssh");
+    expect(backupScript).toContain('ssh "${SSH_ARGS[@]}" "$REMOTE" "bash -s"');
+    expect(backupScript).not.toContain("remote_env=(");
+    expect(backupScript).not.toContain("${remote_env[*]}");
     expect(deployWorkflow).toContain("docker system df");
     expect(attestationScript).toContain("control_plane.credential.upsert");
     expect(attestationScript).toContain("control_plane.credential.revoke");
