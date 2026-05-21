@@ -386,3 +386,9 @@ Offer/Pricing before asserting success. The transport remains the generic
 `POST /app-server` and `continuous.worker.command` envelope, but runtime errors
 now show the failing command, worker role, call id, and worker error in Actions
 logs instead of only the outer `success:false` bridge envelope.
+
+Deploy now prunes stopped containers, dangling Docker images, old app image
+tags, build cache, container JSON logs, and stale release archive files before
+uploading and loading release images. The cleanup keeps the target tag plus the
+current and previous app tags so a failed image load does not erase the rollback
+surface on smaller droplets.

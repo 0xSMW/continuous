@@ -160,6 +160,70 @@ set_control_plane_token_catalog() {
   set_env CONTROL_PLANE_TOKEN_CATALOG_B64 "$catalog_b64"
 }
 
+cleanup_release_storage() {
+  mkdir -p "$APP_DIR/releases"
+  current_app_tag="$(grep '^APP_TAG=' .env | cut -d= -f2- || true)"
+  previous_app_tag="$(grep '^PREVIOUS_APP_TAG=' .env | cut -d= -f2- || true)"
+
+  echo "Remote disk before deploy cleanup:"
+  df -h / "$APP_DIR" /var/lib/docker 2>/dev/null || df -h /
+  docker system df || true
+
+  docker compose --profile scheduler stop app caddy worker-scheduler >/dev/null 2>&1 || true
+  docker compose --profile scheduler rm -f app caddy worker-scheduler >/dev/null 2>&1 || true
+  docker container prune -f >/dev/null || true
+  docker system prune -af >/dev/null || true
+  docker builder prune -af >/dev/null || true
+  find /var/lib/docker/containers -type f -name '*-json.log' -exec truncate -s 0 {} + 2>/dev/null || true
+  find "$APP_DIR/releases" -mindepth 2 -maxdepth 2 -type f ! -path "$APP_DIR/releases/$APP_TAG/*" -delete 2>/dev/null || true
+  docker images "$APP_IMAGE" --format '{{.Repository}} {{.Tag}}' | while read -r image_repo image_tag; do
+    if [ -z "$image_repo" ] || [ -z "$image_tag" ] || [ "$image_tag" = "<none>" ]; then
+      continue
+    fi
+
+    keep_image=false
+    case "$image_tag" in
+      "$APP_TAG"|"$APP_TAG-migrate"|"$APP_TAG-scheduler")
+        keep_image=true
+        ;;
+    esac
+    if [ -n "$current_app_tag" ]; then
+      case "$image_tag" in
+        "$current_app_tag"|"$current_app_tag-migrate"|"$current_app_tag-scheduler")
+          keep_image=true
+          ;;
+      esac
+    fi
+    if [ -n "$previous_app_tag" ]; then
+      case "$image_tag" in
+        "$previous_app_tag"|"$previous_app_tag-migrate"|"$previous_app_tag-scheduler")
+          keep_image=true
+          ;;
+      esac
+    fi
+
+    if [ "$keep_image" = false ]; then
+      docker image rm "$image_repo:$image_tag" >/dev/null 2>&1 || true
+    fi
+  done
+
+  find "$APP_DIR/releases" -mindepth 1 -maxdepth 1 -type d | while IFS= read -r release_dir; do
+    release_name="$(basename "$release_dir")"
+    case "$release_name" in
+      "$APP_TAG"|"$current_app_tag"|"$previous_app_tag")
+        ;;
+      *)
+        rm -rf "$release_dir"
+        ;;
+    esac
+  done
+
+  echo "Remote disk after deploy cleanup:"
+  df -h / "$APP_DIR" /var/lib/docker 2>/dev/null || df -h /
+  docker system df || true
+  du -sh "$APP_DIR/releases" 2>/dev/null || true
+}
+
 set_env APP_URL "$APP_URL"
 set_env SITE_HOSTS "$SITE_HOSTS"
 set_env ACME_EMAIL "$ACME_EMAIL"
@@ -203,6 +267,7 @@ fi
 set_env WORKER_RUN_TOKEN "$worker_token"
 set_env WORKER_RUN_ENABLED true
 set_control_plane_token_catalog
+cleanup_release_storage
 
 docker compose pull db caddy
 docker compose up -d db

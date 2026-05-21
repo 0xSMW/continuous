@@ -198,6 +198,83 @@ jobs:
           echo "::error::SSH did not become reachable from this runner."
           exit 1
 
+      - name: Prepare remote release storage
+        if: ${{ inputs.rollback_app_tag == '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" \
+            "APP_DIR='$DEPLOY_PATH' APP_IMAGE='continuous-app' APP_TAG='$RELEASE_APP_TAG' bash -s" <<'REMOTE'
+          set -euo pipefail
+          mkdir -p "$APP_DIR/releases"
+
+          current_app_tag=""
+          previous_app_tag=""
+          if [ -f "$APP_DIR/.env" ]; then
+            current_app_tag="$(grep '^APP_TAG=' "$APP_DIR/.env" | cut -d= -f2- || true)"
+            previous_app_tag="$(grep '^PREVIOUS_APP_TAG=' "$APP_DIR/.env" | cut -d= -f2- || true)"
+          fi
+
+          echo "Remote disk before release cleanup:"
+          df -h / "$APP_DIR" /var/lib/docker 2>/dev/null || df -h /
+
+          if command -v docker >/dev/null 2>&1; then
+            docker compose --profile scheduler stop app caddy worker-scheduler >/dev/null 2>&1 || true
+            docker compose --profile scheduler rm -f app caddy worker-scheduler >/dev/null 2>&1 || true
+            docker container prune -f >/dev/null || true
+            docker system prune -af >/dev/null || true
+            docker builder prune -af >/dev/null || true
+            docker images "$APP_IMAGE" --format '{{.Repository}} {{.Tag}}' | while read -r image_repo image_tag; do
+              if [ -z "$image_repo" ] || [ -z "$image_tag" ] || [ "$image_tag" = "<none>" ]; then
+                continue
+              fi
+
+              keep_image=false
+              case "$image_tag" in
+                "$APP_TAG"|"$APP_TAG-migrate"|"$APP_TAG-scheduler")
+                  keep_image=true
+                  ;;
+              esac
+              if [ -n "$current_app_tag" ]; then
+                case "$image_tag" in
+                  "$current_app_tag"|"$current_app_tag-migrate"|"$current_app_tag-scheduler")
+                    keep_image=true
+                    ;;
+                esac
+              fi
+              if [ -n "$previous_app_tag" ]; then
+                case "$image_tag" in
+                  "$previous_app_tag"|"$previous_app_tag-migrate"|"$previous_app_tag-scheduler")
+                    keep_image=true
+                    ;;
+                esac
+              fi
+
+              if [ "$keep_image" = false ]; then
+                docker image rm "$image_repo:$image_tag" >/dev/null 2>&1 || true
+              fi
+            done
+          fi
+
+          if [ -d "$APP_DIR/releases" ]; then
+            find "$APP_DIR/releases" -mindepth 1 -maxdepth 1 -type d | while IFS= read -r release_dir; do
+              release_name="$(basename "$release_dir")"
+              case "$release_name" in
+                "$APP_TAG"|"$current_app_tag"|"$previous_app_tag")
+                  ;;
+                *)
+                  rm -rf "$release_dir"
+                  ;;
+              esac
+            done
+            find "$APP_DIR/releases" -mindepth 2 -maxdepth 2 -type f ! -path "$APP_DIR/releases/$APP_TAG/*" -delete 2>/dev/null || true
+          fi
+
+          echo "Remote disk after release cleanup:"
+          df -h / "$APP_DIR" /var/lib/docker 2>/dev/null || df -h /
+          du -sh "$APP_DIR/releases" 2>/dev/null || true
+          REMOTE
+
       - name: Sync repository
         shell: bash
         run: |
@@ -342,6 +419,67 @@ jobs:
             set_env CONTROL_PLANE_TOKENS_JSON ""
             set_env CONTROL_PLANE_TOKEN_CATALOG_B64 "$catalog_b64"
           }
+          cleanup_release_storage() {
+            mkdir -p "$APP_DIR/releases"
+            current_app_tag="$(grep '^APP_TAG=' .env | cut -d= -f2- || true)"
+            previous_app_tag="$(grep '^PREVIOUS_APP_TAG=' .env | cut -d= -f2- || true)"
+
+            echo "Remote disk before image load cleanup:"
+            df -h / "$APP_DIR" /var/lib/docker 2>/dev/null || df -h /
+            docker system df || true
+
+            docker container prune -f >/dev/null || true
+            docker image prune -f >/dev/null || true
+            docker builder prune -af >/dev/null || true
+            docker images "$APP_IMAGE" --format '{{.Repository}} {{.Tag}}' | while read -r image_repo image_tag; do
+              if [ -z "$image_repo" ] || [ -z "$image_tag" ] || [ "$image_tag" = "<none>" ]; then
+                continue
+              fi
+
+              keep_image=false
+              case "$image_tag" in
+                "$APP_TAG"|"$APP_TAG-migrate"|"$APP_TAG-scheduler")
+                  keep_image=true
+                  ;;
+              esac
+              if [ -n "$current_app_tag" ]; then
+                case "$image_tag" in
+                  "$current_app_tag"|"$current_app_tag-migrate"|"$current_app_tag-scheduler")
+                    keep_image=true
+                    ;;
+                esac
+              fi
+              if [ -n "$previous_app_tag" ]; then
+                case "$image_tag" in
+                  "$previous_app_tag"|"$previous_app_tag-migrate"|"$previous_app_tag-scheduler")
+                    keep_image=true
+                    ;;
+                esac
+              fi
+
+              if [ "$keep_image" = false ]; then
+                docker image rm "$image_repo:$image_tag" >/dev/null 2>&1 || true
+              fi
+            done
+            find /var/lib/docker/containers -type f -name '*-json.log' -exec truncate -s 0 {} + 2>/dev/null || true
+            find "$APP_DIR/releases" -mindepth 2 -maxdepth 2 -type f ! -path "$APP_DIR/releases/$APP_TAG/*" -delete 2>/dev/null || true
+
+            find "$APP_DIR/releases" -mindepth 1 -maxdepth 1 -type d | while IFS= read -r release_dir; do
+              release_name="$(basename "$release_dir")"
+              case "$release_name" in
+                "$APP_TAG"|"$current_app_tag"|"$previous_app_tag")
+                  ;;
+                *)
+                  rm -rf "$release_dir"
+                  ;;
+              esac
+            done
+
+            echo "Remote disk after image load cleanup:"
+            df -h / "$APP_DIR" /var/lib/docker 2>/dev/null || df -h /
+            docker system df || true
+            du -sh "$APP_DIR/releases" 2>/dev/null || true
+          }
           if [ -n "${ROLLBACK_APP_TAG:-}" ]; then
             app_image="$(grep '^APP_IMAGE=' .env | cut -d= -f2- || true)"
             app_image="${app_image:-continuous-app}"
@@ -381,6 +519,7 @@ jobs:
               exit 1
             fi
             gzip -t "$RELEASE_IMAGE_ARCHIVE"
+            cleanup_release_storage
             docker load -i "$RELEASE_IMAGE_ARCHIVE"
             docker image inspect "$APP_IMAGE:$APP_TAG" >/dev/null
             docker image inspect "$APP_IMAGE:$APP_TAG-migrate" >/dev/null
