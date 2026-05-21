@@ -1290,9 +1290,6 @@ export async function generateOwnerBrief(input: {
   const inputHash = hashJson({
     schemaVersion: "worker.owner_chief_of_staff.brief_generate.input.v1",
     requestHash,
-    sourceCounts: readModel.counts,
-    sourceRefs: brief.sourceRefs,
-    riskFlags: brief.riskFlags,
   });
   const coreRun = await startCoreWorkerRun({
     operatorEmail: input.operatorEmail,
@@ -1313,8 +1310,6 @@ export async function generateOwnerBrief(input: {
       config: input.config,
       window: readModel.window,
       scopes,
-      sourceCounts: readModel.counts,
-      sourceRefs: brief.sourceRefs,
     },
     policy: {
       externalExecution: "blocked",
