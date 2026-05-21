@@ -380,3 +380,9 @@ Managed control-plane credential inventory now fails closed when durable
 tenant, route, access, command, or worker-role scope lists are omitted or empty.
 This matches the deployment docs and prevents an empty managed credential row
 from authorizing broad access after catalog auth succeeds.
+
+Deploy app-server smoke now prints the parsed inner dynamic-tool result for
+Offer/Pricing before asserting success. The transport remains the generic
+`POST /app-server` and `continuous.worker.command` envelope, but runtime errors
+now show the failing command, worker role, call id, and worker error in Actions
+logs instead of only the outer `success:false` bridge envelope.

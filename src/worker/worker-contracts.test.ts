@@ -561,6 +561,8 @@ describe("future worker contracts", () => {
     expect(deployWorkflow).toContain("continuous.worker.command");
     expect(deployWorkflow).toContain('command: "lead.read"');
     expect(deployWorkflow).toContain("deploy-app-server-lead-read-smoke");
+    expect(deployWorkflow).toContain("appServerTool");
+    expect(deployWorkflow).toContain("missing or unparseable app-server tool response");
     expect(deployWorkflow).toContain("scripts/attest-control-plane-on-host.sh");
     expect(deployWorkflow).toContain("scripts/rotate-control-plane-token-on-host.sh");
     expect(deployWorkflow).toContain("scripts/smoke-core-worker-lifecycle-on-host.sh");

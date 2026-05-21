@@ -879,6 +879,22 @@ jobs:
               --data "$APP_SERVER_PRICING_PAYLOAD"
           )"
           echo "$APP_SERVER_PRICING_RESPONSE" | /usr/bin/jq -c '{api,error,success:.data.success,contentItemCount:(.data.contentItems | length)}'
+          echo "$APP_SERVER_PRICING_RESPONSE" | /usr/bin/jq -c '
+            {
+              appServerTool: (
+                (.data.contentItems[0].text? | fromjson?) // {ok:null,error:"missing or unparseable app-server tool response"}
+                | {
+                    ok,
+                    tool,
+                    callId,
+                    error,
+                    command: .data.command,
+                    view: .data.view,
+                    workerRole: .data.worker.role
+                  }
+              )
+            }
+          '
           echo "$APP_SERVER_PRICING_RESPONSE" | /usr/bin/jq -e '
             .api == "continuous.app_server.v1" and
             .error == null and
