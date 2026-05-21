@@ -419,8 +419,9 @@ export const workerContracts: PlannedWorkerContractMetadata[] = [
             records: { type: "array", minItems: 1, maxItems: 25, items: objectSchema() },
             items: { type: "array", minItems: 1, maxItems: 25, items: objectSchema() },
             leads: { type: "array", minItems: 1, maxItems: 25, items: objectSchema() },
+            scheduler: objectSchema("Internal scheduler lease and source metadata."),
           },
-          additionalProperties: true,
+          additionalProperties: false,
         },
       },
       {

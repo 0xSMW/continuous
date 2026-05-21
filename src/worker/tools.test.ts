@@ -1469,6 +1469,7 @@ describe("worker tool contract", () => {
     ]) {
       expect(schema).toEqual(expect.objectContaining({ additionalProperties: false }));
     }
+    expect(leadRead?.properties?.scheduler?.additionalProperties).toBe(true);
     expect(run?.properties?.pricing?.additionalProperties).toBe(false);
     expect(paymentLinkPrepare?.properties?.sourceRefs?.additionalProperties).toBe(false);
     expect(paymentLinkPrepare?.properties?.policy?.additionalProperties).toBe(false);
