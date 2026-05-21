@@ -1200,10 +1200,10 @@ describe("/worker route", () => {
   it("rejects route-like or family-worker operation names before registry dispatch", async () => {
     const { POST } = await import("./route");
     const badOperations = [
-      ["", "api", "revenue-worker", "run"].join("/"),
-      ["", "revenue-worker"].join("/"),
-      "revenue-worker",
-      ["revenue_worker", "run"].join("."),
+      ["", "api", "legacy-worker", "run"].join("/"),
+      ["", "legacy-worker"].join("/"),
+      "legacy-worker",
+      ["legacy_worker", "run"].join("."),
       "worker.run",
       "worker?view=snapshot",
       "api.worker.run",

@@ -19,7 +19,8 @@ routes.
 `/worker` is the only worker control-plane route. Use `POST /worker` for
 commands and `POST /worker` for read views; do not add worker-family URLs such
 as family-specific API paths, nested worker-role paths, or role-named worker
-routes.
+routes. Worker family names and catalog labels are payload selectors and
+metadata only; they never become route aliases.
 
 ```json
 {

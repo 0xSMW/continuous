@@ -222,10 +222,10 @@ describe("future worker contracts", () => {
       "price_policy",
     ];
     const routeShapedOperations = [
-      ["", "api", "revenue-worker", "run"].join("/"),
-      ["", "revenue-worker"].join("/"),
-      "revenue-worker",
-      ["revenue_worker", "run"].join("."),
+      ["", "api", "legacy-worker", "run"].join("/"),
+      ["", "legacy-worker"].join("/"),
+      "legacy-worker",
+      ["legacy_worker", "run"].join("."),
       "worker.run",
       "worker.view.snapshot",
       "worker?view=snapshot",

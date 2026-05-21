@@ -19,6 +19,8 @@ raising autonomy or permitting external sends.
 ## API Shape
 
 The canonical worker control-plane route is `/worker`.
+Revenue does not expose a family-specific route alias; the Revenue role is only
+selected through `worker.role: "revenue_operations"` in the request payload.
 
 Only `command`, `worker`, `idempotencyKey`, and `config` are accepted as
 top-level command fields. Worker role, tenant selection, and worker id live

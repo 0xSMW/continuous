@@ -319,10 +319,10 @@ describe("worker tool contract", () => {
     ).rejects.toThrow("config is required and must be an object.");
 
     for (const command of [
-      ["", "api", "revenue-worker", "run"].join("/"),
-      ["", "revenue-worker"].join("/"),
-      "revenue-worker",
-      ["revenue_worker", "run"].join("."),
+      ["", "api", "legacy-worker", "run"].join("/"),
+      ["", "legacy-worker"].join("/"),
+      "legacy-worker",
+      ["legacy_worker", "run"].join("."),
       "worker.run",
       "worker?view=snapshot",
       "api.worker.run",
@@ -961,7 +961,7 @@ describe("worker tool contract", () => {
 
     await expect(
       executeWorkerCommand({
-        command: ["", "api", "revenue-worker", "run"].join("/"),
+        command: ["", "api", "legacy-worker", "run"].join("/"),
         target: {
           role: "revenue_operations",
           tenantSlug: "continuous-demo",
@@ -984,7 +984,7 @@ describe("worker tool contract", () => {
           tenantSlug: "continuous-demo",
         },
         operatorEmail: "owner@continuoushq.com",
-        idempotencyKey: ["", "api", "revenue-worker", "run"].join("/"),
+        idempotencyKey: ["", "api", "legacy-worker", "run"].join("/"),
         config: {},
       }),
     ).rejects.toMatchObject({
