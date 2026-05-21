@@ -2954,6 +2954,41 @@ describe("POST /core", () => {
     );
   });
 
+  it("requires worker role scope for Core worker-run completions", async () => {
+    vi.stubEnv(
+      "CONTROL_PLANE_TOKENS_JSON",
+      JSON.stringify([
+        {
+          id: "core-route-test",
+          token: "test-token",
+          operatorEmail: "operator@example.com",
+          allowedTenants: ["continuous-demo"],
+          allowedWorkerRoles: ["finance_operations"],
+          allowedRoutes: ["core"],
+          allowedAccess: ["write"],
+          allowedCommands: exactCoreRouteCommands,
+        },
+      ]),
+    );
+
+    const response = await postCore("worker.run.complete", "worker-run-complete-forbidden-role-001", {
+      worker: {
+        role: "revenue_operations",
+      },
+      workerRunId: "55555555-5555-4555-8555-555555555555",
+      state: "done",
+      reason: "Quote packet prepared with blocked external execution.",
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(body.error).toEqual({
+      code: "control_plane_worker_role_forbidden",
+      message: "This operator token is not allowed to access the requested worker role.",
+    });
+    expect(mocks.completeCoreWorkerRun).not.toHaveBeenCalled();
+  });
+
   it("dispatches adapter.intent.record with adapter config payload", async () => {
     mocks.recordAdapterIntent.mockResolvedValue({
       created: true,

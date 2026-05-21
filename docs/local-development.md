@@ -53,7 +53,7 @@ shell history, and logs never carry bearer values:
 ```sh
 read -rsp "Route-scoped operator token: " CONTROL_PLANE_OPERATOR_TOKEN
 CONTROL_PLANE_TOKEN_SHA256="$(printf '%s' "$CONTROL_PLANE_OPERATOR_TOKEN" | shasum -a 256 | awk '{print $1}')"
-export CONTROL_PLANE_TOKENS_JSON='[{"id":"local-operator","tokenSha256":"'"$CONTROL_PLANE_TOKEN_SHA256"'","operatorEmail":"owner@continuoushq.com","allowedTenants":["continuous-demo"],"allowedWorkerRoles":["revenue_operations","offer_pricing_operations","customer_experience_operations"],"allowedRoutes":["core","worker","workflow","approval","app_server"],"allowedAccess":["read","write"],"allowedCommands":["core:view.summary","core:task.create","core:object.upsert","core:entity.setup.record","core:worker.upsert","core:worker.transition","worker:view.snapshot","worker:view.approvals","worker:lead.read","worker:run","worker:quote.prepare","worker:payment_link.prepare","worker:margin.review.prepare","worker:view.price_policy","worker:recovery.draft","worker:view.signals","worker:adapters.reconcile","worker:adapters.retry","app_server:core.schema","app_server:core.view.summary","app_server:core.command.task.create","app_server:core.command.object.upsert","app_server:core.command.worker.upsert","app_server:worker.schema","app_server:worker.view.snapshot","app_server:worker.command.lead.read","app_server:worker.command.payment_link.prepare","app_server:worker.command.margin.review.prepare","app_server:worker.view.price_policy","app_server:worker.command.recovery.draft","app_server:worker.view.signals","workflow:view.overview","approval:view.inbox","approval:approval.decide"]}]'
+export CONTROL_PLANE_TOKENS_JSON='[{"id":"local-operator","tokenSha256":"'"$CONTROL_PLANE_TOKEN_SHA256"'","operatorEmail":"owner@continuoushq.com","allowedTenants":["continuous-demo"],"allowedWorkerRoles":["revenue_operations","offer_pricing_operations","customer_experience_operations"],"allowedRoutes":["core","worker","workflow","approval","app_server"],"allowedAccess":["read","write"],"allowedCommands":["core:view.summary","core:task.create","core:object.upsert","core:entity.setup.record","core:worker.upsert","core:worker.transition","core:worker.run.start","core:worker.run.complete","worker:view.snapshot","worker:view.approvals","worker:lead.read","worker:run","worker:quote.prepare","worker:payment_link.prepare","worker:margin.review.prepare","worker:view.price_policy","worker:recovery.draft","worker:view.signals","worker:adapters.reconcile","worker:adapters.retry","app_server:core.schema","app_server:core.view.summary","app_server:core.command.task.create","app_server:core.command.object.upsert","app_server:core.command.worker.upsert","app_server:core.command.worker.run.start","app_server:core.command.worker.run.complete","app_server:worker.schema","app_server:worker.view.snapshot","app_server:worker.command.lead.read","app_server:worker.command.payment_link.prepare","app_server:worker.command.margin.review.prepare","app_server:worker.view.price_policy","app_server:worker.command.recovery.draft","app_server:worker.view.signals","workflow:view.overview","approval:view.inbox","approval:approval.decide"]}]'
 ```
 
 Core side effects use a structured command payload. For local-only testing,
@@ -99,7 +99,8 @@ curl -X POST http://localhost:3000/core \
 
 The additional Core write commands are `task.transition`, `object.link`,
 `adapter.upsert`, `connection.upsert`, `connection.health.record`, `entity.setup.record`,
-`worker.upsert`, `worker.transition`, `event.ingest`, `evidence.attach`, `document.create`, `decision.record`, `packet.prepare`,
+`worker.upsert`, `worker.transition`, `worker.run.start`, `worker.run.complete`,
+`event.ingest`, `evidence.attach`, `document.create`, `decision.record`, `packet.prepare`,
 `document.packet.prepare`, `approval.request`, `adapter.intent.record`,
 `rule.change.record`, `external_action.record`, `capability.grant`, `budget.reserve`, `budget.charge`,
 `budget.release`, `ai.infer`, `view.publish`, `customer_signal.record`, `payroll.preview.record`, and
@@ -140,8 +141,12 @@ curl -X POST http://localhost:3000/worker \
   }'
 ```
 
-The run command is a guarded side-effecting `POST /worker` call and is disabled
-by default. For local-only testing, start the app with:
+Core owns the generic worker-run ledger through `POST /core` commands
+`worker.run.start` and `worker.run.complete`: worker role, capability,
+budget account, idempotency, and settlement details live under `config`. The
+current Revenue runtime still exposes its registered business operation as
+`POST /worker` `command: "run"` while that command is moved onto the shared
+Core lifecycle gate. For local-only testing, start the app with:
 
 ```sh
 export WORKER_RUN_ENABLED=true
@@ -180,7 +185,9 @@ be forged from shell JSON. Codex dynamic tool-call payloads use `tool` plus
 `arguments`; the arguments stay the same strict `command`/`view`, `worker`,
 `idempotencyKey`, and `config` envelope. A
 successful run records an approval request and audit trail while keeping
-external send and money movement blocked. Use `worker.command` with
+external send and money movement blocked; the reusable run start/settlement
+boundary is the Core `worker.run.start` / `worker.run.complete` command pair.
+Use `worker.command` with
 `command: "lead.read"` to persist source lead records before `worker.command`
 with `command: "run"`;
 `config.leadPacket` is only the direct fallback for controlled local tests. If

@@ -242,6 +242,66 @@ describe("app-server Core tools", () => {
     );
   });
 
+  it("dispatches Core worker-run completion through the app-server command envelope", async () => {
+    const result = await executeAppServerCoreTool(
+      "continuous.core.command",
+      {
+        command: "worker.run.complete",
+        core: {
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "core-app-server-worker-run-complete-001",
+        config: {
+          worker: {
+            role: "revenue_operations",
+            id: "22222222-2222-4222-8222-222222222222",
+          },
+          workerRunId: "run-1",
+          state: "done",
+          reason: "Quote packet prepared with blocked external execution.",
+          output: {
+            packetId: "packet-1",
+          },
+        },
+      },
+      {
+        operatorEmail: "owner@continuoushq.com",
+        source: "control_plane",
+        allowedAccess: ["write"],
+        allowedCommands: ["core:worker.run.complete"],
+        allowedTenants: ["continuous-demo"],
+      },
+    );
+
+    expect(result).toEqual({
+      command: "worker.run.complete",
+      core: {
+        tenantSlug: "continuous-demo",
+      },
+      result: {
+        completed: true,
+        workerRunId: "run-1",
+      },
+    });
+    expect(mocks.completeCoreWorkerRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operatorEmail: "owner@continuoushq.com",
+        idempotencyKey: "core-app-server-worker-run-complete-001",
+        tenantSlug: "continuous-demo",
+        worker: {
+          role: "revenue_operations",
+          id: "22222222-2222-4222-8222-222222222222",
+        },
+        workerRunId: "run-1",
+        state: "done",
+        reason: "Quote packet prepared with blocked external execution.",
+        output: {
+          packetId: "packet-1",
+        },
+      }),
+    );
+  });
+
   it("dispatches Core summary views through the canonical app-server view envelope", async () => {
     const result = await executeAppServerCoreTool(
       "continuous.core.view",

@@ -111,6 +111,8 @@ printf '%s\n' "$APP_SERVER_CORE_SCHEMA_RESPONSE" | /usr/bin/jq -e '
     .ok == true and
     .tool == "continuous.core.schema" and
     (.data.registry.commands | any(.name == "task.create" and .apiRoute == "/core")) and
+    (.data.registry.commands | any(.name == "worker.run.start" and .apiRoute == "/core")) and
+    (.data.registry.commands | any(.name == "worker.run.complete" and .apiRoute == "/core")) and
     (.data.registry.views | any(.name == "summary" and .apiRoute == "/core"))
   )
 ' >/dev/null

@@ -103,6 +103,14 @@ bun run worker:tool worker.command <<'JSON'
 JSON
 ```
 
+The generic run ledger lives in Core, not in worker-family routes. New run
+lifecycle automation should call `continuous.core.command` or `POST /core` with
+`command: "worker.run.start"` and `command: "worker.run.complete"` and place
+worker role, capability, budget, evidence, and settlement details under
+`config`. The current Revenue `worker.command` examples remain the registered
+business operation path until those handlers adopt the shared Core lifecycle
+gate internally.
+
 When the HTTP snapshot, approval, or run path is required, use a route-scoped
 token from `CONTROL_PLANE_TOKENS_JSON` or `CONTROL_PLANE_TOKEN_CATALOG_B64`.
 Keep `WORKER_RUN_TOKEN` only as a bootstrap secret for first deploys and host
@@ -174,7 +182,8 @@ The same surface owns the persisted Core primitives used by future workers:
 
 Other supported Core commands are `task.transition`, `object.link`,
 `adapter.upsert`, `connection.upsert`, `connection.health.record`, `entity.setup.record`,
-`worker.upsert`, `worker.transition`, `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`, `document.packet.prepare`,
+`worker.upsert`, `worker.transition`, `worker.run.start`, `worker.run.complete`,
+`event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`, `document.packet.prepare`,
 `decision.record`, `approval.request`, `adapter.intent.record`,
 `rule.change.record`, `capability.grant`, `budget.reserve`, `budget.charge`,
 `budget.release`, `ai.infer`, `view.publish`, `customer_signal.record`, `payroll.preview.record`, and

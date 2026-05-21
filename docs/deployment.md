@@ -29,7 +29,8 @@ commands.
 `POST /core` is the operator-gated headless Core command surface. It
 supports `task.create`, `task.transition`, `object.upsert`, `object.link`,
 `adapter.upsert`, `connection.upsert`, `connection.health.record`, `entity.setup.record`,
-`worker.upsert`, `worker.transition`, `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`, `document.packet.prepare`,
+`worker.upsert`, `worker.transition`, `worker.run.start`, `worker.run.complete`,
+`event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`, `document.packet.prepare`,
 `decision.record`, `approval.request`, `capability.grant`, `budget.reserve`,
 `budget.charge`, `budget.release`, `ai.infer`, `view.publish`, `adapter.intent.record`,
 `rule.change.record`, `external_action.record`, `customer_signal.record`,
@@ -183,6 +184,14 @@ connection and scheduler idempotency key. `WORKER_SCHEDULER_LEAD_POLL_LIMIT`
 caps poll attempts per cycle and defaults to `5`. The scheduler does not execute
 external sends or money movement; it only drains queued internal work already
 covered by the command registry and workflow step ledger.
+
+Worker run accounting is a Core concern. New generic lifecycle calls use
+`POST /core` with `command: "worker.run.start"` and
+`command: "worker.run.complete"`, keeping worker role, capability, budget,
+reservation, settlement, evidence, and output details in `config`. The current
+Revenue deploy smoke still invokes the registered business command on
+`POST /worker` while the command internals are migrated onto that shared Core
+gate.
 
 For the HTTPS worker API path, call `POST /worker` with `command`, `worker`,
 `config`, and `idempotencyKey` fields as required by the command plus the bearer
@@ -371,6 +380,8 @@ Control-plane token catalog entries have this shape when provided directly via
       "core:entity.setup.record",
       "core:worker.upsert",
       "core:worker.transition",
+      "core:worker.run.start",
+      "core:worker.run.complete",
       "worker:view.snapshot",
       "worker:view.readiness",
       "worker:view.health",
@@ -612,6 +623,8 @@ and route-qualified command; unrelated commands remain closed.
       "core:entity.setup.record",
       "core:worker.upsert",
       "core:worker.transition",
+      "core:worker.run.start",
+      "core:worker.run.complete",
       "worker:view.snapshot",
       "worker:view.readiness",
       "worker:view.health",

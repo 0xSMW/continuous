@@ -31,6 +31,12 @@ can inspect payload requirements for candidate and packaged workers before
 handlers exist.
 `continuous.worker.view`, `continuous.worker.command`, `/worker`, and
 `worker:tool` all run through the same registry validation before dispatch.
+`continuous.core.command` owns reusable worker-run lifecycle control through
+`worker.run.start` and `worker.run.complete`, using the Core envelope with
+worker, capability, budget, evidence, and settlement data under `config`.
+Registered worker business commands stay on `/worker` and
+`continuous.worker.command`; they should adopt that Core lifecycle gate rather
+than adding worker-family-specific tool names or routes.
 The CI integration suite exercises `continuous.worker.command` on real
 Revenue `lead.read`, `run`, `lead.classify`, `response.draft`,
 `quote.prepare`, and `payment_link.prepare`. It also exercises Owner `brief.generate`, Dispatch
