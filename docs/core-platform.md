@@ -231,8 +231,11 @@ graph, ingests events, attaches evidence, creates document packets, records
 decisions, requests platform approvals, prepares durable evidence packets,
 grants scoped capabilities, moves AI budget through
 reserve/charge/release ledger states, and publishes renderer-neutral generated
-views. `worker.upsert` owns worker identity, manager, mission, role, scope,
-memory, policy, KPI, and autonomy setup. `worker.transition` owns lifecycle
+views. `worker.upsert` and `worker.transition` are the canonical generic
+`/core` worker lifecycle commands; `/worker` remains the execution surface for
+role-scoped worker commands and views. `worker.upsert` owns worker identity,
+manager, mission, role, scope, memory, policy, KPI, and autonomy setup.
+`worker.transition` owns lifecycle
 movement through `draft`, `training`, `active`, `paused`, and `retired` with
 reason and evidence packets; it does not execute tools or mutate external
 systems. `entity.setup.record` records legal entity facts, identifiers, work

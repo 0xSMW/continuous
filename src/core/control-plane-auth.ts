@@ -758,7 +758,7 @@ export async function authorizeManagedControlPlaneCredential(
           .limit(1)
       : [];
 
-    if (!rotationBridge) {
+    if (!rotationBridge && requireManagedCredential) {
       return {
         ok: false,
         status: 401,

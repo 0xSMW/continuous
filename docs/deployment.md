@@ -480,6 +480,10 @@ bootstrap credential inventory row, revokes a disposable drill credential,
 reviews recent bootstrap sessions, and writes the non-secret
 credential/auth/session evidence ids into this file. These scripts do not attest
 recovery drills, object-storage backups, alerting, or non-root host access.
+Only the bootstrap recovery commands `control_plane.token_rotation.attest` and
+`control_plane.credential.upsert` can reconcile a stale managed token
+fingerprint; normal `/core`, `/worker`, `/workflow`, and `/approval` commands
+continue to reject stale fingerprints before dispatch.
 
 ```sh
 install -m 0700 -d /etc/continuous
@@ -534,6 +538,11 @@ runtime still proves the bearer token against the hashed catalog, then `/core`,
 row with a token fingerprint before dispatch. That inventory can also narrow,
 pause, expire, or revoke the matching `credentialId` without changing the API
 shape:
+
+If a deploy rotates the catalog token but the managed credential row is still
+on the previous fingerprint, only the recovery commands named above may update
+that row. The stale credential row must still allow the exact route, access,
+and route-qualified command; unrelated commands remain closed.
 
 ```json
 {

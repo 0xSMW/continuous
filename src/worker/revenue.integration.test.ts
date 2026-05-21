@@ -366,6 +366,94 @@ maybeDescribe("Revenue Worker integration eval", () => {
     }
   });
 
+  it("lets recovery commands reconcile stale managed credential fingerprints without opening normal commands", async () => {
+    const credentialId = `ci-managed-recovery-${randomUUID()}`;
+    const staleToken = `ci-managed-stale-token-${randomUUID()}`;
+    const nextToken = `ci-managed-next-token-${randomUUID()}`;
+
+    await upsertControlPlaneCredential({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-managed-recovery-upsert-${randomUUID()}`,
+      credentialId,
+      displayName: "CI stale recovery credential",
+      tokenFingerprint: controlPlaneTokenFingerprint(staleToken) ?? undefined,
+      allowedTenants: ["continuous-demo"],
+      allowedWorkerRoles: ["revenue_operations"],
+      allowedRoutes: ["core", "worker"],
+      allowedAccess: ["write"],
+      allowedCommands: ["core:control_plane.credential.upsert", "worker:run"],
+      evidence: {
+        source: "ci",
+      },
+      db,
+    });
+
+    const nextRequest = new Request("http://localhost/core", {
+      headers: {
+        authorization: `Bearer ${nextToken}`,
+      },
+    });
+    const catalogAuth = {
+      ok: true as const,
+      operatorEmail: "owner@continuoushq.com",
+      credentialId,
+      scope: {
+        tenantSlugs: ["continuous-demo"],
+        workerRoles: ["revenue_operations"],
+      },
+    };
+    const normalCommandDenied = await authorizeManagedControlPlaneCredential({
+      request: nextRequest,
+      auth: catalogAuth,
+      tenantSlug: "continuous-demo",
+      workerRole: "revenue_operations",
+      route: "worker",
+      access: "write",
+      command: "run",
+      requireManagedCredential: true,
+      db,
+    });
+
+    expect(normalCommandDenied).toEqual({
+      ok: false,
+      status: 401,
+      code: "control_plane_credential_fingerprint_mismatch",
+      message: "Control-plane credential fingerprint does not match managed credential inventory.",
+    });
+
+    const recoveryCommandAllowed = await authorizeManagedControlPlaneCredential({
+      request: nextRequest,
+      auth: catalogAuth,
+      tenantSlug: "continuous-demo",
+      route: "core",
+      access: "write",
+      command: "control_plane.credential.upsert",
+      requireManagedCredential: false,
+      db,
+    });
+
+    expect(recoveryCommandAllowed.ok).toBe(true);
+
+    const unlistedRecoveryCommandDenied = await authorizeManagedControlPlaneCredential({
+      request: nextRequest,
+      auth: catalogAuth,
+      tenantSlug: "continuous-demo",
+      route: "core",
+      access: "write",
+      command: "control_plane.session.review",
+      requireManagedCredential: false,
+      db,
+    });
+
+    expect(unlistedRecoveryCommandDenied).toEqual({
+      ok: false,
+      status: 403,
+      code: "control_plane_command_forbidden",
+      message: "This managed control-plane credential is not allowed to execute the requested command.",
+    });
+  });
+
   it("enforces managed control-plane credential revocation after catalog auth succeeds", async () => {
     const credentialId = `ci-managed-${randomUUID()}`;
     const token = `ci-managed-token-${randomUUID()}`;
