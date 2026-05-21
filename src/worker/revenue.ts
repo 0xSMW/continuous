@@ -179,6 +179,18 @@ export type RevenueWorkerReadiness = {
     quoteApprovalViewId: string | null;
     paymentReviewViewId: string | null;
     adapterReceiptEvidenceId: string | null;
+    approvalContinuationWorkerRunId: string | null;
+    controlledSendReceiptEvidenceId: string | null;
+    paymentLinkContinuationWorkerRunId: string | null;
+    adapterRetryEvidenceId: string | null;
+    adapterReconciliationWorkflowStepId: string | null;
+    launchProofs: {
+      approvalContinuation: JsonObject;
+      controlledSendReceipt: JsonObject;
+      paymentLinkContinuation: JsonObject;
+      adapterRetry: JsonObject;
+      adapterReconciliation: JsonObject;
+    };
   };
 };
 
@@ -2940,6 +2952,81 @@ function revenueReadinessGate(input: {
   };
 }
 
+function revenueLaunchProof(input: {
+  key: string;
+  label: string;
+  ready: boolean;
+  reason: string;
+  workerRunId?: string | null;
+  workflowRunId?: string | null;
+  workflowStepId?: string | null;
+  evidenceId?: string | null;
+  adapterRunId?: string | null;
+  adapterActionId?: string | null;
+  status?: string | null;
+  recordedAt?: string | null;
+  details?: JsonObject;
+}): JsonObject {
+  return {
+    key: input.key,
+    label: input.label,
+    state: input.ready ? "ready" : "blocked",
+    reason: input.reason,
+    workerRunId: input.workerRunId ?? null,
+    workflowRunId: input.workflowRunId ?? null,
+    workflowStepId: input.workflowStepId ?? null,
+    evidenceId: input.evidenceId ?? null,
+    adapterRunId: input.adapterRunId ?? null,
+    adapterActionId: input.adapterActionId ?? null,
+    status: input.status ?? null,
+    recordedAt: input.recordedAt ?? null,
+    details: input.details ?? {},
+  };
+}
+
+function launchProofReady(proof: JsonObject) {
+  return proof.state === "ready";
+}
+
+function proofString(proof: JsonObject, key: string) {
+  return typeof proof[key] === "string" && proof[key] ? proof[key] : null;
+}
+
+function missingRevenueLaunchProofs() {
+  return {
+    approvalContinuation: revenueLaunchProof({
+      key: "approval_continuation",
+      label: "Approval continuation",
+      ready: false,
+      reason: "No completed Revenue approval continuation worker run was found.",
+    }),
+    controlledSendReceipt: revenueLaunchProof({
+      key: "controlled_send_receipt",
+      label: "Controlled-send receipt",
+      ready: false,
+      reason: "No completed controlled customer-message send receipt with rollback proof was found.",
+    }),
+    paymentLinkContinuation: revenueLaunchProof({
+      key: "payment_link_continuation",
+      label: "Payment-link continuation",
+      ready: false,
+      reason: "No completed payment-link approval continuation worker run was found.",
+    }),
+    adapterRetry: revenueLaunchProof({
+      key: "adapter_retry",
+      label: "Adapter retry",
+      ready: false,
+      reason: "No adapter retry execution receipt was found.",
+    }),
+    adapterReconciliation: revenueLaunchProof({
+      key: "adapter_reconciliation",
+      label: "Adapter reconciliation",
+      ready: false,
+      reason: "No post-retry adapter reconciliation workflow proof was found.",
+    }),
+  };
+}
+
 function revenueExecutionCredentialGates(): RevenueReadinessGate[] {
   return [
     revenueReadinessGate({
@@ -2950,18 +3037,324 @@ function revenueExecutionCredentialGates(): RevenueReadinessGate[] {
       requiredFor: "live_external_send",
     }),
     revenueReadinessGate({
-      key: "controlled_send_receipt_and_rollback",
-      label: "Controlled-send receipt and rollback proof",
-      reason:
-        "A first controlled send needs provider receipt capture plus rollback or escalation evidence before live execution is unblocked.",
-      requiredFor: "live_external_send",
-    }),
-    revenueReadinessGate({
       key: "cash_and_payment_handoff_credentials",
       label: "Cash and payment handoff credentials",
       reason:
         "Accounting, payment, and bank credentials remain explicit handoff gates; Revenue may prepare packets but cannot move money.",
       requiredFor: "cash_handoff",
+    }),
+  ];
+}
+
+async function revenueExecutionLaunchProofs(input: {
+  db: Database;
+  tenantId: string;
+  workerId: string;
+}) {
+  const launchProofs = missingRevenueLaunchProofs();
+  const [continuationRows, retryProofRows, reconciliationStepRows] = await Promise.all([
+    input.db
+      .select({
+        id: workerRuns.id,
+        state: workerRuns.state,
+        mode: workerRuns.mode,
+        idempotencyKey: workerRuns.idempotencyKey,
+        startedAt: workerRuns.startedAt,
+        endedAt: workerRuns.endedAt,
+        data: workerRuns.data,
+      })
+      .from(workerRuns)
+      .where(
+        and(
+          eq(workerRuns.tenantId, input.tenantId),
+          eq(workerRuns.workerId, input.workerId),
+          eq(workerRuns.state, "done"),
+          eq(workerRuns.mode, "continuation"),
+        ),
+      )
+      .orderBy(desc(workerRuns.endedAt), desc(workerRuns.startedAt), desc(workerRuns.id))
+      .limit(25),
+    input.db
+      .select({
+        id: evidence.id,
+        data: evidence.data,
+        createdAt: evidence.createdAt,
+      })
+      .from(evidence)
+      .where(and(eq(evidence.tenantId, input.tenantId), eq(evidence.name, "Adapter retry executed")))
+      .orderBy(desc(evidence.createdAt), desc(evidence.id))
+      .limit(1),
+    input.db
+      .select({
+        id: workflowSteps.id,
+        workflowRunId: workflowSteps.workflowRunId,
+        toState: workflowSteps.toState,
+        output: workflowSteps.output,
+        completedAt: workflowSteps.completedAt,
+      })
+      .from(workflowSteps)
+      .where(
+        and(
+          eq(workflowSteps.tenantId, input.tenantId),
+          eq(workflowSteps.workerId, input.workerId),
+          eq(workflowSteps.kind, "adapter_reconciliation"),
+          eq(workflowSteps.state, "done"),
+        ),
+      )
+      .orderBy(desc(workflowSteps.completedAt), desc(workflowSteps.id))
+      .limit(1),
+  ]);
+  const hasObjectFields = (value: JsonObject) => Object.keys(value).length > 0;
+  const continuationOutputFor = (row: (typeof continuationRows)[number]) => outputData(objectValue(row.data));
+  const quoteContinuation = continuationRows.find((row) => {
+    const output = continuationOutputFor(row);
+    const status = stringValue(output.status);
+
+    return (
+      status === "approved_execution_blocked" ||
+      status === "approved_execution_recorded" ||
+      status === "rejected_closed" ||
+      hasObjectFields(objectValue(output.approvedExecutionPacket)) ||
+      hasObjectFields(objectValue(output.revisionPacket))
+    );
+  });
+  const controlledSendContinuation = continuationRows.find((row) => {
+    const output = continuationOutputFor(row);
+    const controlledSendReceipt = objectValue(output.controlledSendReceipt);
+    const rollback = objectValue(controlledSendReceipt.rollback);
+
+    return (
+      stringValue(output.status) === "approved_execution_recorded" &&
+      hasObjectFields(controlledSendReceipt) &&
+      hasObjectFields(rollback)
+    );
+  });
+  const paymentLinkContinuation = continuationRows.find((row) => {
+    const output = continuationOutputFor(row);
+    const status = stringValue(output.status);
+
+    return (
+      status === "approved_payment_link_execution_blocked" ||
+      status === "payment_link_rejected_closed" ||
+      hasObjectFields(objectValue(output.approvedPaymentLinkPacket)) ||
+      hasObjectFields(objectValue(output.revisedPaymentLinkPacket))
+    );
+  });
+
+  if (quoteContinuation) {
+    const output = continuationOutputFor(quoteContinuation);
+
+    launchProofs.approvalContinuation = revenueLaunchProof({
+      key: "approval_continuation",
+      label: "Approval continuation",
+      ready: true,
+      reason: "A Revenue approval continuation has completed through the worker ledger.",
+      workerRunId: quoteContinuation.id,
+      workflowRunId: stringValue(output.workflowRunId) || null,
+      workflowStepId: stringValue(output.workflowStepId) || null,
+      evidenceId: stringValue(output.approvedExecutionEvidenceId, stringValue(output.evidenceId)) || null,
+      adapterRunId: stringValue(output.adapterRunId) || null,
+      adapterActionId: stringValue(output.adapterActionId) || null,
+      status: stringValue(output.status) || null,
+      recordedAt: (quoteContinuation.endedAt ?? quoteContinuation.startedAt).toISOString(),
+      details: {
+        idempotencyKey: quoteContinuation.idempotencyKey,
+        externalExecution: stringValue(output.externalExecution) || null,
+        externalSend: output.externalSend === true,
+      },
+    });
+  }
+
+  if (controlledSendContinuation) {
+    const output = continuationOutputFor(controlledSendContinuation);
+    const controlledSendReceipt = objectValue(output.controlledSendReceipt);
+    const externalActionRecord = objectValue(output.externalActionRecord);
+    const receipt = objectValue(controlledSendReceipt.receipt);
+    const rollback = objectValue(controlledSendReceipt.rollback);
+
+    launchProofs.controlledSendReceipt = revenueLaunchProof({
+      key: "controlled_send_receipt",
+      label: "Controlled-send receipt",
+      ready: true,
+      reason: "A controlled customer-message send receipt and rollback proof were recorded.",
+      workerRunId: controlledSendContinuation.id,
+      workflowRunId: stringValue(output.workflowRunId) || null,
+      workflowStepId: stringValue(output.workflowStepId) || null,
+      evidenceId: stringValue(externalActionRecord.evidenceId, stringValue(output.evidenceId)) || null,
+      adapterRunId: stringValue(output.adapterRunId) || null,
+      adapterActionId: stringValue(output.adapterActionId) || null,
+      status: stringValue(output.status) || null,
+      recordedAt: (controlledSendContinuation.endedAt ?? controlledSendContinuation.startedAt).toISOString(),
+      details: {
+        externalExecution: stringValue(output.externalExecution) || null,
+        externalSend: output.externalSend === true,
+        operation: stringValue(controlledSendReceipt.operation) || null,
+        receiptStatus: stringValue(receipt.status) || null,
+        rollbackStrategy: stringValue(rollback.strategy) || null,
+        externalActionId: stringValue(externalActionRecord.id) || null,
+      },
+    });
+  }
+
+  if (paymentLinkContinuation) {
+    const output = continuationOutputFor(paymentLinkContinuation);
+
+    launchProofs.paymentLinkContinuation = revenueLaunchProof({
+      key: "payment_link_continuation",
+      label: "Payment-link continuation",
+      ready: true,
+      reason: "A payment-link approval continuation has completed while provider creation and money movement remain blocked.",
+      workerRunId: paymentLinkContinuation.id,
+      workflowRunId: stringValue(output.workflowRunId) || null,
+      workflowStepId: stringValue(output.workflowStepId) || null,
+      evidenceId: stringValue(output.approvedPaymentLinkEvidenceId, stringValue(output.evidenceId)) || null,
+      adapterRunId: stringValue(output.adapterRunId) || null,
+      adapterActionId: stringValue(output.adapterActionId) || null,
+      status: stringValue(output.status) || null,
+      recordedAt: (paymentLinkContinuation.endedAt ?? paymentLinkContinuation.startedAt).toISOString(),
+      details: {
+        providerPaymentLinkCreation: stringValue(output.providerPaymentLinkCreation) || null,
+        moneyMovement: stringValue(output.moneyMovement) || null,
+        externalExecution: stringValue(output.externalExecution) || null,
+        externalMutation: output.externalMutation === true,
+      },
+    });
+  }
+
+  const retryProof = retryProofRows[0];
+
+  if (retryProof) {
+    const retryData = objectValue(retryProof.data);
+    const rollbackPlan = objectValue(retryData.rollbackPlan);
+    const executionGate = objectValue(retryData.executionGate);
+    const retryReady =
+      stringValue(retryData.externalExecution) === "blocked" &&
+      hasObjectFields(rollbackPlan) &&
+      stringValue(executionGate.state) === "blocked";
+
+    launchProofs.adapterRetry = revenueLaunchProof({
+      key: "adapter_retry",
+      label: "Adapter retry",
+      ready: retryReady,
+      reason: retryReady
+        ? "Adapter retry execution recorded blocked live-credential checks and rollback proof."
+        : "Adapter retry proof exists but is missing blocked execution or rollback details.",
+      workerRunId: stringValue(retryData.workerRunId) || null,
+      evidenceId: retryProof.id,
+      adapterRunId: stringValue(retryData.targetType) === "adapter_run" ? stringValue(retryData.targetId) || null : null,
+      adapterActionId:
+        stringValue(retryData.targetType) === "adapter_action" ? stringValue(retryData.targetId) || null : null,
+      status: stringValue(retryData.targetType) || null,
+      recordedAt: retryProof.createdAt.toISOString(),
+      details: {
+        operation: stringValue(retryData.operation) || null,
+        attempt: typeof retryData.attempt === "number" ? retryData.attempt : null,
+        maxAttempts: typeof retryData.maxAttempts === "number" ? retryData.maxAttempts : null,
+        externalExecution: stringValue(retryData.externalExecution) || null,
+        externalSend: retryData.externalSend === true,
+        executionGateState: stringValue(executionGate.state) || null,
+        rollbackPlanState: stringValue(rollbackPlan.state) || null,
+      },
+    });
+  }
+
+  const reconciliationStep = reconciliationStepRows[0];
+
+  if (reconciliationStep) {
+    const output = objectValue(reconciliationStep.output);
+    const reconciliationReady =
+      reconciliationStep.toState === "post_retry_reconciled" && stringValue(output.decision) === "matched";
+
+    launchProofs.adapterReconciliation = revenueLaunchProof({
+      key: "adapter_reconciliation",
+      label: "Adapter reconciliation",
+      ready: reconciliationReady,
+      reason: reconciliationReady
+        ? "Post-retry adapter reconciliation matched and updated the Revenue workflow."
+        : "Adapter reconciliation proof exists but has not reached post-retry matched state.",
+      workerRunId: stringValue(output.workerRunId) || null,
+      workflowRunId: reconciliationStep.workflowRunId,
+      workflowStepId: reconciliationStep.id,
+      evidenceId: stringValue(output.evidenceId) || null,
+      adapterRunId: stringValue(output.targetType) === "adapter_run" ? stringValue(output.targetId) || null : null,
+      adapterActionId:
+        stringValue(output.targetType) === "adapter_action" ? stringValue(output.targetId) || null : null,
+      status: stringValue(output.decision) || null,
+      recordedAt: (reconciliationStep.completedAt ?? new Date(0)).toISOString(),
+      details: {
+        toState: reconciliationStep.toState,
+        operation: stringValue(output.operation) || null,
+        externalExecution: stringValue(output.externalExecution) || null,
+        externalSend: output.externalSend === true,
+      },
+    });
+  }
+
+  return launchProofs;
+}
+
+function revenueExecutionProofGates(input: {
+  approvalContinuation: JsonObject;
+  controlledSendReceipt: JsonObject;
+  paymentLinkContinuation: JsonObject;
+  adapterRetry: JsonObject;
+  adapterReconciliation: JsonObject;
+}): RevenueReadinessGate[] {
+  return [
+    revenueReadinessGate({
+      key: "approval_continuation_proof",
+      label: "Approval continuation proof",
+      ready: launchProofReady(input.approvalContinuation),
+      reason:
+        "A worker approval must continue through the generic /worker command=continue ledger before launch readiness can be trusted.",
+      requiredFor: "live_external_send",
+      details: {
+        proof: input.approvalContinuation,
+      },
+    }),
+    revenueReadinessGate({
+      key: "controlled_send_receipt_and_rollback",
+      label: "Controlled-send receipt and rollback proof",
+      ready: launchProofReady(input.controlledSendReceipt),
+      reason:
+        "A first controlled send needs provider receipt capture plus rollback or escalation evidence before live execution is unblocked.",
+      requiredFor: "live_external_send",
+      details: {
+        proof: input.controlledSendReceipt,
+      },
+    }),
+    revenueReadinessGate({
+      key: "payment_link_continuation_proof",
+      label: "Payment-link continuation proof",
+      ready: launchProofReady(input.paymentLinkContinuation),
+      reason:
+        "Payment-link approvals must continue through the worker ledger and prove provider creation remains blocked before cash handoff launch.",
+      requiredFor: "cash_handoff",
+      details: {
+        proof: input.paymentLinkContinuation,
+      },
+    }),
+    revenueReadinessGate({
+      key: "adapter_retry_proof",
+      label: "Adapter retry proof",
+      ready: launchProofReady(input.adapterRetry),
+      reason:
+        "Adapter retry execution must record live-credential checks, rollback plans, and blocked external execution before launch.",
+      requiredFor: "adapter_reliability",
+      details: {
+        proof: input.adapterRetry,
+      },
+    }),
+    revenueReadinessGate({
+      key: "adapter_reconciliation_proof",
+      label: "Adapter reconciliation proof",
+      ready: launchProofReady(input.adapterReconciliation),
+      reason:
+        "Post-retry adapter reconciliation must close back into the Revenue workflow before launch.",
+      requiredFor: "adapter_reliability",
+      details: {
+        proof: input.adapterReconciliation,
+      },
     }),
   ];
 }
@@ -3239,7 +3632,23 @@ function revenueReadinessFromChecks(input: {
   proof?: Partial<RevenueWorkerReadiness["proof"]>;
 }) {
   const blockers = input.checks.filter((check) => check.state === "blocked");
-  const launchGates = input.launchGates ?? revenueExecutionCredentialGates();
+  const defaultLaunchProofs = missingRevenueLaunchProofs();
+  const launchProofs = {
+    approvalContinuation:
+      input.proof?.launchProofs?.approvalContinuation ?? defaultLaunchProofs.approvalContinuation,
+    controlledSendReceipt:
+      input.proof?.launchProofs?.controlledSendReceipt ?? defaultLaunchProofs.controlledSendReceipt,
+    paymentLinkContinuation:
+      input.proof?.launchProofs?.paymentLinkContinuation ?? defaultLaunchProofs.paymentLinkContinuation,
+    adapterRetry: input.proof?.launchProofs?.adapterRetry ?? defaultLaunchProofs.adapterRetry,
+    adapterReconciliation:
+      input.proof?.launchProofs?.adapterReconciliation ?? defaultLaunchProofs.adapterReconciliation,
+  };
+  const launchGates =
+    input.launchGates ?? [
+      ...revenueExecutionProofGates(launchProofs),
+      ...revenueExecutionCredentialGates(),
+    ];
   const launchBlockers = launchGates.filter((gate) => gate.state === "blocked");
 
   return {
@@ -3261,6 +3670,21 @@ function revenueReadinessFromChecks(input: {
       quoteApprovalViewId: input.proof?.quoteApprovalViewId ?? null,
       paymentReviewViewId: input.proof?.paymentReviewViewId ?? null,
       adapterReceiptEvidenceId: input.proof?.adapterReceiptEvidenceId ?? null,
+      approvalContinuationWorkerRunId:
+        input.proof?.approvalContinuationWorkerRunId ??
+        proofString(launchProofs.approvalContinuation, "workerRunId"),
+      controlledSendReceiptEvidenceId:
+        input.proof?.controlledSendReceiptEvidenceId ??
+        proofString(launchProofs.controlledSendReceipt, "evidenceId"),
+      paymentLinkContinuationWorkerRunId:
+        input.proof?.paymentLinkContinuationWorkerRunId ??
+        proofString(launchProofs.paymentLinkContinuation, "workerRunId"),
+      adapterRetryEvidenceId:
+        input.proof?.adapterRetryEvidenceId ?? proofString(launchProofs.adapterRetry, "evidenceId"),
+      adapterReconciliationWorkflowStepId:
+        input.proof?.adapterReconciliationWorkflowStepId ??
+        proofString(launchProofs.adapterReconciliation, "workflowStepId"),
+      launchProofs,
     },
   } satisfies RevenueWorkerReadiness;
 }
@@ -3413,7 +3837,7 @@ export async function getRevenueReadiness(input: {
       .where(
         and(
           eq(generatedViews.tenantId, workerRow.tenantId),
-          eq(generatedViews.key, "payment.approval.review"),
+          sql`(${generatedViews.key} = 'payment.approval.review' or ${generatedViews.key} like 'payment.approval.review.%')`,
           eq(generatedViews.active, true),
         ),
       )
@@ -3466,6 +3890,11 @@ export async function getRevenueReadiness(input: {
   const leadSourceGates = await revenueLeadSourceReadinessGates({
     db,
     tenantId: workerRow.tenantId,
+  });
+  const executionLaunchProofs = await revenueExecutionLaunchProofs({
+    db,
+    tenantId: workerRow.tenantId,
+    workerId: workerRow.id,
   });
   const allocationCount = allocationRows[0]?.value ?? 0;
   const allocationUnits = numberValue(allocationRows[0]?.units);
@@ -3556,6 +3985,7 @@ export async function getRevenueReadiness(input: {
     ],
     launchGates: [
       ...leadSourceGates,
+      ...revenueExecutionProofGates(executionLaunchProofs),
       ...revenueExecutionCredentialGates(),
     ],
     proof: {
@@ -3568,6 +3998,7 @@ export async function getRevenueReadiness(input: {
       quoteApprovalViewId,
       paymentReviewViewId,
       adapterReceiptEvidenceId: adapterReceiptEvidenceId || null,
+      launchProofs: executionLaunchProofs,
     },
   });
 }

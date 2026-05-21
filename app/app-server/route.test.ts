@@ -68,6 +68,7 @@ describe("/app-server route", () => {
       CONTROL_PLANE_TOKENS_JSON: tokenCatalog([
         "app_server:worker.schema",
         "app_server:worker.view.snapshot",
+        "app_server:worker.view.readiness",
         "app_server:worker.command.lead.read",
       ]),
       CONTROL_PLANE_TOKEN_CATALOG_B64: undefined,
@@ -216,7 +217,7 @@ describe("/app-server route", () => {
     const payload = {
       tool: "continuous.worker.view",
       arguments: {
-        view: "snapshot",
+        view: "readiness",
         worker: {
           role: "revenue_operations",
           tenantSlug: "continuous-demo",
@@ -243,7 +244,7 @@ describe("/app-server route", () => {
       operatorEmail: "operator@example.com",
       source: "control_plane",
       allowedAccess: ["read"],
-      allowedCommands: ["worker:view.snapshot"],
+      allowedCommands: ["worker:view.readiness"],
       allowedTenants: ["continuous-demo"],
       allowedWorkerRoles: ["revenue_operations"],
     });

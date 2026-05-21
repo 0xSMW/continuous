@@ -647,3 +647,10 @@ Deploy smoke now runs Revenue `lead.read -> run` through the authenticated
 worker run row, budget settlement, source-object refs, workflow run, and
 external-send disabled posture. This closes the previous production proof gap
 where app-server smoke proved Revenue source reads but not the actual worker run.
+
+Revenue launch readiness now fails closed on first-class proof objects, not
+route names or family-specific APIs. `/worker` `view=readiness` exposes
+`launchProofs` and direct ids for approval continuation, controlled-send
+receipt, payment-link continuation, adapter retry, and adapter reconciliation,
+then turns each into a generic launch gate before credential and money-movement
+gates are evaluated.

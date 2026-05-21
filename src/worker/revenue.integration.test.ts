@@ -4687,6 +4687,39 @@ maybeDescribe("Revenue Worker integration eval", () => {
       expect(continuationDataJson).not.toContain(forbidden);
     }
 
+    const controlledReadiness = await executeWorkerView({
+      view: "readiness",
+      target: {
+        role: "revenue_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+    });
+    const controlledReadinessData = objectValue(controlledReadiness.data.readiness);
+    const controlledReadinessProof = objectValue(controlledReadinessData.proof);
+    const controlledLaunchProofs = objectValue(controlledReadinessProof.launchProofs);
+    const controlledSendProof = objectValue(controlledLaunchProofs.controlledSendReceipt);
+    const controlledSendDetails = objectValue(controlledSendProof.details);
+    const controlledLaunchGates = Array.isArray(controlledReadinessData.launchGates)
+      ? controlledReadinessData.launchGates.map((gate) => objectValue(gate))
+      : [];
+
+    expect(controlledReadiness.error).toBeNull();
+    expect(controlledReadinessProof.approvalContinuationWorkerRunId).toBe(controlledContinuation.workerRunId);
+    expect(controlledReadinessProof.controlledSendReceiptEvidenceId).toBe(externalActionRecord.evidenceId);
+    expect(objectValue(controlledLaunchProofs.approvalContinuation).state).toBe("ready");
+    expect(controlledSendProof.state).toBe("ready");
+    expect(controlledSendProof.workerRunId).toBe(controlledContinuation.workerRunId);
+    expect(controlledSendProof.adapterActionId).toBe(first.adapterActionId);
+    expect(controlledSendDetails.operation).toBe("customer_message.send");
+    expect(controlledLaunchGates.find((gate) => gate.key === "controlled_send_receipt_and_rollback")?.state).toBe(
+      "ready",
+    );
+    expect(controlledLaunchGates.find((gate) => gate.key === "controlled_customer_send_credentials")?.state).toBe(
+      "blocked",
+    );
+    expect(controlledReadinessData.launchReady).toBe(false);
+
     const replay = await continueRevenueWorker({
       approvalId: first.approvalRequestId ?? "",
       idempotencyKey: `ci-worker-controlled-send-continue-${runId}`,
@@ -7060,6 +7093,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
       ? readinessData.launchGates.map((gate) => objectValue(gate))
       : [];
     const readinessProof = objectValue(readinessData.proof);
+    const launchProofs = objectValue(readinessProof.launchProofs);
 
     expect(readiness.error).toBeNull();
     expect(readiness.data.view).toBe("readiness");
@@ -7072,15 +7106,33 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(readinessProof.latestWorkerRunId).toBe(quoteResult.workerRunId);
     expect(readinessProof.quoteApprovalViewId).toBe(quoteResult.quoteApprovalViewId);
     expect(readinessProof.adapterReceiptEvidenceId).toBe(quoteResult.adapterReceiptEvidenceId);
+    expect(readinessProof.approvalContinuationWorkerRunId).toBeNull();
+    expect(readinessProof.controlledSendReceiptEvidenceId).toBeNull();
+    expect(readinessProof.paymentLinkContinuationWorkerRunId).toBeNull();
+    expect(readinessProof.adapterRetryEvidenceId).toBeNull();
+    expect(readinessProof.adapterReconciliationWorkflowStepId).toBeNull();
+    expect(objectValue(launchProofs.approvalContinuation).state).toBe("blocked");
+    expect(objectValue(launchProofs.controlledSendReceipt).state).toBe("blocked");
+    expect(objectValue(launchProofs.paymentLinkContinuation).state).toBe("blocked");
+    expect(objectValue(launchProofs.adapterRetry).state).toBe("blocked");
+    expect(objectValue(launchProofs.adapterReconciliation).state).toBe("blocked");
     expect(launchGates.map((gate) => gate.key)).toEqual([
       "lead_source_connection",
       "lead_source_connection_health",
       "scheduler_lead_read_cursor",
-      "controlled_customer_send_credentials",
+      "approval_continuation_proof",
       "controlled_send_receipt_and_rollback",
+      "payment_link_continuation_proof",
+      "adapter_retry_proof",
+      "adapter_reconciliation_proof",
+      "controlled_customer_send_credentials",
       "cash_and_payment_handoff_credentials",
     ]);
     expect(launchGates.some((gate) => gate.state === "blocked")).toBe(true);
+    expect(launchGates.find((gate) => gate.key === "approval_continuation_proof")?.state).toBe("blocked");
+    expect(launchGates.find((gate) => gate.key === "payment_link_continuation_proof")?.state).toBe("blocked");
+    expect(launchGates.find((gate) => gate.key === "adapter_retry_proof")?.state).toBe("blocked");
+    expect(launchGates.find((gate) => gate.key === "adapter_reconciliation_proof")?.state).toBe("blocked");
     expect(launchGates.find((gate) => gate.key === "controlled_customer_send_credentials")?.state).toBe("blocked");
     expect(launchGates.find((gate) => gate.key === "controlled_send_receipt_and_rollback")?.state).toBe("blocked");
     expect(launchGates.find((gate) => gate.key === "cash_and_payment_handoff_credentials")?.state).toBe("blocked");
@@ -7520,6 +7572,39 @@ maybeDescribe("Revenue Worker integration eval", () => {
       "approved_payment_link_execution_blocked",
     );
 
+    const paymentContinuationReadiness = await executeWorkerView({
+      view: "readiness",
+      target: {
+        role: "revenue_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+    });
+    const paymentContinuationReadinessData = objectValue(paymentContinuationReadiness.data.readiness);
+    const paymentContinuationProof = objectValue(paymentContinuationReadinessData.proof);
+    const paymentLaunchProofs = objectValue(paymentContinuationProof.launchProofs);
+    const paymentLinkContinuationProof = objectValue(paymentLaunchProofs.paymentLinkContinuation);
+    const paymentLinkContinuationDetails = objectValue(paymentLinkContinuationProof.details);
+    const paymentContinuationLaunchGates = Array.isArray(paymentContinuationReadinessData.launchGates)
+      ? paymentContinuationReadinessData.launchGates.map((gate) => objectValue(gate))
+      : [];
+
+    expect(paymentContinuationReadiness.error).toBeNull();
+    expect(paymentContinuationProof.paymentLinkContinuationWorkerRunId).toBe(paymentContinuation.workerRunId);
+    expect(paymentLinkContinuationProof.state).toBe("ready");
+    expect(paymentLinkContinuationProof.workerRunId).toBe(paymentContinuation.workerRunId);
+    expect(paymentLinkContinuationProof.workflowStepId).toBe(paymentContinuation.workflowStepId);
+    expect(paymentLinkContinuationProof.evidenceId).toBe(paymentContinuationOutput.approvedPaymentLinkEvidenceId);
+    expect(paymentLinkContinuationDetails.providerPaymentLinkCreation).toBe("blocked");
+    expect(paymentLinkContinuationDetails.moneyMovement).toBe("blocked");
+    expect(paymentContinuationLaunchGates.find((gate) => gate.key === "payment_link_continuation_proof")?.state).toBe(
+      "ready",
+    );
+    expect(paymentContinuationLaunchGates.find((gate) => gate.key === "cash_and_payment_handoff_credentials")?.state).toBe(
+      "blocked",
+    );
+    expect(paymentContinuationReadinessData.launchReady).toBe(false);
+
     const run = await runRevenueWorker({
       idempotencyKey: `ci-worker-run-from-lead-read-${runId}`,
       tenantSlug: "continuous-demo",
@@ -7836,6 +7921,10 @@ maybeDescribe("Revenue Worker integration eval", () => {
     const readinessPayload = objectValue(readinessEnvelope.readiness);
     const readinessWorker = objectValue(readinessEnvelope.worker);
     const readinessProof = objectValue(readinessPayload.proof);
+    const readinessLaunchProofs = objectValue(readinessProof.launchProofs);
+    const readinessLaunchGates = Array.isArray(readinessPayload.launchGates)
+      ? readinessPayload.launchGates.map((gate) => objectValue(gate))
+      : [];
 
     expect(readinessEnvelope.error).toBeNull();
     expect(readinessEnvelope.view).toBe("readiness");
@@ -7845,6 +7934,25 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(readinessProof.latestWorkerRunId).toBe(quoteResult.workerRunId);
     expect(readinessProof.quoteApprovalViewId).toBe(quoteResult.quoteApprovalViewId);
     expect(readinessProof.adapterReceiptEvidenceId).toBe(quoteResult.adapterReceiptEvidenceId);
+    expect(readinessProof).toHaveProperty("approvalContinuationWorkerRunId");
+    expect(readinessProof).toHaveProperty("controlledSendReceiptEvidenceId");
+    expect(readinessProof).toHaveProperty("paymentLinkContinuationWorkerRunId");
+    expect(readinessProof).toHaveProperty("adapterRetryEvidenceId");
+    expect(readinessProof).toHaveProperty("adapterReconciliationWorkflowStepId");
+    expect(objectValue(readinessLaunchProofs.approvalContinuation)).toHaveProperty("state");
+    expect(objectValue(readinessLaunchProofs.controlledSendReceipt)).toHaveProperty("state");
+    expect(objectValue(readinessLaunchProofs.paymentLinkContinuation)).toHaveProperty("state");
+    expect(objectValue(readinessLaunchProofs.adapterRetry)).toHaveProperty("state");
+    expect(objectValue(readinessLaunchProofs.adapterReconciliation)).toHaveProperty("state");
+    expect(readinessLaunchGates.map((gate) => gate.key)).toEqual(
+      expect.arrayContaining([
+        "approval_continuation_proof",
+        "controlled_send_receipt_and_rollback",
+        "payment_link_continuation_proof",
+        "adapter_retry_proof",
+        "adapter_reconciliation_proof",
+      ]),
+    );
 
     const paymentLink = await executeAppServerWorkerTool("continuous.worker.command", {
       command: "payment_link.prepare",
@@ -9066,6 +9174,31 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(retryOutput.rollbackPlans).toBeGreaterThanOrEqual(2);
     expect(retryOutput.blockedLiveExecutions).toBeGreaterThanOrEqual(2);
 
+    const retryReadiness = await executeWorkerView({
+      view: "readiness",
+      target: {
+        role: "revenue_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+    });
+    const retryReadinessData = objectValue(retryReadiness.data.readiness);
+    const retryReadinessProof = objectValue(retryReadinessData.proof);
+    const retryLaunchProofs = objectValue(retryReadinessProof.launchProofs);
+    const adapterRetryProof = objectValue(retryLaunchProofs.adapterRetry);
+    const retryLaunchGates = Array.isArray(retryReadinessData.launchGates)
+      ? retryReadinessData.launchGates.map((gate) => objectValue(gate))
+      : [];
+    const adapterRetryTargetId =
+      stringValue(adapterRetryProof.adapterRunId) || stringValue(adapterRetryProof.adapterActionId);
+
+    expect(retryReadiness.error).toBeNull();
+    expect(retryReadinessProof.adapterRetryEvidenceId).toBeTruthy();
+    expect(adapterRetryProof.state).toBe("ready");
+    expect(stringList(retryOutput.evidenceIds)).toContain(stringValue(adapterRetryProof.evidenceId));
+    expect([first.adapterRunId, first.adapterActionId]).toContain(adapterRetryTargetId);
+    expect(retryLaunchGates.find((gate) => gate.key === "adapter_retry_proof")?.state).toBe("ready");
+
     const postRetry = await reconcileAdapterLedger({
       tenantSlug: "continuous-demo",
       limit: 100,
@@ -9099,6 +9232,31 @@ maybeDescribe("Revenue Worker integration eval", () => {
         .filter((step) => step.workflowRunId === first.workflowRunId)
         .every((step) => step.kind === "adapter_reconciliation" && step.toState === "post_retry_reconciled"),
     ).toBe(true);
+
+    const postRetryReadiness = await executeWorkerView({
+      view: "readiness",
+      target: {
+        role: "revenue_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+    });
+    const postRetryReadinessData = objectValue(postRetryReadiness.data.readiness);
+    const postRetryReadinessProof = objectValue(postRetryReadinessData.proof);
+    const postRetryLaunchProofs = objectValue(postRetryReadinessProof.launchProofs);
+    const adapterReconciliationProof = objectValue(postRetryLaunchProofs.adapterReconciliation);
+    const postRetryLaunchGates = Array.isArray(postRetryReadinessData.launchGates)
+      ? postRetryReadinessData.launchGates.map((gate) => objectValue(gate))
+      : [];
+
+    expect(postRetryReadiness.error).toBeNull();
+    expect(postRetryReadinessProof.adapterReconciliationWorkflowStepId).toBeTruthy();
+    expect(adapterReconciliationProof.state).toBe("ready");
+    expect(adapterReconciliationProof.workflowRunId).toBe(first.workflowRunId);
+    expect(postRetry.workflowStepIds).toContain(stringValue(adapterReconciliationProof.workflowStepId));
+    expect(stringList(postRetry.evidenceIds)).toContain(stringValue(adapterReconciliationProof.evidenceId));
+    expect(postRetryLaunchGates.find((gate) => gate.key === "adapter_retry_proof")?.state).toBe("ready");
+    expect(postRetryLaunchGates.find((gate) => gate.key === "adapter_reconciliation_proof")?.state).toBe("ready");
   }, 120_000);
 
   it("reconciles pending dry-run adapter rows without external execution", async () => {
