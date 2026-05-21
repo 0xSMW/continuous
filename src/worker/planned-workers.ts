@@ -690,6 +690,17 @@ export const workerContracts: PlannedWorkerContractMetadata[] = [
         requiresTenant: true,
         requiredConfig: ["approvalId", "action"],
       },
+      {
+        role: "owner_chief_of_staff",
+        name: "continue",
+        toolAlias: "worker.command",
+        description: "Continue a decided owner brief approval by publishing, revising, or marking it stale without external execution.",
+        idempotency: "required",
+        sideEffects: "internal",
+        externalExecution: "blocked",
+        requiresTenant: true,
+        requiredConfig: ["approvalId"],
+      },
     ],
     views: [
       {
