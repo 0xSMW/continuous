@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { CoreSummary } from "../../src/core/summary";
 
@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../../src/core/summary", () => ({
   getCoreSummarySafe: mocks.getCoreSummarySafe,
 }));
+
+const originalAppEnv = process.env.APP_ENV;
 
 const emptySummary: CoreSummary = {
   tenantName: null,
@@ -142,7 +144,16 @@ function readySummary(): CoreSummary {
 }
 
 describe("/health route", () => {
+  beforeEach(() => {
+    process.env.APP_ENV = "test";
+  });
+
   afterEach(() => {
+    if (originalAppEnv === undefined) {
+      delete process.env.APP_ENV;
+    } else {
+      process.env.APP_ENV = originalAppEnv;
+    }
     vi.resetAllMocks();
   });
 
