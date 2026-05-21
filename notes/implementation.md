@@ -205,6 +205,7 @@
 | Prevented shallow smoke stdin drain | `scripts/smoke-production-on-host.sh` now closes stdin around its Postgres version probe so heredoc-driven deploy scripts continue into deeper credential, Core worker lifecycle, and worker runtime smokes |
 | Hardened readiness env parsing | `scripts/check-production-readiness-on-host.sh` now reads explicit key/value pairs from readiness, backup, and observability env files and passes only whitelisted backup credentials into the object-storage check instead of shell-sourcing host files |
 | Aligned deploy approval smoke with read envelopes | The DigitalOcean deploy smoke now reads the approval inbox through `POST /approval` with `view`, `approval`, and `config`, matching the canonical control-plane API shape |
+| Moved Owner brief generation onto Core lifecycle | Owner `brief.generate` still enters through the generic `/worker` command envelope, but now uses Core `worker.run.start` and `worker.run.complete` for the run row, active capability grant, budget reservation, usage settlement, and replayable lifecycle proof while Owner-specific brief, evidence, approval, decision, and view records stay as business proof |
 
 ### Tradeoffs
 

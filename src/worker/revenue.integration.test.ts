@@ -9888,10 +9888,30 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .from(workerRuns)
       .where(eq(workerRuns.id, ownerResult.workerRunId ?? ""))
       .limit(1);
+    const [localRun] = await db
+      .select({ id: workerRuns.id })
+      .from(workerRuns)
+      .where(
+        and(
+          eq(workerRuns.source, "continuous.worker"),
+          eq(workerRuns.idempotencyKey, `ci-owner-brief-${runId}`),
+        ),
+      )
+      .limit(1);
     const [ownerWorker] = await db
       .select({ id: workers.id })
       .from(workers)
       .where(eq(workers.role, "owner_chief_of_staff"))
+      .limit(1);
+    const [reservation] = await db
+      .select()
+      .from(budgetReservations)
+      .where(eq(budgetReservations.id, ownerResult.reservationId ?? ""))
+      .limit(1);
+    const [usage] = await db
+      .select()
+      .from(usageEvents)
+      .where(eq(usageEvents.id, ownerResult.usageEventId ?? ""))
       .limit(1);
     const replay = await executeWorkerCommand({
       command: "brief.generate",
@@ -9921,11 +9941,23 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(approval?.workerRunId).toBe(ownerResult.workerRunId);
     expect(objectValue(approval?.requestedAction).externalExecution).toBe("blocked");
     expect(run?.mode).toBe("read_only");
+    expect(run?.source).toBe("continuous.core.worker_runs");
     expect(run?.workerId).toBe(ownerWorker?.id);
+    expect(objectValue(run?.data).command).toBe("brief.generate");
+    expect(objectValue(objectValue(run?.data).budget).reservationId).toBe(ownerResult.reservationId);
+    expect(objectValue(objectValue(run?.data).completion).state).toBe("done");
+    expect(objectValue(objectValue(objectValue(run?.data).completion).budget).usageEventId).toBe(
+      ownerResult.usageEventId,
+    );
+    expect(localRun).toBeUndefined();
+    expect(reservation?.state).toBe("used");
+    expect(usage?.reservationId).toBe(ownerResult.reservationId);
+    expect(usage?.actorId).toBe(ownerWorker?.id);
     expect(objectValue(ownerResult.output).externalExecution).toBe("blocked");
     expect(objectValue(ownerResult.output).externalSend).toBe(false);
     expect(replayResult.created).toBe(false);
     expect(replayResult.workerRunId).toBe(ownerResult.workerRunId);
+    expect(replayResult.usageEventId).toBe(ownerResult.usageEventId);
   }, 120_000);
 
   it("continues Owner Chief-of-Staff approval outcomes through the worker command spine", async () => {

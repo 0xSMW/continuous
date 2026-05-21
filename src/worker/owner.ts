@@ -4,6 +4,7 @@ import { and, count, desc, eq, sql } from "drizzle-orm";
 
 import { PlatformUnavailableError } from "../core/errors";
 import { loadOperatorContext } from "../core/operators";
+import { completeCoreWorkerRun, startCoreWorkerRun } from "../core/worker-runs";
 import { db as defaultDb } from "../db/client";
 import {
   approvalRequests,
@@ -35,6 +36,7 @@ type Database = typeof defaultDb;
 export const ownerWorkerRole = "owner_chief_of_staff";
 
 const ownerSource = "continuous.worker";
+const coreWorkerRunSource = "continuous.core.worker_runs";
 const dailyBriefWorkflowKey = "daily_owner_brief";
 const ownerRunUnits = 4000;
 const defaultBriefScopes = ["tasks", "approvals", "cash", "capacity", "obligations", "workers"];
@@ -787,31 +789,62 @@ function buildBrief(readModel: OwnerReadModel, scopes: string[]) {
   };
 }
 
+function outputData(data: JsonObject) {
+  const output = objectValue(data.output);
+
+  if (Object.keys(output).length > 0) {
+    return output;
+  }
+
+  return objectValue(objectValue(data.pendingCompletion).output);
+}
+
+function dataString(data: JsonObject, key: string) {
+  const output = outputData(data);
+  const completion = objectValue(data.completion);
+  const completionBudget = objectValue(completion.budget);
+
+  return (
+    stringValue(output[key]) ??
+    stringValue(data[key]) ??
+    stringValue(completion[key]) ??
+    stringValue(completionBudget[key]) ??
+    null
+  );
+}
+
+function dataStringList(data: JsonObject, key: string) {
+  const output = outputData(data);
+  const list = stringList(output[key]);
+
+  return list.length > 0 ? list : stringList(data[key]);
+}
+
 function replayedBriefResult(
   run: typeof workerRuns.$inferSelect,
   snapshot: OwnerWorkerSnapshot,
 ): OwnerBriefRunResult {
   const data = objectValue(run.data);
-  const output = objectValue(data.output);
+  const output = outputData(data);
 
   return {
     created: false,
     idempotencyKey: run.idempotencyKey,
     workerRunId: run.id,
-    eventId: run.eventId,
-    objectId: stringValue(data.objectId) ?? null,
-    objectVersionId: stringValue(data.objectVersionId) ?? null,
-    evidenceId: stringValue(data.evidenceId) ?? null,
-    documentId: stringValue(data.documentId) ?? null,
-    packetId: stringValue(data.packetId) ?? null,
-    approvalRequestId: stringValue(data.approvalRequestId) ?? null,
-    auditEventId: stringValue(data.auditEventId) ?? null,
-    reservationId: stringValue(data.reservationId) ?? null,
-    usageEventId: stringValue(data.usageEventId) ?? null,
-    workflowRunId: stringValue(data.workflowRunId) ?? null,
-    workflowStepIds: stringList(data.workflowStepIds),
-    decisionIds: stringList(data.decisionIds),
-    viewIds: stringList(data.viewIds),
+    eventId: dataString(data, "eventId") ?? run.eventId,
+    objectId: dataString(data, "objectId"),
+    objectVersionId: dataString(data, "objectVersionId"),
+    evidenceId: dataString(data, "evidenceId"),
+    documentId: dataString(data, "documentId"),
+    packetId: dataString(data, "packetId"),
+    approvalRequestId: dataString(data, "approvalRequestId"),
+    auditEventId: dataString(data, "auditEventId"),
+    reservationId: dataString(data, "reservationId"),
+    usageEventId: dataString(data, "usageEventId"),
+    workflowRunId: dataString(data, "workflowRunId"),
+    workflowStepIds: dataStringList(data, "workflowStepIds"),
+    decisionIds: dataStringList(data, "decisionIds"),
+    viewIds: dataStringList(data, "viewIds"),
     output,
     snapshot,
   };
@@ -1232,10 +1265,10 @@ export async function generateOwnerBrief(input: {
     selector: { role: ownerWorkerRole, tenantSlug: input.tenantSlug, workerId: input.workerId },
     operatorEmail: input.operatorEmail,
   });
-  const existing = await existingRun(db, context, input.idempotencyKey);
+  const legacyRun = await existingRun(db, context, input.idempotencyKey);
 
-  if (existing) {
-    return replayedBriefResult(existing, await getOwnerWorkerSnapshot(db, {
+  if (legacyRun) {
+    return replayedBriefResult(legacyRun, await getOwnerWorkerSnapshot(db, {
       role: ownerWorkerRole,
       tenantSlug: context.worker.tenantSlug,
       workerId: context.worker.id,
@@ -1244,9 +1277,117 @@ export async function generateOwnerBrief(input: {
 
   const readModel = await buildReadModel(db, context.worker.tenantId, window);
   const brief = buildBrief(readModel, scopes);
+  const requestHash = hashJson({
+    schemaVersion: "worker.owner_chief_of_staff.brief_generate.request.v1",
+    idempotencyKey: input.idempotencyKey,
+    tenantId: context.worker.tenantId,
+    workerId: context.worker.id,
+    operatorUserId: context.operator.userId,
+    config: input.config,
+    window: readModel.window,
+    scopes,
+  });
+  const inputHash = hashJson({
+    schemaVersion: "worker.owner_chief_of_staff.brief_generate.input.v1",
+    requestHash,
+    sourceCounts: readModel.counts,
+    sourceRefs: brief.sourceRefs,
+    riskFlags: brief.riskFlags,
+  });
+  const coreRun = await startCoreWorkerRun({
+    operatorEmail: input.operatorEmail,
+    tenantSlug: context.worker.tenantSlug,
+    idempotencyKey: input.idempotencyKey,
+    worker: {
+      id: context.worker.id,
+      role: ownerWorkerRole,
+    },
+    command: "brief.generate",
+    mode: "read_only",
+    capabilityKey: "owner_brief.generate",
+    budgetAccountId: context.budgetAccount.id,
+    units: ownerRunUnits,
+    input: {
+      requestHash,
+      inputHash,
+      config: input.config,
+      window: readModel.window,
+      scopes,
+      sourceCounts: readModel.counts,
+      sourceRefs: brief.sourceRefs,
+    },
+    policy: {
+      externalExecution: "blocked",
+      externalSend: "blocked",
+      sensitiveReveal: "approval_required",
+    },
+    evidence: {
+      command: "brief.generate",
+      required: ["task_rollup", "kpi_snapshot", "owner_brief_source_snapshot"],
+      externalExecution: "blocked",
+      externalSend: false,
+    },
+    db,
+  });
+  const coreBudget = objectValue(coreRun.budget);
+  const coreReservationId = stringValue(coreBudget.reservationId);
   const now = new Date();
 
   const result = await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${coreWorkerRunSource}:brief.generate:${input.idempotencyKey}`}))`,
+    );
+
+    const [run] = await tx
+      .select()
+      .from(workerRuns)
+      .where(
+        and(
+          eq(workerRuns.tenantId, context.worker.tenantId),
+          eq(workerRuns.id, coreRun.workerRunId),
+        ),
+      )
+      .limit(1);
+
+    if (!run) {
+      throw new PlatformUnavailableError(
+        "worker_run_missing",
+        "Core worker.run.start did not return a persisted Owner worker run.",
+        409,
+      );
+    }
+
+    const runData = objectValue(run.data);
+    const existingInput = objectValue(runData.input);
+    const existingRequest = objectValue(existingInput.request);
+    const existingRequestHash = stringValue(existingRequest.requestHash) ?? stringValue(existingInput.requestHash);
+    const existingInputHash = stringValue(existingRequest.inputHash) ?? stringValue(existingInput.inputHash);
+
+    if (
+      stringValue(existingInput.command) !== "brief.generate" ||
+      run.mode !== "read_only" ||
+      (existingRequestHash && existingRequestHash !== requestHash) ||
+      (!existingRequestHash && existingInputHash && existingInputHash !== inputHash)
+    ) {
+      throw new PlatformUnavailableError(
+        "worker_idempotency_conflict",
+        "This idempotency key was already used with different owner worker input.",
+        409,
+      );
+    }
+
+    const existingOutput = outputData(runData);
+
+    if (
+      stringValue(existingOutput.command) === "brief.generate" ||
+      (run.state !== "running" && stringValue(runData.command) === "brief.generate")
+    ) {
+      return {
+        created: false as const,
+        run,
+      };
+    }
+
     const [definition] = await tx
       .select({ id: workflowDefinitions.id })
       .from(workflowDefinitions)
@@ -1377,61 +1518,6 @@ export async function generateOwnerBrief(input: {
       .insert(workflowSteps)
       .values(stepValues)
       .returning({ id: workflowSteps.id });
-    const [reservation] = await tx
-      .insert(budgetReservations)
-      .values({
-        tenantId: context.worker.tenantId,
-        accountId: context.budgetAccount.id,
-        units: ownerRunUnits,
-        state: "used",
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning({ id: budgetReservations.id });
-    const [usage] = await tx
-      .insert(usageEvents)
-      .values({
-        tenantId: context.worker.tenantId,
-        accountId: context.budgetAccount.id,
-        reservationId: reservation.id,
-        actorType: "worker",
-        actorId: context.worker.id,
-        units: ownerRunUnits,
-        costUsd: "0.000000",
-        data: {
-          command: "brief.generate",
-          externalExecution: "blocked",
-        },
-        createdAt: now,
-      })
-      .returning({ id: usageEvents.id });
-    const [run] = await tx
-      .insert(workerRuns)
-      .values({
-        tenantId: context.worker.tenantId,
-        workerId: context.worker.id,
-        budgetAccountId: context.budgetAccount.id,
-        source: ownerSource,
-        idempotencyKey: input.idempotencyKey,
-        state: "done",
-        mode: "read_only",
-        data: {
-          command: "brief.generate",
-          output: brief,
-          objectId: briefObject.id,
-          objectVersionId: version.id,
-          reservationId: reservation.id,
-          usageEventId: usage.id,
-          workflowRunId: workflowRun.id,
-          workflowStepIds: workflowStepRows.map((step) => step.id),
-          externalExecution: "blocked",
-        },
-        startedAt: now,
-        endedAt: now,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning({ id: workerRuns.id });
     const [event] = await tx
       .insert(events)
       .values({
@@ -1509,7 +1595,8 @@ export async function generateOwnerBrief(input: {
         documentIds: { ids: [document.id] },
         data: {
           ...brief,
-          budgetUsageEventId: usage.id,
+          budgetReservationId: coreReservationId ?? null,
+          budgetUsageEventId: null,
           sourceSnapshotEvidenceId: sourceSnapshot.id,
         },
         hash: hashJson({ brief, sourceSnapshotId: sourceSnapshot.id }),
@@ -1780,6 +1867,7 @@ export async function generateOwnerBrief(input: {
 
     const output = {
       ...brief,
+      command: "brief.generate",
       objectId: briefObject.id,
       objectVersionId: version.id,
       evidenceId: sourceSnapshot.id,
@@ -1787,8 +1875,8 @@ export async function generateOwnerBrief(input: {
       packetId: packet.id,
       approvalRequestId: approval.id,
       auditEventId: audit.id,
-      reservationId: reservation.id,
-      usageEventId: usage.id,
+      reservationId: coreReservationId ?? null,
+      usageEventId: null,
       workflowRunId: workflowRun.id,
       workflowStepIds: workflowStepRows.map((step) => step.id),
       decisionIds: decisionRows.map((decision) => decision.id),
@@ -1800,6 +1888,9 @@ export async function generateOwnerBrief(input: {
       .set({
         eventId: event.id,
         data: {
+          ...runData,
+          businessEventId: event.id,
+          eventId: event.id,
           command: "brief.generate",
           output,
           objectId: briefObject.id,
@@ -1811,18 +1902,23 @@ export async function generateOwnerBrief(input: {
           approvalEvidenceId: approvalEvidence.id,
           approvalAuditEventId: approvalAudit.id,
           auditEventId: audit.id,
-          reservationId: reservation.id,
-          usageEventId: usage.id,
+          reservationId: coreReservationId ?? null,
+          usageEventId: null,
           workflowRunId: workflowRun.id,
           workflowStepIds: workflowStepRows.map((step) => step.id),
           decisionIds: decisionRows.map((decision) => decision.id),
           viewIds,
+          pendingCompletion: {
+            output,
+          },
           externalExecution: "blocked",
         },
+        updatedAt: now,
       })
       .where(eq(workerRuns.id, run.id));
 
     return {
+      created: true as const,
       runId: run.id,
       eventId: event.id,
       objectId: briefObject.id,
@@ -1832,14 +1928,80 @@ export async function generateOwnerBrief(input: {
       packetId: packet.id,
       approvalRequestId: approval.id,
       auditEventId: audit.id,
-      reservationId: reservation.id,
-      usageEventId: usage.id,
+      reservationId: coreReservationId ?? null,
+      usageEventId: null,
       workflowRunId: workflowRun.id,
       workflowStepIds: workflowStepRows.map((step) => step.id),
       decisionIds: decisionRows.map((decision) => decision.id),
       viewIds,
       output,
     };
+  });
+
+  if (!result.created) {
+    return replayedBriefResult(result.run, await getOwnerWorkerSnapshot(db, {
+      role: ownerWorkerRole,
+      tenantSlug: context.worker.tenantSlug,
+      workerId: context.worker.id,
+    }));
+  }
+
+  const completion = await completeCoreWorkerRun({
+    operatorEmail: input.operatorEmail,
+    tenantSlug: context.worker.tenantSlug,
+    idempotencyKey: input.idempotencyKey,
+    worker: {
+      id: context.worker.id,
+      role: ownerWorkerRole,
+    },
+    workerRunId: result.runId,
+    state: "done",
+    reason: "Owner Chief-of-Staff generated a tenant-scoped brief with external execution blocked.",
+    output: result.output,
+    costUsd: 0,
+    evidence: {
+      command: "brief.generate",
+      eventId: result.eventId,
+      auditEventId: result.auditEventId,
+      evidenceId: result.evidenceId,
+      documentId: result.documentId,
+      packetId: result.packetId,
+      approvalRequestId: result.approvalRequestId,
+      externalExecution: "blocked",
+      externalSend: false,
+    },
+    db,
+  });
+  const completionBudget = objectValue(completion.budget);
+  const settledReservationId = stringValue(completionBudget.reservationId) ?? result.reservationId;
+  const settledUsageEventId = stringValue(completionBudget.usageEventId) ?? result.usageEventId;
+  const settledOutput = {
+    ...result.output,
+    reservationId: settledReservationId,
+    usageEventId: settledUsageEventId,
+  } satisfies JsonObject;
+  const [completedRun] = await db
+    .select({ data: workerRuns.data })
+    .from(workerRuns)
+    .where(eq(workerRuns.id, result.runId))
+    .limit(1);
+
+  await db
+    .update(workerRuns)
+    .set({
+      data: {
+        ...objectValue(completedRun?.data),
+        output: settledOutput,
+        reservationId: settledReservationId,
+        usageEventId: settledUsageEventId,
+      },
+      updatedAt: new Date(),
+    })
+    .where(eq(workerRuns.id, result.runId));
+  const snapshot = await getOwnerWorkerSnapshot(db, {
+    role: ownerWorkerRole,
+    tenantSlug: context.worker.tenantSlug,
+    workerId: context.worker.id,
   });
 
   return {
@@ -1854,18 +2016,14 @@ export async function generateOwnerBrief(input: {
     packetId: result.packetId,
     approvalRequestId: result.approvalRequestId,
     auditEventId: result.auditEventId,
-    reservationId: result.reservationId,
-    usageEventId: result.usageEventId,
+    reservationId: settledReservationId,
+    usageEventId: settledUsageEventId,
     workflowRunId: result.workflowRunId,
     workflowStepIds: result.workflowStepIds,
     decisionIds: result.decisionIds,
     viewIds: result.viewIds,
-    output: result.output,
-    snapshot: await getOwnerWorkerSnapshot(db, {
-      role: ownerWorkerRole,
-      tenantSlug: context.worker.tenantSlug,
-      workerId: context.worker.id,
-    }),
+    output: settledOutput,
+    snapshot,
   };
 }
 
