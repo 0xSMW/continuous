@@ -235,7 +235,8 @@
 | Deploy timeout boundary | The GitHub deploy workflow has bounded service readiness and smoke calls, but the strict customer-data gate remains opt-in until non-root deploy, observability, backup, recovery-drill, and credential evidence are all provisioned |
 | Hardened Core/workflow failure coverage | `/core external_action.record` now has route-level invalid-idempotency, adapter mismatch, and replay-conflict coverage plus integration coverage for changed-input replay and adapter/connection mismatch; `/workflow` now preserves structured route failures across overview, approvals, start, transition, step execution, and approval decisions |
 | Adopted Core lifecycle in one worker slice | Customer Experience `recovery.draft` now starts and completes through Core `worker.run.start` and `worker.run.complete`, reuses the Core `worker_runs` row for its business proof, and lets Core settle the budget reservation instead of writing a duplicate local run or usage event |
-| Captured next audit lanes | The next high-impact gaps are app-server lifecycle smoke coverage, consistent worker-transition role scope, Growth `campaign.draft` runtime promotion, readiness/roadmap status normalization, and production readiness hardening beyond backup freshness |
+| Captured next audit lanes | The next high-impact gaps are app-server lifecycle smoke coverage, consistent worker-transition role scope, Growth external-action gates, remaining readiness/roadmap status normalization, and production readiness hardening beyond backup freshness |
+| Promoted Growth draft docs to runtime | Growth `campaign.draft` is now documented as a runtime `/worker` slice for `worker.role=growth_operations`; source refs and policy stay under `config`, while publish, send, ad-spend, and tracking mutation remain blocked until approval/proof gates exist |
 
 ### Current State
 
@@ -450,9 +451,18 @@ valid payment-link entry points, not a loose `sourceRefs` object.
 The expansion map now distinguishes Growth's inbound and outbound handoffs:
 `customer.signal_to_growth` opens Growth campaign drafting from customer or
 review evidence, while `growth.campaign_to_owner_review` remains Growth's
-owner-review output. Planned Customer Experience, Asset/Supply, Growth, and
-Vertical Package command schemas now name the concrete Core refs and policy
-flags expected by the contracts instead of exposing only broad object blobs.
+owner-review output. Customer Experience and Growth are runtime draft slices;
+Asset/Supply and Vertical Package command schemas still name the concrete Core
+refs and policy flags expected by the contracts instead of exposing only broad
+object blobs.
+
+Growth is now documented as a runtime draft slice. Its canonical API is
+`POST /worker` with `worker.role=growth_operations`,
+`command=campaign.draft`, and source refs plus policy under `config`. The
+tradeoff is deliberately narrow: drafting, packets, approvals, and generated
+`campaigns` views may run now, while publish, send, ad-spend, and tracking
+mutation still require future approval, credential, receipt, rollback, and eval
+proof.
 
 Approval decisions now enforce the assigned reviewer when
 `approval_requests.reviewer_user_id` is set. Tenant-scoped approval authority is
@@ -507,3 +517,11 @@ provenance under `config.scheduler`, Revenue persists that as
 `lastLeadRead.schedulerProof`, and the readiness gate only treats
 `scheduler_lead_read_cursor` as ready when the proof is verified for the
 connection and scheduler idempotency key.
+
+Growth `campaign.draft` now treats its budget reservation as a single-use
+runtime input. New runs lock the reservation row, reject expired, insufficient,
+or already-bound reservations, and mark the reservation used when the campaign
+draft consumes units; idempotent replay is resolved before that mutable check
+so retries do not double-consume budget. Growth snapshots and campaign views
+are also scoped to the authenticated operator's tenant and the Growth worker's
+own objects, runs, approvals, budget account, and generated views.

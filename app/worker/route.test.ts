@@ -305,6 +305,90 @@ describe("/worker route", () => {
     });
   });
 
+  it("routes Growth commands through the canonical worker envelope", async () => {
+    const commandResult = {
+      worker: {
+        role: "growth_operations",
+        id: null,
+        tenantSlug: "continuous-demo",
+      },
+      command: "campaign.draft",
+      result: {
+        campaignObjectId: "campaign-object-1",
+        contentDraftObjectId: "content-draft-1",
+        externalExecution: "blocked",
+        externalPublish: false,
+        externalSend: false,
+        externalSpend: false,
+        trackingMutation: "blocked",
+      },
+    };
+    mocks.executeWorkerCommand.mockResolvedValue(commandResult);
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/worker", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "campaign.draft",
+          worker: {
+            role: "growth_operations",
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "growth-campaign-001",
+          config: {
+            sourceRefs: {
+              customerSignalObjectId: "signal-object-1",
+              evidencePacketId: "packet-1",
+              budgetReservationId: "budget-reservation-1",
+            },
+            policy: {
+              channel: "email",
+              audience: "recent_customers",
+              requiresOwnerApproval: true,
+              allowPublish: false,
+            },
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      api: "continuous.worker.v1",
+      data: commandResult,
+      error: null,
+    });
+    expect(mocks.executeWorkerCommand).toHaveBeenCalledWith({
+      command: "campaign.draft",
+      target: {
+        role: "growth_operations",
+        id: undefined,
+        tenantSlug: "continuous-demo",
+      },
+      config: {
+        sourceRefs: {
+          customerSignalObjectId: "signal-object-1",
+          evidencePacketId: "packet-1",
+          budgetReservationId: "budget-reservation-1",
+        },
+        policy: {
+          channel: "email",
+          audience: "recent_customers",
+          requiresOwnerApproval: true,
+          allowPublish: false,
+        },
+      },
+      idempotencyKey: "growth-campaign-001",
+      operatorEmail: "operator@example.com",
+    });
+  });
+
   it("routes payment-link preparation through the canonical worker envelope", async () => {
     const commandResult = {
       worker: {

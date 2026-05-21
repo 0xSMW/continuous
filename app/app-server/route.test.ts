@@ -785,6 +785,74 @@ describe("/app-server route", () => {
     });
   });
 
+  it("bridges authenticated Growth commands through the same app-server worker envelope", async () => {
+    mocks.env.CONTROL_PLANE_TOKENS_JSON = tokenCatalog(
+      ["app_server:worker.command.campaign.draft"],
+      {
+        allowedWorkerRoles: ["growth_operations"],
+      },
+    );
+
+    const { POST } = await import("./route");
+    const payload = {
+      tool: "continuous.worker.command",
+      arguments: {
+        command: "campaign.draft",
+        worker: {
+          role: "growth_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "app-server-route-growth-campaign-001",
+        config: {
+          sourceRefs: {
+            customerSignalObjectId: "signal-object-1",
+            evidencePacketId: "packet-1",
+            budgetReservationId: "budget-reservation-1",
+          },
+          policy: {
+            channel: "email",
+            audience: "recent_customers",
+            requiresOwnerApproval: true,
+            allowPublish: false,
+          },
+        },
+      },
+      callId: "call-growth-001",
+      threadId: "thread-001",
+      turnId: "turn-001",
+    };
+    const response = await POST(
+      new Request("http://localhost/app-server", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.authorizeManagedControlPlaneCredential).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: "app_server",
+        access: "write",
+        command: "worker.command.campaign.draft",
+        tenantSlug: "continuous-demo",
+        workerRole: "growth_operations",
+        requireManagedCredential: true,
+      }),
+    );
+    expect(mocks.executeAppServerWorkerDynamicToolCall).toHaveBeenCalledWith(payload, {
+      operatorEmail: "operator@example.com",
+      source: "control_plane",
+      allowedAccess: ["write"],
+      allowedCommands: ["worker:campaign.draft"],
+      allowedTenants: ["continuous-demo"],
+      allowedWorkerRoles: ["growth_operations"],
+    });
+  });
+
   it("authorizes schema discovery through an explicit app-server schema command", async () => {
     const { POST } = await import("./route");
     const payload = {

@@ -78,6 +78,7 @@ const ids = {
   complianceWorker: "aaaaaaaa-aaaa-4aaa-8aaa-000000000007",
   offerPricingWorker: "aaaaaaaa-aaaa-4aaa-8aaa-000000000008",
   customerExperienceWorker: "aaaaaaaa-aaaa-4aaa-8aaa-000000000009",
+  growthWorker: "aaaaaaaa-aaaa-4aaa-8aaa-000000000010",
   adapter: "56565656-5656-4565-8565-565656565656",
   dispatchAdapter: "56565656-5656-4565-8565-000000000002",
   financeAdapter: "56565656-5656-4565-8565-000000000003",
@@ -107,6 +108,9 @@ const ids = {
   offerPricingBudgetAllocation: "bbbbbbbb-bbbb-4bbb-8bbb-000000000019",
   customerExperienceBudgetAccount: "bbbbbbbb-bbbb-4bbb-8bbb-000000000020",
   customerExperienceBudgetAllocation: "bbbbbbbb-bbbb-4bbb-8bbb-000000000021",
+  growthBudgetAccount: "bbbbbbbb-bbbb-4bbb-8bbb-000000000022",
+  growthBudgetAllocation: "bbbbbbbb-bbbb-4bbb-8bbb-000000000023",
+  growthBudgetReservation: "bbbbbbbb-bbbb-4bbb-8bbb-000000000024",
   systemsWorkerReadGrant: "10101010-1010-4010-8010-000000000001",
   systemsApprovalGrant: "10101010-1010-4010-8010-000000000002",
   systemsDocumentGrant: "10101010-1010-4010-8010-000000000003",
@@ -198,6 +202,7 @@ const ids = {
   workflowPaymentDraft: "66666666-6666-4666-8666-000000000026",
   workflowPricingMarginReview: "66666666-6666-4666-8666-000000000027",
   workflowCustomerRecovery: "66666666-6666-4666-8666-000000000028",
+  workflowCampaignDrafting: "66666666-6666-4666-8666-000000000029",
   workflowOpenNewState: "66666666-6666-4666-8666-000000000009",
   workflowCompensationChange: "66666666-6666-4666-8666-000000000010",
   workflowLocationChange: "66666666-6666-4666-8666-000000000011",
@@ -284,6 +289,7 @@ const capIds = {
   arFollowupDraft: "10000000-0000-4000-8000-000000000020",
   paymentDraftPrepare: "10000000-0000-4000-8000-000000000021",
   recoveryDraft: "10000000-0000-4000-8000-000000000022",
+  campaignDraft: "10000000-0000-4000-8000-000000000023",
 };
 
 const revenueExcludedCapabilityIds = new Set([
@@ -291,6 +297,7 @@ const revenueExcludedCapabilityIds = new Set([
   capIds.marginReviewPrepare,
   capIds.arFollowupDraft,
   capIds.paymentDraftPrepare,
+  capIds.campaignDraft,
 ]);
 const revenueCapabilityIds = Object.values(capIds).filter(
   (capabilityId) => !revenueExcludedCapabilityIds.has(capabilityId),
@@ -613,6 +620,40 @@ async function seed() {
           approval_requests_created: 0,
         },
       },
+      {
+        id: ids.growthWorker,
+        tenantId: ids.tenant,
+        managerUserId: ids.owner,
+        kind: "synthetic",
+        state: "training",
+        name: "Growth Worker",
+        role: "growth_operations",
+        mission:
+          "Turn customer signals, reviews, audiences, claims, and budget refs into source-backed campaign drafts while publish, send, spend, and tracking mutation stay blocked.",
+        autonomyLevel: 2,
+        scope: {
+          flows: ["campaign_drafting", "claim_review", "budget_review", "owner_review"],
+          systems: ["email", "ads", "cms", "social", "analytics"],
+        },
+        memory: {
+          campaign_context: "tenant_scoped",
+          contact_lists: "source_handles_only",
+        },
+        policy: {
+          external_execution: "blocked",
+          publish: "blocked",
+          customer_send: "blocked",
+          ad_spend: "blocked",
+          tracking_mutation: "blocked",
+          claims: "source_required",
+        },
+        kpis: {
+          campaign_drafts_prepared: 0,
+          claims_source_checked: 0,
+          approval_requests_created: 0,
+          unauthorized_publish_attempts: 0,
+        },
+      },
     ])
     .onConflictDoNothing();
 
@@ -842,6 +883,33 @@ async function seed() {
         rules: { customer_send: "blocked", refund: "blocked", approval_required: true },
         evidence: { required: ["customer_signal", "source_refs", "recovery_draft", "approval_request"] },
       },
+      {
+        id: capIds.campaignDraft,
+        key: "campaign.draft",
+        name: "Draft campaign",
+        class: "draft",
+        risk: "high",
+        sideEffect: "internal",
+        description:
+          "Prepare source-backed campaign drafts, claim packets, budget refs, and approval requests without publishing, sending, spending, or changing tracking.",
+        rules: {
+          external_publish: "blocked",
+          customer_send: "blocked",
+          ad_spend: "blocked",
+          tracking_mutation: "blocked",
+          approval_required: true,
+        },
+        evidence: {
+          required: [
+            "customer_signal",
+            "source_claims",
+            "budget_reservation",
+            "campaign_draft",
+            "approval_request",
+            "no_publish_proof",
+          ],
+        },
+      },
     ])
     .onConflictDoNothing();
 
@@ -938,6 +1006,47 @@ async function seed() {
           refund: "blocked",
           concession: "approval_required",
           restricted_data: "redacted_by_default",
+        },
+      })),
+    )
+    .onConflictDoNothing();
+
+  await db
+    .insert(capabilityGrants)
+    .values(
+      [
+        capIds.campaignDraft,
+        capIds.approvalRequest,
+        capIds.documentPacketPrepare,
+        capIds.workerRead,
+      ].map((capabilityId) => ({
+        tenantId: ids.tenant,
+        capabilityId,
+        actorType: "worker" as const,
+        actorId: ids.growthWorker,
+        scope: {
+          tenant_id: ids.tenant,
+          objects: [
+            "campaign",
+            "channel",
+            "audience",
+            "content_draft",
+            "attribution_event",
+            "budget_reservation",
+            "customer_signal",
+            "review",
+            "testimonial",
+          ],
+        },
+        policy: {
+          mode: "review_only",
+          autonomy_level: 2,
+          external_execution: "blocked",
+          publish: "blocked",
+          customer_send: "blocked",
+          ad_spend: "blocked",
+          tracking_mutation: "blocked",
+          claims: "source_required",
         },
       })),
     )
@@ -1315,6 +1424,14 @@ async function seed() {
         target: "worker",
         targetId: ids.customerExperienceWorker,
       },
+      {
+        id: ids.growthBudgetAccount,
+        tenantId: ids.tenant,
+        policyId: ids.budgetPolicy,
+        name: "Growth Worker monthly intelligence budget",
+        target: "worker",
+        targetId: ids.growthWorker,
+      },
     ])
     .onConflictDoNothing();
 
@@ -1398,6 +1515,15 @@ async function seed() {
         tenantId: ids.tenant,
         poolId: ids.budgetPool,
         accountId: ids.customerExperienceBudgetAccount,
+        units: 1000000,
+        startsAt: now,
+        endsAt: nextMonth,
+      },
+      {
+        id: ids.growthBudgetAllocation,
+        tenantId: ids.tenant,
+        poolId: ids.budgetPool,
+        accountId: ids.growthBudgetAccount,
         units: 1000000,
         startsAt: now,
         endsAt: nextMonth,
@@ -2186,6 +2312,36 @@ async function seed() {
           required: ["customer_signal", "recovery_draft", "no_send_proof"],
         },
         tests: { required: ["customer_ref", "source_refs", "approval_request", "no_external_send"] },
+      },
+      {
+        id: ids.workflowCampaignDrafting,
+        key: "campaign_drafting",
+        name: "Campaign drafting",
+        purpose:
+          "Turn source-backed customer signals into campaign drafts, budget review, owner approval, and no-publish proof.",
+        domain: "growth",
+        states: {
+          order: ["idea", "source_review", "content_draft", "budget_review", "approval_pending", "ready_to_publish", "blocked"],
+        },
+        transitions: {
+          idea: ["source_review", "blocked"],
+          source_review: ["content_draft", "blocked"],
+          content_draft: ["budget_review", "blocked"],
+          budget_review: ["approval_pending", "blocked"],
+          approval_pending: ["ready_to_publish", "blocked", "rejected"],
+        },
+        objects: { required: ["campaign", "content_draft", "customer_signal", "budget_reservation"] },
+        approvals: {
+          required: ["growth_campaign_approval"],
+          states: { approval_pending: ["growth_campaign_approval"] },
+        },
+        evidence: {
+          packet: "growth_campaign_packet",
+          required: ["customer_signal", "source_claims", "budget_reservation", "no_publish_proof"],
+        },
+        tests: {
+          required: ["source_claims", "budget_reservation", "approval_request", "no_publish_send_spend_tracking"],
+        },
       },
       {
         id: ids.workflowDailyOwnerBrief,
@@ -3186,6 +3342,7 @@ async function seed() {
             ids.workforceWorker,
             ids.complianceWorker,
             ids.systemsWorker,
+            ids.growthWorker,
           ],
           adapterIds: [ids.adapter, ids.dispatchAdapter, ids.financeAdapter],
           connectionIds: [ids.connection, ids.dispatchConnection, ids.financeConnection],
@@ -3432,6 +3589,18 @@ async function seed() {
       taskId: ids.taskQuote,
       units: 50000,
       state: "used",
+      expiresAt: nextMonth,
+    })
+    .onConflictDoNothing();
+
+  await db
+    .insert(budgetReservations)
+    .values({
+      id: ids.growthBudgetReservation,
+      tenantId: ids.tenant,
+      accountId: ids.growthBudgetAccount,
+      units: 75000,
+      state: "held",
       expiresAt: nextMonth,
     })
     .onConflictDoNothing();

@@ -198,7 +198,7 @@ waves that compose the first seven workers instead of creating private APIs.
 | 8 | Offer and Pricing Worker | Runtime `margin.review.prepare` command and `price_policy` view for price book, quote-line, margin, and discount packets; change-order packets remain follow-up | Revenue quote evidence, margin rules, and approval policies are available as Core records |
 | 9 | Customer Experience Worker | Runtime `recovery.draft` command and `signals` view for source-backed recovery packets; escalation and review-response packets remain follow-up | Revenue/Dispatch customer messages and customer-signal records have source evidence and approval posture |
 | 10 | Asset and Supply Worker | Inventory, vendor, purchase, maintenance, and stockout packets | Dispatch closeout, Finance cash, and Systems sync refs prove asset/vendor state without purchase mutation |
-| 11 | Growth Worker | Campaign, channel, audience, content draft, and attribution packets | Customer signal, review, budget, and source-claim evidence can block external publish until approval |
+| 11 | Growth Worker | Runtime `campaign.draft` command and `campaigns` view for source-backed campaign, channel, audience, content draft, and budget packets | Customer signal, review, budget, and source-claim evidence can block external publish/send/spend/tracking until approval |
 | 12 | Vertical packaged workers | Quote-to-Cash Field, Knowledge Delivery, Inventory/Replenishment, Compliance QA, and Maintenance bundles | The package declares which existing family commands it composes, which Core refs are accepted, and which approvals block execution |
 
 Post-Systems workers must still register commands on `/worker`, keep selectors
@@ -217,6 +217,13 @@ Customer Experience now has its first runtime slice:
 `view: "signals"`, the `customer.signal_to_experience` handoff fixture, and a
 generated customer-signals review packet. Customer sends, refunds, concessions,
 review responses, and promise mutations remain blocked follow-up gates.
+
+Growth now has its first runtime slice:
+`worker.role=growth_operations`, `command=campaign.draft`,
+`view: "campaigns"`, the `customer.signal_to_growth` handoff fixture, and a
+generated campaign review packet. Publish, send, ad-spend, and tracking
+mutations remain blocked until approval, source proof, budget proof, scoped
+credentials, receipts, and rollback evidence are present.
 
 ## Expansion Rule
 

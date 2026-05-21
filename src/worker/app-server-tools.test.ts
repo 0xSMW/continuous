@@ -19,10 +19,10 @@ const runtimeContractRoles = [
   "systems_operations",
   "offer_pricing_operations",
   "customer_experience_operations",
+  "growth_operations",
 ];
 const plannedContractRoles = [
   "asset_supply_operations",
-  "growth_operations",
   "vertical_packages",
 ];
 const contractRoles = [...runtimeContractRoles, ...plannedContractRoles];
@@ -148,6 +148,15 @@ describe("app-server worker tools", () => {
           name: "approval.decide",
           apiRoute: "/worker",
         }),
+        expect.objectContaining({
+          role: "growth_operations",
+          name: "campaign.draft",
+          apiRoute: "/worker",
+          externalExecution: "blocked",
+          configSchema: expect.objectContaining({
+            required: ["sourceRefs", "policy"],
+          }),
+        }),
       ]),
     );
     expect(registry.views).toEqual(
@@ -170,6 +179,18 @@ describe("app-server worker tools", () => {
             properties: expect.objectContaining({
               quoteObjectId: expect.objectContaining({ type: "string" }),
               priceBookId: expect.objectContaining({ type: "string" }),
+            }),
+            additionalProperties: false,
+          }),
+        }),
+        expect.objectContaining({
+          role: "growth_operations",
+          name: "campaigns",
+          apiRoute: "/worker",
+          configSchema: expect.objectContaining({
+            properties: expect.objectContaining({
+              state: expect.objectContaining({ type: "string" }),
+              channel: expect.objectContaining({ type: "string" }),
             }),
             additionalProperties: false,
           }),
@@ -202,11 +223,6 @@ describe("app-server worker tools", () => {
           name: "reorder.plan",
           apiRoute: "/worker",
           externalExecution: "dry_run",
-        }),
-        expect.objectContaining({
-          role: "growth_operations",
-          name: "campaign.draft",
-          apiRoute: "/worker",
         }),
         expect.objectContaining({
           role: "vertical_packages",

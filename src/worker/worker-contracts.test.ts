@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { isWorkerOperationIdentifier, isWorkerRoleIdentifier } from "./envelope";
+import { registeredWorkerCommands } from "./registry";
 import {
   plannedWorkerCommands,
   plannedWorkerContracts,
@@ -77,7 +78,7 @@ const contracts = [
     path: "docs/growth-worker-v1-contract.md",
     role: "growth_operations",
     evidencePacket: "growth_campaign_packet",
-    runtime: false,
+    runtime: true,
   },
   {
     path: "docs/vertical-packaged-worker-v1-contract.md",
@@ -184,6 +185,10 @@ describe("future worker contracts", () => {
       path("api", "domain_worker", "run"),
       path("api", "example-operations-worker"),
       path("api", "example_operations_worker"),
+      path("api", "revenue-worker"),
+      path("api", "revenue-worker", "run"),
+      path("api", "revenue_worker"),
+      path("api", "revenue_worker", "run"),
       path("api", "specialized_operations-worker", "run"),
       path("api", "specialized_operations_worker", "run"),
       path("api", "worker"),
@@ -196,6 +201,8 @@ describe("future worker contracts", () => {
       path("workers", "example"),
       path("domain-worker"),
       path("domain_worker"),
+      path("revenue-worker"),
+      path("revenue_worker"),
       path("specialized_operations-worker"),
       path("specialized_operations_worker"),
     ];
@@ -223,9 +230,13 @@ describe("future worker contracts", () => {
     ];
     const routeShapedOperations = [
       ["", "api", "legacy-worker", "run"].join("/"),
+      ["", "api", "revenue-worker", "run"].join("/"),
       ["", "legacy-worker"].join("/"),
+      ["", "revenue-worker"].join("/"),
       "legacy-worker",
+      "revenue-worker",
       ["legacy_worker", "run"].join("."),
+      ["revenue_worker", "run"].join("."),
       "worker.run",
       "worker.view.snapshot",
       "worker?view=snapshot",
@@ -259,7 +270,10 @@ describe("future worker contracts", () => {
       "workflow",
       "legacy-worker",
       "legacy_worker",
+      "revenue-worker",
+      "revenue_worker",
       ["api", "legacy-worker"].join("/"),
+      ["api", "revenue-worker"].join("/"),
       ["worker", "revenue_operations"].join("/"),
     ];
 
@@ -793,11 +807,12 @@ describe("future worker contracts", () => {
         (command) => command.role === "asset_supply_operations" && command.name === "reorder.plan",
       )?.configSchema.properties?.sourceRefs.oneRequired,
     ).toEqual(["materialObjectId", "assetObjectId"]);
-    expect(
-      plannedWorkerCommands().find(
-        (command) => command.role === "growth_operations" && command.name === "campaign.draft",
-      )?.configSchema.properties?.sourceRefs.required,
-    ).toEqual(["customerSignalObjectId", "evidencePacketId", "budgetReservationId"]);
+    const growthSourceRefsSchema = registeredWorkerCommands().find(
+      (command) => command.role === "growth_operations" && command.name === "campaign.draft",
+    )?.configSchema?.properties?.sourceRefs;
+
+    expect(growthSourceRefsSchema?.required).toEqual(["evidencePacketId", "budgetReservationId"]);
+    expect(growthSourceRefsSchema?.oneRequired).toEqual(["customerSignalObjectId", "customerSignalId"]);
     expect(
       plannedWorkerViews().find(
         (view) => view.role === "vertical_packages" && view.name === "package_readiness",

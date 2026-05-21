@@ -235,9 +235,11 @@ const growthCampaignDraftConfigSchema: PlannedWorkerConfigSchema = {
   properties: {
     sourceRefs: {
       type: "object",
-      required: ["customerSignalObjectId", "evidencePacketId", "budgetReservationId"],
+      required: ["evidencePacketId", "budgetReservationId"],
+      oneRequired: ["customerSignalObjectId", "customerSignalId"],
       properties: {
         customerSignalObjectId: stringSchema("Customer signal Core object id."),
+        customerSignalId: stringSchema("Customer signal primitive id."),
         customerObjectId: stringSchema("Optional customer Core object id."),
         reviewObjectId: stringSchema("Optional review Core object id."),
         campaignObjectId: stringSchema("Optional existing campaign Core object id."),
@@ -1649,6 +1651,7 @@ const runtimeWorkerRoles = new Set([
   "systems_operations",
   "offer_pricing_operations",
   "customer_experience_operations",
+  "growth_operations",
 ]);
 
 export const runtimeWorkerContracts = workerContracts.filter((contract) =>
@@ -2023,7 +2026,7 @@ export const workerExpansionCatalog: WorkerExpansionCatalogEntry[] = [
     order: 11,
     key: "growth_operations",
     name: "Growth Worker",
-    status: "candidate",
+    status: "runtime",
     kind: "worker_family",
     apiRoute: workerApiRoute,
     workerRole: "growth_operations",
@@ -2039,7 +2042,7 @@ export const workerExpansionCatalog: WorkerExpansionCatalogEntry[] = [
       "Budget is reserved",
       "Audience and channel are explicit",
     ],
-    firstBlocker: "External publish approval and ROI ledger fixture.",
+    firstBlocker: "External publish approval, ROI ledger fixture, send/spend gates, and tracking mutation proof.",
     launchGate: "No external publish without approval, source-backed claims, budget and ROI ledger.",
     contractPath: "docs/growth-worker-v1-contract.md",
     evidencePacket: "growth_campaign_packet",

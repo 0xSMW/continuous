@@ -33,10 +33,10 @@ const runtimeContractRoles = [
   "systems_operations",
   "offer_pricing_operations",
   "customer_experience_operations",
+  "growth_operations",
 ];
 const plannedContractRoles = [
   "asset_supply_operations",
-  "growth_operations",
   "vertical_packages",
 ];
 const contractRoles = [...runtimeContractRoles, ...plannedContractRoles];
@@ -1113,6 +1113,21 @@ describe("worker tool contract", () => {
           name: "approval.decide",
           apiRoute: "/worker",
         }),
+        expect.objectContaining({
+          role: "growth_operations",
+          name: "campaign.draft",
+          apiRoute: "/worker",
+          externalExecution: "blocked",
+          configSchema: expect.objectContaining({
+            required: ["sourceRefs", "policy"],
+            properties: expect.objectContaining({
+              sourceRefs: expect.objectContaining({
+                required: ["evidencePacketId", "budgetReservationId"],
+                oneRequired: ["customerSignalObjectId", "customerSignalId"],
+              }),
+            }),
+          }),
+        }),
       ]),
     );
     expect(workerToolSchema.registry.views).toEqual(
@@ -1142,6 +1157,18 @@ describe("worker tool contract", () => {
             properties: expect.objectContaining({
               quoteObjectId: expect.objectContaining({ type: "string" }),
               priceBookId: expect.objectContaining({ type: "string" }),
+            }),
+            additionalProperties: false,
+          }),
+        }),
+        expect.objectContaining({
+          role: "growth_operations",
+          name: "campaigns",
+          apiRoute: "/worker",
+          configSchema: expect.objectContaining({
+            properties: expect.objectContaining({
+              state: expect.objectContaining({ type: "string" }),
+              channel: expect.objectContaining({ type: "string" }),
             }),
             additionalProperties: false,
           }),
@@ -1178,6 +1205,16 @@ describe("worker tool contract", () => {
         (view) => view.role === "customer_experience_operations",
       ),
     ).toBe(false);
+    expect(
+      workerToolSchema.registry.plannedFutureWorkerCommands.some(
+        (command) => command.role === "growth_operations",
+      ),
+    ).toBe(false);
+    expect(
+      workerToolSchema.registry.plannedFutureWorkerViews.some(
+        (view) => view.role === "growth_operations",
+      ),
+    ).toBe(false);
     expect(workerToolSchema.registry.plannedFutureWorkerCommands).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -1185,12 +1222,6 @@ describe("worker tool contract", () => {
           name: "reorder.plan",
           apiRoute: "/worker",
           externalExecution: "dry_run",
-        }),
-        expect.objectContaining({
-          role: "growth_operations",
-          name: "campaign.draft",
-          apiRoute: "/worker",
-          externalExecution: "blocked",
         }),
         expect.objectContaining({
           role: "vertical_packages",
@@ -1248,7 +1279,6 @@ describe("worker tool contract", () => {
     }
     for (const command of [
       ["asset_supply_operations", "reorder.plan"],
-      ["growth_operations", "campaign.draft"],
       ["vertical_packages", "package.flow.prepare"],
     ] as const) {
       const planned = plannedFutureCommands.find(
@@ -1514,7 +1544,7 @@ describe("worker tool contract", () => {
         workerRole: "growth_operations",
         firstCommand: "campaign.draft",
         firstView: "campaigns",
-        status: "candidate",
+        status: "runtime",
         contractPath: "docs/growth-worker-v1-contract.md",
         evidencePacket: "growth_campaign_packet",
       }),

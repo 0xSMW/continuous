@@ -2,8 +2,9 @@
 
 This contract defines the first Growth worker slice for campaign drafts,
 source-backed claims, audience/channel planning, attribution review, and
-budget-reservation evidence. V1 prepares drafts and internal packets only. It
-does not publish content, buy ads, send campaigns, or alter live tracking.
+budget-reservation evidence. The `campaign.draft` slice is runtime-registered
+on the canonical `/worker` API. V1 prepares drafts and internal packets only;
+it does not publish content, buy ads, send campaigns, or alter live tracking.
 
 ## Header
 
@@ -12,12 +13,15 @@ does not publish content, buy ads, send campaigns, or alter live tracking.
 | Worker role | `growth_operations` |
 | First outcome | Campaign draft with source-backed claims, budget reservation, approval request, and generated campaign view |
 | Autonomy level | `2` |
-| Runtime status | Planned contract |
+| Runtime status | First runtime slice |
 | External execution | `blocked` |
 
 ## API Shape
 
 All commands and views use `POST /worker`; no growth-specific route is added.
+The canonical runtime call is `worker.role=growth_operations`,
+`command=campaign.draft`, with `config.sourceRefs` and `config.policy`
+carrying source, budget, audience, claim, approval, and no-publish controls.
 Command names, worker selection, and view names are payload fields. Operation
 inputs and read filters stay under `config`.
 
@@ -127,6 +131,13 @@ Golden cases cover source-backed campaign drafts, unsupported claims,
 regulated claims, prompt injection in market copy, missing suppression lists,
 budget pressure, attribution ambiguity, approval behavior, idempotent replay,
 and no publish, send, ad spend, or tracking mutation.
+
+## Expansion Gates
+
+Future publish, send, ad-spend, or tracking mutation commands must stay blocked
+until scoped credentials, owner approval, source-claim proof, budget proof,
+adapter receipts, rollback evidence, and eval coverage are present. The runtime
+`campaign.draft` slice is not approval to mutate external marketing systems.
 
 ## Security
 

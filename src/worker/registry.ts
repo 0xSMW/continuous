@@ -71,6 +71,12 @@ import {
   prepareCustomerRecoveryDraft,
 } from "./customer-experience";
 import {
+  getGrowthWorkerSnapshotSafe,
+  growthWorkerRole,
+  listGrowthCampaigns,
+  prepareGrowthCampaignDraft,
+} from "./growth";
+import {
   getSystemsRepairs,
   getSystemsWorkerSnapshotSafe,
   planSystemsAutomation,
@@ -958,6 +964,57 @@ const customerExperienceSignalsViewConfig: WorkerConfigSchema = {
   properties: {
     state: { type: "string" },
     severity: { type: "string" },
+  },
+  additionalProperties: false,
+};
+const growthCampaignDraftConfig: WorkerConfigSchema = {
+  type: "object",
+  required: ["sourceRefs", "policy"],
+  properties: {
+    sourceRefs: {
+      type: "object",
+      required: ["evidencePacketId", "budgetReservationId"],
+      oneRequired: ["customerSignalObjectId", "customerSignalId"],
+      properties: {
+        customerSignalObjectId: { type: "string" },
+        customerSignalId: { type: "string" },
+        customerObjectId: { type: "string" },
+        reviewObjectId: { type: "string" },
+        campaignObjectId: { type: "string" },
+        contentDraftObjectId: { type: "string" },
+        audienceObjectId: { type: "string" },
+        budgetReservationId: { type: "string" },
+        evidencePacketId: { type: "string" },
+      },
+      additionalProperties: false,
+    },
+    policy: {
+      type: "object",
+      required: ["channel", "audience", "requiresOwnerApproval", "allowPublish"],
+      properties: {
+        channel: { type: "string" },
+        audience: { type: "string" },
+        requiresOwnerApproval: { type: "boolean" },
+        allowPublish: { type: "boolean" },
+        allowSend: { type: "boolean" },
+        allowSpend: { type: "boolean" },
+        allowTrackingMutation: { type: "boolean" },
+      },
+      additionalProperties: true,
+    },
+    claims: {
+      type: "array",
+      items: jsonObjectConfig,
+    },
+    content: jsonObjectConfig,
+  },
+  additionalProperties: false,
+};
+const growthCampaignsViewConfig: WorkerConfigSchema = {
+  type: "object",
+  properties: {
+    state: { type: "string" },
+    channel: { type: "string" },
   },
   additionalProperties: false,
 };
@@ -1890,6 +1947,128 @@ const workerDefinitions: Record<string, WorkerDefinition> = {
               worker: responseTarget(context.target),
               view: "signals",
               signals,
+            },
+            error: null,
+          };
+        },
+      },
+    },
+  },
+  [growthWorkerRole]: {
+    role: growthWorkerRole,
+    commands: {
+      "campaign.draft": {
+        name: "campaign.draft",
+        description:
+          "Prepare a source-backed campaign draft, budget proof, approval packet, and generated campaign view without publishing, sending, spending, or changing tracking.",
+        idempotency: "required",
+        sideEffects: "internal",
+        externalExecution: "blocked",
+        requiresTenant: true,
+        configSchema: growthCampaignDraftConfig,
+        async handle(context) {
+          if (!context.idempotencyKey) {
+            throw new PlatformUnavailableError(
+              "invalid_idempotency_key",
+              "A string idempotency key is required.",
+              400,
+            );
+          }
+
+          return prepareGrowthCampaignDraft({
+            idempotencyKey: context.idempotencyKey,
+            tenantSlug: context.target.tenantSlug,
+            workerId: context.target.workerId,
+            operatorEmail: context.operatorEmail,
+            config: context.config,
+          });
+        },
+      },
+      "approval.decide": {
+        name: "approval.decide",
+        description: "Decide a growth approval request without executing external actions.",
+        idempotency: "required",
+        sideEffects: "internal",
+        externalExecution: "blocked",
+        requiresTenant: true,
+        configSchema: {
+          type: "object",
+          required: ["approvalId", "action"],
+          properties: {
+            approvalId: { type: "string" },
+            action: {
+              type: "string",
+              enum: ["approved", "rejected", "revision_requested"],
+            },
+            note: { type: "string" },
+          },
+          additionalProperties: true,
+        },
+        async handle(context) {
+          const approvalId = optionalString(context.config.approvalId);
+          const action = normalizeApprovalDecision(context.config.action);
+
+          if (!approvalId || !action) {
+            throw new PlatformUnavailableError(
+              "invalid_worker_command_config",
+              "config.approvalId and config.action are required for approval.decide.",
+              400,
+            );
+          }
+
+          return decideApproval({
+            approvalId,
+            idempotencyKey: context.idempotencyKey!,
+            operatorEmail: context.operatorEmail,
+            tenantSlug: context.target.tenantSlug,
+            action,
+            note: optionalString(context.config.note),
+            subject: "worker",
+          });
+        },
+      },
+    },
+    views: {
+      snapshot: {
+        name: "snapshot",
+        description: "Read the Growth Worker runtime snapshot.",
+        configSchema: emptyViewConfig,
+        async handle(context) {
+          const result = await getGrowthWorkerSnapshotSafe({
+            tenantSlug: context.target.tenantSlug,
+            workerId: context.target.workerId,
+            role: context.target.role,
+            operatorEmail: context.operatorEmail,
+          });
+
+          return {
+            status: result.ok ? 200 : 500,
+            data: {
+              worker: responseTarget(context.target),
+              view: "snapshot",
+              snapshot: result.snapshot,
+            },
+            error: result.error,
+          };
+        },
+      },
+      campaigns: {
+        name: "campaigns",
+        description: "Read campaign drafts, claim blockers, audience policy, budget refs, and no-publish proof.",
+        configSchema: growthCampaignsViewConfig,
+        async handle(context) {
+          const campaigns = await listGrowthCampaigns({
+            tenantSlug: context.target.tenantSlug,
+            workerId: context.target.workerId,
+            operatorEmail: context.operatorEmail,
+            config: context.config,
+          });
+
+          return {
+            data: {
+              worker: responseTarget(context.target),
+              view: "campaigns",
+              campaigns,
             },
             error: null,
           };
