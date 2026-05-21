@@ -16,6 +16,7 @@ import {
   runtimeWorkerContracts,
   workerContracts,
   workerExpansionCatalog,
+  workerExpansionPromotionPlan,
   workerFollowUpCommands,
   workerFollowUpViews,
 } from "./planned-workers";
@@ -1503,10 +1504,14 @@ describe("worker tool contract", () => {
 
   it("exposes queryable expansion metadata through the generic worker registry", () => {
     const expansion = workerToolSchema.registry.expansion;
+    const promotionPlan = workerToolSchema.registry.expansionPromotionPlan;
     const waves = new Set(expansion.map((entry) => entry.wave));
     const byKey = new Map(expansion.map((entry) => [entry.key, entry]));
+    const promotionByKey = new Map(promotionPlan.map((entry) => [entry.key, entry]));
 
     expect(expansion).toBe(workerExpansionCatalog);
+    expect(promotionPlan).toBe(workerExpansionPromotionPlan);
+    expect(promotionPlan.map((entry) => entry.key)).toEqual(expansion.map((entry) => entry.key));
     expect([...waves].sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
     expect([...byKey.keys()]).toEqual(
       expect.arrayContaining([
@@ -1530,6 +1535,44 @@ describe("worker tool contract", () => {
         "package_dispatch_asset_utilization",
         "package_maintenance",
       ]),
+    );
+    expect(promotionByKey.get("asset_supply_operations")).toEqual(
+      expect.objectContaining({
+        schemaVersion: "continuous.worker_expansion_promotion.v1",
+        executionState: "schema_only_until_handler_registered",
+        apiRoute: "/worker",
+        workerRole: "asset_supply_operations",
+        firstCommand: "reorder.plan",
+        firstView: "stockouts",
+        incomingHandoff: "dispatch.asset_need_to_supply",
+      }),
+    );
+    expect(
+      promotionByKey.get("asset_supply_operations")?.commandPayloadTemplate.payload.config.sourceRefs,
+    ).toEqual({
+      handoff: "dispatch.asset_need_to_supply",
+      requiredCoreRefs: [
+        "Vendor",
+        "InventoryItem",
+        "PurchaseOrder",
+        "Asset",
+        "Facility",
+        "MaintenanceEvent",
+      ],
+    });
+    expect(
+      promotionByKey.get("package_quote_to_cash_field")?.commandPayloadTemplate.payload,
+    ).toEqual(
+      expect.objectContaining({
+        command: "package.flow.prepare",
+        worker: {
+          role: "vertical_packages",
+          tenantSlug: "<tenantSlug>",
+        },
+        config: expect.objectContaining({
+          packageKey: "quote_to_cash_field",
+        }),
+      }),
     );
     expect(byKey.get("revenue_operations")).toEqual(
       expect.objectContaining({
@@ -1618,6 +1661,34 @@ describe("worker tool contract", () => {
       expect(entry.firstBlocker.length).toBeGreaterThan(0);
       expect(entry.launchGate.length).toBeGreaterThan(0);
       expect(entry.sourceDocs.length).toBeGreaterThan(0);
+      const promotion = promotionByKey.get(entry.key);
+
+      expect(promotion).toBeTruthy();
+      expect(promotion?.apiRoute).toBe("/worker");
+      expect(promotion?.firstCommand).toBe(entry.firstCommand);
+      expect(promotion?.firstView).toBe(entry.firstView);
+      expect(promotion?.commandPayloadTemplate.apiRoute).toBe("/worker");
+      expect(promotion?.commandPayloadTemplate.tool).toBe("continuous.worker.command");
+      expect(promotion?.commandPayloadTemplate.payload.command).toBe(entry.firstCommand);
+      expect(promotion?.commandPayloadTemplate.payload.worker.role).toBe(entry.workerRole);
+      expect(promotion?.commandPayloadTemplate.payload.config.policy.externalExecution).toBe(
+        entry.externalExecution,
+      );
+      expect(promotion?.viewPayloadTemplate.apiRoute).toBe("/worker");
+      expect(promotion?.viewPayloadTemplate.tool).toBe("continuous.worker.view");
+      expect(promotion?.viewPayloadTemplate.payload.view).toBe(entry.firstView);
+      expect(JSON.stringify(promotion)).not.toMatch(/\/api(?:\/|$)|revenue[-_]worker/i);
+      expect(promotion?.promotionChecklist.map((item) => item.key)).toEqual(
+        expect.arrayContaining([
+          "contract_current",
+          "registry_metadata",
+          "first_command_config_schema",
+          "first_view_contract",
+          "acceptance_checks",
+          "evidence_packet",
+          "launch_gate",
+        ]),
+      );
       if (entry.status === "candidate" || entry.status === "packaged") {
         expect(entry.contractPath).toBeTruthy();
         expect(entry.evidencePacket).toBeTruthy();

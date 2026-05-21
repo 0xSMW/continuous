@@ -114,6 +114,73 @@ export type WorkerExpansionCatalogEntry = {
   sourceDocs: string[];
 };
 
+export type WorkerExpansionPromotionProof = {
+  key: string;
+  required: boolean;
+  artifact: string;
+  expected: string;
+};
+
+export type WorkerExpansionPromotionPlanEntry = {
+  schemaVersion: "continuous.worker_expansion_promotion.v1";
+  key: string;
+  wave: number;
+  order: number;
+  status: WorkerExpansionStatus;
+  executionState:
+    | "registered_runtime"
+    | "partial_runtime"
+    | "schema_only_until_handler_registered"
+    | "packaged_catalog";
+  apiRoute: WorkerApiRoute;
+  workerRole: string;
+  packageKey?: string;
+  firstCommand: string;
+  firstView: string;
+  contractPath?: string;
+  evidencePacket?: string;
+  incomingHandoff?: string;
+  commandPayloadTemplate: {
+    apiRoute: WorkerApiRoute;
+    tool: "continuous.worker.command";
+    payload: {
+      command: string;
+      worker: {
+        role: string;
+        tenantSlug: "<tenantSlug>";
+      };
+      idempotencyKey: string;
+      config: {
+        packageKey?: string;
+        sourceRefs: {
+          handoff?: string;
+          requiredCoreRefs: string[];
+        };
+        policy: {
+          externalExecution: ExternalExecution;
+          requireOwnerApproval: true;
+        };
+      };
+    };
+  };
+  viewPayloadTemplate: {
+    apiRoute: WorkerApiRoute;
+    tool: "continuous.worker.view";
+    payload: {
+      view: string;
+      worker: {
+        role: string;
+        tenantSlug: "<tenantSlug>";
+      };
+      config: {
+        packageKey?: string;
+      };
+    };
+  };
+  promotionChecklist: WorkerExpansionPromotionProof[];
+  sourceDocs: string[];
+};
+
 function stringSchema(description?: string): PlannedWorkerConfigSchema {
   return {
     type: "string",
@@ -2574,6 +2641,147 @@ export const workerExpansionCatalog: WorkerExpansionCatalogEntry[] = [
     ],
   },
 ];
+
+function expansionExecutionState(
+  status: WorkerExpansionStatus,
+): WorkerExpansionPromotionPlanEntry["executionState"] {
+  if (status === "runtime") {
+    return "registered_runtime";
+  }
+
+  if (status === "partial") {
+    return "partial_runtime";
+  }
+
+  if (status === "packaged") {
+    return "packaged_catalog";
+  }
+
+  return "schema_only_until_handler_registered";
+}
+
+function expansionPromotionConfig(entry: WorkerExpansionCatalogEntry) {
+  return {
+    ...(entry.packageKey ? { packageKey: entry.packageKey } : {}),
+    sourceRefs: {
+      ...(entry.incomingHandoff ? { handoff: entry.incomingHandoff } : {}),
+      requiredCoreRefs: entry.coreObjects,
+    },
+    policy: {
+      externalExecution: entry.externalExecution,
+      requireOwnerApproval: true as const,
+    },
+  };
+}
+
+function expansionPromotionChecklist(entry: WorkerExpansionCatalogEntry): WorkerExpansionPromotionProof[] {
+  return [
+    {
+      key: "contract_current",
+      required: true,
+      artifact: entry.contractPath ?? "worker contract",
+      expected: "Contract names the /worker command envelope, Core object map, workflow, evidence packet, evals, and security boundaries.",
+    },
+    {
+      key: "registry_metadata",
+      required: true,
+      artifact: `workerToolSchema.registry.expansion.${entry.key}`,
+      expected: "Registry entry exposes launch order, first command/view, Core objects, handoff, blockers, and launch gate.",
+    },
+    {
+      key: "first_command_config_schema",
+      required: true,
+      artifact: `${entry.workerRole ?? "vertical_packages"}.${entry.firstCommand}`,
+      expected: "Command config schema keeps operation inputs under config and keeps execution on /worker.",
+    },
+    {
+      key: "first_view_contract",
+      required: true,
+      artifact: `${entry.workerRole ?? "vertical_packages"}.${entry.firstView}`,
+      expected: "Read view accepts worker selectors plus config filters and returns operator-reviewable proof.",
+    },
+    ...(entry.incomingHandoff
+      ? [
+          {
+            key: "incoming_handoff_fixture",
+            required: true,
+            artifact: entry.incomingHandoff,
+            expected: "Fixture resolves Core refs from the producer handoff before the worker writes records.",
+          } satisfies WorkerExpansionPromotionProof,
+        ]
+      : []),
+    {
+      key: "acceptance_checks",
+      required: true,
+      artifact: entry.acceptanceChecks.join("; "),
+      expected: "Every acceptance check is covered by a test, deploy smoke, or named launch blocker.",
+    },
+    {
+      key: "evidence_packet",
+      required: true,
+      artifact: entry.evidencePacket ?? "evidence packet",
+      expected: "Worker writes or plans the evidence packet named by the contract.",
+    },
+    {
+      key: "launch_gate",
+      required: true,
+      artifact: entry.launchGate,
+      expected: "Launch gate proves no unauthorized external execution and names any live credential, receipt, and rollback requirements.",
+    },
+  ];
+}
+
+export const workerExpansionPromotionPlan: WorkerExpansionPromotionPlanEntry[] =
+  workerExpansionCatalog.map((entry) => {
+    const role = entry.workerRole ?? "vertical_packages";
+    const config = expansionPromotionConfig(entry);
+
+    return {
+      schemaVersion: "continuous.worker_expansion_promotion.v1",
+      key: entry.key,
+      wave: entry.wave,
+      order: entry.order,
+      status: entry.status,
+      executionState: expansionExecutionState(entry.status),
+      apiRoute: entry.apiRoute,
+      workerRole: role,
+      ...(entry.packageKey ? { packageKey: entry.packageKey } : {}),
+      firstCommand: entry.firstCommand,
+      firstView: entry.firstView,
+      ...(entry.contractPath ? { contractPath: entry.contractPath } : {}),
+      ...(entry.evidencePacket ? { evidencePacket: entry.evidencePacket } : {}),
+      ...(entry.incomingHandoff ? { incomingHandoff: entry.incomingHandoff } : {}),
+      commandPayloadTemplate: {
+        apiRoute: entry.apiRoute,
+        tool: "continuous.worker.command",
+        payload: {
+          command: entry.firstCommand,
+          worker: {
+            role,
+            tenantSlug: "<tenantSlug>",
+          },
+          idempotencyKey: `${entry.key}:<run-id>`,
+          config,
+        },
+      },
+      viewPayloadTemplate: {
+        apiRoute: entry.apiRoute,
+        tool: "continuous.worker.view",
+        payload: {
+          view: entry.firstView,
+          worker: {
+            role,
+            tenantSlug: "<tenantSlug>",
+          },
+          config: {
+            ...(entry.packageKey ? { packageKey: entry.packageKey } : {}),
+          },
+        },
+      },
+      promotionChecklist: expansionPromotionChecklist(entry),
+      sourceDocs: entry.sourceDocs,
+    };
+  });
 
 export function plannedWorkerRoles() {
   return plannedWorkerContracts.map((contract) => contract.role);

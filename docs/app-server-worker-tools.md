@@ -180,6 +180,7 @@ The `registry` buckets have distinct execution meaning:
 | `plannedFutureWorkerCommands` | Non-executable command schemas for worker families that have no runtime handler yet |
 | `plannedFutureWorkerViews` | Non-executable read schemas for worker families that have no runtime handler yet |
 | `expansion` | Launch-order catalog with Core object spines, handoffs, acceptance checks, blockers, and gates |
+| `expansionPromotionPlan` | Derived promotion payload templates and proof checklist for each expansion entry |
 
 Expansion status values are `runtime`, `partial`, `planned_contract`,
 `candidate`, and `packaged`. `runtime` means executable through the registry
@@ -188,6 +189,15 @@ open. `planned_contract` means a contract exists without runtime promotion.
 `candidate` means catalog and contract planning only. `packaged` means a
 composed bundle that must still execute through family commands and `/worker`,
 not through package-specific routes.
+
+`expansionPromotionPlan` is derived from the expansion catalog and is safe for
+app-server agents to follow. Each entry includes a generic
+`continuous.worker.command` payload template, a matching
+`continuous.worker.view` payload template, the worker role or package key, the
+incoming handoff, required Core refs, contract and evidence packet paths, and a
+promotion checklist. It does not create an execution surface; candidates and
+packaged workers remain schema-only until their handlers move into the
+registered command list.
 
 Worker selectors support `worker.role`, optional `worker.tenantSlug`, and
 optional `worker.id`. Use `worker.id` only when targeting a specific persisted

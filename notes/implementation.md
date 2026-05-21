@@ -703,3 +703,10 @@ reads/commands at the generic `/worker` surface, with operation-specific input
 kept under `arguments.config`. This is schema metadata, not a new execution
 surface, and exists so agents do not infer `/api/*-worker`, `/worker/<role>`,
 or worker-family-specific tool names from prose.
+
+The worker registry now also derives an expansion promotion plan from the
+launch-order catalog. Each promotion entry provides generic
+`continuous.worker.command` and `continuous.worker.view` payload templates plus
+a proof checklist, so candidate and packaged workers can be promoted by adding
+registry handlers and tests instead of creating worker-family URLs or
+route-shaped tool names.

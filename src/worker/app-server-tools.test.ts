@@ -86,6 +86,7 @@ describe("app-server worker tools", () => {
     const registry = schema.registry;
     const lifecycle = schema.lifecycle;
     const expansionKeys = registry.expansion.map((entry) => entry.key);
+    const promotionKeys = registry.expansionPromotionPlan.map((entry) => entry.key);
     const runtimeRoles = registry.runtimeContracts.map((contract) => contract.role);
     const plannedRoles = registry.plannedContracts.map((contract) => contract.role);
     const revenueFollowUpCommands = registry.followUpCommands.filter(
@@ -111,6 +112,22 @@ describe("app-server worker tools", () => {
     expect(registry.commands.every((command) => command.apiRoute === "/worker")).toBe(true);
     expect(registry.views.every((view) => view.apiRoute === "/worker")).toBe(true);
     expect(registry.expansion.every((entry) => entry.apiRoute === "/worker")).toBe(true);
+    expect(promotionKeys).toEqual(expansionKeys);
+    expect(
+      registry.expansionPromotionPlan.every(
+        (entry) =>
+          entry.apiRoute === "/worker" &&
+          entry.commandPayloadTemplate.apiRoute === "/worker" &&
+          entry.commandPayloadTemplate.payload.config.policy.requireOwnerApproval === true,
+      ),
+    ).toBe(true);
+    expect(registry.expansionPromotionPlan.find((entry) => entry.key === "asset_supply_operations")).toEqual(
+      expect.objectContaining({
+        executionState: "schema_only_until_handler_registered",
+        firstCommand: "reorder.plan",
+        incomingHandoff: "dispatch.asset_need_to_supply",
+      }),
+    );
     expect(lifecycle.schemaVersion).toBe("continuous.worker_lifecycle.v1");
     expect(lifecycle.boundary).toEqual(
       expect.objectContaining({
