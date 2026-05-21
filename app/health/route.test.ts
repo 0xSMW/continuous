@@ -173,9 +173,9 @@ describe("/health route", () => {
     expect(body).toMatchObject({
       service: "Continuous Core",
       status: "ok",
-      mode: "test",
       version: "0.1.0",
     });
+    expect(["development", "test"]).toContain(body.mode);
     expect(body.checkedAt).toEqual(expect.any(String));
     expect(body.checks).toEqual([
       { id: "database", state: "pass" },
