@@ -26,15 +26,8 @@ set_readiness_value() {
   chmod 0600 "$READINESS_ENV_FILE"
 
   tmp="$(mktemp)"
-  if grep -q "^${key}=" "$READINESS_ENV_FILE"; then
-    awk -v key="$key" -v value="$(shell_quote "$value")" '
-      index($0, key "=") == 1 { print key "=" value; next }
-      { print }
-    ' "$READINESS_ENV_FILE" > "$tmp"
-  else
-    cat "$READINESS_ENV_FILE" > "$tmp"
-    printf '%s=%s\n' "$key" "$(shell_quote "$value")" >> "$tmp"
-  fi
+  grep -v "^${key}=" "$READINESS_ENV_FILE" > "$tmp" || true
+  printf '%s=%s\n' "$key" "$(shell_quote "$value")" >> "$tmp"
 
   install -m 0600 "$tmp" "$READINESS_ENV_FILE"
   rm -f "$tmp"

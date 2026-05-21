@@ -29,6 +29,7 @@ describe("production readiness operations", () => {
     expect(attest).toContain("deploy_user_missing_docker_group");
     expect(attest).toContain("docker compose version");
     expect(attest).toContain("NON_ROOT_ACCESS_DOCKER_COMPOSE_VERSION");
+    expect(attest).not.toContain("awk -v");
 
     expect(install).toContain("DEPLOY_PUBLIC_KEY");
     expect(install).toContain("COPY_AUTHORIZED_KEYS_FROM_USER");
