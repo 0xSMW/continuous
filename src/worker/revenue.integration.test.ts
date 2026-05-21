@@ -7949,6 +7949,101 @@ maybeDescribe("Revenue Worker integration eval", () => {
       ]),
     );
 
+    const [seedConnection] = await db.select({ tenantId: connections.tenantId }).from(connections).limit(1);
+
+    expect(seedConnection?.tenantId).toBeTruthy();
+
+    const [sendAdapter] = await db
+      .insert(adapters)
+      .values({
+        key: `app_server_customer_message_${runId}`,
+        name: `App-server customer message ${runId}`,
+        kind: "customer_message",
+        auth: "managed",
+        capabilities: {
+          write: ["customer_message.send"],
+          receipts: ["delivery"],
+        },
+      })
+      .returning();
+    const [sendConnection] = await db
+      .insert(connections)
+      .values({
+        tenantId: seedConnection.tenantId,
+        adapterId: sendAdapter.id,
+        name: `App-server customer send ${runId}`,
+        state: "active",
+        externalAccountId: `app-server-customer-send-${runId}`,
+        scopes: { writes: ["customer_message.send"] },
+        config: {
+          executable: false,
+          credentialRef: "managed:app-server-customer-message",
+          writer: {
+            provider: "postmark",
+            channel: "email",
+          },
+        },
+      })
+      .returning();
+
+    await decideApproval({
+      approvalId: stringValue(quoteResult.approvalRequestId),
+      idempotencyKey: `ci-app-server-quote-approval-${runId}`,
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      action: "approved",
+      note: "Approve app-server controlled send receipt recording.",
+      subject: "worker",
+      db,
+    });
+
+    const controlledContinue = await executeAppServerWorkerTool("continuous.worker.command", {
+      command: "continue",
+      worker: {
+        role: "revenue_operations",
+        tenantSlug: "continuous-demo",
+      },
+      idempotencyKey: `ci-app-server-controlled-send-continue-${runId}`,
+      config: {
+        approvalId: stringValue(quoteResult.approvalRequestId),
+        execution: {
+          connectionId: sendConnection.id,
+          credentialRef: "managed:app-server-customer-message",
+          requiredScopes: ["customer_message.send"],
+          channel: "email",
+          recipient: "buyer@example.com",
+          receipt: {
+            receiptId: `app-server-receipt:${runId}`,
+            providerMessageId: `app-server-message:${runId}`,
+            sentAt: "2026-05-19T09:30:00.000Z",
+          },
+          rollback: {
+            strategy: "send_followup_correction",
+            escalationOwner: "owner@continuoushq.com",
+            steps: ["send correction email", "open owner review task"],
+          },
+        },
+      },
+    });
+    const controlledContinueEnvelope = objectValue(controlledContinue);
+    const controlledContinueResult = objectValue(controlledContinueEnvelope.result);
+    const controlledContinueOutput = objectValue(controlledContinueResult.output);
+    const controlledReceipt = objectValue(controlledContinueOutput.controlledSendReceipt);
+    const controlledExternalAction = objectValue(controlledContinueOutput.externalActionRecord);
+
+    expect(controlledContinueEnvelope.command).toBe("continue");
+    expect(objectValue(controlledContinueEnvelope.worker)).toMatchObject({
+      role: "revenue_operations",
+      tenantSlug: "continuous-demo",
+    });
+    expect(controlledContinueResult.created).toBe(true);
+    expect(controlledContinueOutput.status).toBe("approved_execution_recorded");
+    expect(controlledContinueOutput.externalExecution).toBe("recorded");
+    expect(controlledContinueOutput.externalSend).toBe(true);
+    expect(controlledReceipt.operation).toBe("customer_message.send");
+    expect(controlledReceipt.connectionId).toBe(sendConnection.id);
+    expect(controlledExternalAction.state).toBe("done");
+
     const paymentLink = await executeAppServerWorkerTool("continuous.worker.command", {
       command: "payment_link.prepare",
       worker: {
@@ -7984,6 +8079,43 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(paymentLinkOutput.externalExecution).toBe("blocked");
     expect(paymentLinkOutput.providerPaymentLinkCreation).toBe("blocked");
     expect(paymentLinkOutput.moneyMovement).toBe("blocked");
+
+    await decideApproval({
+      approvalId: stringValue(paymentLinkResult.approvalRequestId),
+      idempotencyKey: `ci-app-server-payment-link-approval-${runId}`,
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      action: "approved",
+      note: "Approve app-server payment link while provider creation remains blocked.",
+      subject: "worker",
+      db,
+    });
+
+    const paymentLinkContinue = await executeAppServerWorkerTool("continuous.worker.command", {
+      command: "continue",
+      worker: {
+        role: "revenue_operations",
+        tenantSlug: "continuous-demo",
+      },
+      idempotencyKey: `ci-app-server-payment-link-continue-${runId}`,
+      config: {
+        approvalId: stringValue(paymentLinkResult.approvalRequestId),
+      },
+    });
+    const paymentLinkContinueEnvelope = objectValue(paymentLinkContinue);
+    const paymentLinkContinueResult = objectValue(paymentLinkContinueEnvelope.result);
+    const paymentLinkContinueOutput = objectValue(paymentLinkContinueResult.output);
+
+    expect(paymentLinkContinueEnvelope.command).toBe("continue");
+    expect(objectValue(paymentLinkContinueEnvelope.worker)).toMatchObject({
+      role: "revenue_operations",
+      tenantSlug: "continuous-demo",
+    });
+    expect(paymentLinkContinueResult.created).toBe(true);
+    expect(paymentLinkContinueOutput.status).toBe("approved_payment_link_execution_blocked");
+    expect(paymentLinkContinueOutput.providerPaymentLinkCreation).toBe("blocked");
+    expect(paymentLinkContinueOutput.moneyMovement).toBe("blocked");
+    expect(paymentLinkContinueOutput.externalMutation).toBe(false);
 
     const [readRun] = await db
       .select()

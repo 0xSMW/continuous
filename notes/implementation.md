@@ -657,3 +657,14 @@ route names or family-specific APIs. `/worker` `view=readiness` exposes
 receipt, payment-link continuation, adapter retry, and adapter reconciliation,
 then turns each into a generic launch gate before credential and money-movement
 gates are evaluated.
+
+The app-server Revenue proof now covers `continuous.worker.command` for
+`command=continue` in both approved controlled-send receipt recording and
+approved payment-link continuation paths. The call shape stays the same
+generic app-server dynamic-tool envelope, with `command`, `worker`,
+`idempotencyKey`, and operation details under `arguments.config`; live payment
+provider creation and money movement remain blocked until scoped credentials
+and rollback evidence exist. `docs/app-server-worker-tools.md` now also names
+the exact worker schema buckets, expansion status enum, top-level schema
+response keys, and optional `worker.id` selector so app-server-driven worker
+expansion can consume the registry without inferring from prose.

@@ -29,6 +29,8 @@ selection belong under `worker`; package or bundle selectors and
 operation-specific inputs belong under `config`.
 
 Status words are strict: `runtime` means registered and executable now,
+`partial` means at least one runtime slice exists but launch gates remain open,
+`planned_contract` means a contract exists without runtime promotion,
 `candidate` means contract/catalog metadata only, and `packaged` means a
 cataloged composed bundle that is not launch-ready runtime.
 

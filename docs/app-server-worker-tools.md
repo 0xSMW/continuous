@@ -42,7 +42,8 @@ commands adopt the Core lifecycle gate instead of adding worker-family-specific
 tool names or routes.
 The CI integration suite exercises `continuous.worker.command` on real
 Revenue `lead.read`, `run`, `lead.classify`, `response.draft`,
-`quote.prepare`, and `payment_link.prepare`. It also exercises Owner `brief.generate`, Dispatch
+`quote.prepare`, `payment_link.prepare`, and `continue` for both controlled-send
+receipt recording and blocked payment-link continuations. It also exercises Owner `brief.generate`, Dispatch
 `schedule.propose`, and Finance
 `payment_draft.prepare` commands, proving the app-server boundary writes the
 same worker run, approval, evidence, budget, event, adapter dry-run, generated
@@ -112,6 +113,46 @@ Asset and Supply and Vertical Packaged Worker contracts are discoverable as
 planned future-worker metadata. Their first commands still use `/worker`, keep
 operation inputs under `config`, and remain non-executable until runtime
 handlers are registered.
+
+## App-Server Worker Registry Map
+
+`continuous.worker.schema` returns this top-level response:
+
+| Key | Meaning |
+|---|---|
+| `manifest` | App-server tool manifest, tool names, schemas, and boundary metadata |
+| `registry` | Machine-readable worker registry used by app-server, `/worker`, and `worker:tool` |
+| `plannedWorkers` | Alias for `registry.plannedContracts` for older consumers |
+| `workerToolSchema` | Full worker tool schema, including `$defs` plus the same `registry` object |
+
+The `registry` buckets have distinct execution meaning:
+
+| Bucket | Execution meaning |
+|---|---|
+| `commands` | Registered executable worker commands available now through `continuous.worker.command` and `/worker` |
+| `views` | Registered executable worker reads available now through `continuous.worker.view` and `/worker` |
+| `contracts` | Full worker contract catalog, including runtime, planned, candidate, and packaged entries |
+| `runtimeContracts` | Worker contracts with at least one registered executable runtime surface |
+| `plannedContracts` | Worker contracts that are not runtime-registered yet |
+| `followUpCommands` / `plannedCommands` | Contract-defined commands for runtime workers that are not executable yet |
+| `followUpViews` / `plannedViews` | Contract-defined reads for runtime workers that are not executable yet |
+| `plannedFutureWorkerCommands` | Non-executable command schemas for worker families that have no runtime handler yet |
+| `plannedFutureWorkerViews` | Non-executable read schemas for worker families that have no runtime handler yet |
+| `expansion` | Launch-order catalog with Core object spines, handoffs, acceptance checks, blockers, and gates |
+
+Expansion status values are `runtime`, `partial`, `planned_contract`,
+`candidate`, and `packaged`. `runtime` means executable through the registry
+now. `partial` means at least one runtime slice exists, but launch gates remain
+open. `planned_contract` means a contract exists without runtime promotion.
+`candidate` means catalog and contract planning only. `packaged` means a
+composed bundle that must still execute through family commands and `/worker`,
+not through package-specific routes.
+
+Worker selectors support `worker.role`, optional `worker.tenantSlug`, and
+optional `worker.id`. Use `worker.id` only when targeting a specific persisted
+worker instance; otherwise prefer role plus tenant. Operation inputs, package
+keys, source refs, approvals, execution receipts, and filters must remain under
+`config`.
 
 ```sh
 export WORKER_OPERATOR_EMAIL=owner@continuoushq.com
