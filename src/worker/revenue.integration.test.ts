@@ -6957,10 +6957,18 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .where(eq(workerRuns.id, stringList([readResult.workerRunId])[0] ?? ""))
       .limit(1);
     const readRunData = objectValue(readRun?.data);
+    const readRunCompletion = objectValue(readRunData.completion);
+    const readRunBudget = objectValue(readRunCompletion.budget);
 
+    expect(readRun?.source).toBe("continuous.core.worker_runs");
+    expect(readRun?.state).toBe("done");
     expect(readRun?.mode).toBe("read_only");
     expect(objectValue(readRunData.input).command).toBe("lead.read");
     expect(objectValue(readRunData.output).readCount).toBe(1);
+    expect(readRunData.businessEventId).toBe(readResult.eventId);
+    expect(readRunBudget.state).toBe("used");
+    expect(readRunBudget.reservationId).toBe(readResult.reservationId);
+    expect(readRunBudget.usageEventId).toBe(readResult.usageEventId);
   }, 120_000);
 
   it("executes Revenue commands through the app-server worker command surface", async () => {
@@ -7112,6 +7120,9 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .from(workerRuns)
       .where(eq(workerRuns.id, stringValue(readResult.workerRunId)))
       .limit(1);
+    const readRunData = objectValue(readRun?.data);
+    const readRunCompletion = objectValue(readRunData.completion);
+    const readRunBudget = objectValue(readRunCompletion.budget);
     const [runRow] = await db
       .select()
       .from(workerRuns)
@@ -7138,7 +7149,13 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .where(eq(approvalRequests.id, stringValue(runResult.approvalRequestId)))
       .limit(1);
 
-    expect(objectValue(objectValue(readRun?.data).input).command).toBe("lead.read");
+    expect(readRun?.source).toBe("continuous.core.worker_runs");
+    expect(readRun?.state).toBe("done");
+    expect(objectValue(readRunData.input).command).toBe("lead.read");
+    expect(readRunData.businessEventId).toBe(readResult.eventId);
+    expect(readRunBudget.state).toBe("used");
+    expect(readRunBudget.reservationId).toBe(readResult.reservationId);
+    expect(readRunBudget.usageEventId).toBe(readResult.usageEventId);
     expect(runRow?.source).toBe("continuous.worker");
     expect(runRow?.state).toBe("done");
     expect(objectValue(objectValue(runRow?.data).input).inputHash).toBeTruthy();

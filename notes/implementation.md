@@ -553,3 +553,10 @@ through the app-server Core command envelope, then starts and completes a run
 with its existing `permission.review` grant and active budget account so the
 smoke proves the real capability and budget gates without creating another
 role-matching worker.
+
+Revenue `lead.read` now starts and completes through Core `worker.run.start` and
+`worker.run.complete`, reusing the Core worker-run row for source-read proof and
+letting Core own the budget reservation and usage settlement. The command still
+keeps all operation inputs under `/worker` `config`, writes the same lead
+objects/events/evidence selectors, and records a role-qualified business event
+while the canonical run source stays `continuous.core.worker_runs`.

@@ -43,6 +43,7 @@ import {
   workers,
   type JsonObject,
 } from "../db/schema";
+import { completeCoreWorkerRun, startCoreWorkerRun } from "../core/worker-runs";
 import { pollLeadSourceConnection, type LeadSourcePollResult } from "./lead-source-connectors";
 
 type Database = typeof defaultDb;
@@ -51,6 +52,7 @@ type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 const revenueWorkerRole = "revenue_operations";
 const revenueWorkflowKey = "lead_to_cash";
 const source = "continuous.worker";
+const coreWorkerRunSource = "continuous.core.worker_runs";
 const schedulerSource = "continuous.worker_scheduler";
 const connectionHealthSource = "continuous.core.connection_health";
 const runUnits = 12000;
@@ -273,6 +275,7 @@ type WorkerContext = {
   worker: {
     id: string;
     tenantId: string;
+    tenantSlug: string;
     name: string;
     kpis: JsonObject;
   };
@@ -371,7 +374,9 @@ function stringData(data: JsonObject, key: string) {
   const output = data.output;
   const nested =
     output && typeof output === "object" && !Array.isArray(output) ? (output as JsonObject) : null;
-  const value = nested?.[key] ?? data[key];
+  const completion = objectValue(data.completion);
+  const completionBudget = objectValue(completion.budget);
+  const value = nested?.[key] ?? data[key] ?? completion[key] ?? completionBudget[key];
   return typeof value === "string" ? value : null;
 }
 
@@ -380,7 +385,13 @@ function objectValue(value: unknown): JsonObject {
 }
 
 function outputData(data: JsonObject) {
-  return objectValue(data.output);
+  const output = objectValue(data.output);
+
+  if (Object.keys(output).length > 0) {
+    return output;
+  }
+
+  return objectValue(objectValue(data.pendingCompletion).output);
 }
 
 function stringValue(value: unknown, fallback = "") {
@@ -2350,6 +2361,7 @@ async function loadWorkerContext(db: Database, selector: RevenueWorkerSelector):
     .select({
       id: workers.id,
       tenantId: workers.tenantId,
+      tenantSlug: tenants.slug,
       name: workers.name,
       kpis: workers.kpis,
       tenantName: tenants.name,
@@ -2476,6 +2488,7 @@ async function loadWorkerContext(db: Database, selector: RevenueWorkerSelector):
     worker: {
       id: workerRow.id,
       tenantId: workerRow.tenantId,
+      tenantSlug: workerRow.tenantSlug,
       name: workerRow.name,
       kpis: workerRow.kpis,
     },
@@ -3822,7 +3835,7 @@ export async function readRevenueLeads(input: {
       .where(
         and(
           eq(workerRuns.tenantId, context.worker.tenantId),
-          eq(workerRuns.source, source),
+          eq(workerRuns.source, coreWorkerRunSource),
           eq(workerRuns.idempotencyKey, input.idempotencyKey),
         ),
       )
@@ -3830,7 +3843,9 @@ export async function readRevenueLeads(input: {
 
     if (existingRun) {
       const existingInput = objectValue(existingRun.data.input);
-      const existingRequestHash = stringValue(existingInput.requestHash);
+      const existingRequest = objectValue(existingInput.request);
+      const existingRequestHash = stringValue(existingRequest.requestHash) || stringValue(existingInput.requestHash);
+      const existingOutput = outputData(existingRun.data);
 
       if (
         stringValue(existingInput.command) !== "lead.read" ||
@@ -3843,13 +3858,15 @@ export async function readRevenueLeads(input: {
         );
       }
 
-      const snapshot = await getRevenueWorkerSnapshot(db, {
-        tenantSlug: input.tenantSlug,
-        workerId: context.worker.id,
-        role: revenueWorkerRole,
-      });
+      if (stringValue(existingOutput.command) === "lead.read") {
+        const snapshot = await getRevenueWorkerSnapshot(db, {
+          tenantSlug: input.tenantSlug,
+          workerId: context.worker.id,
+          role: revenueWorkerRole,
+        });
 
-      return replayedLeadReadResult(existingRun, snapshot);
+        return replayedLeadReadResult(existingRun, snapshot);
+      }
     }
   }
 
@@ -3889,154 +3906,102 @@ export async function readRevenueLeads(input: {
     sourceReader,
     records: records.map((record) => record.leadPacket),
   });
+  const coreRun = await startCoreWorkerRun({
+    operatorEmail: input.operatorEmail,
+    tenantSlug: context.worker.tenantSlug,
+    idempotencyKey: input.idempotencyKey,
+    worker: {
+      id: context.worker.id,
+      role: revenueWorkerRole,
+    },
+    command: "lead.read",
+    mode: "read_only",
+    capabilityId,
+    connectionId: connectionRead?.connection.id ?? undefined,
+    budgetAccountId: context.budgetAccountId,
+    units: leadReadUnits,
+    input: {
+      requestHash,
+      inputHash,
+      config: requestConfig,
+      source: sourceName,
+      sourceReader,
+      connectionId: connectionRead?.connection.id ?? null,
+      pollingReceipt: connectionRead?.pollingReceipt ?? null,
+      schedulerProof,
+      records: records.map((record) => record.leadPacket),
+    },
+    policy: {
+      externalExecution: "blocked",
+      sourceRead: "read_only",
+    },
+    evidence: {
+      command: "lead.read",
+      required: ["lead_source_snapshot", "source_event", "intake_selector"],
+      externalExecution: "blocked",
+      externalSend: false,
+    },
+    db,
+  });
+  const coreBudget = objectValue(coreRun.budget);
+  const coreReservationId = stringValue(coreBudget.reservationId);
 
   const result = await db.transaction(async (tx) => {
     await tx.execute(
       sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${source}:${input.idempotencyKey}`}))`,
     );
 
-    const [existingRun] = await tx
+    const [run] = await tx
       .select()
       .from(workerRuns)
       .where(
         and(
           eq(workerRuns.tenantId, context.worker.tenantId),
-          eq(workerRuns.source, source),
-          eq(workerRuns.idempotencyKey, input.idempotencyKey),
+          eq(workerRuns.id, coreRun.workerRunId),
         ),
       )
       .limit(1);
 
-    if (existingRun) {
-      const existingInput = objectValue(existingRun.data.input);
-      const existingHash = stringValue(existingInput.inputHash);
-      const existingRequestHash = stringValue(existingInput.requestHash);
+    if (!run) {
+      throw new RevenueWorkerUnavailableError(
+        "worker_run_missing",
+        "Core worker.run.start did not return a persisted Revenue Worker run.",
+        409,
+      );
+    }
 
-      if (
-        stringValue(existingInput.command) !== "lead.read" ||
-        (existingRequestHash && existingRequestHash !== requestHash) ||
-        (!existingRequestHash && existingHash && existingHash !== inputHash)
-      ) {
-        throw new RevenueWorkerUnavailableError(
-          "worker_idempotency_conflict",
-          "This idempotency key was already used with different worker input.",
-          409,
-        );
-      }
+    const existingInput = objectValue(run.data.input);
+    const existingRequest = objectValue(existingInput.request);
+    const existingHash = stringValue(existingRequest.inputHash) || stringValue(existingInput.inputHash);
+    const existingRequestHash = stringValue(existingRequest.requestHash) || stringValue(existingInput.requestHash);
 
+    if (
+      stringValue(existingInput.command) !== "lead.read" ||
+      (existingRequestHash && existingRequestHash !== requestHash) ||
+      (!existingRequestHash && existingHash && existingHash !== inputHash)
+    ) {
+      throw new RevenueWorkerUnavailableError(
+        "worker_idempotency_conflict",
+        "This idempotency key was already used with different worker input.",
+        409,
+      );
+    }
+
+    const existingOutput = outputData(run.data);
+
+    if (stringValue(existingOutput.command) === "lead.read") {
       return {
         created: false as const,
-        run: existingRun,
-        output: outputData(existingRun.data),
-        eventId: existingRun.eventId ?? stringData(existingRun.data, "eventId"),
-        reservationId: stringData(existingRun.data, "reservationId"),
-        usageEventId: stringData(existingRun.data, "usageEventId"),
-        auditEventId: stringData(existingRun.data, "auditEventId"),
+        run,
+        output: existingOutput,
+        eventId: run.eventId ?? stringData(run.data, "eventId"),
+        reservationId: stringData(run.data, "reservationId"),
+        usageEventId: stringData(run.data, "usageEventId"),
+        auditEventId: stringData(run.data, "auditEventId"),
       };
     }
 
     const now = new Date();
-    await assertWorkerBudgetCapacity(tx, {
-      budgetAccountId: context.budgetAccountId,
-      units: leadReadUnits,
-      label: "lead.read",
-    });
-
-    const [grant] = await tx
-      .select({ id: capabilityGrants.id })
-      .from(capabilityGrants)
-      .innerJoin(capabilities, eq(capabilityGrants.capabilityId, capabilities.id))
-      .where(
-        and(
-          eq(capabilityGrants.tenantId, context.worker.tenantId),
-          eq(capabilityGrants.actorType, "worker"),
-          eq(capabilityGrants.actorId, context.worker.id),
-          eq(capabilityGrants.capabilityId, capabilityId),
-          eq(capabilityGrants.active, true),
-          eq(capabilities.active, true),
-          sql`(${capabilityGrants.startsAt} is null or ${capabilityGrants.startsAt} <= ${now})`,
-          sql`(${capabilityGrants.endsAt} is null or ${capabilityGrants.endsAt} > ${now})`,
-        ),
-      )
-      .limit(1);
-
-    if (!grant) {
-      throw new RevenueWorkerUnavailableError(
-        "worker_capability_not_granted",
-        "Revenue Worker is not actively granted lead.read.",
-        403,
-      );
-    }
-
-    const [reservation] = await tx
-      .insert(budgetReservations)
-      .values({
-        tenantId: context.worker.tenantId,
-        accountId: context.budgetAccountId,
-        units: leadReadUnits,
-        state: "used",
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning({ id: budgetReservations.id });
-    const [usage] = await tx
-      .insert(usageEvents)
-      .values({
-        tenantId: context.worker.tenantId,
-        accountId: context.budgetAccountId,
-        reservationId: reservation.id,
-        capabilityId,
-        actorType: "worker",
-        actorId: context.worker.id,
-        units: leadReadUnits,
-        costUsd: "0.000000",
-        data: {
-          command: "lead.read",
-          source: sourceName,
-          sourceReader,
-          readCount: records.length,
-          connectionId: connectionRead?.connection.id ?? null,
-          pollingReceipt: connectionRead?.pollingReceipt ?? null,
-          externalExecution: "blocked",
-        },
-        createdAt: now,
-      })
-      .returning({ id: usageEvents.id });
-    const [run] = await tx
-      .insert(workerRuns)
-      .values({
-        tenantId: context.worker.tenantId,
-        workerId: context.worker.id,
-        capabilityId,
-        budgetAccountId: context.budgetAccountId,
-        source,
-        idempotencyKey: input.idempotencyKey,
-        state: "running",
-        mode: "read_only",
-        data: {
-          input: {
-            command: "lead.read",
-            requestHash,
-            inputHash,
-            config: requestConfig,
-            source: sourceName,
-            sourceReader,
-            connectionId: connectionRead?.connection.id ?? null,
-            pollingReceipt: connectionRead?.pollingReceipt ?? null,
-            operator: {
-              userId: operator.id,
-              email: operator.email,
-            },
-          },
-          reservationId: reservation.id,
-          usageEventId: usage.id,
-          externalExecution: "blocked",
-        },
-        startedAt: now,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning({ id: workerRuns.id });
 
     const selectors = [] as JsonObject[];
 
@@ -4212,8 +4177,8 @@ export async function readRevenueLeads(input: {
       objectIds: selectors.map((selector) => selector.objectId),
       eventIds: selectors.map((selector) => selector.eventId),
       evidenceIds: selectors.map((selector) => selector.evidenceId),
-      reservationId: reservation.id,
-      usageEventId: usage.id,
+      reservationId: coreReservationId || null,
+      usageEventId: null,
       connectionId: connectionRead?.connection.id ?? null,
       cursor: lastSourceCursor(records),
       pollingReceipt: connectionRead?.pollingReceipt ?? null,
@@ -4294,8 +4259,8 @@ export async function readRevenueLeads(input: {
           sourceReader,
           readCount: records.length,
           selectors,
-          reservationId: reservation.id,
-          usageEventId: usage.id,
+          reservationId: coreReservationId || null,
+          usageEventId: null,
           externalExecution: "blocked",
         },
         createdAt: now,
@@ -4306,28 +4271,18 @@ export async function readRevenueLeads(input: {
       .update(workerRuns)
       .set({
         eventId: event.id,
-        state: "done",
         data: {
-          input: {
-            command: "lead.read",
-            requestHash,
-            inputHash,
-            config: requestConfig,
-            source: sourceName,
-            sourceReader,
-            operator: {
-              userId: operator.id,
-              email: operator.email,
-            },
-          },
-          output,
-          reservationId: reservation.id,
-          usageEventId: usage.id,
+          ...objectValue(run.data),
+          businessEventId: event.id,
+          businessAuditEventId: audit.id,
+          reservationId: coreReservationId || null,
           auditEventId: audit.id,
           eventId: event.id,
+          pendingCompletion: {
+            output,
+          },
           externalExecution: "blocked",
         },
-        endedAt: now,
         updatedAt: now,
       })
       .where(eq(workerRuns.id, run.id));
@@ -4347,12 +4302,47 @@ export async function readRevenueLeads(input: {
       created: true as const,
       workerRunId: run.id,
       eventId: event.id,
-      reservationId: reservation.id,
-      usageEventId: usage.id,
+      reservationId: coreReservationId || null,
+      usageEventId: null,
       auditEventId: audit.id,
       output,
     };
   });
+  const completion = result.created
+    ? await completeCoreWorkerRun({
+        operatorEmail: input.operatorEmail,
+        tenantSlug: context.worker.tenantSlug,
+        idempotencyKey: input.idempotencyKey,
+        worker: {
+          id: context.worker.id,
+          role: revenueWorkerRole,
+        },
+        workerRunId: result.workerRunId,
+        state: "done",
+        reason: "Revenue Worker read lead source records with external execution blocked.",
+        output: result.output,
+        costUsd: 0,
+        evidence: {
+          command: "lead.read",
+          eventId: result.eventId,
+          auditEventId: result.auditEventId,
+          source: sourceName,
+          sourceReader,
+          readCount: records.length,
+          externalExecution: "blocked",
+          externalSend: false,
+        },
+        db,
+      })
+    : null;
+  const completionBudget = objectValue(completion?.budget);
+  const settledReservationId = stringValue(completionBudget.reservationId) || result.reservationId;
+  const settledUsageEventId = stringValue(completionBudget.usageEventId) || result.usageEventId;
+  const settledOutput = {
+    ...result.output,
+    reservationId: settledReservationId,
+    usageEventId: settledUsageEventId,
+  } satisfies JsonObject;
   const snapshot = await getRevenueWorkerSnapshot(db, {
     tenantSlug: input.tenantSlug,
     workerId: context.worker.id,
@@ -4372,12 +4362,12 @@ export async function readRevenueLeads(input: {
     idempotencyKey: input.idempotencyKey,
     workerRunId: result.workerRunId,
     eventId: result.eventId,
-    reservationId: result.reservationId,
-    usageEventId: result.usageEventId,
+    reservationId: settledReservationId,
+    usageEventId: settledUsageEventId,
     auditEventId: result.auditEventId,
     readCount: records.length,
     selectors,
-    output: result.output,
+    output: settledOutput,
     snapshot,
   };
 }
