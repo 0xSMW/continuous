@@ -2,8 +2,8 @@
 
 The current Revenue Operations Worker is a deterministic persisted runtime. It proves
 worker identity, capability grants, task ownership, Core worker-run budget
-reservation and usage settlement, inference logging, event emission, evidence capture,
-adapter receipts, approval requests, audit events, operator decisions, approval
+reservation and usage settlement, AI gateway inference logging, event emission,
+evidence capture, adapter receipts, approval requests, audit events, operator decisions, approval
 state, workflow state, object versioning, and approved controlled-send receipt
 recording without storing live credential material or moving money.
 
@@ -43,6 +43,11 @@ and config schemas, not new HTTP route names. The mutation envelope accepts only
 worker selectors live under `worker`, and operation inputs live under `config`.
 The `worker` object is limited to `role`, `id`, and `tenantSlug`.
 
+Revenue expansion depends on this same surface: Core worker-run lifecycle,
+generic worker APIs, persisted evidence, approval, budget, AI gateway usage
+capture, and an owner or data-to-decision loop that can inspect the result
+before autonomy increases.
+
 ## Expansion Gates
 
 Do not increase autonomy until each gate has a persisted record and an operator
@@ -51,10 +56,13 @@ smoke test.
 | Gate | Required proof |
 |---|---|
 | Auth | Configured operator user is bound to every side-effecting run and approval decision |
+| Generic API | New capabilities use the generic `/worker` command/view envelope with registered command and config schemas |
 | Idempotency | Core `worker.run.start` / `worker.run.complete` owns first-class run lifecycle state for read/classify/draft/run/quote/payment-link/continue paths, with event idempotency kept as a compatibility guard |
 | Budget | Core reservation before model/tool work and usage attribution after |
 | Evidence | Source snapshot, prompt/result trace, approval, and adapter receipt |
 | Approval | First-class `approval_requests`, approval decision evidence, audit trail, and allowed workflow advancement while external execution remains blocked |
+| AI gateway | Model and tool calls route through the AI gateway with usage, trace, and policy refs attached to Core run/evidence records |
+| Owner/data-to-decision loop | Outputs are bound to owner approval, a generated review view, readiness read, or decision queue before autonomy rises |
 | Adapter safety | Dry-run mode, receipt evidence, attempt metadata, reconciliation worker output, due retry execution, retry/review system tasks, workflow retry/review/post-retry states, live-credential readiness checks, rollback plans, and audit/evidence records are persisted; scoped live execution is still blocked |
 | Eval | Golden lead/quote cases cover direct packets, Core row intake refs, source-selector intake, normal urgency, expected classification, approval, budget, adapter receipt, and idempotency outputs in CI |
 | Launch | Production smoke proves no external mutation without approval and receipt capture |

@@ -713,3 +713,10 @@ launch-order catalog. Each promotion entry provides generic
 a proof checklist, so candidate and packaged workers can be promoted by adding
 registry handlers and tests instead of creating worker-family URLs or
 route-shaped tool names.
+
+Owner Chief-of-Staff Core lifecycle replay now repairs interrupted runs for
+`brief.generate`, `decision_queue.prepare`, and `anomaly.triage`. If the
+business proof exists but the Core worker run is still `running`, replay settles
+the run through `worker.run.complete`, releases the held budget, stores the
+settled reservation and usage ids, and returns the original Owner business event
+id instead of the later Core completion event id.

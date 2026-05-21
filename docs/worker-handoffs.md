@@ -4,6 +4,11 @@ Workers expand on one shared Core graph. A handoff is not a private function
 call; it is a set of Core object, event, evidence, approval, workflow, and
 adapter records that the next worker can query and verify.
 
+Worker expansion is executable only when the path uses the Core worker-run
+lifecycle, the generic `/worker` command/view envelope, persisted evidence,
+approval, budget, and AI gateway usage records, and an owner or
+data-to-decision loop can review the output before external execution.
+
 ## Contract Shape
 
 Every handoff must define:
@@ -123,3 +128,5 @@ concessions, and promise mutation.
    while the full packet remains in Core evidence/documents/views.
 4. Every cross-worker handoff must create or update an audit event naming both
    producer and consumer roles before external execution can be considered.
+5. New handoffs cannot bypass Core lifecycle, generic worker APIs, budget
+   reservation, AI gateway logging, or owner/data-to-decision review.

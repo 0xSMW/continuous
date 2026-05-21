@@ -128,6 +128,61 @@ function stringValue(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : "";
 }
 
+async function forceWorkerRunPendingCompletion(input: {
+  workerRunId: string;
+  reservationId: string;
+  usageEventId: string;
+}) {
+  const [run] = await db.select().from(workerRuns).where(eq(workerRuns.id, input.workerRunId)).limit(1);
+  const runData = objectValue(run?.data);
+  const completion = objectValue(runData.completion);
+  const completionEventId = stringValue(completion.eventId);
+  const completionAuditEventId = stringValue(completion.auditEventId);
+  const completionEvidenceId = stringValue(completion.evidenceId);
+  const businessEventId = stringValue(runData.businessEventId) || stringValue(runData.eventId) || stringValue(run?.eventId);
+  const partialOutput = {
+    ...objectValue(runData.output),
+    reservationId: input.reservationId,
+    usageEventId: null,
+  } satisfies JsonObject;
+  const partialRunData = { ...runData };
+  delete partialRunData.completion;
+
+  expect(run).toBeDefined();
+  expect(businessEventId).toBeTruthy();
+  expect(completionEventId).toBeTruthy();
+  expect(completionAuditEventId).toBeTruthy();
+  expect(completionEvidenceId).toBeTruthy();
+
+  await db
+    .update(workerRuns)
+    .set({
+      state: "running",
+      eventId: businessEventId,
+      endedAt: null,
+      data: {
+        ...partialRunData,
+        eventId: businessEventId,
+        output: partialOutput,
+        pendingCompletion: {
+          output: partialOutput,
+        },
+        reservationId: input.reservationId,
+        usageEventId: null,
+      },
+      updatedAt: new Date(),
+    })
+    .where(eq(workerRuns.id, input.workerRunId));
+  await db
+    .update(budgetReservations)
+    .set({ state: "held", updatedAt: new Date() })
+    .where(eq(budgetReservations.id, input.reservationId));
+  await db.delete(usageEvents).where(eq(usageEvents.id, input.usageEventId));
+  await db.delete(evidence).where(eq(evidence.id, completionEvidenceId));
+  await db.delete(auditEvents).where(eq(auditEvents.id, completionAuditEventId));
+  await db.delete(events).where(eq(events.id, completionEventId));
+}
+
 maybeDescribe("Revenue Worker integration eval", () => {
   beforeAll(() => {
     process.env.WORKER_OPERATOR_EMAIL = originalWorkerOperatorEmail ?? "owner@continuoushq.com";
@@ -10043,7 +10098,57 @@ maybeDescribe("Revenue Worker integration eval", () => {
 
     expect(decisionReplayResult.created).toBe(false);
     expect(decisionReplayResult.workerRunId).toBe(decisionResult.workerRunId);
+    expect(decisionReplayResult.eventId).toBe(decisionResult.eventId);
     expect(decisionReplayResult.usageEventId).toBe(decisionResult.usageEventId);
+
+    await forceWorkerRunPendingCompletion({
+      workerRunId: decisionResult.workerRunId ?? "",
+      reservationId: decisionResult.reservationId ?? "",
+      usageEventId: decisionResult.usageEventId ?? "",
+    });
+
+    const decisionRepair = await executeWorkerCommand({
+      command: "decision_queue.prepare",
+      target: {
+        role: "owner_chief_of_staff",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: `ci-owner-decision-queue-${runId}`,
+      config: {
+        window: {
+          from: "2026-05-19T00:00:00.000Z",
+          to: "2026-05-20T00:00:00.000Z",
+        },
+      },
+    });
+    const decisionRepairResult = decisionRepair.result as Awaited<
+      ReturnType<typeof import("./owner").prepareOwnerDecisionQueue>
+    >;
+    const [repairedDecisionRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(eq(workerRuns.id, decisionRepairResult.workerRunId ?? ""))
+      .limit(1);
+    const [repairedDecisionReservation] = await db
+      .select()
+      .from(budgetReservations)
+      .where(eq(budgetReservations.id, decisionRepairResult.reservationId ?? ""))
+      .limit(1);
+    const [repairedDecisionUsage] = await db
+      .select()
+      .from(usageEvents)
+      .where(eq(usageEvents.id, decisionRepairResult.usageEventId ?? ""))
+      .limit(1);
+
+    expect(decisionRepairResult.created).toBe(false);
+    expect(decisionRepairResult.workerRunId).toBe(decisionResult.workerRunId);
+    expect(decisionRepairResult.eventId).toBe(decisionResult.eventId);
+    expect(decisionRepairResult.usageEventId).toBeTruthy();
+    expect(decisionRepairResult.usageEventId).not.toBe(decisionResult.usageEventId);
+    expect(repairedDecisionRun?.state).toBe("done");
+    expect(repairedDecisionReservation?.state).toBe("used");
+    expect(repairedDecisionUsage?.actorId).toBe(ownerWorker?.id);
 
     const anomaly = await executeAppServerWorkerTool("continuous.worker.command", {
       command: "anomaly.triage",
@@ -10128,7 +10233,58 @@ maybeDescribe("Revenue Worker integration eval", () => {
 
     expect(anomalyReplayResult.created).toBe(false);
     expect(anomalyReplayResult.workerRunId).toBe(anomalyResult.workerRunId);
+    expect(anomalyReplayResult.eventId).toBe(anomalyResult.eventId);
     expect(anomalyReplayResult.usageEventId).toBe(anomalyResult.usageEventId);
+
+    await forceWorkerRunPendingCompletion({
+      workerRunId: anomalyResult.workerRunId ?? "",
+      reservationId: anomalyResult.reservationId ?? "",
+      usageEventId: anomalyResult.usageEventId ?? "",
+    });
+
+    const anomalyRepair = await executeWorkerCommand({
+      command: "anomaly.triage",
+      target: {
+        role: "owner_chief_of_staff",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: `ci-owner-anomaly-triage-${runId}`,
+      config: {
+        window: {
+          from: "2026-05-19T00:00:00.000Z",
+          to: "2026-05-20T00:00:00.000Z",
+        },
+        metricKeys: ["pending_approvals", "high_priority_tasks", "open_obligations"],
+      },
+    });
+    const anomalyRepairResult = anomalyRepair.result as Awaited<
+      ReturnType<typeof import("./owner").triageOwnerAnomalies>
+    >;
+    const [repairedAnomalyRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(eq(workerRuns.id, anomalyRepairResult.workerRunId ?? ""))
+      .limit(1);
+    const [repairedAnomalyReservation] = await db
+      .select()
+      .from(budgetReservations)
+      .where(eq(budgetReservations.id, anomalyRepairResult.reservationId ?? ""))
+      .limit(1);
+    const [repairedAnomalyUsage] = await db
+      .select()
+      .from(usageEvents)
+      .where(eq(usageEvents.id, anomalyRepairResult.usageEventId ?? ""))
+      .limit(1);
+
+    expect(anomalyRepairResult.created).toBe(false);
+    expect(anomalyRepairResult.workerRunId).toBe(anomalyResult.workerRunId);
+    expect(anomalyRepairResult.eventId).toBe(anomalyResult.eventId);
+    expect(anomalyRepairResult.usageEventId).toBeTruthy();
+    expect(anomalyRepairResult.usageEventId).not.toBe(anomalyResult.usageEventId);
+    expect(repairedAnomalyRun?.state).toBe("done");
+    expect(repairedAnomalyReservation?.state).toBe("used");
+    expect(repairedAnomalyUsage?.actorId).toBe(ownerWorker?.id);
   }, 120_000);
 
   it("continues Owner Chief-of-Staff approval outcomes through the worker command spine", async () => {

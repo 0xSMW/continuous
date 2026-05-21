@@ -893,7 +893,7 @@ function replayedDecisionQueueResult(
     created: false,
     idempotencyKey: run.idempotencyKey,
     workerRunId: run.id,
-    eventId: run.eventId,
+    eventId: dataString(data, "eventId") ?? run.eventId,
     evidenceId: dataString(data, "evidenceId"),
     auditEventId: dataString(data, "auditEventId"),
     reservationId: dataString(data, "reservationId"),
@@ -916,7 +916,7 @@ function replayedAnomalyResult(
     created: false,
     idempotencyKey: run.idempotencyKey,
     workerRunId: run.id,
-    eventId: run.eventId,
+    eventId: dataString(data, "eventId") ?? run.eventId,
     evidenceId: dataString(data, "evidenceId"),
     auditEventId: dataString(data, "auditEventId"),
     reservationId: dataString(data, "reservationId"),
@@ -944,6 +944,84 @@ async function existingRun(db: Database, context: OwnerContext, idempotencyKey: 
     .limit(1);
 
   return run ?? null;
+}
+
+async function ownerRunById(db: Database, workerRunId: string) {
+  const [run] = await db.select().from(workerRuns).where(eq(workerRuns.id, workerRunId)).limit(1);
+
+  return run ?? null;
+}
+
+async function persistOwnerSettledOutput(
+  db: Database,
+  workerRunId: string,
+  output: JsonObject,
+  completionBudget: JsonObject,
+) {
+  const settledReservationId =
+    stringValue(completionBudget.reservationId) ?? stringValue(output.reservationId) ?? null;
+  const settledUsageEventId =
+    stringValue(completionBudget.usageEventId) ?? stringValue(output.usageEventId) ?? null;
+  const settledOutput = {
+    ...output,
+    reservationId: settledReservationId,
+    usageEventId: settledUsageEventId,
+  } satisfies JsonObject;
+  const [completedRun] = await db
+    .select({ data: workerRuns.data })
+    .from(workerRuns)
+    .where(eq(workerRuns.id, workerRunId))
+    .limit(1);
+
+  await db
+    .update(workerRuns)
+    .set({
+      data: {
+        ...objectValue(completedRun?.data),
+        output: settledOutput,
+        reservationId: settledReservationId,
+        usageEventId: settledUsageEventId,
+      },
+      updatedAt: new Date(),
+    })
+    .where(eq(workerRuns.id, workerRunId));
+
+  return settledOutput;
+}
+
+async function settleOwnerCoreRun(input: {
+  db: Database;
+  operatorEmail: string;
+  tenantSlug: string;
+  workerId: string;
+  idempotencyKey: string;
+  workerRunId: string;
+  reason: string;
+  output: JsonObject;
+  evidence: JsonObject;
+}) {
+  const completion = await completeCoreWorkerRun({
+    operatorEmail: input.operatorEmail,
+    tenantSlug: input.tenantSlug,
+    idempotencyKey: input.idempotencyKey,
+    worker: {
+      id: input.workerId,
+      role: ownerWorkerRole,
+    },
+    workerRunId: input.workerRunId,
+    state: "done",
+    reason: input.reason,
+    output: input.output,
+    costUsd: 0,
+    evidence: {
+      ...input.evidence,
+      externalExecution: "blocked",
+      externalSend: false,
+    },
+    db: input.db,
+  });
+
+  return persistOwnerSettledOutput(input.db, input.workerRunId, input.output, objectValue(completion.budget));
 }
 
 export async function getOwnerWorkerSnapshot(
@@ -1946,6 +2024,40 @@ export async function generateOwnerBrief(input: {
   });
 
   if (!result.created) {
+    if (result.run.state === "running") {
+      const runData = objectValue(result.run.data);
+      const output = outputData(runData);
+
+      await settleOwnerCoreRun({
+        db,
+        operatorEmail: input.operatorEmail,
+        tenantSlug: context.worker.tenantSlug,
+        workerId: context.worker.id,
+        idempotencyKey: input.idempotencyKey,
+        workerRunId: result.run.id,
+        reason: "Owner Chief-of-Staff generated a tenant-scoped brief with external execution blocked.",
+        output,
+        evidence: {
+          command: "brief.generate",
+          eventId: dataString(runData, "eventId"),
+          auditEventId: dataString(runData, "auditEventId"),
+          evidenceId: dataString(runData, "evidenceId"),
+          documentId: dataString(runData, "documentId"),
+          packetId: dataString(runData, "packetId"),
+          approvalRequestId: dataString(runData, "approvalRequestId"),
+        },
+      });
+
+      return replayedBriefResult(
+        (await ownerRunById(db, result.run.id)) ?? result.run,
+        await getOwnerWorkerSnapshot(db, {
+          role: ownerWorkerRole,
+          tenantSlug: context.worker.tenantSlug,
+          workerId: context.worker.id,
+        }),
+      );
+    }
+
     return replayedBriefResult(result.run, await getOwnerWorkerSnapshot(db, {
       role: ownerWorkerRole,
       tenantSlug: context.worker.tenantSlug,
@@ -1953,19 +2065,15 @@ export async function generateOwnerBrief(input: {
     }));
   }
 
-  const completion = await completeCoreWorkerRun({
+  const settledOutput = await settleOwnerCoreRun({
+    db,
     operatorEmail: input.operatorEmail,
     tenantSlug: context.worker.tenantSlug,
+    workerId: context.worker.id,
     idempotencyKey: input.idempotencyKey,
-    worker: {
-      id: context.worker.id,
-      role: ownerWorkerRole,
-    },
     workerRunId: result.runId,
-    state: "done",
     reason: "Owner Chief-of-Staff generated a tenant-scoped brief with external execution blocked.",
     output: result.output,
-    costUsd: 0,
     evidence: {
       command: "brief.generate",
       eventId: result.eventId,
@@ -1974,37 +2082,10 @@ export async function generateOwnerBrief(input: {
       documentId: result.documentId,
       packetId: result.packetId,
       approvalRequestId: result.approvalRequestId,
-      externalExecution: "blocked",
-      externalSend: false,
     },
-    db,
   });
-  const completionBudget = objectValue(completion.budget);
-  const settledReservationId = stringValue(completionBudget.reservationId) ?? result.reservationId;
-  const settledUsageEventId = stringValue(completionBudget.usageEventId) ?? result.usageEventId;
-  const settledOutput = {
-    ...result.output,
-    reservationId: settledReservationId,
-    usageEventId: settledUsageEventId,
-  } satisfies JsonObject;
-  const [completedRun] = await db
-    .select({ data: workerRuns.data })
-    .from(workerRuns)
-    .where(eq(workerRuns.id, result.runId))
-    .limit(1);
-
-  await db
-    .update(workerRuns)
-    .set({
-      data: {
-        ...objectValue(completedRun?.data),
-        output: settledOutput,
-        reservationId: settledReservationId,
-        usageEventId: settledUsageEventId,
-      },
-      updatedAt: new Date(),
-    })
-    .where(eq(workerRuns.id, result.runId));
+  const settledReservationId = stringValue(settledOutput.reservationId) ?? result.reservationId;
+  const settledUsageEventId = stringValue(settledOutput.usageEventId) ?? result.usageEventId;
   const snapshot = await getOwnerWorkerSnapshot(db, {
     role: ownerWorkerRole,
     tenantSlug: context.worker.tenantSlug,
@@ -2985,6 +3066,37 @@ export async function prepareOwnerDecisionQueue(input: {
   });
 
   if (!result.created) {
+    if (result.run.state === "running") {
+      const runData = objectValue(result.run.data);
+      const output = outputData(runData);
+
+      await settleOwnerCoreRun({
+        db,
+        operatorEmail: input.operatorEmail,
+        tenantSlug: context.worker.tenantSlug,
+        workerId: context.worker.id,
+        idempotencyKey: input.idempotencyKey,
+        workerRunId: result.run.id,
+        reason: "Owner Chief-of-Staff prepared a tenant-scoped decision queue with external execution blocked.",
+        output,
+        evidence: {
+          command: "decision_queue.prepare",
+          eventId: dataString(runData, "eventId"),
+          auditEventId: dataString(runData, "auditEventId"),
+          evidenceId: dataString(runData, "evidenceId"),
+        },
+      });
+
+      return replayedDecisionQueueResult(
+        (await ownerRunById(db, result.run.id)) ?? result.run,
+        await getOwnerWorkerSnapshot(db, {
+          role: ownerWorkerRole,
+          tenantSlug: context.worker.tenantSlug,
+          workerId: context.worker.id,
+        }),
+      );
+    }
+
     return replayedDecisionQueueResult(result.run, await getOwnerWorkerSnapshot(db, {
       role: ownerWorkerRole,
       tenantSlug: context.worker.tenantSlug,
@@ -2992,55 +3104,24 @@ export async function prepareOwnerDecisionQueue(input: {
     }));
   }
 
-  const completion = await completeCoreWorkerRun({
+  const settledOutput = await settleOwnerCoreRun({
+    db,
     operatorEmail: input.operatorEmail,
     tenantSlug: context.worker.tenantSlug,
+    workerId: context.worker.id,
     idempotencyKey: input.idempotencyKey,
-    worker: {
-      id: context.worker.id,
-      role: ownerWorkerRole,
-    },
     workerRunId: result.runId,
-    state: "done",
     reason: "Owner Chief-of-Staff prepared a tenant-scoped decision queue with external execution blocked.",
     output: result.output,
-    costUsd: 0,
     evidence: {
       command: "decision_queue.prepare",
       eventId: result.eventId,
       auditEventId: result.auditEventId,
       evidenceId: result.evidenceId,
-      externalExecution: "blocked",
-      externalSend: false,
     },
-    db,
   });
-  const completionBudget = objectValue(completion.budget);
-  const settledReservationId = stringValue(completionBudget.reservationId) ?? result.reservationId;
-  const settledUsageEventId = stringValue(completionBudget.usageEventId) ?? result.usageEventId;
-  const settledOutput = {
-    ...result.output,
-    reservationId: settledReservationId,
-    usageEventId: settledUsageEventId,
-  } satisfies JsonObject;
-  const [completedRun] = await db
-    .select({ data: workerRuns.data })
-    .from(workerRuns)
-    .where(eq(workerRuns.id, result.runId))
-    .limit(1);
-
-  await db
-    .update(workerRuns)
-    .set({
-      data: {
-        ...objectValue(completedRun?.data),
-        output: settledOutput,
-        reservationId: settledReservationId,
-        usageEventId: settledUsageEventId,
-      },
-      updatedAt: new Date(),
-    })
-    .where(eq(workerRuns.id, result.runId));
+  const settledReservationId = stringValue(settledOutput.reservationId) ?? result.reservationId;
+  const settledUsageEventId = stringValue(settledOutput.usageEventId) ?? result.usageEventId;
 
   return {
     created: true,
@@ -3485,6 +3566,38 @@ export async function triageOwnerAnomalies(input: {
   });
 
   if (!result.created) {
+    if (result.run.state === "running") {
+      const runData = objectValue(result.run.data);
+      const output = outputData(runData);
+
+      await settleOwnerCoreRun({
+        db,
+        operatorEmail: input.operatorEmail,
+        tenantSlug: context.worker.tenantSlug,
+        workerId: context.worker.id,
+        idempotencyKey: input.idempotencyKey,
+        workerRunId: result.run.id,
+        reason: "Owner Chief-of-Staff triaged tenant-scoped anomalies with external execution blocked.",
+        output,
+        evidence: {
+          command: "anomaly.triage",
+          eventId: dataString(runData, "eventId"),
+          auditEventId: dataString(runData, "auditEventId"),
+          evidenceId: dataString(runData, "evidenceId"),
+          taskId: dataString(runData, "taskId"),
+        },
+      });
+
+      return replayedAnomalyResult(
+        (await ownerRunById(db, result.run.id)) ?? result.run,
+        await getOwnerWorkerSnapshot(db, {
+          role: ownerWorkerRole,
+          tenantSlug: context.worker.tenantSlug,
+          workerId: context.worker.id,
+        }),
+      );
+    }
+
     return replayedAnomalyResult(result.run, await getOwnerWorkerSnapshot(db, {
       role: ownerWorkerRole,
       tenantSlug: context.worker.tenantSlug,
@@ -3492,56 +3605,25 @@ export async function triageOwnerAnomalies(input: {
     }));
   }
 
-  const completion = await completeCoreWorkerRun({
+  const settledOutput = await settleOwnerCoreRun({
+    db,
     operatorEmail: input.operatorEmail,
     tenantSlug: context.worker.tenantSlug,
+    workerId: context.worker.id,
     idempotencyKey: input.idempotencyKey,
-    worker: {
-      id: context.worker.id,
-      role: ownerWorkerRole,
-    },
     workerRunId: result.runId,
-    state: "done",
     reason: "Owner Chief-of-Staff triaged tenant-scoped anomalies with external execution blocked.",
     output: result.output,
-    costUsd: 0,
     evidence: {
       command: "anomaly.triage",
       eventId: result.eventId,
       auditEventId: result.auditEventId,
       evidenceId: result.evidenceId,
       taskId: result.taskId,
-      externalExecution: "blocked",
-      externalSend: false,
     },
-    db,
   });
-  const completionBudget = objectValue(completion.budget);
-  const settledReservationId = stringValue(completionBudget.reservationId) ?? result.reservationId;
-  const settledUsageEventId = stringValue(completionBudget.usageEventId) ?? result.usageEventId;
-  const settledOutput = {
-    ...result.output,
-    reservationId: settledReservationId,
-    usageEventId: settledUsageEventId,
-  } satisfies JsonObject;
-  const [completedRun] = await db
-    .select({ data: workerRuns.data })
-    .from(workerRuns)
-    .where(eq(workerRuns.id, result.runId))
-    .limit(1);
-
-  await db
-    .update(workerRuns)
-    .set({
-      data: {
-        ...objectValue(completedRun?.data),
-        output: settledOutput,
-        reservationId: settledReservationId,
-        usageEventId: settledUsageEventId,
-      },
-      updatedAt: new Date(),
-    })
-    .where(eq(workerRuns.id, result.runId));
+  const settledReservationId = stringValue(settledOutput.reservationId) ?? result.reservationId;
+  const settledUsageEventId = stringValue(settledOutput.usageEventId) ?? result.usageEventId;
 
   return {
     created: true,
