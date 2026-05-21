@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   authorizeManagedControlPlaneCredential: vi.fn(),
+  executeAppServerControlDynamicToolCall: vi.fn(),
   executeAppServerCoreDynamicToolCall: vi.fn(),
   executeAppServerWorkerDynamicToolCall: vi.fn(),
   recordControlPlaneAuthAttempt: vi.fn(),
@@ -31,6 +32,15 @@ vi.mock("../../src/core/app-server-tools", async (importOriginal) => {
   return {
     ...actual,
     executeAppServerCoreDynamicToolCall: mocks.executeAppServerCoreDynamicToolCall,
+  };
+});
+
+vi.mock("../../src/core/app-server-control-tools", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/core/app-server-control-tools")>();
+
+  return {
+    ...actual,
+    executeAppServerControlDynamicToolCall: mocks.executeAppServerControlDynamicToolCall,
   };
 });
 
@@ -85,6 +95,15 @@ describe("/app-server route", () => {
       ],
     });
     mocks.executeAppServerCoreDynamicToolCall.mockResolvedValue({
+      success: true,
+      contentItems: [
+        {
+          type: "inputText",
+          text: "{}",
+        },
+      ],
+    });
+    mocks.executeAppServerControlDynamicToolCall.mockResolvedValue({
       success: true,
       contentItems: [
         {
@@ -385,6 +404,340 @@ describe("/app-server route", () => {
       }),
     );
     expect(mocks.executeAppServerCoreDynamicToolCall).toHaveBeenCalledWith(payload, undefined);
+  });
+
+  it("bridges authenticated workflow views into read-scoped app-server context", async () => {
+    mocks.env.CONTROL_PLANE_TOKENS_JSON = tokenCatalog(
+      ["app_server:workflow.view.overview"],
+      {
+        allowedWorkerRoles: [],
+      },
+    );
+
+    const { POST } = await import("./route");
+    const payload = {
+      tool: "continuous.workflow.view",
+      arguments: {
+        view: "overview",
+        workflow: {
+          tenantSlug: "continuous-demo",
+        },
+        config: {
+          state: "active",
+        },
+      },
+      callId: "call-workflow-view-001",
+      threadId: "thread-001",
+      turnId: "turn-001",
+    };
+    const response = await POST(
+      new Request("http://localhost/app-server", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.authorizeManagedControlPlaneCredential).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: "app_server",
+        access: "read",
+        command: "workflow.view.overview",
+        tenantSlug: "continuous-demo",
+        workerRole: undefined,
+        requireManagedCredential: true,
+      }),
+    );
+    expect(mocks.executeAppServerControlDynamicToolCall).toHaveBeenCalledWith(payload, {
+      operatorEmail: "operator@example.com",
+      source: "control_plane",
+      allowedAccess: ["read"],
+      allowedCommands: ["workflow:view.overview"],
+      allowedTenants: ["continuous-demo"],
+      allowedWorkerRoles: ["*"],
+    });
+    expect(mocks.executeAppServerCoreDynamicToolCall).not.toHaveBeenCalled();
+    expect(mocks.executeAppServerWorkerDynamicToolCall).not.toHaveBeenCalled();
+  });
+
+  it("bridges authenticated workflow commands into write-scoped app-server context", async () => {
+    mocks.env.CONTROL_PLANE_TOKENS_JSON = tokenCatalog(
+      ["app_server:workflow.command.start"],
+      {
+        allowedWorkerRoles: [],
+      },
+    );
+
+    const { POST } = await import("./route");
+    const payload = {
+      tool: "continuous.workflow.command",
+      arguments: {
+        command: "start",
+        workflow: {
+          key: "lead_to_cash",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "app-server-route-workflow-start-001",
+        config: {
+          initialState: "started",
+        },
+      },
+      callId: "call-workflow-command-001",
+      threadId: "thread-001",
+      turnId: "turn-001",
+    };
+    const response = await POST(
+      new Request("http://localhost/app-server", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.authorizeManagedControlPlaneCredential).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: "app_server",
+        access: "write",
+        command: "workflow.command.start",
+        tenantSlug: "continuous-demo",
+        requireManagedCredential: true,
+      }),
+    );
+    expect(mocks.executeAppServerControlDynamicToolCall).toHaveBeenCalledWith(payload, {
+      operatorEmail: "operator@example.com",
+      source: "control_plane",
+      allowedAccess: ["write"],
+      allowedCommands: ["workflow:start"],
+      allowedTenants: ["continuous-demo"],
+      allowedWorkerRoles: ["*"],
+    });
+  });
+
+  it("bridges authenticated approval views and commands through shared control tools", async () => {
+    mocks.env.CONTROL_PLANE_TOKENS_JSON = tokenCatalog(
+      ["app_server:approval.view.inbox", "app_server:approval.command.approval.decide"],
+      {
+        allowedWorkerRoles: [],
+      },
+    );
+
+    const { POST } = await import("./route");
+    const viewPayload = {
+      tool: "continuous.approval.view",
+      arguments: {
+        view: "inbox",
+        approval: {
+          tenantSlug: "continuous-demo",
+          subject: "worker",
+        },
+        config: {
+          state: "pending",
+        },
+      },
+      callId: "call-approval-view-001",
+      threadId: "thread-001",
+      turnId: "turn-001",
+    };
+    const commandPayload = {
+      tool: "continuous.approval.command",
+      arguments: {
+        command: "approval.decide",
+        approval: {
+          id: "77777777-7777-4777-8777-000000000001",
+          tenantSlug: "continuous-demo",
+          subject: "core",
+        },
+        idempotencyKey: "app-server-route-approval-decision-001",
+        config: {
+          action: "approved",
+        },
+      },
+      callId: "call-approval-command-001",
+      threadId: "thread-001",
+      turnId: "turn-001",
+    };
+
+    const viewResponse = await POST(
+      new Request("http://localhost/app-server", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(viewPayload),
+      }),
+    );
+    const commandResponse = await POST(
+      new Request("http://localhost/app-server", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(commandPayload),
+      }),
+    );
+
+    expect(viewResponse.status).toBe(200);
+    expect(commandResponse.status).toBe(200);
+    expect(mocks.executeAppServerControlDynamicToolCall).toHaveBeenNthCalledWith(1, viewPayload, {
+      operatorEmail: "operator@example.com",
+      source: "control_plane",
+      allowedAccess: ["read"],
+      allowedCommands: ["approval:view.inbox"],
+      allowedTenants: ["continuous-demo"],
+      allowedWorkerRoles: ["*"],
+    });
+    expect(mocks.executeAppServerControlDynamicToolCall).toHaveBeenNthCalledWith(2, commandPayload, {
+      operatorEmail: "operator@example.com",
+      source: "control_plane",
+      allowedAccess: ["write"],
+      allowedCommands: ["approval:approval.decide"],
+      allowedTenants: ["continuous-demo"],
+      allowedWorkerRoles: ["*"],
+    });
+  });
+
+  it("authorizes workflow and approval schema discovery through explicit app-server schema commands", async () => {
+    mocks.env.CONTROL_PLANE_TOKENS_JSON = tokenCatalog([
+      "app_server:workflow.schema",
+      "app_server:approval.schema",
+    ]);
+
+    const { POST } = await import("./route");
+    const workflowPayload = {
+      tool: "continuous.workflow.schema",
+      arguments: {},
+      callId: "call-workflow-schema-001",
+      threadId: "thread-001",
+      turnId: "turn-001",
+    };
+    const approvalPayload = {
+      tool: "continuous.approval.schema",
+      arguments: {},
+      callId: "call-approval-schema-001",
+      threadId: "thread-001",
+      turnId: "turn-001",
+    };
+
+    const workflowResponse = await POST(
+      new Request("http://localhost/app-server", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(workflowPayload),
+      }),
+    );
+    const approvalResponse = await POST(
+      new Request("http://localhost/app-server", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(approvalPayload),
+      }),
+    );
+
+    expect(workflowResponse.status).toBe(200);
+    expect(approvalResponse.status).toBe(200);
+    expect(mocks.authorizeManagedControlPlaneCredential).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: "app_server",
+        access: "read",
+        command: "workflow.schema",
+        requireManagedCredential: false,
+      }),
+    );
+    expect(mocks.authorizeManagedControlPlaneCredential).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: "app_server",
+        access: "read",
+        command: "approval.schema",
+        requireManagedCredential: false,
+      }),
+    );
+    expect(mocks.executeAppServerControlDynamicToolCall).toHaveBeenCalledWith(
+      workflowPayload,
+      undefined,
+    );
+    expect(mocks.executeAppServerControlDynamicToolCall).toHaveBeenCalledWith(
+      approvalPayload,
+      undefined,
+    );
+  });
+
+  it("rejects approval and workflow bridge calls outside token command scope", async () => {
+    mocks.env.CONTROL_PLANE_TOKENS_JSON = tokenCatalog(["app_server:core.view.summary"], {
+      allowedWorkerRoles: [],
+    });
+
+    const { POST } = await import("./route");
+    const approvalResponse = await POST(
+      new Request("http://localhost/app-server", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          tool: "continuous.approval.view",
+          arguments: {
+            view: "inbox",
+            approval: {
+              tenantSlug: "continuous-demo",
+              subject: "worker",
+            },
+            config: {},
+          },
+          callId: "call-approval-denied-001",
+          threadId: "thread-001",
+          turnId: "turn-001",
+        }),
+      }),
+    );
+    const workflowResponse = await POST(
+      new Request("http://localhost/app-server", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          tool: "continuous.workflow.view",
+          arguments: {
+            view: "overview",
+            workflow: {
+              tenantSlug: "continuous-demo",
+            },
+            config: {},
+          },
+          callId: "call-workflow-denied-001",
+          threadId: "thread-001",
+          turnId: "turn-001",
+        }),
+      }),
+    );
+
+    expect(approvalResponse.status).toBe(403);
+    expect(workflowResponse.status).toBe(403);
+    await expect(approvalResponse.json()).resolves.toMatchObject({
+      error: { code: "control_plane_command_forbidden" },
+    });
+    await expect(workflowResponse.json()).resolves.toMatchObject({
+      error: { code: "control_plane_command_forbidden" },
+    });
+    expect(mocks.executeAppServerControlDynamicToolCall).not.toHaveBeenCalled();
   });
 
   it("rejects Core bridge calls outside token command or tenant scope", async () => {
@@ -1453,7 +1806,7 @@ describe("/app-server route", () => {
     await expect(response.json()).resolves.toMatchObject({
       error: {
         code: "invalid_app_server_tool_call",
-        message: expect.stringContaining("Put worker operation inputs under arguments.config."),
+        message: expect.stringContaining("Put operation inputs under arguments.config."),
       },
     });
     expect(mocks.authorizeManagedControlPlaneCredential).not.toHaveBeenCalled();

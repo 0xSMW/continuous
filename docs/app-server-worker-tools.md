@@ -1,7 +1,8 @@
 # App-Server Tools
 
-Continuous exposes repo-owned app-server dynamic tool specs for Core and worker
-discovery plus registry-backed read and command execution:
+Continuous exposes repo-owned app-server dynamic tool specs for Core, worker,
+workflow, and approval discovery plus registry-backed read and command
+execution:
 
 | Tool | Mode | Purpose |
 |---|---|---|
@@ -11,13 +12,20 @@ discovery plus registry-backed read and command execution:
 | `continuous.worker.schema` | Read-only | Returns worker contracts, runtime roles, registered commands, follow-up commands, planned future-worker metadata, worker tool schema, and integration boundary |
 | `continuous.worker.view` | Registry-backed read | Reads registered worker views with the same `view`, `worker`, and `config` envelope used by local worker tooling and `POST /worker` read payloads |
 | `continuous.worker.command` | Registry-backed command | Invokes an existing worker command with the same `command`, `worker`, `idempotencyKey`, and `config` envelope used by `/worker` |
+| `continuous.workflow.schema` | Read-only | Returns workflow command/view names, canonical `apiRoute: "/workflow"`, and app-server bridge metadata |
+| `continuous.workflow.view` | Registry-backed read | Reads shared workflow views with the same `view`, `workflow`, and `config` envelope used by `POST /workflow` |
+| `continuous.workflow.command` | Registry-backed command | Invokes shared workflow commands with the same `command`, `workflow`, `idempotencyKey` when required, and `config` envelope used by `POST /workflow` |
+| `continuous.approval.schema` | Read-only | Returns shared approval command/view names, canonical `apiRoute: "/approval"`, and app-server bridge metadata |
+| `continuous.approval.view` | Registry-backed read | Reads the shared approval inbox with the same `view`, `approval`, and `config` envelope used by `POST /approval` |
+| `continuous.approval.command` | Registry-backed command | Invokes shared approval decisions with the same `command`, `approval`, `idempotencyKey`, and `config` envelope used by `POST /approval`; decisions require `approval.id` plus a concrete `approval.subject` of `core`, `worker`, `workflow`, or `task` |
 
 The generated Codex app-server protocol defines a dynamic tool as `name`,
 `description`, and `inputSchema`, and invokes dynamic tools with a payload
 containing `tool`, `arguments`, `callId`, `threadId`, and `turnId`. The local
 manifest and dynamic-call adapters follow that shape: Core tools live in
 `src/core/app-server-tools.ts`, worker tools live in
-`src/worker/app-server-tools.ts`, and both delegate reads and commands to
+`src/worker/app-server-tools.ts`, shared workflow and approval tools live in
+`src/core/app-server-control-tools.ts`, and all delegate reads and commands to
 registered handlers rather than worker-family-specific routes.
 `continuous.core.schema` exposes registered Core command and view names for the
 app-server bridge. Credential and token-rotation administration remains on
@@ -31,6 +39,10 @@ can inspect payload requirements for candidate and packaged workers before
 handlers exist.
 `continuous.worker.view`, `continuous.worker.command`, `/worker`, and
 `worker:tool` all run through the same registry validation before dispatch.
+`continuous.workflow.view`, `continuous.workflow.command`, `/workflow`,
+`continuous.approval.view`, `continuous.approval.command`, and `/approval`
+share the same control-plane service functions and keep workflow/approval
+operation inputs under `config`.
 `continuous.core.command` owns reusable worker lifecycle control through
 `worker.upsert`, `worker.transition`, `worker.run.start`, and
 `worker.run.complete`, using the Core envelope with worker identity, capability,
@@ -58,6 +70,10 @@ Deploy smoke also exercises Core worker lifecycle commands, Revenue
 Revenue worker execution, and post-Revenue workers can use the same dynamic-tool
 envelope without a worker-specific route and with worker-role scope enforced
 before lifecycle dispatch.
+The bridge also exposes shared workflow and approval controls through
+`continuous.workflow.*` and `continuous.approval.*`, so remote agents can inspect
+workflow runs, drain workflow steps, read approval inboxes, and decide approvals
+without inventing query URLs or worker-family app-server tools.
 Customer Experience `recovery.draft` and `signals` are runtime-registered the
 same way: customer, signal, evidence, channel, and no-send policy selectors
 live under `config`, while the app-server tool still sends only `command`,
@@ -163,6 +179,10 @@ bun run app-server:proxy
 bun run app-server:tools continuous.core.schema
 bun run app-server:tools continuous.core.view --payload='{"view":"summary","core":{"tenantSlug":"continuous-demo"},"config":{}}'
 bun run app-server:tools continuous.worker.schema
+bun run app-server:tools continuous.workflow.schema
+bun run app-server:tools continuous.workflow.view --payload='{"view":"overview","workflow":{"tenantSlug":"continuous-demo"},"config":{}}'
+bun run app-server:tools continuous.approval.schema
+bun run app-server:tools continuous.approval.view --payload='{"view":"inbox","approval":{"tenantSlug":"continuous-demo","subject":"worker"},"config":{"state":"pending"}}'
 bun run app-server:tools dynamic-call --payload='{"tool":"continuous.worker.schema","arguments":{},"callId":"local-schema-001","threadId":"local-thread-001","turnId":"local-turn-001"}'
 bun run app-server:tools continuous.worker.view --payload='{"view":"snapshot","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{}}'
 bun run app-server:tools continuous.worker.view --payload='{"view":"readiness","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{}}'
@@ -194,10 +214,19 @@ The app-server Core and worker tools are intentionally narrow:
   invoke the same persisted primitive handlers used by `POST /core`.
 - Worker commands are resolved by the same registry as `/worker` and
   `worker:tool`.
+- Workflow commands are resolved by the shared workflow command list and invoke
+  the same persisted handlers used by `POST /workflow`.
+- Approval commands are resolved by the shared approval command list and invoke
+  the same approval service used by `POST /approval`.
 - Core reads currently expose the `summary` view through the same `view`,
   `core`, and `config` envelope as `POST /core`.
 - Reads are resolved by the same view registry as `POST /worker` view payloads
   and `worker.view`.
+- Workflow reads accept only `view`, `workflow`, and `config`; read filters
+  belong under `config`.
+- Approval reads accept only `view`, `approval`, and `config`; subject and
+  approval id selectors belong under `approval`, while filters belong under
+  `config`.
 - Core read envelopes are strict. `continuous.core.view` accepts only `view`,
   `core`, and `config`; send `{}` when there are no read filters.
 - Read envelopes are strict. `continuous.worker.view` accepts only `view`,
@@ -210,6 +239,16 @@ The app-server Core and worker tools are intentionally narrow:
   `command`, `worker`, `idempotencyKey`, and `config`; `approvalId`, source
   records, retry limits, lead payloads, and every other operation input belong
   under `config`.
+- Workflow mutation envelopes are strict. `continuous.workflow.command` accepts
+  only `command`, `workflow`, optional `idempotencyKey`, and `config`;
+  `workflow.start`, `workflow.transition`, and `workflow.approval.decide`
+  require payload idempotency keys, while `steps.execute` remains an execution
+  drain command without an idempotency key requirement.
+- Approval mutation envelopes are strict. `continuous.approval.command` accepts
+  only `command`, `approval`, `idempotencyKey`, and `config`; approval actions
+  and notes belong under `config`. `approval.decide` requires `approval.id`
+  and a concrete `approval.subject` of `core`, `worker`, `workflow`, or `task`;
+  broad `subject: "all"` is only valid for reads.
 - Worker-specific options stay inside `config` and are validated by the
   command registry's `configSchema`.
 - Follow-up commands expose config schemas but remain non-executable until
@@ -250,9 +289,12 @@ inputs under `arguments.config`, and never send `operatorEmail`, bearer tokens,
 transport context, tenant scope, or worker-role scope in the payload.
 
 `continuous.core.command`, `continuous.core.view`,
-`continuous.worker.command`, `continuous.worker.view`, `worker.command`, and
-`worker.view` are tool names; `/core` and `/worker` are HTTP routes; `command`,
-`view`, `core`, `worker`, `idempotencyKey`, and `config` are payload fields.
+`continuous.worker.command`, `continuous.worker.view`,
+`continuous.workflow.command`, `continuous.workflow.view`,
+`continuous.approval.command`, `continuous.approval.view`, `worker.command`,
+and `worker.view` are tool names; `/core`, `/worker`, `/workflow`, and
+`/approval` are HTTP routes; `command`, `view`, `core`, `worker`, `workflow`,
+`approval`, `idempotencyKey`, and `config` are payload fields.
 
 ```http
 POST /app-server

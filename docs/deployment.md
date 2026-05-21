@@ -109,9 +109,14 @@ separate `app_server` route for dynamic-tool bridge calls; those bridge commands
 are scoped as `app_server:worker.command.<name>`,
 `app_server:worker.view.<name>`, `app_server:worker.schema`,
 `app_server:core.command.<name>`, `app_server:core.view.<name>`, or
-`app_server:core.schema`, while the bridge still delegates actual worker
-execution to the `/worker` registry and Core primitive execution to registered
-Core handlers. The raw token remains in `.env` so
+`app_server:core.schema`, plus shared control tools such as
+`app_server:workflow.command.start`, `app_server:workflow.view.overview`,
+`app_server:workflow.schema`, `app_server:approval.command.approval.decide`,
+`app_server:approval.view.inbox`, and `app_server:approval.schema`. The bridge
+still delegates actual worker execution to the `/worker` registry, Core
+primitive execution to registered Core handlers, and shared workflow/approval
+execution to the same services used by `POST /workflow` and `POST /approval`.
+The raw token remains in `.env` so
 deploy smoke, scheduler, rotation, and host recovery can present it as a bearer
 credential; it must not appear inside catalog entries. Production routes refuse
 raw catalog `token` fields and the legacy single-token path if the catalog is
@@ -431,8 +436,24 @@ Control-plane token catalog entries have this shape when provided directly via
       "app_server:core.view.summary",
       "app_server:core.command.task.create",
       "app_server:core.command.obligation.scan",
+      "app_server:workflow.schema",
+      "app_server:workflow.view.overview",
+      "app_server:workflow.view.approvals",
+      "app_server:workflow.command.start",
+      "app_server:workflow.command.transition",
+      "app_server:workflow.command.steps.execute",
+      "app_server:workflow.command.approval.decide",
+      "app_server:approval.schema",
+      "app_server:approval.view.inbox",
+      "app_server:approval.command.approval.decide",
       "workflow:view.overview",
-      "approval:view.inbox"
+      "workflow:view.approvals",
+      "workflow:start",
+      "workflow:transition",
+      "workflow:steps.execute",
+      "workflow:approval.decide",
+      "approval:view.inbox",
+      "approval:approval.decide"
     ],
     "expiresAt": "2026-06-20T00:00:00.000Z"
   }
@@ -684,7 +705,20 @@ and route-qualified command; unrelated commands remain closed.
       "app_server:core.view.summary",
       "app_server:core.command.task.create",
       "app_server:core.command.obligation.scan",
+      "app_server:workflow.schema",
+      "app_server:workflow.view.overview",
+      "app_server:workflow.view.approvals",
+      "app_server:workflow.command.start",
+      "app_server:workflow.command.transition",
+      "app_server:workflow.command.steps.execute",
+      "app_server:workflow.command.approval.decide",
+      "app_server:approval.schema",
+      "app_server:approval.view.inbox",
+      "app_server:approval.command.approval.decide",
       "workflow:view.overview",
+      "workflow:view.approvals",
+      "workflow:start",
+      "workflow:transition",
       "workflow:steps.execute",
       "workflow:approval.decide",
       "approval:view.inbox",

@@ -198,6 +198,92 @@ printf '%s\n' "$APP_SERVER_CORE_SCHEMA_RESPONSE" | /usr/bin/jq -e '
   )
 ' >/dev/null
 
+APP_SERVER_WORKFLOW_SCHEMA_RESPONSE="$(
+  curl -fsS "${curl_args[@]}" --resolve "$resolve_arg" \
+    -X POST \
+    -H "authorization: Bearer $WORKER_TOKEN" \
+    -H 'content-type: application/json' \
+    --data '{"tool":"continuous.workflow.schema","arguments":{},"callId":"production-workflow-schema-smoke","threadId":"production-smoke","turnId":"production-smoke"}' \
+    "$app_server_url"
+)"
+printf '%s\n' "$APP_SERVER_WORKFLOW_SCHEMA_RESPONSE" | /usr/bin/jq -c '{api,error,success:.data.success,contentItemCount:(.data.contentItems | length)}'
+printf '%s\n' "$APP_SERVER_WORKFLOW_SCHEMA_RESPONSE" | /usr/bin/jq -e '
+  .api == "continuous.app_server.v1" and
+  .error == null and
+  .data.success == true and
+  (.data.contentItems[0].text | fromjson |
+    .ok == true and
+    .tool == "continuous.workflow.schema" and
+    (.data.registry.commands | any(.name == "start" and .apiRoute == "/workflow")) and
+    (.data.registry.commands | any(.name == "steps.execute" and .idempotency == "not_required")) and
+    (.data.registry.views | any(.name == "overview" and .apiRoute == "/workflow"))
+  )
+' >/dev/null
+
+APP_SERVER_APPROVAL_SCHEMA_RESPONSE="$(
+  curl -fsS "${curl_args[@]}" --resolve "$resolve_arg" \
+    -X POST \
+    -H "authorization: Bearer $WORKER_TOKEN" \
+    -H 'content-type: application/json' \
+    --data '{"tool":"continuous.approval.schema","arguments":{},"callId":"production-approval-schema-smoke","threadId":"production-smoke","turnId":"production-smoke"}' \
+    "$app_server_url"
+)"
+printf '%s\n' "$APP_SERVER_APPROVAL_SCHEMA_RESPONSE" | /usr/bin/jq -c '{api,error,success:.data.success,contentItemCount:(.data.contentItems | length)}'
+printf '%s\n' "$APP_SERVER_APPROVAL_SCHEMA_RESPONSE" | /usr/bin/jq -e '
+  .api == "continuous.app_server.v1" and
+  .error == null and
+  .data.success == true and
+  (.data.contentItems[0].text | fromjson |
+    .ok == true and
+    .tool == "continuous.approval.schema" and
+    (.data.registry.commands | any(.name == "approval.decide" and .apiRoute == "/approval")) and
+    (.data.registry.views | any(.name == "inbox" and .apiRoute == "/approval"))
+  )
+' >/dev/null
+
+APP_SERVER_WORKFLOW_VIEW_RESPONSE="$(
+  curl -fsS "${curl_args[@]}" --resolve "$resolve_arg" \
+    -X POST \
+    -H "authorization: Bearer $WORKER_TOKEN" \
+    -H 'content-type: application/json' \
+    --data '{"tool":"continuous.workflow.view","arguments":{"view":"overview","workflow":{"tenantSlug":"continuous-demo"},"config":{}},"callId":"production-workflow-view-smoke","threadId":"production-smoke","turnId":"production-smoke"}' \
+    "$app_server_url"
+)"
+printf '%s\n' "$APP_SERVER_WORKFLOW_VIEW_RESPONSE" | /usr/bin/jq -c '{api,error,success:.data.success,contentItemCount:(.data.contentItems | length)}'
+printf '%s\n' "$APP_SERVER_WORKFLOW_VIEW_RESPONSE" | /usr/bin/jq -e '
+  .api == "continuous.app_server.v1" and
+  .error == null and
+  .data.success == true and
+  (.data.contentItems[0].text | fromjson |
+    .ok == true and
+    .tool == "continuous.workflow.view" and
+    .data.view == "overview" and
+    .data.workflow.tenantSlug == "continuous-demo"
+  )
+' >/dev/null
+
+APP_SERVER_APPROVAL_VIEW_RESPONSE="$(
+  curl -fsS "${curl_args[@]}" --resolve "$resolve_arg" \
+    -X POST \
+    -H "authorization: Bearer $WORKER_TOKEN" \
+    -H 'content-type: application/json' \
+    --data '{"tool":"continuous.approval.view","arguments":{"view":"inbox","approval":{"tenantSlug":"continuous-demo","subject":"core"},"config":{"state":"pending"}},"callId":"production-approval-view-smoke","threadId":"production-smoke","turnId":"production-smoke"}' \
+    "$app_server_url"
+)"
+printf '%s\n' "$APP_SERVER_APPROVAL_VIEW_RESPONSE" | /usr/bin/jq -c '{api,error,success:.data.success,contentItemCount:(.data.contentItems | length)}'
+printf '%s\n' "$APP_SERVER_APPROVAL_VIEW_RESPONSE" | /usr/bin/jq -e '
+  .api == "continuous.app_server.v1" and
+  .error == null and
+  .data.success == true and
+  (.data.contentItems[0].text | fromjson |
+    .ok == true and
+    .tool == "continuous.approval.view" and
+    .data.view == "inbox" and
+    .data.approval.tenantSlug == "continuous-demo" and
+    .data.approval.subject == "core"
+  )
+' >/dev/null
+
 if [ "${APP_SERVER_CORE_LIFECYCLE_SMOKE:-false}" = "true" ]; then
   APP_DIR="$APP_DIR" SITE_HOST="$SITE_HOST" TENANT_SLUG="continuous-demo" \
     ./scripts/smoke-app-server-core-lifecycle-on-host.sh

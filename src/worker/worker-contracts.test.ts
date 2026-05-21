@@ -628,6 +628,9 @@ describe("future worker contracts", () => {
     expect(attestationScript).toContain("app_server:worker.command.margin.review.prepare");
     expect(attestationScript).toContain("app_server:worker.command.run");
     expect(attestationScript).toContain("app_server:worker.view.price_policy");
+    expect(attestationScript).toContain("app_server:workflow.schema");
+    expect(attestationScript).toContain("app_server:workflow.view.overview");
+    expect(attestationScript).toContain("app_server:approval.view.inbox");
     expect(attestationScript).toContain("workforce_operations");
     expect(attestationScript).toContain("systems_operations");
     expect(attestationScript).toContain("offer_pricing_operations");
@@ -663,6 +666,9 @@ describe("future worker contracts", () => {
     expect(deployScript).toContain("app_server:worker.command.margin.review.prepare");
     expect(deployScript).toContain("app_server:worker.command.run");
     expect(deployScript).toContain("app_server:worker.view.price_policy");
+    expect(deployScript).toContain("app_server:workflow.schema");
+    expect(deployScript).toContain("app_server:workflow.view.overview");
+    expect(deployScript).toContain("app_server:approval.view.inbox");
     expect(deployScript).toContain("scripts/rotate-control-plane-token-on-host.sh");
     expect(deployScript).toContain("scripts/smoke-core-worker-lifecycle-on-host.sh");
     expect(deployScript).toContain("preserving the existing bootstrap token");
@@ -692,6 +698,11 @@ describe("future worker contracts", () => {
     expect(deployWorkflow).toContain("app_server:worker.command.margin.review.prepare");
     expect(deployWorkflow).toContain("app_server:worker.command.run");
     expect(deployWorkflow).toContain("app_server:worker.view.price_policy");
+    expect(deployWorkflow).toContain("app_server:workflow.schema");
+    expect(deployWorkflow).toContain("app_server:workflow.view.overview");
+    expect(deployWorkflow).toContain("app_server:approval.view.inbox");
+    expect(productionSmokeScript).toContain("continuous.workflow.schema");
+    expect(productionSmokeScript).toContain("continuous.approval.view");
     expect(deployWorkflow).toContain("APP_SERVER_RUN_KEY");
     expect(deployWorkflow).toContain("deploy-app-server-worker-run-smoke");
     expect(deployWorkflow).toContain('tool: "continuous.worker.command"');

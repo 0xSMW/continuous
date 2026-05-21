@@ -20,6 +20,7 @@ work from one worker family to the next.
 | Capabilities | Typed capability grants define read, draft, prepare, approve, and execute boundaries |
 | Budget | Worker budget account, reservation path, usage event, and overage policy are present |
 | Approval | Shared `approval_requests` route supports the worker's approval subject |
+| App-server control bridge | Shared workflow and approval controls are available through `continuous.workflow.*` and `continuous.approval.*` dynamic tools with the same `/workflow` and `/approval` envelopes |
 | Adapter | Dry-run action, receipt evidence, retry policy, reconciliation state, and retry/review system-task creation are present |
 | Eval | Golden cases cover classification, missing facts, risk, cost, and approval behavior |
 | UI | Generated approval, brief, exception, and evidence views can be rendered from data |

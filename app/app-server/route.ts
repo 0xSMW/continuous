@@ -10,6 +10,11 @@ import {
   type AppServerCoreTransportContext,
 } from "../../src/core/app-server-tools";
 import {
+  appServerControlBridgeTarget,
+  executeAppServerControlDynamicToolCall,
+  type AppServerControlTransportContext,
+} from "../../src/core/app-server-control-tools";
+import {
   executeAppServerWorkerDynamicToolCall,
   type AppServerDynamicToolCallParams,
   type AppServerWorkerTransportContext,
@@ -49,7 +54,7 @@ const appServerDynamicToolCallFields = new Set([
 ]);
 
 type AppServerBridgeTarget = {
-  kind: "core" | "worker";
+  kind: "core" | "worker" | "control";
   access: ControlPlaneAccess;
   controlCommand: string;
   innerCommand?: string;
@@ -212,7 +217,7 @@ function appServerBridgeTarget(body: Record<string, unknown>):
       ok: false,
       error: {
         code: "invalid_app_server_tool_call",
-        message: `App-server dynamic calls accept only tool, arguments, callId, threadId, and turnId. Put worker operation inputs under arguments.config. Unexpected fields: ${unexpectedFields.join(", ")}.`,
+        message: `App-server dynamic calls accept only tool, arguments, callId, threadId, and turnId. Put operation inputs under arguments.config. Unexpected fields: ${unexpectedFields.join(", ")}.`,
       },
     };
   }
@@ -252,6 +257,32 @@ function appServerBridgeTarget(body: Record<string, unknown>):
   }
 
   const args = argumentsResult.args;
+
+  const controlTarget = appServerControlBridgeTarget(tool, args);
+
+  if (controlTarget) {
+    if (!controlTarget.ok) {
+      return {
+        ok: false,
+        error: controlTarget.error,
+      };
+    }
+
+    return {
+      ok: true,
+      payload: body as AppServerDynamicToolCallParams,
+      target: {
+        kind: "control",
+        access: controlTarget.target.access,
+        controlCommand: controlTarget.target.controlCommand,
+        innerCommand: controlTarget.target.innerCommand,
+        tenantSlug: controlTarget.target.tenantSlug,
+        requireTenantScope: Boolean(controlTarget.target.tenantSlug),
+        requireWorkerRoleScope: false,
+        requireManagedCredential: Boolean(controlTarget.target.tenantSlug),
+      },
+    };
+  }
 
   if (tool === "continuous.worker.schema" && Object.keys(args).length > 0) {
     return {
@@ -586,6 +617,20 @@ function coreTransportContextFor(input: {
   };
 }
 
+function controlTransportContextFor(input: {
+  operatorEmail: string;
+  target: AppServerBridgeTarget;
+}): AppServerControlTransportContext {
+  return {
+    operatorEmail: input.operatorEmail,
+    source: "control_plane",
+    allowedAccess: [input.target.access],
+    allowedCommands: input.target.innerCommand ? [input.target.innerCommand] : [],
+    allowedTenants: input.target.tenantSlug ? [input.target.tenantSlug] : ["*"],
+    allowedWorkerRoles: ["*"],
+  };
+}
+
 function coreWorkerRoleFromCommandArgs(command: string, args: Record<string, unknown>) {
   const config = bodyObject(args.config);
 
@@ -750,12 +795,19 @@ export async function POST(request: Request) {
             ? undefined
             : coreTransportContextFor({ operatorEmail: auth.operatorEmail, target }),
         )
-      : await executeAppServerWorkerDynamicToolCall(
-          payload,
-          payload.tool === "continuous.worker.schema"
-            ? undefined
-            : transportContextFor({ operatorEmail: auth.operatorEmail, target }),
-        );
+      : target.kind === "control"
+        ? await executeAppServerControlDynamicToolCall(
+            payload,
+            payload.tool.endsWith(".schema")
+              ? undefined
+              : controlTransportContextFor({ operatorEmail: auth.operatorEmail, target }),
+          )
+        : await executeAppServerWorkerDynamicToolCall(
+            payload,
+            payload.tool === "continuous.worker.schema"
+              ? undefined
+              : transportContextFor({ operatorEmail: auth.operatorEmail, target }),
+          );
 
   return Response.json(
     {

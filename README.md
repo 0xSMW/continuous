@@ -106,12 +106,13 @@ Then open `http://localhost:3000`.
 Worker-specific HTTP routes and local family-specific mutation shortcuts are
 intentionally absent; new worker families extend `/worker` and generic
 `worker:tool` / app-server surfaces by registering commands, views, and
-structured payload fields. App-server dynamic tools now expose both
-`continuous.core.*` and `continuous.worker.*` surfaces, so agents can inspect
-Core, write Core primitives, inspect worker registries, and run workers without
-adding route-shaped tool names. The HTTP, app-server, and local worker
-read/command surfaces reject stray top-level operation fields so operation
-inputs stay under `config`.
+structured payload fields. App-server dynamic tools now expose
+`continuous.core.*`, `continuous.worker.*`, `continuous.workflow.*`, and
+`continuous.approval.*` surfaces, so agents can inspect Core, write Core
+primitives, inspect worker registries, run workers, inspect workflow state, and
+decide shared approvals without adding route-shaped worker-family tool names.
+The HTTP, app-server, and local worker read/command surfaces reject stray
+top-level operation fields so operation inputs stay under `config`.
 
 ## Docs
 

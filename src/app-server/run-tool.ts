@@ -7,6 +7,12 @@ import {
   type AppServerCoreTransportContext,
 } from "../core/app-server-tools";
 import {
+  appServerControlToolManifest,
+  executeAppServerControlDynamicToolCall,
+  executeAppServerControlTool,
+  type AppServerControlTransportContext,
+} from "../core/app-server-control-tools";
+import {
   appServerWorkerToolManifest,
   executeAppServerWorkerDynamicToolCall,
   executeAppServerWorkerTool,
@@ -30,7 +36,12 @@ async function readStdin() {
   return Buffer.concat(chunks).toString("utf8").trim();
 }
 
-function transportContextFromArgs(): AppServerWorkerTransportContext | AppServerCoreTransportContext | undefined {
+type AppServerTransportContext =
+  | AppServerWorkerTransportContext
+  | AppServerCoreTransportContext
+  | AppServerControlTransportContext;
+
+function transportContextFromArgs(): AppServerTransportContext | undefined {
   const inlineContext = argValue("context");
   const envContext = process.env.APP_SERVER_TRANSPORT_CONTEXT_JSON?.trim();
   const contextSource = inlineContext ?? envContext;
@@ -39,7 +50,7 @@ function transportContextFromArgs(): AppServerWorkerTransportContext | AppServer
     return undefined;
   }
 
-  const context = JSON.parse(contextSource) as AppServerWorkerTransportContext | AppServerCoreTransportContext;
+  const context = JSON.parse(contextSource) as AppServerTransportContext;
 
   if (context.source === "control_plane") {
     throw new Error(
@@ -52,35 +63,54 @@ function transportContextFromArgs(): AppServerWorkerTransportContext | AppServer
 
 async function runDynamicCall(
   payload: AppServerDynamicToolCallParams,
-  context?: AppServerWorkerTransportContext | AppServerCoreTransportContext,
+  context?: AppServerTransportContext,
 ) {
-  return payload.tool.startsWith("continuous.core.")
-    ? executeAppServerCoreDynamicToolCall(
-        payload,
-        context as AppServerCoreTransportContext | undefined,
-      )
-    : executeAppServerWorkerDynamicToolCall(
-        payload,
-        context as AppServerWorkerTransportContext | undefined,
-      );
+  if (payload.tool.startsWith("continuous.core.")) {
+    return executeAppServerCoreDynamicToolCall(
+      payload,
+      context as AppServerCoreTransportContext | undefined,
+    );
+  }
+
+  if (payload.tool.startsWith("continuous.workflow.") || payload.tool.startsWith("continuous.approval.")) {
+    return executeAppServerControlDynamicToolCall(
+      payload,
+      context as AppServerControlTransportContext | undefined,
+    );
+  }
+
+  return executeAppServerWorkerDynamicToolCall(
+    payload,
+    context as AppServerWorkerTransportContext | undefined,
+  );
 }
 
 async function runNamedTool(
   name: string,
   payload: JsonObject,
-  context?: AppServerWorkerTransportContext | AppServerCoreTransportContext,
+  context?: AppServerTransportContext,
 ) {
-  return name.startsWith("continuous.core.")
-    ? executeAppServerCoreTool(
-        name,
-        payload,
-        context as AppServerCoreTransportContext | undefined,
-      )
-    : executeAppServerWorkerTool(
-        name,
-        payload,
-        context as AppServerWorkerTransportContext | undefined,
-      );
+  if (name.startsWith("continuous.core.")) {
+    return executeAppServerCoreTool(
+      name,
+      payload,
+      context as AppServerCoreTransportContext | undefined,
+    );
+  }
+
+  if (name.startsWith("continuous.workflow.") || name.startsWith("continuous.approval.")) {
+    return executeAppServerControlTool(
+      name,
+      payload,
+      context as AppServerControlTransportContext | undefined,
+    );
+  }
+
+  return executeAppServerWorkerTool(
+    name,
+    payload,
+    context as AppServerWorkerTransportContext | undefined,
+  );
 }
 
 async function main() {
@@ -104,9 +134,14 @@ async function main() {
           protocol: "codex.app-server.dynamic_tools",
           mode: "continuous_app_server_control",
           owner: "continuous",
-          tools: [...appServerCoreToolManifest.tools, ...appServerWorkerToolManifest.tools],
+          tools: [
+            ...appServerCoreToolManifest.tools,
+            ...appServerWorkerToolManifest.tools,
+            ...appServerControlToolManifest.tools,
+          ],
           core: appServerCoreToolManifest,
           worker: appServerWorkerToolManifest,
+          control: appServerControlToolManifest,
         },
         null,
         2,
