@@ -527,6 +527,9 @@ describe("future worker contracts", () => {
     expect(deployWorkflow).toContain("worker:view.repairs");
     expect(deployWorkflow).toContain("worker:sync.repair.plan");
     expect(deployWorkflow).toContain("worker:permission.review");
+    expect(deployWorkflow).toContain("continuous.worker.command");
+    expect(deployWorkflow).toContain('command: "lead.read"');
+    expect(deployWorkflow).toContain("deploy-app-server-lead-read-smoke");
     expect(deployWorkflow).toContain("scripts/attest-control-plane-on-host.sh");
     expect(deployWorkflow).toContain("scripts/rotate-control-plane-token-on-host.sh");
     expect(deployWorkflow).toContain("scripts/smoke-core-worker-lifecycle-on-host.sh");

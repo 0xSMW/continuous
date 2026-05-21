@@ -720,6 +720,58 @@ jobs:
             )
           ' >/dev/null
 
+          APP_SERVER_LEAD_READ_KEY="deploy-app-server-lead-read-smoke-$SMOKE_RUN_ID"
+          APP_SERVER_LEAD_READ_SOURCE_EVENT="app-server-deploy-smoke:$SMOKE_RUN_ID"
+          APP_SERVER_LEAD_READ_PAYLOAD="$(
+            /usr/bin/jq -nc --arg key "$APP_SERVER_LEAD_READ_KEY" --arg sourceEventId "$APP_SERVER_LEAD_READ_SOURCE_EVENT" '{
+              tool: "continuous.worker.command",
+              arguments: {
+                command: "lead.read",
+                worker: {role: "revenue_operations", tenantSlug: "continuous-demo"},
+                idempotencyKey: $key,
+                config: {
+                  source: "deploy_app_server_smoke",
+                  records: [
+                    {
+                      sourceEventId: $sourceEventId,
+                      customerName: "Continuous App Server Smoke",
+                      customerIntent: "verify app-server worker execution",
+                      serviceArea: "platform",
+                      urgency: "normal"
+                    }
+                  ]
+                }
+              },
+              callId: $key,
+              threadId: "deploy-smoke",
+              turnId: "deploy-smoke"
+            }'
+          )"
+          APP_SERVER_LEAD_READ_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/app-server \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              --data "$APP_SERVER_LEAD_READ_PAYLOAD"
+          )"
+          echo "$APP_SERVER_LEAD_READ_RESPONSE" | /usr/bin/jq -c '{api,error,success:.data.success,contentItemCount:(.data.contentItems | length)}'
+          echo "$APP_SERVER_LEAD_READ_RESPONSE" | /usr/bin/jq -e --arg sourceEventId "$APP_SERVER_LEAD_READ_SOURCE_EVENT" '
+            .api == "continuous.app_server.v1" and
+            .error == null and
+            .data.success == true and
+            (.data.contentItems[0].text | fromjson |
+              .ok == true and
+              .tool == "continuous.worker.command" and
+              .data.command == "lead.read" and
+              .data.worker.role == "revenue_operations" and
+              .data.result.created == true and
+              .data.result.readCount == 1 and
+              (.data.result.workerRunId | length > 0) and
+              (.data.result.selectors | length) == 1 and
+              .data.result.selectors[0].sourceEventId == $sourceEventId
+            )
+          ' >/dev/null
+
           WORKFORCE_HIRE_KEY="deploy-workforce-hire-smoke-$SMOKE_RUN_ID"
           WORKFORCE_HIRE_PAYLOAD="$(
             /usr/bin/jq -nc --arg key "$WORKFORCE_HIRE_KEY" '{
