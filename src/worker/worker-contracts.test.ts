@@ -542,9 +542,10 @@ describe("future worker contracts", () => {
     expect(deployScript).toContain("scripts/smoke-core-worker-lifecycle-on-host.sh");
     expect(deployScript).toContain("preserving the existing bootstrap token");
     expect(deployScript).toContain("Remote disk before deploy cleanup");
-    expect(deployScript).toContain("docker image prune -f");
+    expect(deployScript).toContain('timeout --preserve-status 120s "$@"');
+    expect(deployScript).toContain("run_cleanup docker image prune -f");
     expect(deployScript).toContain("docker system df");
-    expect(deployScript).toContain("docker builder prune -af");
+    expect(deployScript).toContain("run_cleanup docker builder prune -af");
     expect(deployScript).toContain('SITE_HOST="$SITE_HOST"');
     expect(deployWorkflow).toContain("core:control_plane.token_rotation.attest");
     expect(deployWorkflow).toContain("core:ai.infer");
@@ -574,8 +575,9 @@ describe("future worker contracts", () => {
     expect(deployWorkflow).toContain("preserving the existing bootstrap token");
     expect(deployWorkflow).toContain("Prepare remote release storage");
     expect(deployWorkflow).toContain("Remote disk before image load cleanup");
-    expect(deployWorkflow).toContain("docker image prune -f");
-    expect(deployWorkflow).toContain("docker builder prune -af");
+    expect(deployWorkflow).toContain('timeout --preserve-status 120s "$@"');
+    expect(deployWorkflow).toContain("run_cleanup docker image prune -f");
+    expect(deployWorkflow).toContain("run_cleanup docker builder prune -af");
     expect(deployWorkflow).toContain('SITE_HOST="$SITE_HOST"');
   });
 

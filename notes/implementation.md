@@ -389,6 +389,6 @@ logs instead of only the outer `success:false` bridge envelope.
 
 Deploy now prunes stopped containers, dangling Docker images, old app image
 tags, build cache, container JSON logs, and stale release archive files before
-uploading and loading release images. The cleanup keeps the target tag plus the
-current and previous app tags so a failed image load does not erase the rollback
-surface on smaller droplets.
+uploading and loading release images. Docker cleanup calls are bounded so cleanup
+cannot hang the rollout, while the target, current, and previous app tags stay
+available for rollback on smaller droplets.
