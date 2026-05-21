@@ -1360,7 +1360,11 @@ export async function prepareComplianceFiling(input: {
     };
   });
 
-  const persistSettledOutput = async (workerRunId: string, output: JsonObject, completionBudget: JsonObject) => {
+  const persistSettledOutput = async (
+    workerRunId: string,
+    output: JsonObject,
+    completionBudget: JsonObject,
+  ): Promise<JsonObject> => {
     const settledReservationId =
       optionalString(completionBudget.reservationId) ?? optionalString(output.reservationId) ?? null;
     const settledUsageEventId = optionalString(completionBudget.usageEventId) ?? optionalString(output.usageEventId) ?? null;
@@ -1368,7 +1372,7 @@ export async function prepareComplianceFiling(input: {
       ...output,
       reservationId: settledReservationId,
       usageEventId: settledUsageEventId,
-    } satisfies JsonObject;
+    } as JsonObject;
     const [completedRun] = await db
       .select({ data: workerRuns.data })
       .from(workerRuns)
@@ -1391,7 +1395,7 @@ export async function prepareComplianceFiling(input: {
     return settledOutput;
   };
 
-  const settleCoreRun = async (workerRunId: string, output: JsonObject) => {
+  const settleCoreRun = async (workerRunId: string, output: JsonObject): Promise<JsonObject> => {
     const completion = await completeCoreWorkerRun({
       operatorEmail: input.operatorEmail,
       tenantSlug: context.worker.tenantSlug,
