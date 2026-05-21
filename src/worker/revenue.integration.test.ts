@@ -10990,9 +10990,40 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .from(generatedViews)
       .where(and(eq(generatedViews.tenantId, tenantId), eq(generatedViews.key, "dispatch.schedule.review")))
       .limit(1);
+    const runData = objectValue(run?.data);
+    const completionBudget = objectValue(objectValue(runData.completion).budget);
+    const [reservation] = await db
+      .select()
+      .from(budgetReservations)
+      .where(eq(budgetReservations.id, stringValue(output.budgetReservationId)))
+      .limit(1);
+    const [usage] = await db
+      .select()
+      .from(usageEvents)
+      .where(eq(usageEvents.id, stringValue(output.usageEventId)))
+      .limit(1);
+    const [localDispatchRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(
+        and(
+          eq(workerRuns.tenantId, tenantId),
+          eq(workerRuns.source, "continuous.worker"),
+          eq(workerRuns.idempotencyKey, `ci-dispatch-schedule-${runId}`),
+        ),
+      )
+      .limit(1);
 
-    expect(run?.source).toBe("continuous.worker");
+    expect(run?.source).toBe("continuous.core.worker_runs");
     expect(run?.state).toBe("done");
+    expect(objectValue(runData.input).command).toBe("schedule.propose");
+    expect(completionBudget.state).toBe("used");
+    expect(completionBudget.reservationId).toBe(output.budgetReservationId);
+    expect(completionBudget.usageEventId).toBe(output.usageEventId);
+    expect(reservation?.state).toBe("used");
+    expect(usage?.reservationId).toBe(output.budgetReservationId);
+    expect(usage?.taskId).toBe(result.taskId);
+    expect(localDispatchRun).toBeUndefined();
     expect(appointment?.type).toBe("appointment");
     expect(appointment?.state).toBe("approval_required");
     expect(dispatchApproval?.state).toBe("pending");
@@ -11935,5 +11966,119 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(exceptionReplayResult.workerRunId).toBe(exceptionResult.workerRunId);
     expect(exceptionReplayResult.taskId).toBe(exceptionResult.taskId);
     expect(exceptionReplayResult.decisionId).toBe(exceptionResult.decisionId);
+  }, 120_000);
+
+  it("prepares Compliance filings through the Core worker-run lifecycle and replays settled output", async () => {
+    const runId = randomUUID();
+    const idempotencyKey = `ci-compliance-filing-core-${runId}`;
+    const config = {
+      filingRequirementId: "55555555-5555-4555-8555-000000000010",
+      period: {
+        label: "ci-quarter",
+        from: "2026-04-01T00:00:00.000Z",
+        to: "2026-07-01T00:00:00.000Z",
+      },
+      sourceRefs: {
+        payrollRunId: "55555555-5555-4555-8555-000000000007",
+        payrollTraceId: "55555555-5555-4555-8555-000000000018",
+      },
+      validation: {
+        source: "ci",
+      },
+      policy: {
+        externalExecution: "blocked",
+        agencySubmission: "blocked",
+        legalAdvice: "blocked",
+      },
+    };
+
+    const response = await executeAppServerWorkerTool("continuous.worker.command", {
+      command: "filing.prepare",
+      worker: {
+        role: "compliance_operations",
+        tenantSlug: "continuous-demo",
+      },
+      idempotencyKey,
+      config,
+    });
+    const envelope = objectValue(response);
+    const result = objectValue(envelope.result) as Awaited<
+      ReturnType<typeof import("./compliance").prepareComplianceFiling>
+    >;
+    const output = objectValue(result.output);
+    const [workerRun] = await db.select().from(workerRuns).where(eq(workerRuns.id, result.workerRunId)).limit(1);
+    const workerRunData = objectValue(workerRun?.data);
+    const workerRunInput = objectValue(workerRunData.input);
+    const workerRunRequest = objectValue(workerRunInput.request);
+    const completionBudget = objectValue(objectValue(workerRunData.completion).budget);
+    const [reservation] = await db
+      .select()
+      .from(budgetReservations)
+      .where(eq(budgetReservations.id, stringValue(result.reservationId)))
+      .limit(1);
+    const [usage] = await db
+      .select()
+      .from(usageEvents)
+      .where(eq(usageEvents.id, stringValue(result.usageEventId)))
+      .limit(1);
+    const [legacyRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(
+        and(
+          eq(workerRuns.source, "continuous.worker"),
+          eq(workerRuns.idempotencyKey, idempotencyKey),
+        ),
+      )
+      .limit(1);
+
+    expect(envelope.command).toBe("filing.prepare");
+    expect(objectValue(envelope.worker).role).toBe("compliance_operations");
+    expect(result.created).toBe(true);
+    expect(result.workerRunId).toBe(output.workerRunId);
+    expect(result.filingDraftId).toBe(output.filingDraftId);
+    expect(result.packetId).toBe(output.packetId);
+    expect(result.documentId).toBe(output.documentId);
+    expect(result.approvalRequestId).toBe(output.approvalRequestId);
+    expect(result.reservationId).toBe(output.reservationId);
+    expect(result.usageEventId).toBe(output.usageEventId);
+    expect(result.externalExecution).toBe("blocked");
+    expect(output.agencySubmission).toBe("blocked");
+    expect(output.legalAdvice).toBe("blocked");
+    expect(objectValue(output.handoff).name).toBe("compliance.obligation_to_owner_review");
+    expect(workerRun?.source).toBe("continuous.core.worker_runs");
+    expect(workerRun?.state).toBe("done");
+    expect(workerRun?.taskId).toBe(result.taskId);
+    expect(workerRunData.businessEventId).toBe(result.eventId);
+    expect(workerRunInput.command).toBe("filing.prepare");
+    expect(workerRunRequest.inputHash).toBeTruthy();
+    expect(completionBudget.state).toBe("used");
+    expect(completionBudget.reservationId).toBe(result.reservationId);
+    expect(completionBudget.usageEventId).toBe(result.usageEventId);
+    expect(reservation?.state).toBe("used");
+    expect(reservation?.taskId).toBe(result.taskId);
+    expect(usage?.reservationId).toBe(result.reservationId);
+    expect(usage?.taskId).toBe(result.taskId);
+    expect(usage?.units).toBe(3000);
+    expect(legacyRun).toBeUndefined();
+
+    const replay = await executeWorkerCommand({
+      command: "filing.prepare",
+      target: {
+        role: "compliance_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey,
+      config,
+    });
+    const replayResult = replay.result as Awaited<ReturnType<typeof import("./compliance").prepareComplianceFiling>>;
+
+    expect(replayResult.created).toBe(false);
+    expect(replayResult.workerRunId).toBe(result.workerRunId);
+    expect(replayResult.filingDraftId).toBe(result.filingDraftId);
+    expect(replayResult.packetId).toBe(result.packetId);
+    expect(replayResult.reservationId).toBe(result.reservationId);
+    expect(replayResult.usageEventId).toBe(result.usageEventId);
   }, 120_000);
 });

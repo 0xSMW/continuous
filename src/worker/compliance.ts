@@ -4,6 +4,7 @@ import { and, count, desc, eq, sql } from "drizzle-orm";
 
 import { PlatformUnavailableError } from "../core/errors";
 import { loadOperatorContext } from "../core/operators";
+import { completeCoreWorkerRun, startCoreWorkerRun } from "../core/worker-runs";
 import { db as defaultDb } from "../db/client";
 import {
   approvalRequests,
@@ -41,6 +42,7 @@ type Database = typeof defaultDb;
 export const complianceWorkerRole = "compliance_operations";
 
 const complianceSource = "continuous.worker";
+const coreWorkerRunSource = "continuous.core.worker_runs";
 const filingPrepareCapabilityKey = "filing.prepare";
 const filingDraftWorkflowKey = "filing_draft";
 const filingPrepareUnits = 3000;
@@ -98,6 +100,8 @@ export type ComplianceFilingPrepareResult = {
   workflowRunId: string | null;
   workflowStepIds: string[];
   complianceViewId: string | null;
+  reservationId: string | null;
+  usageEventId: string | null;
   externalExecution: "blocked";
   output: JsonObject;
   snapshot: ComplianceWorkerSnapshot;
@@ -211,7 +215,13 @@ function hashObject(value: unknown) {
 }
 
 function outputData(data: JsonObject) {
-  return objectValue(data.output);
+  const output = objectValue(data.output);
+
+  if (Object.keys(output).length > 0) {
+    return output;
+  }
+
+  return objectValue(objectValue(data.pendingCompletion).output);
 }
 
 function workerWhere(selector: ComplianceWorkerSelector) {
@@ -682,10 +692,82 @@ export async function prepareComplianceFiling(input: {
     blockers,
   });
   const now = new Date();
+  const [definition] = await db
+    .select({ id: workflowDefinitions.id })
+    .from(workflowDefinitions)
+    .where(and(eq(workflowDefinitions.key, filingDraftWorkflowKey), eq(workflowDefinitions.active, true)))
+    .orderBy(desc(workflowDefinitions.createdAt))
+    .limit(1);
+
+  if (!definition) {
+    throw new PlatformUnavailableError(
+      "worker_workflow_definition_missing",
+      "Compliance Operations Worker requires the filing_draft workflow definition.",
+      409,
+    );
+  }
+
+  const coreRun = await startCoreWorkerRun({
+    operatorEmail: input.operatorEmail,
+    tenantSlug: context.worker.tenantSlug,
+    idempotencyKey: input.idempotencyKey,
+    worker: {
+      id: context.worker.id,
+      role: complianceWorkerRole,
+    },
+    command: "filing.prepare",
+    mode: "simulation",
+    capabilityId: context.capabilityId,
+    budgetAccountId: context.budgetAccountId,
+    units: filingPrepareUnits,
+    input: {
+      command: "filing.prepare",
+      inputHash,
+      config,
+      filingRequirementId: requirement.id,
+      obligationId: obligation?.id ?? null,
+      rulePackId: rulePack?.id ?? null,
+      period: period.json,
+      sourceRefs,
+      validation,
+      blockers,
+    },
+    policy: {
+      ...objectValue(config.policy),
+      externalExecution: "blocked",
+      agencySubmission: "blocked",
+      legalAdvice: "blocked",
+      externalMutation: false,
+    },
+    evidence: {
+      command: "filing.prepare",
+      filingRequirementId: requirement.id,
+      obligationId: obligation?.id ?? null,
+      rulePackId: rulePack?.id ?? null,
+      sourceRefs,
+      validation,
+      blockers,
+      externalExecution: "blocked",
+      agencySubmission: "blocked",
+      legalAdvice: "blocked",
+      externalMutation: false,
+    },
+    db,
+  });
+  const coreBudget = objectValue(coreRun.budget);
+  const coreReservationId = optionalString(coreBudget.reservationId);
+
+  if (!coreReservationId) {
+    throw new PlatformUnavailableError(
+      "worker_run_budget_reservation_missing",
+      "Core worker.run.start did not return a Compliance Operations budget reservation.",
+      409,
+    );
+  }
 
   const result = await db.transaction(async (tx) => {
     await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${complianceSource}:${input.idempotencyKey}`}))`,
+      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${coreWorkerRunSource}:compliance:filing.prepare:${input.idempotencyKey}`}))`,
     );
 
     const [existingRun] = await tx
@@ -694,41 +776,44 @@ export async function prepareComplianceFiling(input: {
       .where(
         and(
           eq(workerRuns.tenantId, context.worker.tenantId),
-          eq(workerRuns.source, complianceSource),
-          eq(workerRuns.idempotencyKey, input.idempotencyKey),
+          eq(workerRuns.id, coreRun.workerRunId),
         ),
       )
       .limit(1);
 
-    if (existingRun) {
-      const existingInput = objectValue(objectValue(existingRun.data).input);
-      const existingHash = optionalString(existingInput.inputHash);
-
-      if (existingHash && existingHash !== inputHash) {
-        throw new PlatformUnavailableError(
-          "worker_idempotency_conflict",
-          "A Compliance filing packet already exists for this idempotency key with different input.",
-          409,
-        );
-      }
-
-      return { status: "replay" as const, replay: existingRun };
-    }
-
-    const [definition] = await tx
-      .select({ id: workflowDefinitions.id })
-      .from(workflowDefinitions)
-      .where(and(eq(workflowDefinitions.key, filingDraftWorkflowKey), eq(workflowDefinitions.active, true)))
-      .orderBy(desc(workflowDefinitions.createdAt))
-      .limit(1);
-
-    if (!definition) {
+    if (!existingRun) {
       throw new PlatformUnavailableError(
-        "worker_workflow_definition_missing",
-        "Compliance Operations Worker requires the filing_draft workflow definition.",
+        "worker_run_missing",
+        "Core worker.run.start did not return a persisted Compliance Operations worker run.",
         409,
       );
     }
+
+    const existingInput = objectValue(objectValue(existingRun.data).input);
+    const existingRequest = objectValue(existingInput.request);
+    const existingHash = optionalString(existingRequest.inputHash) ?? optionalString(existingInput.inputHash);
+
+    if (existingHash && existingHash !== inputHash) {
+      throw new PlatformUnavailableError(
+        "worker_idempotency_conflict",
+        "A Compliance filing packet already exists for this idempotency key with different input.",
+        409,
+      );
+    }
+
+    if (optionalString(outputData(existingRun.data).workerRunId)) {
+      return { status: "replay" as const, replay: existingRun };
+    }
+
+    const runInput = {
+      command: "filing.prepare",
+      inputHash,
+      config,
+      filingRequirementId: requirement.id,
+      obligationId: obligation?.id ?? null,
+      rulePackId: rulePack?.id ?? null,
+      period: period.json,
+    } satisfies JsonObject;
 
     const filingData = {
       command: "filing.prepare",
@@ -862,30 +947,7 @@ export async function prepareComplianceFiling(input: {
       })
       .returning({ id: tasks.id });
 
-    const [run] = await tx
-      .insert(workerRuns)
-      .values({
-        tenantId: context.worker.tenantId,
-        workerId: context.worker.id,
-        taskId: task.id,
-        capabilityId: context.capabilityId,
-        budgetAccountId: context.budgetAccountId,
-        source: complianceSource,
-        idempotencyKey: input.idempotencyKey,
-        state: "running",
-        mode: "simulation",
-        data: {
-          input: {
-            command: "filing.prepare",
-            inputHash,
-            config,
-          },
-        },
-        startedAt: now,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning({ id: workerRuns.id });
+    const workerRunId = coreRun.workerRunId;
 
     const [workflowRun] = await tx
       .insert(workflowRuns)
@@ -899,7 +961,7 @@ export async function prepareComplianceFiling(input: {
         data: {
           ...filingData,
           filingDraftId: filingDraft.id,
-          workerRunId: run.id,
+          workerRunId,
         },
         blockers: { items: blockers },
         metrics: {
@@ -927,7 +989,7 @@ export async function prepareComplianceFiling(input: {
         data: {
           ...filingData,
           filingDraftId: filingDraft.id,
-          workerRunId: run.id,
+          workerRunId,
           workflowRunId: workflowRun.id,
         },
         occurredAt: now,
@@ -1017,7 +1079,7 @@ export async function prepareComplianceFiling(input: {
       .values({
         tenantId: context.worker.tenantId,
         taskId: task.id,
-        workerRunId: run.id,
+        workerRunId,
         workflowRunId: workflowRun.id,
         eventId: event.id,
         objectId: filingObject.id,
@@ -1182,24 +1244,9 @@ export async function prepareComplianceFiling(input: {
       now,
     });
 
-    await tx.insert(usageEvents).values({
-      tenantId: context.worker.tenantId,
-      accountId: context.budgetAccountId,
-      taskId: task.id,
-      capabilityId: context.capabilityId,
-      actorType: "worker",
-      actorId: context.worker.id,
-      units: filingPrepareUnits,
-      data: {
-        command: "filing.prepare",
-        mode: "simulation",
-      },
-      createdAt: now,
-    });
-
     const output = {
       command: "filing.prepare",
-      workerRunId: run.id,
+      workerRunId,
       taskId: task.id,
       eventId: event.id,
       filingObjectId: filingObject.id,
@@ -1214,6 +1261,8 @@ export async function prepareComplianceFiling(input: {
       workflowRunId: workflowRun.id,
       workflowStepIds,
       complianceViewId,
+      reservationId: coreReservationId,
+      usageEventId: null,
       period: period.json,
       blockers,
       validation,
@@ -1240,19 +1289,34 @@ export async function prepareComplianceFiling(input: {
       .update(workerRuns)
       .set({
         eventId: event.id,
-        state: "done",
-        endedAt: now,
+        taskId: task.id,
         updatedAt: now,
         data: {
+          ...objectValue(existingRun.data),
           input: {
-            command: "filing.prepare",
-            inputHash,
-            config,
+            ...existingInput,
+            request: runInput,
           },
           output,
+          businessEventId: event.id,
+          eventId: event.id,
+          taskId: task.id,
+          filingObjectId: filingObject.id,
+          filingDraftId: filingDraft.id,
+          filingRequirementId: requirement.id,
+          obligationId: obligation?.id ?? null,
+          rulePackId: rulePack?.id ?? null,
+          approvalRequestId: approval.id,
+          evidenceId: traceEvidence.id,
+          packetId: packet.id,
+          documentId: document.id,
+          workflowRunId: workflowRun.id,
+          workflowStepIds,
+          complianceViewId,
+          reservationId: coreReservationId,
         },
       })
-      .where(eq(workerRuns.id, run.id));
+      .where(eq(workerRuns.id, workerRunId));
 
     await tx.insert(auditEvents).values({
       tenantId: context.worker.tenantId,
@@ -1262,7 +1326,9 @@ export async function prepareComplianceFiling(input: {
       actorId: context.worker.id,
       actorRef: `worker:${context.worker.id}`,
       targetType: "worker_run",
-      targetId: run.id,
+      targetId: workerRunId,
+      taskId: task.id,
+      workerRunId,
       eventId: event.id,
       objectId: filingObject.id,
       risk: "high",
@@ -1273,7 +1339,7 @@ export async function prepareComplianceFiling(input: {
 
     return {
       created: true,
-      workerRunId: run.id,
+      workerRunId,
       taskId: task.id,
       eventId: event.id,
       filingObjectId: filingObject.id,
@@ -1288,13 +1354,89 @@ export async function prepareComplianceFiling(input: {
       workflowRunId: workflowRun.id,
       workflowStepIds,
       complianceViewId,
+      reservationId: coreReservationId,
+      usageEventId: null,
       output,
     };
   });
 
+  const persistSettledOutput = async (workerRunId: string, output: JsonObject, completionBudget: JsonObject) => {
+    const settledReservationId =
+      optionalString(completionBudget.reservationId) ?? optionalString(output.reservationId) ?? null;
+    const settledUsageEventId = optionalString(completionBudget.usageEventId) ?? optionalString(output.usageEventId) ?? null;
+    const settledOutput = {
+      ...output,
+      reservationId: settledReservationId,
+      usageEventId: settledUsageEventId,
+    } satisfies JsonObject;
+    const [completedRun] = await db
+      .select({ data: workerRuns.data })
+      .from(workerRuns)
+      .where(eq(workerRuns.id, workerRunId))
+      .limit(1);
+
+    await db
+      .update(workerRuns)
+      .set({
+        data: {
+          ...objectValue(completedRun?.data),
+          output: settledOutput,
+          reservationId: settledReservationId,
+          usageEventId: settledUsageEventId,
+        },
+        updatedAt: new Date(),
+      })
+      .where(eq(workerRuns.id, workerRunId));
+
+    return settledOutput;
+  };
+
+  const settleCoreRun = async (workerRunId: string, output: JsonObject) => {
+    const completion = await completeCoreWorkerRun({
+      operatorEmail: input.operatorEmail,
+      tenantSlug: context.worker.tenantSlug,
+      idempotencyKey: input.idempotencyKey,
+      worker: {
+        id: context.worker.id,
+        role: complianceWorkerRole,
+      },
+      workerRunId,
+      state: "done",
+      reason:
+        "Compliance Operations Worker prepared a source-backed filing packet with agency submission, legal advice, and external mutation blocked.",
+      output,
+      costUsd: 0,
+      evidence: {
+        command: "filing.prepare",
+        eventId: optionalString(output.eventId) ?? null,
+        evidenceId: optionalString(output.evidenceId) ?? null,
+        packetId: optionalString(output.packetId) ?? null,
+        documentId: optionalString(output.documentId) ?? null,
+        approvalRequestId: optionalString(output.approvalRequestId) ?? null,
+        workflowRunId: optionalString(output.workflowRunId) ?? null,
+        complianceViewId: optionalString(output.complianceViewId) ?? null,
+        filingDraftId: optionalString(output.filingDraftId) ?? null,
+        filingRequirementId: optionalString(output.filingRequirementId) ?? null,
+        externalExecution: "blocked",
+        agencySubmission: "blocked",
+        legalAdvice: "blocked",
+        externalMutation: false,
+      },
+      db,
+    });
+
+    return persistSettledOutput(workerRunId, output, objectValue(completion.budget));
+  };
+
   if (result.status === "replay") {
     const replay = result.replay;
-    const output = outputData(objectValue(replay.data));
+    const replayData = objectValue(replay.data);
+    const replayOutput = outputData(replayData);
+    const replayCompletionBudget = objectValue(objectValue(replayData.completion).budget);
+    const output =
+      replay.state === "running"
+        ? await settleCoreRun(replay.id, replayOutput)
+        : await persistSettledOutput(replay.id, replayOutput, replayCompletionBudget);
     const snapshot = await getComplianceWorkerSnapshot({
       tenantSlug: input.tenantSlug,
       workerId: input.workerId,
@@ -1305,8 +1447,13 @@ export async function prepareComplianceFiling(input: {
       created: false,
       idempotencyKey: input.idempotencyKey,
       workerRunId: replay.id,
-      taskId: replay.taskId,
-      eventId: replay.eventId,
+      taskId: optionalString(output.taskId) ?? replay.taskId,
+      eventId:
+        optionalString(output.eventId) ??
+        optionalString(replayData.businessEventId) ??
+        replay.eventId ??
+        optionalString(replayData.eventId) ??
+        null,
       filingObjectId: nullishString(output.filingObjectId),
       filingDraftId: nullishString(output.filingDraftId),
       filingRequirementId: nullishString(output.filingRequirementId),
@@ -1319,11 +1466,15 @@ export async function prepareComplianceFiling(input: {
       workflowRunId: nullishString(output.workflowRunId),
       workflowStepIds: stringList(output.workflowStepIds),
       complianceViewId: nullishString(output.complianceViewId),
+      reservationId: nullishString(output.reservationId),
+      usageEventId: nullishString(output.usageEventId),
       externalExecution: "blocked",
       output,
       snapshot,
     };
   }
+
+  const settledOutput = await settleCoreRun(result.workerRunId, result.output);
 
   const snapshot = await getComplianceWorkerSnapshot({
     tenantSlug: input.tenantSlug,
@@ -1334,7 +1485,10 @@ export async function prepareComplianceFiling(input: {
   return {
     ...result,
     idempotencyKey: input.idempotencyKey,
+    reservationId: optionalString(settledOutput.reservationId) ?? null,
+    usageEventId: optionalString(settledOutput.usageEventId) ?? null,
     externalExecution: "blocked",
+    output: settledOutput,
     snapshot,
   };
 }

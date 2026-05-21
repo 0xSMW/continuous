@@ -50,7 +50,7 @@ Runtime entries:
 | `view: "obligations"` payload | `worker.view` | `worker.role`, optional `config.state`, optional `config.limit` | None | Read-only | Blocked |
 | `view: "packet"` payload | `worker.view` | `worker.role`, optional `config.packetId`, optional `config.filingDraftId` | None | Read-only | Blocked |
 | `obligation.scan` | `core.command` | `config.scope`, `config.jurisdiction`, optional `config.rulePackId`, optional `config.filingRequirementId` | Required | Obligation proposals, task evidence, audit, and trace evidence | Blocked |
-| `filing.prepare` | `worker.command` | `config.filingRequirementId`, `config.period.from`, `config.period.to` | Required | Filing draft packet | Blocked |
+| `filing.prepare` | `worker.command` | `config.filingRequirementId`, `config.period.from`, `config.period.to` | Required | Filing draft packet with Core worker-run lifecycle and budget settlement | Blocked |
 
 Follow-up metadata, not runtime handlers yet:
 
@@ -65,6 +65,9 @@ business primitives consumed by Compliance, Owner, Workforce, and future
 packaged workers. Compliance approvals are created by the runtime slice and
 decided through the shared `/approval` surface; that path does not submit to an
 agency.
+`filing.prepare` is a worker business command, but its run ledger is Core-owned:
+the runtime starts and completes `worker.run.*`, attaches filing packet proof to
+the Core run row, and returns Core reservation and usage settlement ids.
 Workflow and task lineage for `obligation.scan` is derived from claimed
 workflow steps; external `/core` and app-server callers do not pass
 `config.workflowRunId` or `config.taskId`.

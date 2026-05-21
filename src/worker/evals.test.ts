@@ -312,6 +312,8 @@ const completeComplianceOutput = {
   workflowRunId: "compliance_workflow_1",
   workflowStepIds: ["compliance_step_1", "compliance_step_2", "compliance_step_3"],
   complianceViewId: "compliance_view_1",
+  reservationId: "compliance_reservation_1",
+  usageEventId: "compliance_usage_1",
   period: {
     label: "April payroll tax filing",
     from: "2026-04-01T00:00:00.000Z",
@@ -445,6 +447,8 @@ const completeComplianceResult: ComplianceFilingPrepareResult = {
   workflowRunId: "compliance_workflow_1",
   workflowStepIds: ["compliance_step_1", "compliance_step_2", "compliance_step_3"],
   complianceViewId: "compliance_view_1",
+  reservationId: "compliance_reservation_1",
+  usageEventId: "compliance_usage_1",
   externalExecution: "blocked",
   output: completeComplianceOutput,
   snapshot: complianceSnapshot,

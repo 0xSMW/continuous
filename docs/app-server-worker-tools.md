@@ -62,11 +62,13 @@ tool names or routes.
 The CI integration suite exercises `continuous.worker.command` on real
 Revenue `lead.read`, `run`, `lead.classify`, `response.draft`,
 `quote.prepare`, `payment_link.prepare`, and `continue` for both controlled-send
-receipt recording and blocked payment-link continuations. It also exercises Owner `brief.generate`, Dispatch
-`schedule.propose`, and Finance
-`payment_draft.prepare` commands, proving the app-server boundary writes the
-same worker run, approval, evidence, budget, event, adapter dry-run, generated
-view, and workflow records as `/worker`.
+receipt recording and blocked payment-link continuations. It also exercises
+Owner `brief.generate`, Dispatch `schedule.propose`, Finance
+`payment_draft.prepare`, and Compliance `filing.prepare` commands, proving the
+app-server boundary writes the same worker run, approval, evidence, budget,
+event, adapter dry-run, generated view, and workflow records as `/worker`.
+Compliance also proves the Core worker-run row and Core budget settlement while
+submission and legal advice remain blocked.
 The Revenue payment-link command can be executed through
 `continuous.worker.command` or `worker:tool`, but it only prepares an internal
 packet through the Core worker-run lifecycle; live provider payment-link
@@ -130,9 +132,10 @@ Compliance uses that same envelope for `filing.prepare` plus the `snapshot`,
 `obligations`, and `packet` views. Filing requirement, period, source refs,
 validation, and policy live under `config`. Core `obligation.scan` supplies the
 shared obligation intake ledger; the worker runtime writes filing draft packets,
-approval requests, workflow/budget/audit proof, and keeps agency submission and
-legal advice blocked. Notice response, license renewal, evidence binder export,
-live credentials, broader rule sources, and receipt capture remain follow-ups.
+approval requests, workflow/audit proof, and Core worker-run budget settlement,
+and keeps agency submission and legal advice blocked. Notice response, license
+renewal, evidence binder export, live credentials, broader rule sources, and
+receipt capture remain follow-ups.
 Asset and Supply and Vertical Packaged Worker contracts are discoverable as
 planned future-worker metadata. Their first commands still use `/worker`, keep
 operation inputs under `config`, and remain non-executable until runtime

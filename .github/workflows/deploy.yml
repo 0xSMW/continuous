@@ -835,10 +835,25 @@ jobs:
               -d "$COMPLIANCE_FILING_PAYLOAD"
           )"
 
-          echo "$COMPLIANCE_FILING_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,worker:.data.worker.role,result:{created:.data.result.created,workerRunId:.data.result.workerRunId,filingDraftId:.data.result.filingDraftId,packetId:.data.result.packetId,documentId:.data.result.documentId,approvalRequestId:.data.result.approvalRequestId,complianceViewId:.data.result.complianceViewId,workflowStepCount:(.data.result.workflowStepIds | length),externalExecution:.data.result.externalExecution,agencySubmission:.data.result.output.agencySubmission,legalAdvice:.data.result.output.legalAdvice}}'
+          echo "$COMPLIANCE_FILING_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,worker:.data.worker.role,result:{created:.data.result.created,workerRunId:.data.result.workerRunId,reservationId:.data.result.reservationId,usageEventId:.data.result.usageEventId,filingDraftId:.data.result.filingDraftId,packetId:.data.result.packetId,documentId:.data.result.documentId,approvalRequestId:.data.result.approvalRequestId,complianceViewId:.data.result.complianceViewId,workflowStepCount:(.data.result.workflowStepIds | length),externalExecution:.data.result.externalExecution,agencySubmission:.data.result.output.agencySubmission,legalAdvice:.data.result.output.legalAdvice}}'
           echo "$COMPLIANCE_FILING_RESPONSE" | /usr/bin/jq -e \
-            '.error == null and .data.command == "filing.prepare" and .data.worker.role == "compliance_operations" and .data.result.created == true and (.data.result.workerRunId | length > 0) and (.data.result.filingDraftId | length > 0) and (.data.result.packetId | length > 0) and (.data.result.documentId | length > 0) and (.data.result.approvalRequestId | length > 0) and (.data.result.complianceViewId | length > 0) and (.data.result.workflowStepIds | length) >= 3 and .data.result.externalExecution == "blocked" and .data.result.output.agencySubmission == "blocked" and .data.result.output.legalAdvice == "blocked" and .data.result.output.handoff.name == "compliance.obligation_to_owner_review" and .data.result.snapshot.controls.agencySubmission == "blocked"' \
+            '.error == null and .data.command == "filing.prepare" and .data.worker.role == "compliance_operations" and .data.result.created == true and (.data.result.workerRunId | length > 0) and (.data.result.reservationId | length > 0) and (.data.result.usageEventId | length > 0) and .data.result.output.reservationId == .data.result.reservationId and .data.result.output.usageEventId == .data.result.usageEventId and (.data.result.filingDraftId | length > 0) and (.data.result.packetId | length > 0) and (.data.result.documentId | length > 0) and (.data.result.approvalRequestId | length > 0) and (.data.result.complianceViewId | length > 0) and (.data.result.workflowStepIds | length) >= 3 and .data.result.externalExecution == "blocked" and .data.result.output.agencySubmission == "blocked" and .data.result.output.legalAdvice == "blocked" and .data.result.output.handoff.name == "compliance.obligation_to_owner_review" and .data.result.snapshot.controls.agencySubmission == "blocked"' \
             >/dev/null
+          COMPLIANCE_FILING_WORKER_RUN_ID="$(echo "$COMPLIANCE_FILING_RESPONSE" | /usr/bin/jq -r '.data.result.workerRunId')"
+          COMPLIANCE_FILING_RESERVATION_ID="$(echo "$COMPLIANCE_FILING_RESPONSE" | /usr/bin/jq -r '.data.result.reservationId')"
+          COMPLIANCE_FILING_USAGE_ID="$(echo "$COMPLIANCE_FILING_RESPONSE" | /usr/bin/jq -r '.data.result.usageEventId')"
+          COMPLIANCE_FILING_RUN_ROW="$(
+            psql_db -Atc "select coalesce(source,'') || '|' || coalesce(state::text,'') || '|' || coalesce(mode,'') || '|' || coalesce(data->'input'->>'command','') || '|' || coalesce(data->'output'->>'command','') || '|' || coalesce(data->'output'->>'agencySubmission','') || '|' || coalesce(data->'output'->>'legalAdvice','') || '|' || coalesce(data->'completion'->'budget'->>'state','') || '|' || coalesce(data->'completion'->'budget'->>'reservationId','') || '|' || coalesce(data->'completion'->'budget'->>'usageEventId','') from worker_runs where id = '$COMPLIANCE_FILING_WORKER_RUN_ID'::uuid;"
+          )"
+          if [ "$COMPLIANCE_FILING_RUN_ROW" != "continuous.core.worker_runs|done|simulation|filing.prepare|filing.prepare|blocked|blocked|used|$COMPLIANCE_FILING_RESERVATION_ID|$COMPLIANCE_FILING_USAGE_ID" ]; then
+            echo "Unexpected Compliance filing worker run row: $COMPLIANCE_FILING_RUN_ROW" >&2
+            exit 1
+          fi
+          COMPLIANCE_LEGACY_RUN_COUNT="$(psql_db -Atc "select count(*) from worker_runs where source = 'continuous.worker' and idempotency_key = '$COMPLIANCE_FILING_KEY';")"
+          if [ "$COMPLIANCE_LEGACY_RUN_COUNT" != "0" ]; then
+            echo "Compliance filing wrote legacy continuous.worker run rows: $COMPLIANCE_LEGACY_RUN_COUNT" >&2
+            exit 1
+          fi
 
           APPROVAL_INBOX_PAYLOAD='{"view":"inbox","approval":{"tenantSlug":"continuous-demo","subject":"core"},"config":{}}'
           APPROVAL_INBOX_RESPONSE="$(
