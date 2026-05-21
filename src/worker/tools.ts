@@ -106,7 +106,7 @@ export const workerTools = [
           additionalProperties: true,
         },
       },
-      required: ["command", "worker", "config"],
+      required: ["command", "worker", "idempotencyKey", "config"],
       additionalProperties: false,
     },
   },
@@ -363,6 +363,16 @@ function assertWorkerToolEnvelope(name: string, payload: JsonObject) {
 
   if (unexpectedFields.length > 0) {
     throw new Error(workerEnvelopeFieldError("Worker tool payload", envelope.description, unexpectedFields));
+  }
+
+  if (name === "worker.command") {
+    if (!stringValue(payload.command)) {
+      throw new Error("worker.command requires command.");
+    }
+
+    if (!stringValue(payload.idempotencyKey)) {
+      throw new Error("worker.command requires idempotencyKey.");
+    }
   }
 
   const worker = payload.worker;

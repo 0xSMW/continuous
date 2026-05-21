@@ -707,9 +707,64 @@ describe("/approval route", () => {
     expect(response.status).toBe(400);
     expect(body.error).toEqual({
       code: "invalid_approval_command_config",
-      message: "config must be an object when provided.",
+      message: "config is required and must be an object.",
     });
     expect(mocks.decideApproval).not.toHaveBeenCalled();
+  });
+
+  it("requires explicit config on approval command and view envelopes", async () => {
+    const { POST } = await import("./route");
+    const commandResponse = await POST(
+      new Request("http://localhost/approval", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "approval.decide",
+          approval: {
+            id: "77777777-7777-4777-8777-000000000001",
+            tenantSlug: "continuous-demo",
+            subject: "worker",
+          },
+          idempotencyKey: "approval-missing-command-config-001",
+        }),
+      }),
+    );
+    const viewResponse = await POST(
+      new Request("http://localhost/approval", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          view: "inbox",
+          approval: {
+            tenantSlug: "continuous-demo",
+            subject: "worker",
+          },
+        }),
+      }),
+    );
+
+    expect(commandResponse.status).toBe(400);
+    await expect(commandResponse.json()).resolves.toMatchObject({
+      error: {
+        code: "invalid_approval_command_config",
+        message: "config is required and must be an object.",
+      },
+    });
+    expect(viewResponse.status).toBe(400);
+    await expect(viewResponse.json()).resolves.toMatchObject({
+      error: {
+        code: "invalid_approval_view_config",
+        message: "config is required and must be an object.",
+      },
+    });
+    expect(mocks.decideApproval).not.toHaveBeenCalled();
+    expect(mocks.listApprovals).not.toHaveBeenCalled();
   });
 
   it("rejects invalid approval decisions before dispatch", async () => {

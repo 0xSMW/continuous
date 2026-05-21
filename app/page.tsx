@@ -6,7 +6,7 @@ const publicContracts = [
   {
     name: "Worker API",
     status: "Generic",
-    detail: "POST /worker with view or command, worker selectors, idempotencyKey when needed, and config.",
+    detail: "POST /worker with command or view, worker selectors, command idempotencyKey, and config.",
   },
   {
     name: "Core API",
@@ -16,7 +16,7 @@ const publicContracts = [
   {
     name: "Workflow API",
     status: "Ledgered",
-    detail: "POST /workflow with command, workflow selectors, idempotencyKey, and config.",
+    detail: "POST /workflow with command or view, workflow selectors, idempotencyKey for mutations, and config.",
   },
   {
     name: "Approval API",

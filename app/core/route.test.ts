@@ -3908,9 +3908,61 @@ describe("POST /core", () => {
     expect(response.status).toBe(400);
     expect(body.error).toEqual({
       code: "invalid_core_command_config",
-      message: "config must be an object when provided.",
+      message: "config is required and must be an object.",
     });
     expect(mocks.createCoreTask).not.toHaveBeenCalled();
+  });
+
+  it("requires explicit config on Core command and view envelopes", async () => {
+    const { POST } = await import("./route");
+    const commandResponse = await POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "task.create",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "core-missing-command-config-001",
+        }),
+      }),
+    );
+    const viewResponse = await POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          view: "summary",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+        }),
+      }),
+    );
+
+    expect(commandResponse.status).toBe(400);
+    await expect(commandResponse.json()).resolves.toMatchObject({
+      error: {
+        code: "invalid_core_command_config",
+        message: "config is required and must be an object.",
+      },
+    });
+    expect(viewResponse.status).toBe(400);
+    await expect(viewResponse.json()).resolves.toMatchObject({
+      error: {
+        code: "invalid_core_view_config",
+        message: "config is required and must be an object.",
+      },
+    });
+    expect(mocks.createCoreTask).not.toHaveBeenCalled();
+    expect(mocks.getCoreSummarySafe).not.toHaveBeenCalled();
   });
 
   it("requires a tenant for scoped Core summary reads", async () => {

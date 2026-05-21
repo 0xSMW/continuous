@@ -149,6 +149,16 @@ function validateAppServerWorkerArguments(
     };
   }
 
+  if (kind === "command" && !optionalString(args.idempotencyKey)) {
+    return {
+      ok: false,
+      error: {
+        code: "invalid_app_server_tool_call",
+        message: "continuous.worker.command arguments require idempotencyKey.",
+      },
+    };
+  }
+
   return { ok: true };
 }
 

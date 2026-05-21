@@ -40,10 +40,6 @@ function bodyObject(value: unknown) {
 }
 
 function configObject(value: unknown, errorCode = "invalid_workflow_command_config") {
-  if (value === undefined || value === null) {
-    return { ok: true as const, value: {} as Record<string, unknown> };
-  }
-
   if (value && typeof value === "object" && !Array.isArray(value)) {
     return { ok: true as const, value: value as Record<string, unknown> };
   }
@@ -52,7 +48,7 @@ function configObject(value: unknown, errorCode = "invalid_workflow_command_conf
     ok: false as const,
     error: {
       code: errorCode,
-      message: "config must be an object when provided.",
+      message: "config is required and must be an object.",
     },
   };
 }

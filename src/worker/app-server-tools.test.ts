@@ -80,6 +80,10 @@ describe("app-server worker tools", () => {
           ?.inputSchema.properties ?? {},
       ),
     ).not.toContain("operatorEmail");
+    expect(
+      appServerWorkerToolManifest.tools.find((tool) => tool.name === "continuous.worker.command")
+        ?.inputSchema.required,
+    ).toEqual(["command", "worker", "idempotencyKey", "config"]);
     if (!("registry" in schema) || !schema.registry) {
       throw new Error("Expected schema result.");
     }
@@ -673,6 +677,17 @@ describe("app-server worker tools", () => {
         config: {},
       }),
     ).rejects.toThrow("continuous.worker.command requires command.");
+
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.command", {
+        command: "run",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        config: {},
+      }),
+    ).rejects.toThrow("continuous.worker.command requires idempotencyKey.");
 
     await expect(
       executeAppServerWorkerTool("continuous.worker.command", {

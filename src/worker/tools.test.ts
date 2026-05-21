@@ -235,8 +235,13 @@ describe("worker tool contract", () => {
       "idempotencyKey",
       "config",
     ]);
-    expect(localCommand.inputSchema.required).toEqual(["command", "worker", "config"]);
-    expect(appServerCommand.inputSchema.required).toEqual(["command", "worker", "config"]);
+    expect(localCommand.inputSchema.required).toEqual(["command", "worker", "idempotencyKey", "config"]);
+    expect(appServerCommand.inputSchema.required).toEqual([
+      "command",
+      "worker",
+      "idempotencyKey",
+      "config",
+    ]);
     expect(localCommand.inputSchema.additionalProperties).toBe(false);
     expect(appServerCommand.inputSchema.additionalProperties).toBe(false);
 
@@ -335,6 +340,17 @@ describe("worker tool contract", () => {
         idempotencyKey: "local-missing-config-test-001",
       }),
     ).rejects.toThrow("config is required and must be an object.");
+
+    await expect(
+      executeWorkerTool("worker.command", {
+        command: "run",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        config: {},
+      }),
+    ).rejects.toThrow("worker.command requires idempotencyKey.");
 
     for (const command of [
       ["", "api", dashedFamilyRouteSegment, "run"].join("/"),
@@ -2296,6 +2312,7 @@ describe("worker tool contract", () => {
         worker: {
           role: "revenue_operations",
         },
+        idempotencyKey: "adapter-reconcile-missing-tenant-001",
         config: {
           limit: 25,
         },
@@ -2331,6 +2348,7 @@ describe("worker tool contract", () => {
         worker: {
           role: "revenue_operations",
         },
+        idempotencyKey: "adapter-retry-missing-tenant-001",
         config: {
           limit: 25,
         },
@@ -2383,6 +2401,7 @@ describe("worker tool contract", () => {
           role: "revenue_operations",
           tenantSlug: "continuous-demo",
         },
+        idempotencyKey: "adapter-reconcile-limit-001",
         config: {
           limit: 1.5,
         },
@@ -2398,6 +2417,7 @@ describe("worker tool contract", () => {
           role: "revenue_operations",
           tenantSlug: "continuous-demo",
         },
+        idempotencyKey: "adapter-retry-limit-001",
         config: {
           limit: 1.5,
         },

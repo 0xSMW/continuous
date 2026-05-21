@@ -94,7 +94,7 @@ export const appServerWorkerTools = [
           additionalProperties: true,
         },
       },
-      required: ["command", "worker", "config"],
+      required: ["command", "worker", "idempotencyKey", "config"],
       additionalProperties: false,
       $defs: {
         workerTarget: workerTargetInputSchema,
@@ -142,7 +142,7 @@ export const appServerWorkerToolManifest = {
     readTools: "continuous.worker.view",
     mutationTools: "continuous.worker.command",
     runtimeControl:
-      "App-server worker reads and commands delegate to the same registry used by /worker and bun run worker:tool. Caller supplies view or command, worker target, idempotencyKey when needed, and config; operator identity must be supplied by authenticated transport context or by the trusted local transport environment, and no production token is loaded.",
+      "App-server worker reads and commands delegate to the same registry used by /worker and bun run worker:tool. Reads supply view, worker target, and config; commands supply command, worker target, idempotencyKey, and config. Operator identity must be supplied by authenticated transport context or by the trusted local transport environment, and no production token is loaded.",
   },
   tools: appServerWorkerTools,
 } as const;
@@ -357,6 +357,10 @@ function assertAppServerWorkerCommandEnvelope(args: JsonObject) {
     );
   }
 
+  if (!stringValue(args.command)) {
+    throw new Error("continuous.worker.command requires command.");
+  }
+
   const targetResult = validateWorkerTargetEnvelope(args.worker);
 
   if (!targetResult.ok) {
@@ -367,6 +371,10 @@ function assertAppServerWorkerCommandEnvelope(args: JsonObject) {
 
   if (!configResult.ok) {
     throw new Error(configResult.message);
+  }
+
+  if (!stringValue(args.idempotencyKey)) {
+    throw new Error("continuous.worker.command requires idempotencyKey.");
   }
 }
 

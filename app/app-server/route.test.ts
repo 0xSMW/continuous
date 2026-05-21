@@ -2105,4 +2105,44 @@ describe("/app-server route", () => {
     expect(mocks.authorizeManagedControlPlaneCredential).not.toHaveBeenCalled();
     expect(mocks.executeAppServerWorkerDynamicToolCall).not.toHaveBeenCalled();
   });
+
+  it("rejects worker commands without payload idempotency before dynamic dispatch", async () => {
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/app-server", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          tool: "continuous.worker.command",
+          arguments: {
+            command: "lead.read",
+            worker: {
+              role: "revenue_operations",
+              tenantSlug: "continuous-demo",
+            },
+            config: {
+              source: "website_form",
+              records: [],
+            },
+          },
+          callId: "call-command-missing-idempotency",
+          threadId: "thread-001",
+          turnId: "turn-001",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "invalid_app_server_tool_call",
+        message: "continuous.worker.command arguments require idempotencyKey.",
+      },
+    });
+    expect(mocks.authorizeManagedControlPlaneCredential).not.toHaveBeenCalled();
+    expect(mocks.executeAppServerWorkerDynamicToolCall).not.toHaveBeenCalled();
+  });
 });

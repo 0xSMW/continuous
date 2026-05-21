@@ -810,9 +810,62 @@ describe("/workflow route scope", () => {
     expect(response.status).toBe(400);
     expect(body.error).toEqual({
       code: "invalid_workflow_command_config",
-      message: "config must be an object when provided.",
+      message: "config is required and must be an object.",
     });
     expect(mocks.executeWorkflowSteps).not.toHaveBeenCalled();
+  });
+
+  it("requires explicit config on workflow command and view envelopes", async () => {
+    mocks.env.CONTROL_PLANE_ALLOWED_TENANTS = "continuous-demo";
+
+    const { POST } = await import("./route");
+    const commandResponse = await POST(
+      new Request("http://localhost/workflow", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "steps.execute",
+          workflow: {
+            tenantSlug: "continuous-demo",
+          },
+        }),
+      }),
+    );
+    const viewResponse = await POST(
+      new Request("http://localhost/workflow", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          view: "overview",
+          workflow: {
+            tenantSlug: "continuous-demo",
+          },
+        }),
+      }),
+    );
+
+    expect(commandResponse.status).toBe(400);
+    await expect(commandResponse.json()).resolves.toMatchObject({
+      error: {
+        code: "invalid_workflow_command_config",
+        message: "config is required and must be an object.",
+      },
+    });
+    expect(viewResponse.status).toBe(400);
+    await expect(viewResponse.json()).resolves.toMatchObject({
+      error: {
+        code: "invalid_workflow_view_config",
+        message: "config is required and must be an object.",
+      },
+    });
+    expect(mocks.executeWorkflowSteps).not.toHaveBeenCalled();
+    expect(mocks.listWorkflows).not.toHaveBeenCalled();
   });
 
   it("preserves mapped workflow service failures", async () => {
