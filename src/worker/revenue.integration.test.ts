@@ -6831,6 +6831,18 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(launchGates.find((gate) => gate.key === "controlled_send_receipt_and_rollback")?.state).toBe("blocked");
     expect(launchGates.find((gate) => gate.key === "cash_and_payment_handoff_credentials")?.state).toBe("blocked");
 
+    const paymentLinkKey = `ci-worker-payment-link-prepare-${runId}`;
+    const paymentLinkConfig = {
+      invoiceObjectId: "33333333-3333-4333-8333-000000000006",
+      sourceRefs: {
+        quoteObjectId: "33333333-3333-4333-8333-000000000004",
+      },
+      policy: {
+        requireOwnerApproval: true,
+        providerPaymentLinkCreation: "blocked",
+        moneyMovement: "blocked",
+      },
+    };
     const paymentLink = await executeWorkerCommand({
       command: "payment_link.prepare",
       target: {
@@ -6838,18 +6850,8 @@ maybeDescribe("Revenue Worker integration eval", () => {
         tenantSlug: "continuous-demo",
       },
       operatorEmail: "owner@continuoushq.com",
-      idempotencyKey: `ci-worker-payment-link-prepare-${runId}`,
-      config: {
-        invoiceObjectId: "33333333-3333-4333-8333-000000000006",
-        sourceRefs: {
-          quoteObjectId: "33333333-3333-4333-8333-000000000004",
-        },
-        policy: {
-          requireOwnerApproval: true,
-          providerPaymentLinkCreation: "blocked",
-          moneyMovement: "blocked",
-        },
-      },
+      idempotencyKey: paymentLinkKey,
+      config: paymentLinkConfig,
     });
     const paymentLinkResult = objectValue(paymentLink.result);
     const paymentLinkOutput = objectValue(paymentLinkResult.output);
@@ -6873,18 +6875,8 @@ maybeDescribe("Revenue Worker integration eval", () => {
         tenantSlug: "continuous-demo",
       },
       operatorEmail: "owner@continuoushq.com",
-      idempotencyKey: `ci-worker-payment-link-prepare-${runId}`,
-      config: {
-        invoiceObjectId: "33333333-3333-4333-8333-000000000006",
-        sourceRefs: {
-          quoteObjectId: "33333333-3333-4333-8333-000000000004",
-        },
-        policy: {
-          requireOwnerApproval: true,
-          providerPaymentLinkCreation: "blocked",
-          moneyMovement: "blocked",
-        },
-      },
+      idempotencyKey: paymentLinkKey,
+      config: paymentLinkConfig,
     });
     const paymentLinkReplayResult = objectValue(paymentLinkReplay.result);
 
@@ -6946,6 +6938,13 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(paymentLinkRunBudget.state).toBe("used");
     expect(paymentLinkRunBudget.reservationId).toBe(paymentLinkResult.reservationId);
     expect(paymentLinkRunBudget.usageEventId).toBe(paymentLinkResult.usageEventId);
+    const [paymentLinkReservation] = await db
+      .select()
+      .from(budgetReservations)
+      .where(eq(budgetReservations.id, stringValue(paymentLinkResult.reservationId)))
+      .limit(1);
+
+    expect(paymentLinkReservation?.taskId).toBe(paymentLinkRun?.taskId);
     expect(paymentLinkObject?.type).toBe("payment");
     expect(paymentLinkObject?.state).toBe("approval_required");
     expect(paymentLinkPayment?.state).toBe("approval_required");
@@ -6962,6 +6961,83 @@ maybeDescribe("Revenue Worker integration eval", () => {
     );
     expect(paymentLinkReceipt?.kind).toBe("receipt");
     expect(objectValue(paymentLinkReceipt?.data).providerPaymentLinkCreation).toBe("blocked");
+
+    const [paymentRowsBeforeRepair] = await db
+      .select({ value: count() })
+      .from(payments)
+      .where(eq(payments.externalId, `revenue-payment-link:${paymentLinkKey}`));
+    const pendingPaymentLinkOutput = {
+      ...paymentLinkOutput,
+      reservationId: stringValue(paymentLinkResult.reservationId),
+      usageEventId: null,
+    } satisfies JsonObject;
+
+    await db
+      .delete(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.source, "continuous.core.worker_runs"),
+          eq(auditEvents.idempotencyKey, `${paymentLinkKey}:worker_run_completed`),
+        ),
+      );
+    await db
+      .delete(events)
+      .where(
+        and(
+          eq(events.source, "continuous.core.worker_runs"),
+          eq(events.idempotencyKey, `${paymentLinkKey}:worker_run_completed`),
+        ),
+      );
+    await db.delete(usageEvents).where(eq(usageEvents.id, stringValue(paymentLinkResult.usageEventId)));
+    await db
+      .update(budgetReservations)
+      .set({ state: "held", taskId: null, updatedAt: new Date() })
+      .where(eq(budgetReservations.id, stringValue(paymentLinkResult.reservationId)));
+    await db
+      .update(workerRuns)
+      .set({
+        state: "running",
+        eventId: stringValue(paymentLinkResult.eventId),
+        data: {
+          ...paymentLinkRunData,
+          output: {},
+          completion: {},
+          pendingCompletion: {
+            output: pendingPaymentLinkOutput,
+          },
+        },
+        updatedAt: new Date(),
+      })
+      .where(eq(workerRuns.id, stringValue(paymentLinkResult.workerRunId)));
+
+    const repairedPaymentLinkReplay = await executeWorkerCommand({
+      command: "payment_link.prepare",
+      target: {
+        role: "revenue_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: paymentLinkKey,
+      config: paymentLinkConfig,
+    });
+    const repairedPaymentLinkResult = objectValue(repairedPaymentLinkReplay.result);
+    const [paymentRowsAfterRepair] = await db
+      .select({ value: count() })
+      .from(payments)
+      .where(eq(payments.externalId, `revenue-payment-link:${paymentLinkKey}`));
+    const [repairedReservation] = await db
+      .select()
+      .from(budgetReservations)
+      .where(eq(budgetReservations.id, stringValue(paymentLinkResult.reservationId)))
+      .limit(1);
+
+    expect(repairedPaymentLinkResult.created).toBe(false);
+    expect(repairedPaymentLinkResult.workerRunId).toBe(paymentLinkResult.workerRunId);
+    expect(repairedPaymentLinkResult.usageEventId).toBeTruthy();
+    expect(repairedPaymentLinkResult.usageEventId).not.toBe(paymentLinkResult.usageEventId);
+    expect(paymentRowsAfterRepair.value).toBe(paymentRowsBeforeRepair.value);
+    expect(repairedReservation?.state).toBe("used");
+    expect(repairedReservation?.taskId).toBe(paymentLinkRun?.taskId);
 
     const paymentReadiness = await executeWorkerView({
       view: "readiness",
