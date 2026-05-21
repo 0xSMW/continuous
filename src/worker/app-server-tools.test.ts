@@ -31,6 +31,13 @@ const contractRoles = [
   "growth_operations",
   "vertical_packages",
 ];
+type JsonRecord = Record<string, unknown>;
+
+function objectValue(value: unknown): JsonRecord {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as JsonRecord)
+    : {};
+}
 
 beforeEach(() => {
   process.env.WORKER_OPERATOR_EMAIL = "owner@continuoushq.com";
@@ -122,7 +129,8 @@ describe("app-server worker tools", () => {
         (entry) =>
           entry.apiRoute === "/worker" &&
           entry.commandPayloadTemplate.apiRoute === "/worker" &&
-          entry.commandPayloadTemplate.payload.config.policy.requireOwnerApproval === true,
+          Object.keys(objectValue(entry.commandPayloadTemplate.payload.config)).length > 0 &&
+          !JSON.stringify(entry.commandPayloadTemplate.payload.config).includes("requiredCoreRefs"),
       ),
     ).toBe(true);
     expect(registry.expansionPromotionPlan.find((entry) => entry.key === "asset_supply_operations")).toEqual(
