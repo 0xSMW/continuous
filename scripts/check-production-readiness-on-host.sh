@@ -34,14 +34,45 @@ bool_enabled() {
 }
 
 env_value() {
-  file="$1"
-  name="$2"
+  local file="$1"
+  local name="$2"
+  local raw value
 
   if [ ! -f "$file" ]; then
     return
   fi
 
-  bash -c 'set -a; source "$1"; name="$2"; printf "%s" "${!name-}"' _ "$file" "$name" 2>/dev/null
+  if [[ ! "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+    return
+  fi
+
+  raw="$(
+    awk -v name="$name" '
+      /^[[:space:]]*($|#)/ { next }
+      {
+        sub(/\r$/, "")
+        if ($0 ~ "^[[:space:]]*" name "=") {
+          print substr($0, index($0, "=") + 1)
+        }
+      }
+    ' "$file" 2>/dev/null | tail -1
+  )"
+
+  if [ -z "$raw" ]; then
+    return
+  fi
+
+  value="$raw"
+
+  if [[ "$value" == \"*\" && "$value" == *\" ]]; then
+    value="${value:1:${#value}-2}"
+  elif [[ "$value" == \'*\' && "$value" == *\' ]]; then
+    value="${value:1:${#value}-2}"
+  fi
+
+  # Install scripts write shell-escaped key/value files. Decode simple backslash
+  # escapes without evaluating the file as code.
+  printf '%s' "$value" | sed 's/\\\(.\)/\1/g'
 }
 
 require_file() {
@@ -181,27 +212,32 @@ run_object_storage_check() {
     return
   fi
 
+  s3_env_args=()
+  for name in \
+    BACKUP_S3_ENDPOINT \
+    BACKUP_S3_BUCKET \
+    BACKUP_S3_REGION \
+    BACKUP_S3_PREFIX \
+    BACKUP_S3_ACCESS_KEY_ID \
+    BACKUP_S3_SECRET_ACCESS_KEY \
+    AWS_ENDPOINT_URL_S3 \
+    AWS_REGION \
+    AWS_ACCESS_KEY_ID \
+    AWS_SECRET_ACCESS_KEY; do
+    value="$(env_value "$BACKUP_ENV_FILE" "$name")"
+
+    if [ -n "$value" ]; then
+      s3_env_args+=(-e "$name=$value")
+    fi
+  done
+
+  backup_s3_max_age_hours="$(env_value "$BACKUP_ENV_FILE" BACKUP_S3_MAX_AGE_HOURS)"
+
   output="$(
-    cd "$APP_DIR" && set -a && source "$BACKUP_ENV_FILE" && set +a && \
-      s3_env_args=() && \
-      for name in \
-        BACKUP_S3_ENDPOINT \
-        BACKUP_S3_BUCKET \
-        BACKUP_S3_REGION \
-        BACKUP_S3_PREFIX \
-        BACKUP_S3_ACCESS_KEY_ID \
-        BACKUP_S3_SECRET_ACCESS_KEY \
-        AWS_ENDPOINT_URL_S3 \
-        AWS_REGION \
-        AWS_ACCESS_KEY_ID \
-        AWS_SECRET_ACCESS_KEY; do
-        if [ -n "${!name:-}" ]; then
-          s3_env_args+=(-e "$name=${!name}")
-        fi
-      done && \
+    cd "$APP_DIR" && \
       docker compose --profile tools run --rm -T \
         "${s3_env_args[@]}" \
-        -e "BACKUP_S3_MAX_AGE_HOURS=${BACKUP_S3_MAX_AGE_HOURS:-$BACKUP_MAX_AGE_HOURS}" \
+        -e "BACKUP_S3_MAX_AGE_HOURS=${backup_s3_max_age_hours:-$BACKUP_MAX_AGE_HOURS}" \
         migrate bun scripts/s3-backup-object.ts --check-latest 2>&1
   )"
   status="$?"

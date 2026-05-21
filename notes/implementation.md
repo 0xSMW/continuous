@@ -201,6 +201,8 @@
 | Added app-server bridge route scope | `POST /app-server` is now treated as a separate control-plane route/audience for Codex dynamic tool calls; it authenticates `app_server:*` bridge commands, then passes scoped worker-registry context into `continuous.worker.command` or `continuous.worker.view` without accepting operator identity in payloads |
 | Bounded deploy readiness smokes | Production deploy now times out Postgres and scheduler readiness checks with container logs, and host smoke probes `/health`, `/worker`, and `/app-server` with bounded curl calls so failures report quickly instead of waiting for the job cap |
 | Prevented shallow smoke stdin drain | `scripts/smoke-production-on-host.sh` now closes stdin around its Postgres version probe so heredoc-driven deploy scripts continue into deeper credential, Core worker lifecycle, and worker runtime smokes |
+| Hardened readiness env parsing | `scripts/check-production-readiness-on-host.sh` now reads explicit key/value pairs from readiness, backup, and observability env files and passes only whitelisted backup credentials into the object-storage check instead of shell-sourcing host files |
+| Aligned deploy approval smoke with read envelopes | The DigitalOcean deploy smoke now reads the approval inbox through `POST /approval` with `view`, `approval`, and `config`, matching the canonical control-plane API shape |
 
 ### Tradeoffs
 

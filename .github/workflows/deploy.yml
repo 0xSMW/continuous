@@ -835,10 +835,13 @@ jobs:
             '.error == null and .data.command == "filing.prepare" and .data.worker.role == "compliance_operations" and .data.result.created == true and (.data.result.workerRunId | length > 0) and (.data.result.filingDraftId | length > 0) and (.data.result.packetId | length > 0) and (.data.result.documentId | length > 0) and (.data.result.approvalRequestId | length > 0) and (.data.result.complianceViewId | length > 0) and (.data.result.workflowStepIds | length) >= 3 and .data.result.externalExecution == "blocked" and .data.result.output.agencySubmission == "blocked" and .data.result.output.legalAdvice == "blocked" and .data.result.output.handoff.name == "compliance.obligation_to_owner_review" and .data.result.snapshot.controls.agencySubmission == "blocked"' \
             >/dev/null
 
+          APPROVAL_INBOX_PAYLOAD='{"view":"inbox","approval":{"tenantSlug":"continuous-demo","subject":"core"},"config":{}}'
           APPROVAL_INBOX_RESPONSE="$(
             curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
-              "https://continuoushq.com/approval?view=inbox&tenantSlug=continuous-demo&subject=core" \
-              -H "authorization: Bearer $WORKER_TOKEN"
+              -X POST https://continuoushq.com/approval \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$APPROVAL_INBOX_PAYLOAD"
           )"
 
           echo "$APPROVAL_INBOX_RESPONSE" | /usr/bin/jq -c '{api,error,view:.data.view,subject:.data.approvals.subject,count:(.data.approvals.approvals | length)}'

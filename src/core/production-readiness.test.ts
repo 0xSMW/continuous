@@ -41,6 +41,11 @@ describe("production readiness operations", () => {
     expect(readiness).toContain("NON_ROOT_ACCESS_USER");
     expect(readiness).toContain("attest-non-root-access-on-host.sh");
     expect(readiness).toContain("non_root_access_live_check");
+    expect(readiness).toContain("awk -v name=\"$name\"");
+    expect(readiness).toContain("Decode simple backslash");
+    expect(readiness).toContain("s3_env_args+=(-e \"$name=$value\")");
+    expect(readiness).not.toContain("source \"$BACKUP_ENV_FILE\"");
+    expect(readiness).not.toContain("source \"$1\"");
 
     expect(attest).toContain("DEPLOY_USER_NAME");
     expect(attest).toContain("deploy_user_is_root");
@@ -95,6 +100,8 @@ describe("production readiness operations", () => {
     expect(deployWorkflow.indexOf("Preflight production readiness gate")).toBeLessThan(
       deployWorkflow.indexOf("Production readiness gate"),
     );
+    expect(deployWorkflow).toContain('"view":"inbox","approval":{"tenantSlug":"continuous-demo","subject":"core"},"config":{}');
+    expect(deployWorkflow).not.toContain("/approval?view=");
 
     expect(deploymentDocs).toContain("HOST=45.55.53.92 ./scripts/install-non-root-access.sh");
     expect(deploymentDocs).toContain("HOST=45.55.53.92 ./scripts/deploy.sh");
