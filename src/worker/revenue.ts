@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { and, count, desc, eq, sql } from "drizzle-orm";
+import { and, count, desc, eq, inArray, sql } from "drizzle-orm";
 
 import { db as defaultDb } from "../db/client";
 import {
@@ -122,6 +122,42 @@ export type RevenueWorkerSnapshot = {
     state: string;
     mode: string;
   } | null;
+};
+
+type RevenueReadinessCheckState = "ready" | "blocked";
+
+export type RevenueReadinessCheck = {
+  key: string;
+  label: string;
+  state: RevenueReadinessCheckState;
+  details: JsonObject;
+};
+
+export type RevenueReadinessGate = {
+  key: string;
+  state: "blocked";
+  label: string;
+  reason: string;
+  requiredFor: string;
+};
+
+export type RevenueWorkerReadiness = {
+  worker: RevenueWorkerSnapshot["worker"];
+  status: RevenueReadinessCheckState;
+  dryRunReady: boolean;
+  checks: RevenueReadinessCheck[];
+  blockers: RevenueReadinessCheck[];
+  liveCredentialGates: RevenueReadinessGate[];
+  proof: {
+    latestWorkerRunId: string | null;
+    latestWorkerRunMode: string | null;
+    latestWorkerRunState: string | null;
+    latestWorkerRunIdempotencyKey: string | null;
+    latestWorkerRunAt: string | null;
+    workflowDefinitionId: string | null;
+    quoteApprovalViewId: string | null;
+    adapterReceiptEvidenceId: string | null;
+  };
 };
 
 export type RevenueWorkerRunResult = {
@@ -2629,6 +2665,383 @@ export async function getRevenueWorkerSnapshotSafe(selector: RevenueWorkerSelect
         latestRun: null,
       },
       error: error instanceof Error ? error.message : "Unknown Revenue Worker error",
+    };
+  }
+}
+
+const revenueReadinessCapabilityKeys = [
+  "lead.read",
+  "lead.classify",
+  "response.draft",
+  "quote.prepare",
+] as const;
+
+const revenueLiveCredentialGates: RevenueReadinessGate[] = [
+  {
+    key: "controlled_customer_send_credentials",
+    state: "blocked",
+    label: "Controlled customer send credentials",
+    reason:
+      "Production sender and CRM managed credential references must be provisioned before external customer communication can execute.",
+    requiredFor: "live_external_send",
+  },
+  {
+    key: "controlled_send_receipt_and_rollback",
+    state: "blocked",
+    label: "Controlled-send receipt and rollback proof",
+    reason:
+      "A first controlled send needs provider receipt capture plus rollback or escalation evidence before live execution is unblocked.",
+    requiredFor: "live_external_send",
+  },
+  {
+    key: "cash_and_payment_handoff_credentials",
+    state: "blocked",
+    label: "Cash and payment handoff credentials",
+    reason:
+      "Accounting, payment, and bank credentials remain explicit handoff gates; Revenue may prepare packets but cannot move money.",
+    requiredFor: "cash_handoff",
+  },
+];
+
+function revenueReadinessCheck(input: {
+  key: string;
+  label: string;
+  ready: boolean;
+  details: JsonObject;
+}): RevenueReadinessCheck {
+  return {
+    key: input.key,
+    label: input.label,
+    state: input.ready ? "ready" : "blocked",
+    details: input.details,
+  };
+}
+
+function revenueReadinessFromChecks(input: {
+  worker: RevenueWorkerSnapshot["worker"];
+  checks: RevenueReadinessCheck[];
+  proof?: Partial<RevenueWorkerReadiness["proof"]>;
+}) {
+  const blockers = input.checks.filter((check) => check.state === "blocked");
+
+  return {
+    worker: input.worker,
+    status: blockers.length === 0 ? "ready" : "blocked",
+    dryRunReady: blockers.length === 0,
+    checks: input.checks,
+    blockers,
+    liveCredentialGates: revenueLiveCredentialGates,
+    proof: {
+      latestWorkerRunId: input.proof?.latestWorkerRunId ?? null,
+      latestWorkerRunMode: input.proof?.latestWorkerRunMode ?? null,
+      latestWorkerRunState: input.proof?.latestWorkerRunState ?? null,
+      latestWorkerRunIdempotencyKey: input.proof?.latestWorkerRunIdempotencyKey ?? null,
+      latestWorkerRunAt: input.proof?.latestWorkerRunAt ?? null,
+      workflowDefinitionId: input.proof?.workflowDefinitionId ?? null,
+      quoteApprovalViewId: input.proof?.quoteApprovalViewId ?? null,
+      adapterReceiptEvidenceId: input.proof?.adapterReceiptEvidenceId ?? null,
+    },
+  } satisfies RevenueWorkerReadiness;
+}
+
+export async function getRevenueReadiness(input: {
+  tenantSlug?: string;
+  workerId?: string;
+  role?: string;
+  db?: Database;
+}): Promise<RevenueWorkerReadiness> {
+  const db = input.db ?? defaultDb;
+  const snapshot = await getRevenueWorkerSnapshot(db, input);
+
+  if (!snapshot.worker) {
+    return revenueReadinessFromChecks({
+      worker: null,
+      checks: [
+        revenueReadinessCheck({
+          key: "worker_registered",
+          label: "Revenue worker registered",
+          ready: false,
+          details: {
+            expectedRole: input.role ?? revenueWorkerRole,
+            tenantSlug: input.tenantSlug ?? null,
+          },
+        }),
+      ],
+    });
+  }
+
+  const now = new Date();
+  const [workerRow] = await db
+    .select({
+      id: workers.id,
+      tenantId: workers.tenantId,
+      state: workers.state,
+    })
+    .from(workers)
+    .where(eq(workers.id, snapshot.worker.id))
+    .limit(1);
+
+  if (!workerRow) {
+    return revenueReadinessFromChecks({
+      worker: snapshot.worker,
+      checks: [
+        revenueReadinessCheck({
+          key: "worker_registered",
+          label: "Revenue worker registered",
+          ready: false,
+          details: {
+            workerId: snapshot.worker.id,
+            reason: "worker_row_missing",
+          },
+        }),
+      ],
+    });
+  }
+
+  const [
+    activeCapabilities,
+    activeGrants,
+    budgetAccountRows,
+    workflowRows,
+    latestDryRunRows,
+    quoteApprovalViews,
+  ] = await Promise.all([
+    db
+      .select({ id: capabilities.id, key: capabilities.key })
+      .from(capabilities)
+      .where(and(inArray(capabilities.key, [...revenueReadinessCapabilityKeys]), eq(capabilities.active, true))),
+    db
+      .select({ grantId: capabilityGrants.id, key: capabilities.key })
+      .from(capabilityGrants)
+      .innerJoin(capabilities, eq(capabilityGrants.capabilityId, capabilities.id))
+      .where(
+        and(
+          eq(capabilityGrants.tenantId, workerRow.tenantId),
+          eq(capabilityGrants.actorType, "worker"),
+          eq(capabilityGrants.actorId, workerRow.id),
+          eq(capabilityGrants.active, true),
+          eq(capabilities.active, true),
+          inArray(capabilities.key, [...revenueReadinessCapabilityKeys]),
+          sql`(${capabilityGrants.startsAt} is null or ${capabilityGrants.startsAt} <= ${now})`,
+          sql`(${capabilityGrants.endsAt} is null or ${capabilityGrants.endsAt} > ${now})`,
+        ),
+      ),
+    db
+      .select({
+        id: budgetAccounts.id,
+        name: budgetAccounts.name,
+        policyId: budgetAccounts.policyId,
+        policyActive: budgetPolicies.active,
+        monthlyUnits: budgetPolicies.monthlyUnits,
+        perTaskUnits: budgetPolicies.perTaskUnits,
+      })
+      .from(budgetAccounts)
+      .leftJoin(budgetPolicies, eq(budgetAccounts.policyId, budgetPolicies.id))
+      .where(
+        and(
+          eq(budgetAccounts.tenantId, workerRow.tenantId),
+          eq(budgetAccounts.target, "worker"),
+          eq(budgetAccounts.targetId, workerRow.id),
+          eq(budgetAccounts.active, true),
+        ),
+      )
+      .orderBy(budgetAccounts.createdAt)
+      .limit(1),
+    db
+      .select({ id: workflowDefinitions.id, key: workflowDefinitions.key, version: workflowDefinitions.version })
+      .from(workflowDefinitions)
+      .where(and(eq(workflowDefinitions.key, revenueWorkflowKey), eq(workflowDefinitions.active, true)))
+      .orderBy(workflowDefinitions.version)
+      .limit(1),
+    db
+      .select({
+        id: workerRuns.id,
+        state: workerRuns.state,
+        mode: workerRuns.mode,
+        idempotencyKey: workerRuns.idempotencyKey,
+        startedAt: workerRuns.startedAt,
+        data: workerRuns.data,
+      })
+      .from(workerRuns)
+      .where(
+        and(
+          eq(workerRuns.tenantId, workerRow.tenantId),
+          eq(workerRuns.workerId, workerRow.id),
+          eq(workerRuns.state, "done"),
+          inArray(workerRuns.mode, ["simulation", "quote_preparation"]),
+        ),
+      )
+      .orderBy(desc(workerRuns.startedAt), desc(workerRuns.id))
+      .limit(1),
+    db
+      .select({ id: generatedViews.id, key: generatedViews.key, active: generatedViews.active })
+      .from(generatedViews)
+      .where(
+        and(
+          eq(generatedViews.tenantId, workerRow.tenantId),
+          eq(generatedViews.key, "quote.approval.review"),
+          eq(generatedViews.active, true),
+        ),
+      )
+      .orderBy(desc(generatedViews.updatedAt), desc(generatedViews.id))
+      .limit(1),
+  ]);
+
+  const budgetAccount = budgetAccountRows[0];
+  const allocationRows = budgetAccount
+    ? await db
+        .select({
+          value: count(),
+          units: sql<number>`coalesce(sum(${budgetAllocations.units}), 0)`,
+        })
+        .from(budgetAllocations)
+        .where(
+          and(
+            eq(budgetAllocations.tenantId, workerRow.tenantId),
+            eq(budgetAllocations.accountId, budgetAccount.id),
+            sql`${budgetAllocations.startsAt} <= ${now}`,
+            sql`${budgetAllocations.endsAt} > ${now}`,
+          ),
+        )
+    : [{ value: 0, units: 0 }];
+  const activeCapabilityKeys = new Set(activeCapabilities.map((capability) => capability.key));
+  const grantedCapabilityKeys = new Set(activeGrants.map((grant) => grant.key));
+  const missingCapabilities = revenueReadinessCapabilityKeys.filter(
+    (key) => !activeCapabilityKeys.has(key),
+  );
+  const missingGrants = revenueReadinessCapabilityKeys.filter(
+    (key) => activeCapabilityKeys.has(key) && !grantedCapabilityKeys.has(key),
+  );
+  const workflow = workflowRows[0];
+  const latestDryRun = latestDryRunRows[0];
+  const latestRunData = objectValue(latestDryRun?.data);
+  const latestRunOutput = outputData(latestRunData);
+  const adapterReceiptEvidenceId = stringData(latestRunData, "adapterReceiptEvidenceId");
+  const workflowRunId = stringData(latestRunData, "workflowRunId");
+  const quoteApprovalViewId =
+    stringData(latestRunData, "quoteApprovalViewId") ||
+    stringValue(latestRunOutput.quoteApprovalViewId) ||
+    quoteApprovalViews[0]?.id ||
+    null;
+  const allocationCount = allocationRows[0]?.value ?? 0;
+  const allocationUnits = numberValue(allocationRows[0]?.units);
+  const budgetReady = Boolean(
+    budgetAccount?.id && budgetAccount.policyId && budgetAccount.policyActive === true && allocationCount > 0,
+  );
+  const dryRunProofReady = Boolean(latestDryRun?.id && adapterReceiptEvidenceId && workflowRunId);
+
+  return revenueReadinessFromChecks({
+    worker: snapshot.worker,
+    checks: [
+      revenueReadinessCheck({
+        key: "worker_registered",
+        label: "Revenue worker registered",
+        ready: ["training", "active"].includes(workerRow.state),
+        details: {
+          workerId: workerRow.id,
+          state: workerRow.state,
+          role: snapshot.worker.role,
+        },
+      }),
+      revenueReadinessCheck({
+        key: "capability_grants",
+        label: "Required capability grants active",
+        ready: missingCapabilities.length === 0 && missingGrants.length === 0,
+        details: {
+          required: [...revenueReadinessCapabilityKeys],
+          granted: [...grantedCapabilityKeys],
+          missingCapabilities,
+          missingGrants,
+        },
+      }),
+      revenueReadinessCheck({
+        key: "budget",
+        label: "Budget account, policy, and allocation ready",
+        ready: budgetReady,
+        details: {
+          accountId: budgetAccount?.id ?? null,
+          policyId: budgetAccount?.policyId ?? null,
+          policyActive: budgetAccount?.policyActive ?? false,
+          monthlyUnits: budgetAccount?.monthlyUnits ?? null,
+          perTaskUnits: budgetAccount?.perTaskUnits ?? null,
+          activeAllocations: allocationCount,
+          activeAllocationUnits: allocationUnits,
+        },
+      }),
+      revenueReadinessCheck({
+        key: "workflow",
+        label: "Lead-to-cash workflow definition active",
+        ready: Boolean(workflow?.id),
+        details: {
+          workflowKey: revenueWorkflowKey,
+          workflowDefinitionId: workflow?.id ?? null,
+          version: workflow?.version ?? null,
+        },
+      }),
+      revenueReadinessCheck({
+        key: "latest_dry_run_proof",
+        label: "Latest dry-run worker proof complete",
+        ready: dryRunProofReady,
+        details: {
+          workerRunId: latestDryRun?.id ?? null,
+          state: latestDryRun?.state ?? null,
+          mode: latestDryRun?.mode ?? null,
+          workflowRunId: workflowRunId || null,
+          adapterReceiptEvidenceId: adapterReceiptEvidenceId || null,
+        },
+      }),
+      revenueReadinessCheck({
+        key: "quote_approval_view",
+        label: "Quote approval review view published",
+        ready: Boolean(quoteApprovalViewId),
+        details: {
+          key: "quote.approval.review",
+          viewId: quoteApprovalViewId,
+        },
+      }),
+    ],
+    proof: {
+      latestWorkerRunId: latestDryRun?.id ?? null,
+      latestWorkerRunMode: latestDryRun?.mode ?? null,
+      latestWorkerRunState: latestDryRun?.state ?? null,
+      latestWorkerRunIdempotencyKey: latestDryRun?.idempotencyKey ?? null,
+      latestWorkerRunAt: latestDryRun?.startedAt.toISOString() ?? null,
+      workflowDefinitionId: workflow?.id ?? null,
+      quoteApprovalViewId,
+      adapterReceiptEvidenceId: adapterReceiptEvidenceId || null,
+    },
+  });
+}
+
+export async function getRevenueReadinessSafe(input: {
+  tenantSlug?: string;
+  workerId?: string;
+  role?: string;
+  db?: Database;
+}): Promise<{ ok: boolean; readiness: RevenueWorkerReadiness; error: string | null }> {
+  try {
+    return {
+      ok: true,
+      readiness: await getRevenueReadiness(input),
+      error: null,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown Revenue Worker readiness error.";
+
+    return {
+      ok: false,
+      readiness: revenueReadinessFromChecks({
+        worker: null,
+        checks: [
+          revenueReadinessCheck({
+            key: "readiness_query",
+            label: "Revenue readiness query",
+            ready: false,
+            details: { error: message },
+          }),
+        ],
+      }),
+      error: message,
     };
   }
 }

@@ -453,7 +453,7 @@ describe("worker tool contract", () => {
         },
         config: {},
       }),
-    ).rejects.toThrow("Worker view must be snapshot or approvals.");
+    ).rejects.toThrow("Worker view must be snapshot or approvals or readiness.");
   });
 
   it("exposes registry-backed repo-owned worker tools", () => {
@@ -853,6 +853,7 @@ describe("worker tool contract", () => {
       expect.arrayContaining([
         expect.objectContaining({ role: "revenue_operations", name: "snapshot" }),
         expect.objectContaining({ role: "revenue_operations", name: "approvals" }),
+        expect.objectContaining({ role: "revenue_operations", name: "readiness" }),
         expect.objectContaining({ role: "owner_chief_of_staff", name: "snapshot" }),
         expect.objectContaining({ role: "owner_chief_of_staff", name: "briefs" }),
         expect.objectContaining({ role: "owner_chief_of_staff", name: "decisions" }),

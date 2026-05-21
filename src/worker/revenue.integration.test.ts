@@ -6162,6 +6162,34 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(quoteReceiptEvidence?.kind).toBe("receipt");
     expect(objectValue(quoteReceiptEvidence?.data).externalMutation).toBe(false);
 
+    const readiness = await executeWorkerView({
+      view: "readiness",
+      target: {
+        role: "revenue_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+    });
+    const readinessData = objectValue(readiness.data.readiness);
+    const checks = Array.isArray(readinessData.checks)
+      ? readinessData.checks.map((check) => objectValue(check))
+      : [];
+    const liveCredentialGates = Array.isArray(readinessData.liveCredentialGates)
+      ? readinessData.liveCredentialGates.map((gate) => objectValue(gate))
+      : [];
+    const readinessProof = objectValue(readinessData.proof);
+
+    expect(readiness.error).toBeNull();
+    expect(readiness.data.view).toBe("readiness");
+    expect(readinessData.status).toBe("ready");
+    expect(readinessData.dryRunReady).toBe(true);
+    expect(checks.find((check) => check.key === "latest_dry_run_proof")?.state).toBe("ready");
+    expect(checks.find((check) => check.key === "quote_approval_view")?.state).toBe("ready");
+    expect(readinessProof.latestWorkerRunId).toBe(quoteResult.workerRunId);
+    expect(readinessProof.quoteApprovalViewId).toBe(quoteResult.quoteApprovalViewId);
+    expect(readinessProof.adapterReceiptEvidenceId).toBe(quoteResult.adapterReceiptEvidenceId);
+    expect(liveCredentialGates.every((gate) => gate.state === "blocked")).toBe(true);
+
     const run = await runRevenueWorker({
       idempotencyKey: `ci-worker-run-from-lead-read-${runId}`,
       tenantSlug: "continuous-demo",

@@ -10,6 +10,7 @@ import {
   classifyRevenueLead,
   continueRevenueWorker,
   draftRevenueResponse,
+  getRevenueReadinessSafe,
   getRevenueWorkerSnapshotSafe,
   prepareRevenueQuote,
   readRevenueLeads,
@@ -1200,6 +1201,28 @@ const revenueDefinition: WorkerDefinition = {
             approvals,
           },
           error: null,
+        };
+      },
+    },
+    readiness: {
+      name: "readiness",
+      description: "Read Revenue dry-run proof, launch blockers, and live credential gates.",
+      configSchema: emptyViewConfig,
+      async handle(context) {
+        const result = await getRevenueReadinessSafe({
+          tenantSlug: context.target.tenantSlug,
+          workerId: context.target.workerId,
+          role: context.target.role,
+        });
+
+        return {
+          status: result.ok ? 200 : 500,
+          data: {
+            worker: responseTarget(context.target, result.readiness.worker ? context.target.tenantSlug : null),
+            view: "readiness",
+            readiness: result.readiness,
+          },
+          error: result.error,
         };
       },
     },

@@ -295,6 +295,7 @@ describe("app-server worker tools", () => {
       "license.renewal.prepare",
       "evidence_binder.export",
     ]);
+    expect(registry.views.some((view) => view.role === "revenue_operations" && view.name === "readiness")).toBe(true);
     expect(registry.views.some((view) => view.role === "workforce_operations" && view.name === "readiness")).toBe(true);
     expect(registry.views).toEqual(
       expect.arrayContaining([
