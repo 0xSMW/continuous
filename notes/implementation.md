@@ -560,3 +560,19 @@ letting Core own the budget reservation and usage settlement. The command still
 keeps all operation inputs under `/worker` `config`, writes the same lead
 objects/events/evidence selectors, and records a role-qualified business event
 while the canonical run source stays `continuous.core.worker_runs`.
+
+Production deploy smoke now asserts the same API and lifecycle contract for
+direct and scheduler-owned Revenue `lead.read`: calls still go through
+`POST /worker` with `worker` and `config`, and the resulting read-only run must
+be `continuous.core.worker_runs`, `done`, `read_only`, and budget-settled before
+the deploy can pass. Revenue `run` stays on the existing command runtime source
+until that command is migrated to the Core worker-run lifecycle.
+
+The standalone production smoke now authenticates the worker schema through
+`/app-server`, verifies worker commands and views stay on `apiRoute: "/worker"`,
+and sends an authenticated malformed `/worker` command with top-level operation
+data to prove the route rejects anything that belongs under `config`. The
+worker route also records authenticated malformed envelope, target, and config
+attempts into `control_plane_auth_sessions` before returning validation errors,
+so bad-shape probes are visible in the same audit stream as auth, scope, and
+managed-credential denials.

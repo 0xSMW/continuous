@@ -15,7 +15,8 @@ routing plan without mutating external systems.
 
 ## API Shape
 
-All commands use `POST /worker`; no owner-specific route is added.
+All commands and read views use `POST /worker`; no owner-specific route is
+added. Operation inputs and read filters stay under `config`.
 
 ```json
 {

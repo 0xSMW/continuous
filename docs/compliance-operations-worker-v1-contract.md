@@ -15,7 +15,8 @@ review packets; agency submissions remain human-approved and blocked.
 
 ## API Shape
 
-All commands use `POST /worker`; no compliance-specific route is added.
+All commands and read views use `POST /worker`; no compliance-specific route is
+added. Operation inputs and read filters stay under `config`.
 
 ```json
 {

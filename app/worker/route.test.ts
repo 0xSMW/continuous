@@ -1080,6 +1080,19 @@ describe("/worker route", () => {
           "Worker command payload fields must be command, worker, idempotencyKey, and config. Move operation inputs into config. Unexpected fields: role, tenantSlug, leadPacket.",
       },
     });
+    expect(mocks.recordControlPlaneAuthAttempt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: "worker",
+        access: "write",
+        command: "run",
+        tenantSlug: undefined,
+        workerRole: undefined,
+        guard: expect.objectContaining({
+          ok: false,
+          code: "invalid_worker_command_envelope",
+        }),
+      }),
+    );
     expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
   });
 
@@ -1714,7 +1727,7 @@ describe("/worker route", () => {
 
   it("rejects top-level worker view filters outside the view envelope", async () => {
     const { POST } = await import("./route");
-    const forbiddenFields = ["role", "tenantSlug", "state", "workerRole", "leadSource"];
+    const forbiddenFields = ["role", "tenantSlug", "state", "workerRole", "leadSource", "idempotencyKey"];
 
     for (const field of forbiddenFields) {
       const response = await POST(

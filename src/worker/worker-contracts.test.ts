@@ -453,7 +453,8 @@ describe("future worker contracts", () => {
   it("keeps the Dispatch runtime contract on generic worker commands", () => {
     const source = read("docs/dispatch-operations-worker-v1-contract.md");
 
-    expect(source).toContain("All commands use `POST /worker`; no dispatch-specific route is added.");
+    expect(source).toContain("All commands and read views use `POST /worker`; no dispatch-specific route is");
+    expect(source).toContain("Operation inputs and read filters stay under `config`.");
     expect(source).toContain("`customer_update.draft`");
     expect(source).toContain("`worker.command`");
     expect(source).toContain("customer update draft");
@@ -467,7 +468,7 @@ describe("future worker contracts", () => {
   it("keeps the Finance runtime contract on generic worker commands", () => {
     const source = read("docs/finance-operations-worker-v1-contract.md");
 
-    expect(source).toContain("All commands use `POST /worker`");
+    expect(source).toContain("All commands and read views use `POST /worker`");
     expect(source).toContain("`worker.command`");
     expect(source).toContain("`worker.view`");
     expect(source).toContain("`invoice.prepare`");

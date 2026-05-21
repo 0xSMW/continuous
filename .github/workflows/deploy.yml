@@ -1627,10 +1627,14 @@ jobs:
             >/dev/null
 
           LEAD_READ_WORKER_RUN_ID="$(echo "$LEAD_READ_RESPONSE" | /usr/bin/jq -r '.data.result.workerRunId')"
-          psql_db -At <<SQL
-          select 'lead_read_worker_run' as kind, state, mode, data->'output'->>'readCount', data->'output'->>'externalSend'
-          from worker_runs where id = '$LEAD_READ_WORKER_RUN_ID'::uuid;
-          SQL
+          LEAD_READ_WORKER_RUN_ROW="$(
+            psql_db -Atc "select coalesce(source,'') || '|' || coalesce(state,'') || '|' || coalesce(mode,'') || '|' || coalesce(data->'output'->>'readCount','') || '|' || coalesce(data->'output'->>'externalSend','') || '|' || coalesce(data->'completion'->'budget'->>'state','') from worker_runs where id = '$LEAD_READ_WORKER_RUN_ID'::uuid;"
+          )"
+          echo "lead_read_worker_run|$LEAD_READ_WORKER_RUN_ROW"
+          if [ "$LEAD_READ_WORKER_RUN_ROW" != "continuous.core.worker_runs|done|read_only|1|false|used" ]; then
+            echo "Unexpected Core-backed lead.read worker run row: $LEAD_READ_WORKER_RUN_ROW" >&2
+            exit 1
+          fi
 
           CONNECTION_LEAD_READ_SOURCE_EVENT_ID="deploy-connection-lead-read:$RUN_ID"
           CONNECTION_ADAPTER_KEY="deploy_smoke_buffered_inbox"
@@ -1767,7 +1771,7 @@ jobs:
           CONNECTION_LEAD_READ_WORKER_RUN_ID=""
           for _ in 1 2 3 4 5 6; do
             CONNECTION_LEAD_READ_WORKER_RUN_ID="$(
-              psql_db -Atc "select id from worker_runs where source = 'continuous.worker' and idempotency_key like 'scheduler-lead-read:$CONNECTION_ID:%' and data->'input'->>'command' = 'lead.read' order by created_at desc limit 1;"
+              psql_db -Atc "select id from worker_runs where source = 'continuous.core.worker_runs' and idempotency_key like 'scheduler-lead-read:$CONNECTION_ID:%' and data->'input'->>'command' = 'lead.read' order by created_at desc limit 1;"
             )"
             if [ -n "$CONNECTION_LEAD_READ_WORKER_RUN_ID" ]; then
               break
@@ -1780,9 +1784,9 @@ jobs:
           fi
 
           CONNECTION_LEAD_READ_ROW="$(
-            psql_db -Atc "select coalesce(data->'output'->>'connectionId','') || '|' || coalesce(data->'output'->>'cursor','') || '|' || coalesce(data->'output'->'sourceReader'->>'sourceMode','') from worker_runs where id = '$CONNECTION_LEAD_READ_WORKER_RUN_ID'::uuid;"
+            psql_db -Atc "select coalesce(source,'') || '|' || coalesce(state,'') || '|' || coalesce(mode,'') || '|' || coalesce(data->'output'->>'connectionId','') || '|' || coalesce(data->'output'->>'cursor','') || '|' || coalesce(data->'output'->'sourceReader'->>'sourceMode','') || '|' || coalesce(data->'completion'->'budget'->>'state','') from worker_runs where id = '$CONNECTION_LEAD_READ_WORKER_RUN_ID'::uuid;"
           )"
-          if [ "$CONNECTION_LEAD_READ_ROW" != "$CONNECTION_ID|$CONNECTION_LEAD_READ_SOURCE_EVENT_ID|connection_buffer" ]; then
+          if [ "$CONNECTION_LEAD_READ_ROW" != "continuous.core.worker_runs|done|read_only|$CONNECTION_ID|$CONNECTION_LEAD_READ_SOURCE_EVENT_ID|connection_buffer|used" ]; then
             echo "Unexpected scheduler connection-backed lead.read worker run row: $CONNECTION_LEAD_READ_ROW" >&2
             exit 1
           fi

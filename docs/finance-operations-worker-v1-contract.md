@@ -20,7 +20,8 @@ through the same generic worker registry.
 
 ## API Shape
 
-All commands use `POST /worker`; no finance-specific route is added.
+All commands and read views use `POST /worker`; no finance-specific route is
+added. Operation inputs and read filters stay under `config`.
 
 ```json
 {

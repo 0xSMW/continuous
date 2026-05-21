@@ -16,7 +16,8 @@ documents, or make employment/legal judgments autonomously.
 
 ## API Shape
 
-All commands use `POST /worker`; no workforce-specific route is added.
+All commands and read views use `POST /worker`; no workforce-specific route is
+added. Operation inputs and read filters stay under `config`.
 
 ```json
 {

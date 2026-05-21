@@ -15,7 +15,8 @@ tasks. V1 prepares internal records and dry-run adapter actions only.
 
 ## API Shape
 
-All commands use `POST /worker`; no dispatch-specific route is added.
+All commands and read views use `POST /worker`; no dispatch-specific route is
+added. Operation inputs and read filters stay under `config`.
 
 ```json
 {

@@ -182,7 +182,9 @@ references in the same `config.intake` object:
 ```
 
 The referenced Core records should carry the same flat lead packet in object,
-event, and evidence data:
+event, and evidence data. This is stored Core record data, not a `/worker`
+request body; when sent to worker commands, these fields belong under
+`config.leadPacket` or are referenced through `config.intake`:
 
 ```json
 {

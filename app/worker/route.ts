@@ -9,6 +9,8 @@ import {
 import {
   authorizeControlPlaneAccess,
   authorizeControlPlaneScope,
+  type ControlPlaneAccess,
+  type ControlPlaneAccessResult,
 } from "../../src/worker/security";
 import {
   authorizeManagedControlPlaneCredential,
@@ -185,6 +187,35 @@ function guardErrorResponse(error: { code: string; message: string; status: numb
   );
 }
 
+function validationGuard(error: { code: string; message: string }) {
+  return {
+    ok: false as const,
+    status: 403 as const,
+    code: error.code,
+    message: error.message,
+  };
+}
+
+async function recordWorkerValidationFailure(input: {
+  request: Request;
+  access: ControlPlaneAccess;
+  command?: string;
+  target: WorkerTargetInput;
+  auth: ControlPlaneAccessResult;
+  error: { code: string; message: string };
+}) {
+  await recordControlPlaneAuthAttempt({
+    request: input.request,
+    route: "worker",
+    access: input.access,
+    command: input.command,
+    tenantSlug: input.target.tenantSlug,
+    workerRole: input.target.role,
+    auth: input.auth,
+    guard: validationGuard(input.error),
+  });
+}
+
 export async function GET() {
   return errorResponse(
     {
@@ -249,35 +280,57 @@ export async function POST(request: Request) {
 
   const body = bodyResult.value;
   const payloadKind = workerPayloadKind(body);
+  const acceptedPreAuth = writePreAuth.ok ? writePreAuth : readPreAuth;
 
   if (payloadKind === "mixed") {
+    const error = {
+      code: "invalid_worker_payload_envelope",
+      message: "Worker payload must contain either command or view, not both.",
+    };
+    await recordWorkerValidationFailure({
+      request,
+      access: "write",
+      command: optionalString(body.command) ?? optionalString(body.view),
+      target: targetFrom(body.worker),
+      auth: acceptedPreAuth,
+      error,
+    });
     return errorResponse(
-      {
-        code: "invalid_worker_payload_envelope",
-        message: "Worker payload must contain either command or view, not both.",
-      },
+      error,
       400,
     );
   }
 
   if (payloadKind === "missing") {
+    const error = {
+      code: "invalid_worker_payload_envelope",
+      message: "Worker payload requires a non-empty command or view string.",
+    };
+    await recordWorkerValidationFailure({
+      request,
+      access: "write",
+      target: targetFrom(body.worker),
+      auth: acceptedPreAuth,
+      error,
+    });
     return errorResponse(
-      {
-        code: "invalid_worker_payload_envelope",
-        message: "Worker payload requires a non-empty command or view string.",
-      },
+      error,
       400,
     );
   }
 
   if (payloadKind === "view") {
-    return handleWorkerView(request, body);
+    return handleWorkerView(request, body, readPreAuth);
   }
 
-  return handleWorkerCommand(request, body);
+  return handleWorkerCommand(request, body, writePreAuth);
 }
 
-async function handleWorkerCommand(request: Request, body: Record<string, unknown>) {
+async function handleWorkerCommand(
+  request: Request,
+  body: Record<string, unknown>,
+  preAuth: ControlPlaneAccessResult,
+) {
   const unexpectedFields = unexpectedWorkerPayloadFields(body);
   const command = optionalString(body.command);
   const configResult = configObject(body.config, "invalid_worker_command_config");
@@ -286,35 +339,58 @@ async function handleWorkerCommand(request: Request, body: Record<string, unknow
   const targetResult = validateWorkerTarget(body.worker);
 
   if (unexpectedFields.length > 0) {
-    return errorResponse(
-      {
-        code: "invalid_worker_command_envelope",
-        message: workerEnvelopeFieldError(
-          "Worker command payload",
-          workerCommandEnvelopeDescription,
-          unexpectedFields,
-        ),
-      },
-      400,
-    );
+    const error = {
+      code: "invalid_worker_command_envelope",
+      message: workerEnvelopeFieldError(
+        "Worker command payload",
+        workerCommandEnvelopeDescription,
+        unexpectedFields,
+      ),
+    };
+    await recordWorkerValidationFailure({
+      request,
+      access: "write",
+      command,
+      target,
+      auth: preAuth,
+      error,
+    });
+    return errorResponse(error, 400);
   }
 
   if (!command) {
+    const error = {
+      code: "invalid_worker_command_envelope",
+      message: "Worker command payload requires a non-empty command string.",
+    };
+    await recordWorkerValidationFailure({
+      request,
+      access: "write",
+      target,
+      auth: preAuth,
+      error,
+    });
     return errorResponse(
-      {
-        code: "invalid_worker_command_envelope",
-        message: "Worker command payload requires a non-empty command string.",
-      },
+      error,
       400,
     );
   }
 
   if (!isWorkerOperationIdentifier(command)) {
+    const error = {
+      code: "invalid_worker_command_envelope",
+      message: workerOperationDescription,
+    };
+    await recordWorkerValidationFailure({
+      request,
+      access: "write",
+      command,
+      target,
+      auth: preAuth,
+      error,
+    });
     return errorResponse(
-      {
-        code: "invalid_worker_command_envelope",
-        message: workerOperationDescription,
-      },
+      error,
       400,
     );
   }
@@ -348,10 +424,26 @@ async function handleWorkerCommand(request: Request, body: Record<string, unknow
   }
 
   if (!targetResult.ok) {
+    await recordWorkerValidationFailure({
+      request,
+      access: "write",
+      command,
+      target,
+      auth,
+      error: targetResult.error,
+    });
     return errorResponse(targetResult.error, 400);
   }
 
   if (!configResult.ok) {
+    await recordWorkerValidationFailure({
+      request,
+      access: "write",
+      command,
+      target,
+      auth,
+      error: configResult.error,
+    });
     return errorResponse(configResult.error, 400);
   }
 
@@ -440,7 +532,11 @@ async function handleWorkerCommand(request: Request, body: Record<string, unknow
   }
 }
 
-async function handleWorkerView(request: Request, body: Record<string, unknown>) {
+async function handleWorkerView(
+  request: Request,
+  body: Record<string, unknown>,
+  preAuth: ControlPlaneAccessResult,
+) {
   const unexpectedFields = unexpectedWorkerViewPayloadFields(body);
   const view = optionalString(body.view);
   const configResult = configObject(body.config, "invalid_worker_view_config");
@@ -449,35 +545,58 @@ async function handleWorkerView(request: Request, body: Record<string, unknown>)
   const targetResult = validateWorkerTarget(body.worker);
 
   if (unexpectedFields.length > 0) {
-    return errorResponse(
-      {
-        code: "invalid_worker_view_envelope",
-        message: workerEnvelopeFieldError(
-          "Worker view payload",
-          workerViewEnvelopeDescription,
-          unexpectedFields,
-        ),
-      },
-      400,
-    );
+    const error = {
+      code: "invalid_worker_view_envelope",
+      message: workerEnvelopeFieldError(
+        "Worker view payload",
+        workerViewEnvelopeDescription,
+        unexpectedFields,
+      ),
+    };
+    await recordWorkerValidationFailure({
+      request,
+      access: "read",
+      command: view ? `view.${view}` : undefined,
+      target,
+      auth: preAuth,
+      error,
+    });
+    return errorResponse(error, 400);
   }
 
   if (!view) {
+    const error = {
+      code: "invalid_worker_view_envelope",
+      message: "Worker view payload requires a non-empty view string.",
+    };
+    await recordWorkerValidationFailure({
+      request,
+      access: "read",
+      target,
+      auth: preAuth,
+      error,
+    });
     return errorResponse(
-      {
-        code: "invalid_worker_view_envelope",
-        message: "Worker view payload requires a non-empty view string.",
-      },
+      error,
       400,
     );
   }
 
   if (!isWorkerOperationIdentifier(view)) {
+    const error = {
+      code: "invalid_worker_view_envelope",
+      message: workerOperationDescription,
+    };
+    await recordWorkerValidationFailure({
+      request,
+      access: "read",
+      command: `view.${view}`,
+      target,
+      auth: preAuth,
+      error,
+    });
     return errorResponse(
-      {
-        code: "invalid_worker_view_envelope",
-        message: workerOperationDescription,
-      },
+      error,
       400,
     );
   }
@@ -510,10 +629,26 @@ async function handleWorkerView(request: Request, body: Record<string, unknown>)
   }
 
   if (!targetResult.ok) {
+    await recordWorkerValidationFailure({
+      request,
+      access: "read",
+      command: `view.${view}`,
+      target,
+      auth,
+      error: targetResult.error,
+    });
     return errorResponse(targetResult.error, 400);
   }
 
   if (!configResult.ok) {
+    await recordWorkerValidationFailure({
+      request,
+      access: "read",
+      command: `view.${view}`,
+      target,
+      auth,
+      error: configResult.error,
+    });
     return errorResponse(configResult.error, 400);
   }
 

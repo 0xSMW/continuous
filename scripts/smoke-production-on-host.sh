@@ -127,6 +127,51 @@ if [ -z "$WORKER_TOKEN" ]; then
   exit 1
 fi
 
+APP_SERVER_WORKER_SCHEMA_RESPONSE="$(
+  curl -fsS "${curl_args[@]}" --resolve "$resolve_arg" \
+    -X POST \
+    -H "authorization: Bearer $WORKER_TOKEN" \
+    -H 'content-type: application/json' \
+    --data '{"tool":"continuous.worker.schema","arguments":{},"callId":"production-worker-schema-smoke","threadId":"production-smoke","turnId":"production-smoke"}' \
+    "$app_server_url"
+)"
+printf '%s\n' "$APP_SERVER_WORKER_SCHEMA_RESPONSE" | /usr/bin/jq -c '{api,error,success:.data.success,contentItemCount:(.data.contentItems | length)}'
+printf '%s\n' "$APP_SERVER_WORKER_SCHEMA_RESPONSE" | /usr/bin/jq -e '
+  .api == "continuous.app_server.v1" and
+  .error == null and
+  .data.success == true and
+  (.data.contentItems[0].text | fromjson |
+    .ok == true and
+    .tool == "continuous.worker.schema" and
+    (.data.registry.commands | all(.apiRoute == "/worker")) and
+    (.data.registry.views | all(.apiRoute == "/worker")) and
+    (.data.registry.commands | any(.role == "revenue_operations" and .name == "lead.read" and .configSchema.properties.records.type == "array")) and
+    (.data.registry.commands | any(.role == "compliance_operations" and .name == "filing.prepare" and .configSchema.required == ["filingRequirementId","period"])) and
+    (.data.registry.views | any(.role == "customer_experience_operations" and .name == "signals" and .apiRoute == "/worker")) and
+    (.data.registry.followUpCommands | all(.apiRoute == "/worker" and .toolAlias == "worker.command"))
+  )
+' >/dev/null
+
+invalid_worker_status="$(
+  curl -sS "${curl_args[@]}" --resolve "$resolve_arg" \
+    -o "$worker_smoke_out" -w '%{http_code}' \
+    -X POST \
+    -H "authorization: Bearer $WORKER_TOKEN" \
+    -H 'content-type: application/json' \
+    --data '{"command":"run","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"production-invalid-worker-envelope","leadPacket":{"customerName":"Nope, put me under config"},"config":{}}' \
+    "$worker_url"
+)"
+
+if [ "$invalid_worker_status" != "400" ]; then
+  echo "Expected authenticated malformed $WORKER_PATH payload to fail at the envelope boundary; got $invalid_worker_status." >&2
+  cat "$worker_smoke_out" >&2 || true
+  exit 1
+fi
+/usr/bin/jq -e \
+  '.api == "continuous.worker.v1" and .error.code == "invalid_worker_command_envelope" and (.error.message | contains("Move operation inputs into config"))' \
+  "$worker_smoke_out" \
+  >/dev/null
+
 APP_SERVER_CORE_SCHEMA_RESPONSE="$(
   curl -fsS "${curl_args[@]}" --resolve "$resolve_arg" \
     -X POST \
