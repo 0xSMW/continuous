@@ -392,3 +392,11 @@ tags, build cache, container JSON logs, and stale release archive files before
 uploading and loading release images. Docker cleanup calls are bounded so cleanup
 cannot hang the rollout, while the target, current, and previous app tags stay
 available for rollback on smaller droplets.
+
+Worker command and view names now have an explicit shared operation identifier
+guard across `/worker`, `/app-server`, local worker tools, app-server tools, and
+direct registry dispatch. Canonical operations stay simple, such as `run`,
+`lead.read`, `payment_draft.prepare`, and `price_policy`; URL-shaped names,
+reserved route prefixes, and family-worker command names are rejected before
+registry dispatch. Worker operation inputs still belong under `config` on
+`/worker` and under `arguments.config` on the app-server bridge.

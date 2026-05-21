@@ -1044,6 +1044,49 @@ describe("/worker route", () => {
     expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
   });
 
+  it("rejects route-like or family-worker operation names before registry dispatch", async () => {
+    const { POST } = await import("./route");
+    const badOperations = [
+      ["", "api", "revenue-worker", "run"].join("/"),
+      ["", "revenue-worker"].join("/"),
+      "revenue-worker",
+      ["revenue_worker", "run"].join("."),
+      "worker.run",
+      "worker?view=snapshot",
+      "api.worker.run",
+    ];
+
+    for (const operation of badOperations) {
+      const response = await POST(
+        new Request("http://localhost/worker", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer test-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            command: operation,
+            worker: {
+              role: "revenue_operations",
+              tenantSlug: "continuous-demo",
+            },
+            idempotencyKey: `bad-worker-operation-${operation.replaceAll(/[^a-z0-9]+/g, "-")}`,
+            config: {},
+          }),
+        }),
+      );
+      const body = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(body.error).toEqual({
+        code: "invalid_worker_command_envelope",
+        message:
+          "Worker command and view names must be registered lower_snake_case or dotted operation identifiers such as lead.read or quote.prepare; do not use URL paths, route names, family-worker names, or query strings.",
+      });
+    }
+    expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
+  });
+
   it("rejects malformed optional worker selectors before registry dispatch", async () => {
     const { POST } = await import("./route");
 

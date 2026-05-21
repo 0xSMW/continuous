@@ -16,11 +16,13 @@ import {
 } from "../../src/worker/security";
 import {
   unexpectedEnvelopeFields,
+  isWorkerOperationIdentifier,
   validateWorkerConfigEnvelope,
   validateWorkerTargetEnvelope,
   workerCommandEnvelopeDescription,
   workerCommandEnvelopeFieldSet,
   workerEnvelopeFieldError,
+  workerOperationDescription,
   workerViewEnvelopeDescription,
   workerViewEnvelopeFieldSet,
 } from "../../src/worker/envelope";
@@ -264,6 +266,16 @@ function appServerBridgeTarget(body: Record<string, unknown>):
       };
     }
 
+    if (!isWorkerOperationIdentifier(command)) {
+      return {
+        ok: false,
+        error: {
+          code: "invalid_app_server_tool_call",
+          message: workerOperationDescription,
+        },
+      };
+    }
+
     return {
       ok: true,
       payload: body as AppServerDynamicToolCallParams,
@@ -297,6 +309,16 @@ function appServerBridgeTarget(body: Record<string, unknown>):
         error: {
           code: "invalid_app_server_tool_call",
           message: "continuous.worker.view requires arguments.view.",
+        },
+      };
+    }
+
+    if (!isWorkerOperationIdentifier(view)) {
+      return {
+        ok: false,
+        error: {
+          code: "invalid_app_server_tool_call",
+          message: workerOperationDescription,
         },
       };
     }

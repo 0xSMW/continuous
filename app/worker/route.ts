@@ -17,11 +17,13 @@ import {
 import { defaultMaxJsonBodyBytes, readJsonObjectBody } from "../../src/http/body";
 import {
   unexpectedEnvelopeFields,
+  isWorkerOperationIdentifier,
   validateWorkerConfigEnvelope,
   validateWorkerTargetEnvelope,
   workerCommandEnvelopeDescription,
   workerCommandEnvelopeFieldSet,
   workerEnvelopeFieldError,
+  workerOperationDescription,
   workerViewEnvelopeDescription,
   workerViewEnvelopeFieldSet,
 } from "../../src/worker/envelope";
@@ -307,6 +309,16 @@ async function handleWorkerCommand(request: Request, body: Record<string, unknow
     );
   }
 
+  if (!isWorkerOperationIdentifier(command)) {
+    return errorResponse(
+      {
+        code: "invalid_worker_command_envelope",
+        message: workerOperationDescription,
+      },
+      400,
+    );
+  }
+
   const auth = authorizeControlPlaneAccess({
     enabled: env.WORKER_RUN_ENABLED,
     appEnv: env.APP_ENV,
@@ -455,6 +467,16 @@ async function handleWorkerView(request: Request, body: Record<string, unknown>)
       {
         code: "invalid_worker_view_envelope",
         message: "Worker view payload requires a non-empty view string.",
+      },
+      400,
+    );
+  }
+
+  if (!isWorkerOperationIdentifier(view)) {
+    return errorResponse(
+      {
+        code: "invalid_worker_view_envelope",
+        message: workerOperationDescription,
       },
       400,
     );

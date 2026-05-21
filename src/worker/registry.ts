@@ -73,7 +73,12 @@ import {
   scanSystemsConnectorHealth,
   systemsWorkerRole,
 } from "./systems";
-import { isWorkerRoleIdentifier, workerRoleDescription } from "./envelope";
+import {
+  isWorkerOperationIdentifier,
+  isWorkerRoleIdentifier,
+  workerOperationDescription,
+  workerRoleDescription,
+} from "./envelope";
 import { plannedWorkerContractForRole, workerApiRoute } from "./planned-workers";
 import { normalizeIdempotencyKey } from "./security";
 
@@ -2731,6 +2736,15 @@ export async function executeWorkerCommand(input: {
   const target = resolveWorkerTarget(input.target);
   const definition = workerDefinitions[target.role];
   const commandName = optionalString(input.command);
+
+  if (commandName && !isWorkerOperationIdentifier(commandName)) {
+    throw new PlatformUnavailableError(
+      "invalid_worker_command",
+      workerOperationDescription,
+      400,
+    );
+  }
+
   const command = commandName ? definition.commands[commandName] : undefined;
 
   if (!command) {
@@ -2785,6 +2799,14 @@ export async function executeWorkerView(input: {
     throw new PlatformUnavailableError(
       "worker_view_missing",
       "Worker view requires a non-empty view.",
+      400,
+    );
+  }
+
+  if (!isWorkerOperationIdentifier(viewName)) {
+    throw new PlatformUnavailableError(
+      "invalid_worker_view",
+      workerOperationDescription,
       400,
     );
   }

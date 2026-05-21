@@ -882,10 +882,10 @@ jobs:
             (.registry.views | any(.role == "workforce_operations" and .name == "readiness")) and
             (.registry.views | any(.role == "systems_operations" and .name == "health")) and
             (.registry.views | any(.role == "systems_operations" and .name == "repairs")) and
-            (.registry.contracts | map(.role) == ["revenue_operations","owner_chief_of_staff","dispatch_operations","finance_operations","workforce_operations","compliance_operations","systems_operations","offer_pricing_operations"]) and
+            (.registry.contracts | map(.role) == ["revenue_operations","owner_chief_of_staff","dispatch_operations","finance_operations","workforce_operations","compliance_operations","systems_operations","offer_pricing_operations","customer_experience_operations","asset_supply_operations","growth_operations","vertical_packages"]) and
             (.registry.contracts | all(.apiRoute == "/worker")) and
             (.registry.runtimeContracts | map(.role) == ["revenue_operations","owner_chief_of_staff","dispatch_operations","finance_operations","workforce_operations","compliance_operations","systems_operations","offer_pricing_operations"]) and
-            (.registry.plannedContracts | map(.role) == []) and
+            (.registry.plannedContracts | map(.role) == ["customer_experience_operations","asset_supply_operations","growth_operations","vertical_packages"]) and
             (.registry.commands | all(.apiRoute == "/worker")) and
             (.registry.views | all(.apiRoute == "/worker")) and
             (.registry.plannedCommands == .registry.followUpCommands) and
@@ -903,15 +903,21 @@ jobs:
             (.registry.followUpCommands | any(.role == "compliance_operations" and .name == "evidence_binder.export")) and
             (.registry.followUpCommands | any(.role == "workforce_operations" and .name == "contractor.packet.prepare")) and
             (.registry.followUpCommands | any(.role == "finance_operations" and .name == "expense_code.propose")) and
+            (.registry.plannedFutureWorkerCommands | any(.role == "customer_experience_operations" and .name == "recovery.draft" and .apiRoute == "/worker" and .configSchema.required == ["sourceRefs","policy"])) and
+            (.registry.plannedFutureWorkerCommands | any(.role == "asset_supply_operations" and .name == "reorder.plan" and .apiRoute == "/worker" and .externalExecution == "dry_run")) and
+            (.registry.plannedFutureWorkerCommands | any(.role == "growth_operations" and .name == "campaign.draft" and .apiRoute == "/worker" and .externalExecution == "blocked")) and
+            (.registry.plannedFutureWorkerCommands | any(.role == "vertical_packages" and .name == "package.flow.prepare" and .apiRoute == "/worker" and .configSchema.required == ["packageKey","sourceRefs","policy"])) and
+            (.registry.plannedFutureWorkerViews | any(.role == "vertical_packages" and .name == "package_readiness" and .apiRoute == "/worker" and .configSchema.required == ["packageKey"])) and
             (.registry.followUpViews | any(.role == "revenue_operations" and .name == "quote_review" and .evidencePacket == "quote_approval_packet")) and
             (.registry.commands | any(.name == "run" and .idempotency == "required")) and
             (.registry.commands | any(.name == "continue" and .idempotency == "required")) and
             (.registry.commands | any(.name == "adapters.reconcile" and .requiresTenant == true)) and
             (.registry.expansion | length) >= 12 and
             (.registry.expansion | all(.apiRoute == "/worker")) and
+            (.registry.expansion | all(if (.status == "candidate" or .status == "packaged") then ((.contractPath | type) == "string" and (.evidencePacket | type) == "string") else true end)) and
             (.registry.expansion | map(.wave) | unique == [1,2,3,4,5,6,7,8,9,10,11,12]) and
             (.registry.expansion | any(.key == "offer_pricing_operations" and .firstCommand == "margin.review.prepare" and .firstView == "price_policy" and .incomingHandoff == "revenue.quote_to_pricing")) and
-            (.registry.expansion | any(.key == "vertical_packages" and .firstCommand == "package.flow.prepare" and .firstView == "package_readiness" and .incomingHandoff == "systems.connection_to_packaged_worker")) and
+            (.registry.expansion | any(.key == "vertical_packages" and .workerRole == "vertical_packages" and .contractPath == "docs/vertical-packaged-worker-v1-contract.md" and .evidencePacket == "package_readiness_packet" and .firstCommand == "package.flow.prepare" and .firstView == "package_readiness" and .incomingHandoff == "systems.connection_to_packaged_worker")) and
             (.registry.expansion | any(.key == "package_quote_to_cash_field" and .kind == "packaged_worker")) and
             (.tools | map(.name) == ["worker.view","worker.command"])
           ' >/dev/null
@@ -933,16 +939,22 @@ jobs:
               .ok == true and
               .tool == "continuous.worker.schema" and
               (.data.registry.runtimeContracts | map(.role) == ["revenue_operations","owner_chief_of_staff","dispatch_operations","finance_operations","workforce_operations","compliance_operations","systems_operations","offer_pricing_operations"]) and
-              (.data.registry.plannedContracts | map(.role) == []) and
+              (.data.registry.plannedContracts | map(.role) == ["customer_experience_operations","asset_supply_operations","growth_operations","vertical_packages"]) and
               (.data.registry.commands | any(.role == "compliance_operations" and .name == "filing.prepare" and .externalExecution == "blocked")) and
               (.data.registry.views | any(.role == "compliance_operations" and .name == "obligations")) and
               (.data.registry.views | any(.role == "compliance_operations" and .name == "packet")) and
               (.data.registry.commands | any(.role == "offer_pricing_operations" and .name == "margin.review.prepare" and .apiRoute == "/worker" and .configSchema.properties.sourceRefs.properties.leadObjectId.type == "string" and .configSchema.properties.sourceRefs.properties.customerObjectId.type == "string")) and
               (.data.registry.views | any(.role == "offer_pricing_operations" and .name == "price_policy" and .apiRoute == "/worker" and .configSchema.properties.quoteObjectId.type == "string" and .configSchema.properties.priceBookId.type == "string")) and
+              (.data.registry.plannedFutureWorkerCommands | any(.role == "customer_experience_operations" and .name == "recovery.draft" and .apiRoute == "/worker" and .configSchema.required == ["sourceRefs","policy"])) and
+              (.data.registry.plannedFutureWorkerCommands | any(.role == "asset_supply_operations" and .name == "reorder.plan" and .apiRoute == "/worker" and .externalExecution == "dry_run")) and
+              (.data.registry.plannedFutureWorkerCommands | any(.role == "growth_operations" and .name == "campaign.draft" and .apiRoute == "/worker" and .externalExecution == "blocked")) and
+              (.data.registry.plannedFutureWorkerCommands | any(.role == "vertical_packages" and .name == "package.flow.prepare" and .apiRoute == "/worker" and .configSchema.required == ["packageKey","sourceRefs","policy"])) and
+              (.data.registry.plannedFutureWorkerViews | any(.role == "vertical_packages" and .name == "package_readiness" and .apiRoute == "/worker" and .configSchema.required == ["packageKey"])) and
               (.data.registry.expansion | length) >= 12 and
               (.data.registry.expansion | all(.apiRoute == "/worker")) and
+              (.data.registry.expansion | all(if (.status == "candidate" or .status == "packaged") then ((.contractPath | type) == "string" and (.evidencePacket | type) == "string") else true end)) and
               (.data.registry.expansion | any(.key == "offer_pricing_operations" and .firstCommand == "margin.review.prepare" and .incomingHandoff == "revenue.quote_to_pricing")) and
-              (.data.registry.expansion | any(.key == "vertical_packages" and .firstCommand == "package.flow.prepare" and .incomingHandoff == "systems.connection_to_packaged_worker")) and
+              (.data.registry.expansion | any(.key == "vertical_packages" and .workerRole == "vertical_packages" and .contractPath == "docs/vertical-packaged-worker-v1-contract.md" and .evidencePacket == "package_readiness_packet" and .firstCommand == "package.flow.prepare" and .incomingHandoff == "systems.connection_to_packaged_worker")) and
               (.data.registry.expansion | any(.key == "package_quote_to_cash_field" and .firstView == "package_readiness"))
             )
           ' >/dev/null

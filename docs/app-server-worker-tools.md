@@ -15,10 +15,12 @@ containing `tool`, `arguments`, `callId`, `threadId`, and `turnId`. The local
 manifest and dynamic-call adapter in `src/worker/app-server-tools.ts` follow
 that shape and delegate reads and commands to the shared worker registry.
 `continuous.worker.schema` exposes each registered command's `configSchema`,
-canonical `apiRoute: "/worker"`, the full `contracts` catalog, current `runtimeContracts`, and
-`followUpCommands` that are contract-defined but not executable yet. Planned
-future-worker commands also expose a non-executable `configSchema` so agents
-can inspect payload requirements before handlers exist.
+canonical `apiRoute: "/worker"`, the full `contracts` catalog, current
+`runtimeContracts`, `plannedContracts`, and `followUpCommands` that are
+contract-defined for runtime workers but not executable yet. Planned
+future-worker commands expose a separate non-executable `configSchema` so agents
+can inspect payload requirements for candidate and packaged workers before
+handlers exist.
 `continuous.worker.view`, `continuous.worker.command`, `/worker`, and
 `worker:tool` all run through the same registry validation before dispatch.
 The CI integration suite exercises `continuous.worker.command` on real
@@ -74,6 +76,10 @@ packets, approval requests, workflow/budget/audit proof, and keeps agency
 submission and legal advice blocked. Obligation scan, notice response, license
 renewal, evidence binder export, live credentials, broader rule sources, and
 receipt capture remain follow-ups.
+Customer Experience, Asset and Supply, Growth, and Vertical Packaged Worker
+contracts are discoverable as planned future-worker metadata. Their first
+commands still use `/worker`, keep operation inputs under `config`, and remain
+non-executable until runtime handlers are registered.
 
 ```sh
 export WORKER_OPERATOR_EMAIL=owner@continuoushq.com

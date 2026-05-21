@@ -18,11 +18,14 @@ import {
 } from "./planned-workers";
 import {
   unexpectedEnvelopeFields,
+  isWorkerOperationIdentifier,
   validateWorkerConfigEnvelope,
   validateWorkerTargetEnvelope,
   workerCommandEnvelopeDescription,
   workerCommandEnvelopeFieldSet,
   workerEnvelopeFieldError,
+  workerOperationDescription,
+  workerOperationPattern,
   workerRoleDescription,
   workerRolePattern,
   workerViewEnvelopeDescription,
@@ -59,6 +62,7 @@ export const workerTools = [
         view: {
           type: "string",
           description: "Registered view name.",
+          pattern: workerOperationPattern.source,
         },
         worker: { $ref: "#/$defs/workerTarget" },
         config: {
@@ -90,7 +94,8 @@ export const workerTools = [
       properties: {
         command: {
           type: "string",
-          description: "Registered command name from workerToolSchema.registry.commands.",
+          description: workerOperationDescription,
+          pattern: workerOperationPattern.source,
         },
         worker: { $ref: "#/$defs/workerTarget" },
         idempotencyKey: { type: "string" },
@@ -387,6 +392,11 @@ export async function executeWorkerTool(name: string, payload: JsonObject = {}) 
     if (!view) {
       throw new Error("worker.view requires view.");
     }
+
+    if (!isWorkerOperationIdentifier(view)) {
+      throw new Error(workerOperationDescription);
+    }
+
     assertTrustedLocalWorkerRead("worker.view");
     const operatorEmail = requiredLocalWorkerOperatorEmail("worker.view");
 
@@ -408,6 +418,10 @@ export async function executeWorkerTool(name: string, payload: JsonObject = {}) 
 
     if (!command) {
       throw new Error("worker.command requires command.");
+    }
+
+    if (!isWorkerOperationIdentifier(command)) {
+      throw new Error(workerOperationDescription);
     }
 
     assertTrustedLocalWorkerMutation("worker.command");

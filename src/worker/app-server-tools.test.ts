@@ -9,6 +9,23 @@ import {
 const originalAppEnv = process.env.APP_ENV;
 const originalTrustedLocalWorkerTools = process.env.CONTINUOUS_TRUSTED_LOCAL_WORKER_TOOLS;
 const originalWorkerOperatorEmail = process.env.WORKER_OPERATOR_EMAIL;
+const runtimeContractRoles = [
+  "revenue_operations",
+  "owner_chief_of_staff",
+  "dispatch_operations",
+  "finance_operations",
+  "workforce_operations",
+  "compliance_operations",
+  "systems_operations",
+  "offer_pricing_operations",
+];
+const plannedContractRoles = [
+  "customer_experience_operations",
+  "asset_supply_operations",
+  "growth_operations",
+  "vertical_packages",
+];
+const contractRoles = [...runtimeContractRoles, ...plannedContractRoles];
 
 beforeEach(() => {
   process.env.WORKER_OPERATOR_EMAIL = "owner@continuoushq.com";
@@ -83,16 +100,7 @@ describe("app-server worker tools", () => {
         ? registeredSystemsViews
         : registry.followUpViews.filter((view) => view.role === "systems_operations");
 
-    expect(registry.contracts.map((contract) => contract.role)).toEqual([
-      "revenue_operations",
-      "owner_chief_of_staff",
-      "dispatch_operations",
-      "finance_operations",
-      "workforce_operations",
-      "compliance_operations",
-      "systems_operations",
-      "offer_pricing_operations",
-    ]);
+    expect(registry.contracts.map((contract) => contract.role)).toEqual(contractRoles);
     expect(registry.contracts.every((contract) => contract.apiRoute === "/worker")).toBe(true);
     expect(registry.commands.every((command) => command.apiRoute === "/worker")).toBe(true);
     expect(registry.views.every((view) => view.apiRoute === "/worker")).toBe(true);
@@ -110,22 +118,16 @@ describe("app-server worker tools", () => {
       registry.expansion.find((entry) => entry.key === "package_quote_to_cash_field"),
     ).toEqual(
       expect.objectContaining({
+        workerRole: "vertical_packages",
         firstCommand: "package.flow.prepare",
         firstView: "package_readiness",
         incomingHandoff: "systems.connection_to_packaged_worker",
+        contractPath: "docs/vertical-packaged-worker-v1-contract.md",
+        evidencePacket: "package_readiness_packet",
       }),
     );
-    expect(runtimeRoles).toEqual([
-      "revenue_operations",
-      "owner_chief_of_staff",
-      "dispatch_operations",
-      "finance_operations",
-      "workforce_operations",
-      "compliance_operations",
-      "systems_operations",
-      "offer_pricing_operations",
-    ]);
-    expect(plannedRoles).toEqual([]);
+    expect(runtimeRoles).toEqual(runtimeContractRoles);
+    expect(plannedRoles).toEqual(plannedContractRoles);
     expect(registry.plannedCommands).toEqual(registry.followUpCommands);
     expect(registry.plannedViews).toEqual(registry.followUpViews);
     expect(registry.commands).toEqual(
@@ -172,6 +174,47 @@ describe("app-server worker tools", () => {
     expect(
       registry.plannedFutureWorkerViews.some((view) => view.role === "systems_operations"),
     ).toBe(false);
+    expect(registry.plannedFutureWorkerCommands).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "customer_experience_operations",
+          name: "recovery.draft",
+          apiRoute: "/worker",
+        }),
+        expect.objectContaining({
+          role: "asset_supply_operations",
+          name: "reorder.plan",
+          apiRoute: "/worker",
+          externalExecution: "dry_run",
+        }),
+        expect.objectContaining({
+          role: "growth_operations",
+          name: "campaign.draft",
+          apiRoute: "/worker",
+        }),
+        expect.objectContaining({
+          role: "vertical_packages",
+          name: "package.flow.prepare",
+          apiRoute: "/worker",
+          configSchema: expect.objectContaining({
+            required: ["packageKey", "sourceRefs", "policy"],
+          }),
+        }),
+      ]),
+    );
+    expect(registry.plannedFutureWorkerViews).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "vertical_packages",
+          name: "package_readiness",
+          apiRoute: "/worker",
+          configSchema: expect.objectContaining({
+            required: ["packageKey"],
+            additionalProperties: false,
+          }),
+        }),
+      ]),
+    );
     expect(
       revenueFollowUpCommands.find((command) => command.name === "payment_link.prepare")?.configSchema.properties
         ?.sourceRefs?.type,
@@ -503,6 +546,30 @@ describe("app-server worker tools", () => {
     ).rejects.toThrow(
       "continuous.worker.command payload fields must be command, worker, idempotencyKey, and config. Move operation inputs into config. Unexpected fields: operatorEmail.",
     );
+
+    for (const command of [
+      ["", "api", "revenue-worker", "run"].join("/"),
+      ["", "revenue-worker"].join("/"),
+      "revenue-worker",
+      ["revenue_worker", "run"].join("."),
+      "worker.run",
+      "worker?view=snapshot",
+      "api.worker.run",
+    ]) {
+      await expect(
+        executeAppServerWorkerTool("continuous.worker.command", {
+          command,
+          worker: {
+            role: "revenue_operations",
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: `app-server-bad-operation-${command.replaceAll(/[^a-z0-9]+/g, "-")}`,
+          config: {},
+        }),
+      ).rejects.toThrow(
+        "Worker command and view names must be registered lower_snake_case or dotted operation identifiers such as lead.read or quote.prepare; do not use URL paths, route names, family-worker names, or query strings.",
+      );
+    }
 
     await expect(
       executeAppServerWorkerTool("continuous.worker.command", {

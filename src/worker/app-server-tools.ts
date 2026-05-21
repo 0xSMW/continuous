@@ -9,11 +9,14 @@ import {
 } from "./tools";
 import {
   unexpectedEnvelopeFields,
+  isWorkerOperationIdentifier,
   validateWorkerConfigEnvelope,
   validateWorkerTargetEnvelope,
   workerCommandEnvelopeDescription,
   workerCommandEnvelopeFieldSet,
   workerEnvelopeFieldError,
+  workerOperationDescription,
+  workerOperationPattern,
   workerViewEnvelopeDescription,
   workerViewEnvelopeFieldSet,
 } from "./envelope";
@@ -78,7 +81,11 @@ export const appServerWorkerTools = [
     inputSchema: {
       type: "object",
       properties: {
-        command: { type: "string" },
+        command: {
+          type: "string",
+          description: workerOperationDescription,
+          pattern: workerOperationPattern.source,
+        },
         worker: { $ref: "#/$defs/workerTarget" },
         idempotencyKey: { type: "string" },
         config: {
@@ -103,6 +110,7 @@ export const appServerWorkerTools = [
         view: {
           type: "string",
           description: "Registered view name.",
+          pattern: workerOperationPattern.source,
         },
         worker: { $ref: "#/$defs/workerTarget" },
         config: {
@@ -344,6 +352,11 @@ export async function executeAppServerWorkerTool(
     if (!command) {
       throw new Error("continuous.worker.command requires command.");
     }
+
+    if (!isWorkerOperationIdentifier(command)) {
+      throw new Error(workerOperationDescription);
+    }
+
     const target = targetFrom(args);
 
     const operatorEmail = operatorEmailFromTransportContext(
@@ -371,6 +384,11 @@ export async function executeAppServerWorkerTool(
     if (!view) {
       throw new Error("continuous.worker.view requires view.");
     }
+
+    if (!isWorkerOperationIdentifier(view)) {
+      throw new Error(workerOperationDescription);
+    }
+
     const config = objectValue(args.config);
     const target = targetFrom(args);
 

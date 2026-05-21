@@ -23,6 +23,23 @@ import {
 const originalAppEnv = process.env.APP_ENV;
 const originalTrustedLocalWorkerTools = process.env.CONTINUOUS_TRUSTED_LOCAL_WORKER_TOOLS;
 const originalWorkerOperatorEmail = process.env.WORKER_OPERATOR_EMAIL;
+const runtimeContractRoles = [
+  "revenue_operations",
+  "owner_chief_of_staff",
+  "dispatch_operations",
+  "finance_operations",
+  "workforce_operations",
+  "compliance_operations",
+  "systems_operations",
+  "offer_pricing_operations",
+];
+const plannedContractRoles = [
+  "customer_experience_operations",
+  "asset_supply_operations",
+  "growth_operations",
+  "vertical_packages",
+];
+const contractRoles = [...runtimeContractRoles, ...plannedContractRoles];
 
 beforeEach(() => {
   process.env.WORKER_OPERATOR_EMAIL = "owner@continuoushq.com";
@@ -298,6 +315,30 @@ describe("worker tool contract", () => {
         idempotencyKey: "local-missing-config-test-001",
       }),
     ).rejects.toThrow("config is required and must be an object.");
+
+    for (const command of [
+      ["", "api", "revenue-worker", "run"].join("/"),
+      ["", "revenue-worker"].join("/"),
+      "revenue-worker",
+      ["revenue_worker", "run"].join("."),
+      "worker.run",
+      "worker?view=snapshot",
+      "api.worker.run",
+    ]) {
+      await expect(
+        executeWorkerTool("worker.command", {
+          command,
+          worker: {
+            role: "revenue_operations",
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: `local-bad-operation-${command.replaceAll(/[^a-z0-9]+/g, "-")}`,
+          config: {},
+        }),
+      ).rejects.toThrow(
+        "Worker command and view names must be registered lower_snake_case or dotted operation identifiers such as lead.read or quote.prepare; do not use URL paths, route names, family-worker names, or query strings.",
+      );
+    }
 
     await expect(
       executeWorkerTool("worker.command", {
@@ -915,6 +956,38 @@ describe("worker tool contract", () => {
       message:
         "worker.role must be a lower_snake_case role identifier such as revenue_operations; do not use route names, family-worker names, or URL fragments.",
     });
+
+    await expect(
+      executeWorkerCommand({
+        command: ["", "api", "revenue-worker", "run"].join("/"),
+        target: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        operatorEmail: "owner@continuoushq.com",
+        idempotencyKey: "direct-bad-worker-operation-001",
+        config: {},
+      }),
+    ).rejects.toMatchObject({
+      code: "invalid_worker_command",
+      message:
+        "Worker command and view names must be registered lower_snake_case or dotted operation identifiers such as lead.read or quote.prepare; do not use URL paths, route names, family-worker names, or query strings.",
+    });
+
+    await expect(
+      executeWorkerCommand({
+        command: "run",
+        target: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        operatorEmail: "owner@continuoushq.com",
+        idempotencyKey: ["", "api", "revenue-worker", "run"].join("/"),
+        config: {},
+      }),
+    ).rejects.toMatchObject({
+      code: "invalid_idempotency_key",
+    });
   });
 
   it("rejects unsupported worker roles before runtime work", async () => {
@@ -969,27 +1042,15 @@ describe("worker tool contract", () => {
             (view) => view.role === "systems_operations",
           );
 
-    expect(workerToolSchema.registry.plannedContracts.map((contract) => contract.role)).toEqual([]);
-    expect(workerToolSchema.registry.contracts.map((contract) => contract.role)).toEqual([
-      "revenue_operations",
-      "owner_chief_of_staff",
-      "dispatch_operations",
-      "finance_operations",
-      "workforce_operations",
-      "compliance_operations",
-      "systems_operations",
-      "offer_pricing_operations",
-    ]);
-    expect(workerToolSchema.registry.runtimeContracts.map((contract) => contract.role)).toEqual([
-      "revenue_operations",
-      "owner_chief_of_staff",
-      "dispatch_operations",
-      "finance_operations",
-      "workforce_operations",
-      "compliance_operations",
-      "systems_operations",
-      "offer_pricing_operations",
-    ]);
+    expect(workerToolSchema.registry.plannedContracts.map((contract) => contract.role)).toEqual(
+      plannedContractRoles,
+    );
+    expect(workerToolSchema.registry.contracts.map((contract) => contract.role)).toEqual(
+      contractRoles,
+    );
+    expect(workerToolSchema.registry.runtimeContracts.map((contract) => contract.role)).toEqual(
+      runtimeContractRoles,
+    );
     expect(workerToolSchema.registry.commands).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -1062,6 +1123,55 @@ describe("worker tool contract", () => {
         (view) => view.role === "systems_operations",
       ),
     ).toBe(false);
+    expect(workerToolSchema.registry.plannedFutureWorkerCommands).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "customer_experience_operations",
+          name: "recovery.draft",
+          apiRoute: "/worker",
+          configSchema: expect.objectContaining({
+            required: ["sourceRefs", "policy"],
+            properties: expect.objectContaining({
+              sourceRefs: expect.objectContaining({ type: "object" }),
+              policy: expect.objectContaining({ type: "object" }),
+            }),
+          }),
+        }),
+        expect.objectContaining({
+          role: "asset_supply_operations",
+          name: "reorder.plan",
+          apiRoute: "/worker",
+          externalExecution: "dry_run",
+        }),
+        expect.objectContaining({
+          role: "growth_operations",
+          name: "campaign.draft",
+          apiRoute: "/worker",
+          externalExecution: "blocked",
+        }),
+        expect.objectContaining({
+          role: "vertical_packages",
+          name: "package.flow.prepare",
+          apiRoute: "/worker",
+          configSchema: expect.objectContaining({
+            required: ["packageKey", "sourceRefs", "policy"],
+          }),
+        }),
+      ]),
+    );
+    expect(workerToolSchema.registry.plannedFutureWorkerViews).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "vertical_packages",
+          name: "package_readiness",
+          apiRoute: "/worker",
+          configSchema: expect.objectContaining({
+            required: ["packageKey"],
+            additionalProperties: false,
+          }),
+        }),
+      ]),
+    );
     expect(workerToolSchema.registry.plannedCommands).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -1310,14 +1420,50 @@ describe("worker tool contract", () => {
         evidencePacket: "pricing_review_packet",
       }),
     );
+    expect(byKey.get("customer_experience_operations")).toEqual(
+      expect.objectContaining({
+        apiRoute: "/worker",
+        workerRole: "customer_experience_operations",
+        firstCommand: "recovery.draft",
+        firstView: "signals",
+        status: "candidate",
+        contractPath: "docs/customer-experience-worker-v1-contract.md",
+        evidencePacket: "customer_experience_packet",
+      }),
+    );
+    expect(byKey.get("asset_supply_operations")).toEqual(
+      expect.objectContaining({
+        apiRoute: "/worker",
+        workerRole: "asset_supply_operations",
+        firstCommand: "reorder.plan",
+        firstView: "stockouts",
+        status: "candidate",
+        contractPath: "docs/asset-supply-worker-v1-contract.md",
+        evidencePacket: "asset_supply_packet",
+      }),
+    );
+    expect(byKey.get("growth_operations")).toEqual(
+      expect.objectContaining({
+        apiRoute: "/worker",
+        workerRole: "growth_operations",
+        firstCommand: "campaign.draft",
+        firstView: "campaigns",
+        status: "candidate",
+        contractPath: "docs/growth-worker-v1-contract.md",
+        evidencePacket: "growth_campaign_packet",
+      }),
+    );
     expect(byKey.get("vertical_packages")).toEqual(
       expect.objectContaining({
         apiRoute: "/worker",
+        workerRole: "vertical_packages",
         packageKey: "vertical_packages",
         firstCommand: "package.flow.prepare",
         firstView: "package_readiness",
         incomingHandoff: "systems.connection_to_packaged_worker",
         kind: "packaged_worker",
+        contractPath: "docs/vertical-packaged-worker-v1-contract.md",
+        evidencePacket: "package_readiness_packet",
       }),
     );
 
@@ -1331,11 +1477,17 @@ describe("worker tool contract", () => {
       expect(entry.firstBlocker.length).toBeGreaterThan(0);
       expect(entry.launchGate.length).toBeGreaterThan(0);
       expect(entry.sourceDocs.length).toBeGreaterThan(0);
+      if (entry.status === "candidate" || entry.status === "packaged") {
+        expect(entry.contractPath).toBeTruthy();
+        expect(entry.evidencePacket).toBeTruthy();
+        expect(entry.sourceDocs).toContain(entry.contractPath);
+      }
       if (entry.kind === "worker_family") {
         expect(entry.workerRole).toBeTruthy();
       }
       if (entry.kind === "packaged_worker") {
         expect(entry.packageKey).toBeTruthy();
+        expect(entry.workerRole).toBe("vertical_packages");
       }
     }
   });

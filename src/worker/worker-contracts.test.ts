@@ -2,6 +2,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { isWorkerOperationIdentifier } from "./envelope";
 import {
   plannedWorkerCommands,
   plannedWorkerContracts,
@@ -60,11 +61,41 @@ const contracts = [
     evidencePacket: "pricing_review_packet",
     runtime: true,
   },
+  {
+    path: "docs/customer-experience-worker-v1-contract.md",
+    role: "customer_experience_operations",
+    evidencePacket: "customer_experience_packet",
+    runtime: false,
+  },
+  {
+    path: "docs/asset-supply-worker-v1-contract.md",
+    role: "asset_supply_operations",
+    evidencePacket: "asset_supply_packet",
+    runtime: false,
+  },
+  {
+    path: "docs/growth-worker-v1-contract.md",
+    role: "growth_operations",
+    evidencePacket: "growth_campaign_packet",
+    runtime: false,
+  },
+  {
+    path: "docs/vertical-packaged-worker-v1-contract.md",
+    role: "vertical_packages",
+    evidencePacket: "package_readiness_packet",
+    runtime: false,
+  },
 ] as const;
 
 const runtimeRoles = new Set<string>(
   contracts.filter((contract) => contract.runtime).map((contract) => contract.role),
 );
+const runtimeRoleList = [
+  "revenue_operations",
+  ...contracts.filter((contract) => contract.runtime).map((contract) => contract.role),
+];
+const plannedRoleList = contracts.filter((contract) => !contract.runtime).map((contract) => contract.role);
+const contractRoleList = ["revenue_operations", ...contracts.map((contract) => contract.role)];
 const workerFamilyRoutePattern = new RegExp(
   "^app/(?:[a-z0-9_-]+[-_]worker/|worker/[^/]+/|workers/[^/]+/|api/(?:[a-z0-9_-]+[-_]worker|worker|workers)(?:/|$))",
 );
@@ -181,6 +212,36 @@ describe("future worker contracts", () => {
     expect(forbiddenWorkerUrlPattern.test(" /workflow ")).toBe(false);
   });
 
+  it("rejects route-shaped command and view names before registry lookup", () => {
+    const canonicalOperations = [
+      "run",
+      "lead.read",
+      "quote.prepare",
+      "payment_draft.prepare",
+      "margin.review.prepare",
+      "price_policy",
+    ];
+    const routeShapedOperations = [
+      ["", "api", "revenue-worker", "run"].join("/"),
+      ["", "revenue-worker"].join("/"),
+      "revenue-worker",
+      ["revenue_worker", "run"].join("."),
+      "worker.run",
+      "worker.view.snapshot",
+      "worker?view=snapshot",
+      "api.worker.run",
+      "app_server.worker.command.lead.read",
+    ];
+
+    for (const operation of canonicalOperations) {
+      expect(isWorkerOperationIdentifier(operation)).toBe(true);
+    }
+
+    for (const operation of routeShapedOperations) {
+      expect(isWorkerOperationIdentifier(operation)).toBe(false);
+    }
+  });
+
   it("keeps persisted worker source and event names role-qualified under the generic worker namespace", () => {
     const files = trackedTextFiles([
       "app",
@@ -244,30 +305,12 @@ describe("future worker contracts", () => {
       (view) => view.role === "revenue_operations",
     );
 
-    expect(workerContracts.map((contract) => contract.role)).toEqual([
-      "revenue_operations",
-      "owner_chief_of_staff",
-      "dispatch_operations",
-      "finance_operations",
-      "workforce_operations",
-      "compliance_operations",
-      "systems_operations",
-      "offer_pricing_operations",
-    ]);
+    expect(workerContracts.map((contract) => contract.role)).toEqual(contractRoleList);
     expect(new Set(workerContracts.map((contract) => contract.apiRoute))).toEqual(
       new Set([workerApiRoute]),
     );
-    expect(runtimeWorkerContracts.map((contract) => contract.role)).toEqual([
-      "revenue_operations",
-      "owner_chief_of_staff",
-      "dispatch_operations",
-      "finance_operations",
-      "workforce_operations",
-      "compliance_operations",
-      "systems_operations",
-      "offer_pricing_operations",
-    ]);
-    expect(plannedWorkerContracts.map((contract) => contract.role)).toEqual([]);
+    expect(runtimeWorkerContracts.map((contract) => contract.role)).toEqual(runtimeRoleList);
+    expect(plannedWorkerContracts.map((contract) => contract.role)).toEqual(plannedRoleList);
     expect(workerContractForRole("offer_pricing_operations")?.contractPath).toBe(
       "docs/offer-pricing-worker-v1-contract.md",
     );
@@ -447,6 +490,11 @@ describe("future worker contracts", () => {
       "Workforce",
       "Compliance",
       "Systems",
+      "Offer and Pricing",
+      "Customer Experience",
+      "Asset and Supply",
+      "Growth",
+      "Vertical packaged workers",
     ]) {
       expect(readiness).toContain(`| ${role} |`);
     }
@@ -643,8 +691,8 @@ describe("future worker contracts", () => {
     expect(plannedWorkerContracts.map((contract) => contract.role)).toEqual(
       plannedContracts.map((contract) => contract.role),
     );
-    expect(plannedWorkerCommands()).toEqual([]);
-    expect(plannedWorkerViews()).toEqual([]);
+    expect(plannedWorkerCommands().length).toBeGreaterThan(0);
+    expect(plannedWorkerViews().length).toBeGreaterThan(0);
     expect(commandRoles).toEqual(new Set(plannedContracts.map((contract) => contract.role)));
     expect(viewRoles).toEqual(new Set(plannedContracts.map((contract) => contract.role)));
 
@@ -667,6 +715,76 @@ describe("future worker contracts", () => {
           (command) => command.role === contract.role && command.name === "approval.decide",
         ),
       ).toBe(true);
+    }
+
+    expect(
+      plannedWorkerCommands().find(
+        (command) => command.role === "vertical_packages" && command.name === "package.flow.prepare",
+      )?.configSchema.required,
+    ).toEqual(["packageKey", "sourceRefs", "policy"]);
+    expect(
+      plannedWorkerViews().find(
+        (view) => view.role === "vertical_packages" && view.name === "package_readiness",
+      )?.configSchema.required,
+    ).toEqual(["packageKey"]);
+  });
+
+  it("requires candidate and packaged expansion entries to carry contract metadata", () => {
+    const readiness = read("docs/worker-readiness.md");
+    const requiredSections = [
+      "## Header",
+      "## API Shape",
+      "## Registry Entries",
+      "## Core Object Map",
+      "## Workflow",
+      "## Capabilities",
+      "## Adapters",
+      "## Evidence Packet",
+      "## Generated Views",
+      "## Evals",
+      "## Security",
+    ];
+
+    for (const entry of workerExpansionCatalog.filter((item) =>
+      ["candidate", "packaged"].includes(item.status),
+    )) {
+      expect(entry.apiRoute).toBe(workerApiRoute);
+      expect(entry.contractPath).toBeTruthy();
+      expect(entry.evidencePacket).toBeTruthy();
+      expect(entry.sourceDocs).toContain(entry.contractPath);
+      expect(entry.sourceDocs).toContain("docs/worker-readiness.md");
+      const readinessName =
+        entry.kind === "worker_family" && entry.key !== "vertical_packages"
+          ? entry.name.replace(/ Worker$/, "")
+          : "Vertical packaged workers";
+
+      expect(readiness).toContain(
+        readinessName,
+      );
+
+      const source = read(entry.contractPath ?? "");
+
+      expect(source).toContain("POST /worker");
+      expect(source).toContain("idempotencyKey");
+      expect(source).toContain("config");
+      expect(source).toContain(entry.evidencePacket ?? "");
+      expect(source).not.toMatch(/\/api\/[a-z0-9_-]+[-_]worker/);
+
+      for (const section of requiredSections) {
+        expect(source).toContain(section);
+      }
+
+      if (entry.kind === "worker_family") {
+        expect(entry.workerRole).toBeTruthy();
+        expect(workerContractForRole(entry.workerRole ?? "")?.contractPath).toBe(entry.contractPath);
+      }
+
+      if (entry.kind === "packaged_worker") {
+        expect(entry.packageKey).toBeTruthy();
+        expect(entry.workerRole).toBe("vertical_packages");
+        expect(entry.contractPath).toBe("docs/vertical-packaged-worker-v1-contract.md");
+        expect(entry.evidencePacket).toBe("package_readiness_packet");
+      }
     }
   });
 });

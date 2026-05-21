@@ -582,6 +582,57 @@ describe("/app-server route", () => {
     expect(mocks.executeAppServerWorkerDynamicToolCall).not.toHaveBeenCalled();
   });
 
+  it("rejects route-like worker operation names inside app-server worker arguments", async () => {
+    const { POST } = await import("./route");
+    const badOperations = [
+      ["", "api", "revenue-worker", "run"].join("/"),
+      ["", "revenue-worker"].join("/"),
+      "revenue-worker",
+      ["revenue_worker", "run"].join("."),
+      "worker.run",
+      "worker?view=snapshot",
+      "api.worker.run",
+    ];
+
+    for (const operation of badOperations) {
+      const response = await POST(
+        new Request("http://localhost/app-server", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer test-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            tool: "continuous.worker.command",
+            arguments: {
+              command: operation,
+              worker: {
+                role: "revenue_operations",
+                tenantSlug: "continuous-demo",
+              },
+              idempotencyKey: `app-server-bad-operation-${operation.replaceAll(/[^a-z0-9]+/g, "-")}`,
+              config: {},
+            },
+            callId: "call-bad-worker-operation",
+            threadId: "thread-001",
+            turnId: "turn-001",
+          }),
+        }),
+      );
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        error: {
+          code: "invalid_app_server_tool_call",
+          message:
+            "Worker command and view names must be registered lower_snake_case or dotted operation identifiers such as lead.read or quote.prepare; do not use URL paths, route names, family-worker names, or query strings.",
+        },
+      });
+    }
+    expect(mocks.authorizeManagedControlPlaneCredential).not.toHaveBeenCalled();
+    expect(mocks.executeAppServerWorkerDynamicToolCall).not.toHaveBeenCalled();
+  });
+
   it("rejects top-level context and operation fields before dynamic dispatch", async () => {
     const { POST } = await import("./route");
     const response = await POST(

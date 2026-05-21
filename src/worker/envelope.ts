@@ -2,13 +2,27 @@ export const workerCommandEnvelopeFields = ["command", "worker", "idempotencyKey
 export const workerViewEnvelopeFields = ["view", "worker", "config"] as const;
 export const workerTargetEnvelopeFields = ["role", "id", "tenantSlug"] as const;
 export const workerRolePattern = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/;
+export const workerOperationPattern = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*(?:\.[a-z][a-z0-9]*(?:_[a-z0-9]+)*)*$/;
 export const workerRoleDescription =
   "worker.role must be a lower_snake_case role identifier such as revenue_operations; do not use route names, family-worker names, or URL fragments.";
+export const workerOperationDescription =
+  "Worker command and view names must be registered lower_snake_case or dotted operation identifiers such as lead.read or quote.prepare; do not use URL paths, route names, family-worker names, or query strings.";
 
 export function isWorkerRoleIdentifier(value: string) {
   const role = value.trim();
 
   return workerRolePattern.test(role) && !role.endsWith("_worker");
+}
+
+export function isWorkerOperationIdentifier(value: string) {
+  const operation = value.trim();
+  const reservedRouteSegments = new Set(["api", "app_server", "worker", "workers"]);
+
+  return (
+    workerOperationPattern.test(operation) &&
+    !operation.includes("_worker") &&
+    operation.split(".").every((segment) => !reservedRouteSegments.has(segment))
+  );
 }
 
 export const workerCommandEnvelopeFieldSet = new Set<string>(workerCommandEnvelopeFields);
