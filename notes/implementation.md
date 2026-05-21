@@ -672,3 +672,18 @@ and rollback evidence exist. `docs/app-server-worker-tools.md` now also names
 the exact worker schema buckets, expansion status enum, top-level schema
 response keys, and optional `worker.id` selector so app-server-driven worker
 expansion can consume the registry without inferring from prose.
+
+The production recovery-drill readiness gate is now backed by a real disposable
+host run. A droplet restored from the managed DigitalOcean backup image ran
+`scripts/recovery-drill.sh` with app rollback plus Postgres restore, completed
+in 42s, and `scripts/attest-recovery-drill.sh` copied and attested
+`reports/recovery-drills/continuous-recovery-20260521T194000Z.md` on
+production. Strict readiness now verifies the report checksum and drill host;
+the remaining strict gate failure is the missing real alert webhook in
+`/etc/continuous/observability.env`.
+
+`scripts/create-droplet.sh` now reconciles firewall rules when the named
+firewall already exists, instead of only setting SSH, HTTP, and HTTPS ingress
+when creating a new firewall. This prevents existing DigitalOcean firewall
+drift from silently removing the narrow operator SSH rule required for
+readiness checks and host maintenance.

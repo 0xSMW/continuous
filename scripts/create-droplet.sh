@@ -185,6 +185,18 @@ firewall_id="$(
     | awk -v name="$FIREWALL_NAME" '$2 == name {print $1; exit}'
 )"
 
+ensure_firewall_rule() {
+  local firewall_id="$1"
+  local rule="$2"
+
+  if doctl compute firewall get "$firewall_id" --format InboundRules --no-header \
+    | grep -Fq "$rule"; then
+    return
+  fi
+
+  doctl compute firewall add-rules "$firewall_id" --inbound-rules "$rule" >/dev/null
+}
+
 if [ -z "$firewall_id" ]; then
   doctl compute firewall create \
     --name "$FIREWALL_NAME" \
@@ -192,6 +204,11 @@ if [ -z "$firewall_id" ]; then
     --inbound-rules "protocol:tcp,ports:22,address:$SSH_CIDR protocol:tcp,ports:80,address:0.0.0.0/0 protocol:tcp,ports:443,address:0.0.0.0/0" \
     --outbound-rules "protocol:icmp,address:0.0.0.0/0 protocol:tcp,ports:0,address:0.0.0.0/0 protocol:udp,ports:0,address:0.0.0.0/0" \
     >/dev/null
+else
+  doctl compute firewall add-tags "$firewall_id" --tag-names "$TAG" >/dev/null 2>&1 || true
+  ensure_firewall_rule "$firewall_id" "protocol:tcp,ports:22,address:$SSH_CIDR"
+  ensure_firewall_rule "$firewall_id" "protocol:tcp,ports:80,address:0.0.0.0/0"
+  ensure_firewall_rule "$firewall_id" "protocol:tcp,ports:443,address:0.0.0.0/0"
 fi
 
 echo "$droplet_row"
