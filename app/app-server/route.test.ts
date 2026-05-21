@@ -372,6 +372,53 @@ describe("/app-server route", () => {
     });
   });
 
+  it("bridges authenticated Core ledger views through the same app-server context", async () => {
+    mocks.env.CONTROL_PLANE_TOKENS_JSON = tokenCatalog(
+      ["app_server:core.view.ledger"],
+      {
+        allowedWorkerRoles: [],
+      },
+    );
+
+    const { POST } = await import("./route");
+    const payload = {
+      tool: "continuous.core.view",
+      arguments: {
+        view: "ledger",
+        core: {
+          tenantSlug: "continuous-demo",
+        },
+        config: {
+          collections: ["objects", "tasks"],
+          limit: 5,
+        },
+      },
+      callId: "call-core-ledger-view-001",
+      threadId: "thread-001",
+      turnId: "turn-001",
+    };
+    const response = await POST(
+      new Request("http://localhost/app-server", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.executeAppServerCoreDynamicToolCall).toHaveBeenCalledWith(payload, {
+      operatorEmail: "operator@example.com",
+      source: "control_plane",
+      allowedAccess: ["read"],
+      allowedCommands: ["core:view.ledger"],
+      allowedTenants: ["continuous-demo"],
+      allowedWorkerRoles: ["*"],
+    });
+  });
+
   it("authorizes Core schema discovery through an explicit app-server schema command", async () => {
     mocks.env.CONTROL_PLANE_TOKENS_JSON = tokenCatalog(["app_server:core.schema"]);
 
@@ -1448,6 +1495,40 @@ describe("/app-server route", () => {
     });
     expect(mocks.authorizeManagedControlPlaneCredential).not.toHaveBeenCalled();
     expect(mocks.executeAppServerWorkerDynamicToolCall).not.toHaveBeenCalled();
+  });
+
+  it("rejects Core schema discovery arguments before dynamic dispatch", async () => {
+    mocks.env.CONTROL_PLANE_TOKENS_JSON = tokenCatalog(["app_server:core.schema"]);
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/app-server", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          tool: "continuous.core.schema",
+          arguments: {
+            view: "summary",
+          },
+          callId: "call-core-schema-extra",
+          threadId: "thread-001",
+          turnId: "turn-001",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "invalid_app_server_tool_call",
+        message: "continuous.core.schema does not accept arguments.",
+      },
+    });
+    expect(mocks.authorizeManagedControlPlaneCredential).not.toHaveBeenCalled();
+    expect(mocks.executeAppServerCoreDynamicToolCall).not.toHaveBeenCalled();
   });
 
   it("rejects bridge calls outside token command, tenant, and worker-role scope", async () => {

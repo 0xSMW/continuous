@@ -9,6 +9,7 @@ BOOTSTRAP_CREDENTIAL_ID="${BOOTSTRAP_CREDENTIAL_ID:-bootstrap-operator}"
 RUN_ID="${CONTROL_PLANE_ATTESTATION_RUN_ID:-$(date -u +%Y%m%d%H%M%S)}"
 CONTROL_PLANE_ALLOWED_COMMANDS_JSON='[
   "core:view.summary",
+  "core:view.ledger",
   "core:task.create",
   "core:task.transition",
   "core:object.upsert",
@@ -140,6 +141,7 @@ CONTROL_PLANE_ALLOWED_COMMANDS_JSON='[
   "app_server:worker.command.automation.plan",
   "app_server:core.schema",
   "app_server:core.view.summary",
+  "app_server:core.view.ledger",
   "app_server:core.command.task.create",
   "app_server:core.command.task.transition",
   "app_server:core.command.object.upsert",

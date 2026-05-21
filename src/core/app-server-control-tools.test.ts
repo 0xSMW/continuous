@@ -501,4 +501,44 @@ describe("app-server workflow and approval tools", () => {
       error: "Dynamic app-server control tool arguments must be an object.",
     });
   });
+
+  it("sanitizes dynamic control backend errors before returning app-server content", async () => {
+    mocks.listWorkflows.mockRejectedValueOnce(
+      new Error("postgres://workflow-db.internal/continuous redaction-sentinel"),
+    );
+
+    const result = await executeAppServerControlDynamicToolCall(
+      {
+        tool: "continuous.workflow.view",
+        arguments: {
+          view: "overview",
+          workflow: {
+            tenantSlug: "continuous-demo",
+          },
+          config: {},
+        },
+        callId: "bad-control-secret-call",
+        threadId: "thread-001",
+        turnId: "turn-001",
+      },
+      {
+        operatorEmail: "owner@continuoushq.com",
+        source: "control_plane",
+        allowedAccess: ["read"],
+        allowedCommands: ["workflow:view.overview"],
+        allowedTenants: ["continuous-demo"],
+        allowedWorkerRoles: ["*"],
+      },
+    );
+    const payload = JSON.parse(result.contentItems[0]?.text ?? "{}") as {
+      ok: boolean;
+      error: string;
+    };
+
+    expect(result.success).toBe(false);
+    expect(payload.ok).toBe(false);
+    expect(payload.error).toBe("Unknown app-server control tool error");
+    expect(JSON.stringify(payload)).not.toContain("redaction-sentinel");
+    expect(JSON.stringify(payload)).not.toContain("postgres://");
+  });
 });

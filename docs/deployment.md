@@ -343,7 +343,8 @@ pollable, scheduler-observed, and backed by a managed credential ref.
 ```
 
 Workflow handlers that already hold Core UUIDs can pass those ids under
-`config.intake`. `GET /core` and `POST /worker` view payloads use the same
+`config.intake`. `GET /core`, `POST /core` read payloads, and `POST /worker`
+view payloads use the same
 bearer token for operator-only snapshots and approval review. Worker read
 payloads carry `view`, `worker`, and `config`; worker command payloads carry
 `command`, `worker`, `idempotencyKey`, and `config`. Worker-specific HTTP paths
@@ -385,6 +386,7 @@ Control-plane token catalog entries have this shape when provided directly via
     "allowedAccess": ["read", "write"],
     "allowedCommands": [
       "core:view.summary",
+      "core:view.ledger",
       "core:task.create",
       "core:object.upsert",
       "core:entity.setup.record",
@@ -434,6 +436,7 @@ Control-plane token catalog entries have this shape when provided directly via
       "app_server:worker.command.campaign.draft",
       "app_server:core.schema",
       "app_server:core.view.summary",
+      "app_server:core.view.ledger",
       "app_server:core.command.task.create",
       "app_server:core.command.obligation.scan",
       "app_server:workflow.schema",
@@ -651,6 +654,7 @@ and route-qualified command; unrelated commands remain closed.
     "allowedAccess": ["read", "write"],
     "allowedCommands": [
       "core:view.summary",
+      "core:view.ledger",
       "core:control_plane.token_rotation.attest",
       "core:control_plane.credential.upsert",
       "core:control_plane.credential.revoke",
@@ -703,6 +707,7 @@ and route-qualified command; unrelated commands remain closed.
       "app_server:worker.command.campaign.draft",
       "app_server:core.schema",
       "app_server:core.view.summary",
+      "app_server:core.view.ledger",
       "app_server:core.command.task.create",
       "app_server:core.command.obligation.scan",
       "app_server:workflow.schema",

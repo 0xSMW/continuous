@@ -40,7 +40,7 @@ Useful app surfaces for worker development:
 | `/` | Static public landing page; operational dashboard data stays behind authenticated control-plane routes |
 | `/health` | Redacted machine health check |
 | `/core` | Operator-gated, tenant-scoped persisted primitive summary |
-| `POST /core` | Canonical Core command surface with `command`, `core`, `config`, and `idempotencyKey` payload fields for tasks, task transitions, workers, entity setup, approvals, capability grants, budget ledger operations, objects, object links, events, evidence, documents, packets, decisions, generated views, adapter intents, rule changes, obligation scans, customer signals, and payroll preview artifacts |
+| `POST /core` | Canonical Core read and command surface. Reads use `view`, `core`, and `config` for `summary` or safe `ledger` projections; commands use `command`, `core`, `config`, and `idempotencyKey` payload fields for tasks, task transitions, workers, entity setup, approvals, capability grants, budget ledger operations, objects, object links, events, evidence, documents, packets, decisions, generated views, adapter intents, rule changes, obligation scans, customer signals, and payroll preview artifacts |
 | `POST /approval` with `view`, `approval`, and `config` | Shared operator-gated approval inbox across Core, workflow, and worker subjects |
 | `POST /approval` with `command`, `approval`, `idempotencyKey`, and `config` | Shared approval decision surface with explicit `approval.subject` |
 | `POST /worker` with `view`, `worker`, and `config` | Canonical operator-gated worker read surface |

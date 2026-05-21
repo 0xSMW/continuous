@@ -226,6 +226,19 @@ function normalizeTokenCatalog(input: {
       definition.allowedWorkerRoles ?? definition.workerRoles,
       fallbackScope.workerRoles,
     );
+
+    if (input.appEnv === "production" && tenantSlugs.length === 0) {
+      throw new Error(
+        `Control-plane token catalog entry ${index + 1} is missing allowedTenants; use "*" for all tenants.`,
+      );
+    }
+
+    if (input.appEnv === "production" && workerRoles.length === 0) {
+      throw new Error(
+        `Control-plane token catalog entry ${index + 1} is missing allowedWorkerRoles; use "*" for all worker roles.`,
+      );
+    }
+
     const routes = coerceList(definition.allowedRoutes ?? definition.routes);
     const access = coerceList(definition.allowedAccess ?? definition.access);
     const commands = coerceList(definition.allowedCommands ?? definition.commands);

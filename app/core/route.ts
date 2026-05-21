@@ -5,6 +5,11 @@ import { reserveBudget, chargeBudget, releaseBudget } from "../../src/core/budge
 import { grantCapability } from "../../src/core/capabilities";
 import { recordEntitySetup } from "../../src/core/entity";
 import { getHealth } from "../../src/core/health";
+import {
+  coreLedgerOptionsFromConfig,
+  getCoreLedgerHealth,
+  getCoreLedgerSafe,
+} from "../../src/core/ledger";
 import { scanObligations } from "../../src/core/obligations";
 import { preparePayrollPreviewPacket, recordPayrollPreview } from "../../src/core/payroll";
 import { getCoreSummarySafe } from "../../src/core/summary";
@@ -463,7 +468,12 @@ function coreCommandRequiresWorkerRoleScope(command?: string) {
   );
 }
 
-async function handleCoreSummaryRead(request: Request, tenantSlug: string | undefined) {
+async function authorizeCoreReadView(
+  request: Request,
+  view: string,
+  tenantSlug: string | undefined,
+): Promise<{ ok: true } | { ok: false; response: Response }> {
+  const command = `view.${view}`;
   const auth = authorizeControlPlaneAccess({
     appEnv: env.APP_ENV,
     expectedToken: env.WORKER_RUN_TOKEN,
@@ -475,7 +485,7 @@ async function handleCoreSummaryRead(request: Request, tenantSlug: string | unde
     tokenCatalogB64: env.CONTROL_PLANE_TOKEN_CATALOG_B64,
     route: "core",
     access: "read",
-    command: "view.summary",
+    command,
   });
 
   if (!auth.ok) {
@@ -483,11 +493,11 @@ async function handleCoreSummaryRead(request: Request, tenantSlug: string | unde
       request,
       route: "core",
       access: "read",
-      command: "view.summary",
+      command,
       tenantSlug,
       auth,
     });
-    return guardErrorResponse(auth);
+    return { ok: false, response: guardErrorResponse(auth) };
   }
 
   const scope = authorizeControlPlaneScope({
@@ -501,19 +511,19 @@ async function handleCoreSummaryRead(request: Request, tenantSlug: string | unde
       request,
       route: "core",
       access: "read",
-      command: "view.summary",
+      command,
       tenantSlug,
       auth,
       scope,
     });
-    return guardErrorResponse(scope);
+    return { ok: false, response: guardErrorResponse(scope) };
   }
 
   const managedCredential = await authorizeManagedControlPlaneCredential({
     request,
     route: "core",
     access: "read",
-    command: "view.summary",
+    command,
     tenantSlug,
     auth,
     requireManagedCredential: true,
@@ -524,24 +534,34 @@ async function handleCoreSummaryRead(request: Request, tenantSlug: string | unde
       request,
       route: "core",
       access: "read",
-      command: "view.summary",
+      command,
       tenantSlug,
       auth,
       scope,
       guard: managedCredential,
     });
-    return guardErrorResponse(managedCredential);
+    return { ok: false, response: guardErrorResponse(managedCredential) };
   }
 
   await recordControlPlaneAuthAttempt({
     request,
     route: "core",
     access: "read",
-    command: "view.summary",
+    command,
     tenantSlug,
     auth,
     scope,
   });
+
+  return { ok: true };
+}
+
+async function handleCoreSummaryRead(request: Request, tenantSlug: string | undefined) {
+  const access = await authorizeCoreReadView(request, "summary", tenantSlug);
+
+  if (!access.ok) {
+    return access.response;
+  }
 
   const result = await getCoreSummarySafe({ tenantSlug });
   const summaryError = result.ok ? null : "Core summary is unavailable.";
@@ -557,6 +577,54 @@ async function handleCoreSummaryRead(request: Request, tenantSlug: string | unde
       health,
       data: result.summary,
       error: summaryError,
+    },
+    {
+      headers: {
+        "Cache-Control": "no-store",
+      },
+    },
+  );
+}
+
+async function handleCoreLedgerRead(
+  request: Request,
+  tenantSlug: string | undefined,
+  config: Record<string, unknown>,
+) {
+  const access = await authorizeCoreReadView(request, "ledger", tenantSlug);
+
+  if (!access.ok) {
+    return access.response;
+  }
+
+  let ledgerOptions;
+
+  try {
+    ledgerOptions = coreLedgerOptionsFromConfig(tenantSlug, config);
+  } catch (error) {
+    return errorResponse(
+      {
+        code: "invalid_core_view_config",
+        message: error instanceof Error ? error.message : "Core ledger config is invalid.",
+      },
+      400,
+    );
+  }
+
+  const result = await getCoreLedgerSafe(ledgerOptions);
+  const ledgerError = result.ok ? null : "Core ledger is unavailable.";
+  const health = getCoreLedgerHealth({
+    ok: result.ok,
+    error: ledgerError,
+    ledger: result.ledger,
+  });
+
+  return Response.json(
+    {
+      api: apiVersion,
+      health,
+      data: result.ledger,
+      error: ledgerError,
     },
     {
       headers: {
@@ -631,17 +699,21 @@ async function handleCoreView(request: Request, body: Record<string, unknown>) {
     return errorResponse(configResult.error, 400);
   }
 
-  if (view !== "summary") {
-    return errorResponse(
-      {
-        code: "core_view_unsupported",
-        message: "Core view must be summary.",
-      },
-      400,
-    );
+  if (view === "summary") {
+    return handleCoreSummaryRead(request, tenantSlug);
   }
 
-  return handleCoreSummaryRead(request, tenantSlug);
+  if (view === "ledger") {
+    return handleCoreLedgerRead(request, tenantSlug, configResult.value);
+  }
+
+  return errorResponse(
+    {
+      code: "core_view_unsupported",
+      message: "Core view must be one of: summary, ledger.",
+    },
+    400,
+  );
 }
 
 export async function POST(request: Request) {

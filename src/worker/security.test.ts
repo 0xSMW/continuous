@@ -330,6 +330,8 @@ describe("authorizeControlPlaneAccess", () => {
           id: "hashed-worker-runner",
           tokenSha256: tokenSha256(),
           operatorEmail,
+          allowedTenants: ["*"],
+          allowedWorkerRoles: ["*"],
           allowedRoutes: ["worker"],
           allowedAccess: ["write"],
           allowedCommands: ["worker:lead.read"],
@@ -353,8 +355,8 @@ describe("authorizeControlPlaneAccess", () => {
       operatorEmail,
       credentialId: "hashed-worker-runner",
       scope: {
-        tenantSlugs: [],
-        workerRoles: [],
+        tenantSlugs: ["*"],
+        workerRoles: ["*"],
       },
       routes: ["worker"],
       access: ["write"],
@@ -400,6 +402,8 @@ describe("authorizeControlPlaneAccess", () => {
           id: "weak-worker-runner",
           tokenSha256: tokenSha256(),
           operatorEmail,
+          allowedTenants: ["*"],
+          allowedWorkerRoles: ["*"],
           allowedRoutes: ["worker"],
           allowedAccess: ["write"],
           allowedCommands,
@@ -432,6 +436,8 @@ describe("authorizeControlPlaneAccess", () => {
         id: "local-bootstrap-control-plane-token",
         tokenSha256: tokenSha256(),
         operatorEmail,
+        allowedTenants: ["*"],
+        allowedWorkerRoles: ["*"],
         allowedRoutes: ["worker"],
         allowedAccess: ["write"],
         allowedCommands: ["worker:*"],
@@ -463,6 +469,8 @@ describe("authorizeControlPlaneAccess", () => {
         id: "worker-runner",
         tokenSha256: tokenSha256(),
         operatorEmail,
+        allowedTenants: ["*"],
+        allowedWorkerRoles: ["*"],
         allowedRoutes: ["worker"],
         allowedAccess: ["write"],
         allowedCommands: ["worker:run"],
@@ -494,6 +502,8 @@ describe("authorizeControlPlaneAccess", () => {
         id: "worker-runner",
         tokenSha256: tokenSha256(),
         operatorEmail,
+        allowedTenants: ["*"],
+        allowedWorkerRoles: ["*"],
         allowedRoutes: ["worker"],
         allowedAccess: ["write"],
         allowedCommands: ["worker:run"],
@@ -596,6 +606,8 @@ describe("authorizeControlPlaneAccess", () => {
         id: "unscoped-runner",
         tokenSha256: tokenSha256(),
         operatorEmail,
+        allowedTenants: ["*"],
+        allowedWorkerRoles: ["*"],
       },
     ]);
 
@@ -624,6 +636,8 @@ describe("authorizeControlPlaneAccess", () => {
         id: "worker-runner",
         tokenSha256: tokenSha256(),
         operatorEmail,
+        allowedTenants: ["*"],
+        allowedWorkerRoles: ["*"],
         allowedRoutes: ["worker"],
         allowedAccess: ["write"],
         allowedCommands: ["worker:run"],
@@ -656,6 +670,8 @@ describe("authorizeControlPlaneAccess", () => {
         id: "expired-worker-runner",
         tokenSha256: tokenSha256(),
         operatorEmail,
+        allowedTenants: ["*"],
+        allowedWorkerRoles: ["*"],
         allowedRoutes: ["worker"],
         allowedAccess: ["write"],
         allowedCommands: ["worker:run"],
@@ -665,6 +681,8 @@ describe("authorizeControlPlaneAccess", () => {
         id: "active-worker-runner",
         tokenSha256: tokenSha256(rotatedCredential),
         operatorEmail,
+        allowedTenants: ["*"],
+        allowedWorkerRoles: ["*"],
         allowedRoutes: ["worker"],
         allowedAccess: ["write"],
         allowedCommands: ["worker:run"],
@@ -706,13 +724,64 @@ describe("authorizeControlPlaneAccess", () => {
       operatorEmail,
       credentialId: "active-worker-runner",
       scope: {
-        tenantSlugs: [],
-        workerRoles: [],
+        tenantSlugs: ["*"],
+        workerRoles: ["*"],
       },
       routes: ["worker"],
       access: ["write"],
       commands: ["worker:run"],
     });
+  });
+
+  it("requires explicit production tenant and worker-role scopes or wildcard", () => {
+    const cases = [
+      {
+        definition: {
+          id: "missing-tenant-scope",
+          tokenSha256: tokenSha256(),
+          operatorEmail,
+          allowedWorkerRoles: ["revenue_operations"],
+          allowedRoutes: ["worker"],
+          allowedAccess: ["write"],
+          allowedCommands: ["worker:run"],
+        },
+        message:
+          'Control-plane token catalog entry 1 is missing allowedTenants; use "*" for all tenants.',
+      },
+      {
+        definition: {
+          id: "missing-worker-role-scope",
+          tokenSha256: tokenSha256(),
+          operatorEmail,
+          allowedTenants: ["continuous-demo"],
+          allowedRoutes: ["worker"],
+          allowedAccess: ["write"],
+          allowedCommands: ["worker:run"],
+        },
+        message:
+          'Control-plane token catalog entry 1 is missing allowedWorkerRoles; use "*" for all worker roles.',
+      },
+    ];
+
+    for (const testCase of cases) {
+      expect(
+        authorizeControlPlaneAccess({
+          enabled: true,
+          appEnv: "production",
+          operatorEmail,
+          authorization: `Bearer ${acceptedCredential}`,
+          tokenCatalogJson: JSON.stringify([testCase.definition]),
+          route: "worker",
+          access: "write",
+          command: "run",
+        }),
+      ).toEqual({
+        ok: false,
+        status: 403,
+        code: "control_plane_token_catalog_invalid",
+        message: testCase.message,
+      });
+    }
   });
 
   it("requires catalog-backed credentials in production", () => {

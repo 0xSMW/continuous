@@ -194,7 +194,8 @@ printf '%s\n' "$APP_SERVER_CORE_SCHEMA_RESPONSE" | /usr/bin/jq -e '
     (.data.registry.commands | any(.name == "worker.transition" and .apiRoute == "/core")) and
     (.data.registry.commands | any(.name == "worker.run.start" and .apiRoute == "/core")) and
     (.data.registry.commands | any(.name == "worker.run.complete" and .apiRoute == "/core")) and
-    (.data.registry.views | any(.name == "summary" and .apiRoute == "/core"))
+    (.data.registry.views | any(.name == "summary" and .apiRoute == "/core")) and
+    (.data.registry.views | any(.name == "ledger" and .apiRoute == "/core"))
   )
 ' >/dev/null
 

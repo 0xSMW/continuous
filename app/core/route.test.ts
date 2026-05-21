@@ -10,7 +10,10 @@ const mocks = vi.hoisted(() => ({
   chargeBudget: vi.fn(),
   createCoreDocument: vi.fn(),
   createCoreTask: vi.fn(),
+  coreLedgerOptionsFromConfig: vi.fn(),
+  getCoreLedgerHealth: vi.fn(),
   getCoreSummarySafe: vi.fn(),
+  getCoreLedgerSafe: vi.fn(),
   getHealth: vi.fn(),
   grantCapability: vi.fn(),
   ingestCoreEvent: vi.fn(),
@@ -79,6 +82,12 @@ vi.mock("../../src/core/summary", () => ({
   getCoreSummarySafe: mocks.getCoreSummarySafe,
 }));
 
+vi.mock("../../src/core/ledger", () => ({
+  coreLedgerOptionsFromConfig: mocks.coreLedgerOptionsFromConfig,
+  getCoreLedgerHealth: mocks.getCoreLedgerHealth,
+  getCoreLedgerSafe: mocks.getCoreLedgerSafe,
+}));
+
 vi.mock("../../src/core/control-plane-auth", () => ({
   authorizeManagedControlPlaneCredential: mocks.authorizeManagedControlPlaneCredential,
   attestControlPlaneTokenRotation: mocks.attestControlPlaneTokenRotation,
@@ -127,6 +136,7 @@ vi.mock("../../src/core/worker-runs", () => ({
 
 const exactCoreRouteCommands = [
   "core:view.summary",
+  "core:view.ledger",
   "core:task.create",
   "core:task.transition",
   "core:object.upsert",
@@ -188,6 +198,67 @@ describe("POST /core", () => {
     vi.stubEnv("CONTROL_PLANE_TOKEN_CATALOG_B64", "");
     mocks.authorizeManagedControlPlaneCredential.mockResolvedValue({ ok: true });
     mocks.recordControlPlaneAuthAttempt.mockResolvedValue({ id: "auth-session-1" });
+    mocks.coreLedgerOptionsFromConfig.mockImplementation((tenantSlug: string | undefined, config: Record<string, unknown>) => ({
+      tenantSlug,
+      collections: config.collections,
+      limit: config.limit,
+    }));
+    mocks.getCoreLedgerSafe.mockResolvedValue({
+      ok: true,
+      error: null,
+      ledger: {
+        schemaVersion: "continuous.core_ledger.v1",
+        tenantName: "Continuous Demo",
+        tenantSlug: "continuous-demo",
+        limit: 2,
+        availableCollections: ["objects", "tasks"],
+        counts: {
+          objects: 1,
+          tasks: 1,
+        },
+        collections: {
+          objects: {
+            count: 1,
+            items: [
+              {
+                id: "object-1",
+                type: "lead",
+                name: "Acme Roof Repair",
+              },
+            ],
+          },
+          tasks: {
+            count: 1,
+            items: [
+              {
+                id: "task-1",
+                title: "Review lead",
+                state: "active",
+              },
+            ],
+          },
+        },
+      },
+    });
+    mocks.getCoreLedgerHealth.mockReturnValue({
+      service: "Continuous Core Ledger",
+      status: "ok",
+      checkedAt: "2026-05-21T00:00:00.000Z",
+      mode: "test",
+      version: "0.1.0",
+      summary: {
+        collections: 2,
+        records: 2,
+        limit: 2,
+      },
+      checks: [
+        {
+          id: "database",
+          state: "pass",
+          detail: "Postgres is reachable",
+        },
+      ],
+    });
   });
 
   afterEach(() => {
@@ -369,6 +440,111 @@ describe("POST /core", () => {
     expect(mocks.getCoreSummarySafe).toHaveBeenCalledWith({
       tenantSlug: "continuous-demo",
     });
+  });
+
+  it("returns tenant-scoped Core ledger reads through the POST view envelope", async () => {
+    mocks.getHealth.mockReturnValue({
+      status: "ok",
+      checks: {
+        db: "ok",
+      },
+    });
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          view: "ledger",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          config: {
+            collections: ["objects", "tasks"],
+            limit: 2,
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.health.status).toBe("ok");
+    expect(body.data.schemaVersion).toBe("continuous.core_ledger.v1");
+    expect(body.data.collections.objects.items[0]).toEqual({
+      id: "object-1",
+      type: "lead",
+      name: "Acme Roof Repair",
+    });
+    expect(mocks.authorizeManagedControlPlaneCredential).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: "core",
+        access: "read",
+        command: "view.ledger",
+        tenantSlug: "continuous-demo",
+        requireManagedCredential: true,
+      }),
+    );
+    expect(mocks.coreLedgerOptionsFromConfig).toHaveBeenCalledWith("continuous-demo", {
+      collections: ["objects", "tasks"],
+      limit: 2,
+    });
+    expect(mocks.getCoreLedgerSafe).toHaveBeenCalledWith({
+      tenantSlug: "continuous-demo",
+      collections: ["objects", "tasks"],
+      limit: 2,
+    });
+    expect(mocks.getCoreLedgerHealth).toHaveBeenCalledWith({
+      ok: true,
+      error: null,
+      ledger: expect.objectContaining({
+        schemaVersion: "continuous.core_ledger.v1",
+        counts: {
+          objects: 1,
+          tasks: 1,
+        },
+      }),
+    });
+  });
+
+  it("rejects invalid Core ledger view config before dispatch", async () => {
+    mocks.coreLedgerOptionsFromConfig.mockImplementation(() => {
+      throw new Error(
+        "Unsupported Core ledger collection. Supported collections: objects, tasks.",
+      );
+    });
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          view: "ledger",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          config: {
+            collections: ["tokens"],
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toEqual({
+      code: "invalid_core_view_config",
+      message: "Unsupported Core ledger collection. Supported collections: objects, tasks.",
+    });
+    expect(mocks.getCoreLedgerSafe).not.toHaveBeenCalled();
   });
 
   it("rejects worker-only catalog tokens before Core dispatch", async () => {

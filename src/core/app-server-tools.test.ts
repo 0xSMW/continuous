@@ -7,6 +7,9 @@ const mocks = vi.hoisted(() => ({
   startCoreWorkerRun: vi.fn(),
   transitionCoreWorker: vi.fn(),
   upsertCoreWorker: vi.fn(),
+  getCoreLedgerHealth: vi.fn(),
+  coreLedgerOptionsFromConfig: vi.fn(),
+  getCoreLedgerSafe: vi.fn(),
   getCoreSummarySafe: vi.fn(),
   getHealth: vi.fn(),
   scanObligations: vi.fn(),
@@ -19,6 +22,12 @@ vi.mock("./tasks", () => ({
 
 vi.mock("./summary", () => ({
   getCoreSummarySafe: mocks.getCoreSummarySafe,
+}));
+
+vi.mock("./ledger", () => ({
+  coreLedgerOptionsFromConfig: mocks.coreLedgerOptionsFromConfig,
+  getCoreLedgerHealth: mocks.getCoreLedgerHealth,
+  getCoreLedgerSafe: mocks.getCoreLedgerSafe,
 }));
 
 vi.mock("./health", () => ({
@@ -79,6 +88,67 @@ beforeEach(() => {
         tasks: 1,
       },
     },
+  });
+  mocks.coreLedgerOptionsFromConfig.mockImplementation((tenantSlug: string | undefined, config: Record<string, unknown>) => ({
+    tenantSlug,
+    collections: config.collections,
+    limit: config.limit,
+  }));
+  mocks.getCoreLedgerSafe.mockResolvedValue({
+    ok: true,
+    error: null,
+    ledger: {
+      schemaVersion: "continuous.core_ledger.v1",
+      tenantName: "Continuous Demo",
+      tenantSlug: "continuous-demo",
+      limit: 2,
+      availableCollections: ["objects", "tasks"],
+      counts: {
+        objects: 1,
+        tasks: 1,
+      },
+      collections: {
+        objects: {
+          count: 1,
+          items: [
+            {
+              id: "object-1",
+              type: "lead",
+              name: "Acme Roof Repair",
+            },
+          ],
+        },
+        tasks: {
+          count: 1,
+          items: [
+            {
+              id: "task-1",
+              title: "Review lead",
+              state: "active",
+            },
+          ],
+        },
+      },
+    },
+  });
+  mocks.getCoreLedgerHealth.mockReturnValue({
+    service: "Continuous Core Ledger",
+    status: "ok",
+    checkedAt: "2026-05-21T00:00:00.000Z",
+    mode: "test",
+    version: "0.1.0",
+    summary: {
+      collections: 2,
+      records: 2,
+      limit: 2,
+    },
+    checks: [
+      {
+        id: "database",
+        state: "pass",
+        detail: "Postgres is reachable",
+      },
+    ],
   });
   mocks.getHealth.mockReturnValue({
     status: "ok",
@@ -159,13 +229,20 @@ describe("app-server Core tools", () => {
         }),
       ]),
     );
-    expect(schema.registry.views).toEqual([
-      expect.objectContaining({
-        name: "summary",
-        apiRoute: "/core",
-        tool: "continuous.core.view",
-      }),
-    ]);
+    expect(schema.registry.views).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "summary",
+          apiRoute: "/core",
+          tool: "continuous.core.view",
+        }),
+        expect.objectContaining({
+          name: "ledger",
+          apiRoute: "/core",
+          tool: "continuous.core.view",
+        }),
+      ]),
+    );
     expect(schema.registry.excludedCommands).toEqual(
       expect.arrayContaining(["control_plane.credential.upsert"]),
     );
@@ -667,6 +744,134 @@ describe("app-server Core tools", () => {
     });
   });
 
+  it("dispatches Core ledger views with read filters under config", async () => {
+    const result = await executeAppServerCoreTool(
+      "continuous.core.view",
+      {
+        view: "ledger",
+        core: {
+          tenantSlug: "continuous-demo",
+        },
+        config: {
+          collections: ["objects", "tasks"],
+          limit: 2,
+        },
+      },
+      {
+        operatorEmail: "owner@continuoushq.com",
+        source: "control_plane",
+        allowedAccess: ["read"],
+        allowedCommands: ["core:view.ledger"],
+        allowedTenants: ["continuous-demo"],
+        allowedWorkerRoles: ["*"],
+      },
+    );
+
+    expect(result).toEqual({
+      core: {
+        tenantSlug: "continuous-demo",
+      },
+      view: "ledger",
+      health: expect.objectContaining({
+        service: "Continuous Core Ledger",
+        status: "ok",
+      }),
+      ledger: {
+        schemaVersion: "continuous.core_ledger.v1",
+        tenantName: "Continuous Demo",
+        tenantSlug: "continuous-demo",
+        limit: 2,
+        availableCollections: ["objects", "tasks"],
+        counts: {
+          objects: 1,
+          tasks: 1,
+        },
+        collections: {
+          objects: {
+            count: 1,
+            items: [
+              {
+                id: "object-1",
+                type: "lead",
+                name: "Acme Roof Repair",
+              },
+            ],
+          },
+          tasks: {
+            count: 1,
+            items: [
+              {
+                id: "task-1",
+                title: "Review lead",
+                state: "active",
+              },
+            ],
+          },
+        },
+      },
+      error: null,
+    });
+    expect(mocks.coreLedgerOptionsFromConfig).toHaveBeenCalledWith("continuous-demo", {
+      collections: ["objects", "tasks"],
+      limit: 2,
+    });
+    expect(mocks.getCoreLedgerSafe).toHaveBeenCalledWith({
+      tenantSlug: "continuous-demo",
+      collections: ["objects", "tasks"],
+      limit: 2,
+    });
+    expect(mocks.getCoreLedgerHealth).toHaveBeenCalledWith({
+      ok: true,
+      error: null,
+      ledger: expect.objectContaining({
+        schemaVersion: "continuous.core_ledger.v1",
+      }),
+    });
+  });
+
+  it("returns public Core ledger config errors through dynamic app-server content", async () => {
+    mocks.coreLedgerOptionsFromConfig.mockImplementationOnce(() => {
+      throw new Error("Unsupported Core ledger collection. Supported collections: objects, tasks.");
+    });
+
+    const response = await executeAppServerCoreDynamicToolCall(
+      {
+        tool: "continuous.core.view",
+        arguments: {
+          view: "ledger",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          config: {
+            collections: ["not_a_collection"],
+          },
+        },
+        callId: "core-ledger-bad-config-call",
+        threadId: "thread-001",
+        turnId: "turn-001",
+      },
+      {
+        operatorEmail: "owner@continuoushq.com",
+        source: "control_plane",
+        allowedAccess: ["read"],
+        allowedCommands: ["core:view.ledger"],
+        allowedTenants: ["continuous-demo"],
+        allowedWorkerRoles: ["*"],
+      },
+    );
+    const payload = JSON.parse(response.contentItems[0]?.text ?? "{}") as {
+      ok: boolean;
+      error: string;
+    };
+
+    expect(response.success).toBe(false);
+    expect(payload.ok).toBe(false);
+    expect(payload.error).toBe(
+      "Unsupported Core ledger collection. Supported collections: objects, tasks.",
+    );
+    expect(JSON.stringify(payload)).not.toContain("not_a_collection");
+  });
+
   it("sanitizes Core summary view errors", async () => {
     mocks.getCoreSummarySafe.mockResolvedValue({
       ok: false,
@@ -756,5 +961,45 @@ describe("app-server Core tools", () => {
         error: "Dynamic app-server Core tool arguments must be an object.",
       }),
     );
+  });
+
+  it("sanitizes dynamic Core backend errors before returning app-server content", async () => {
+    mocks.getCoreSummarySafe.mockRejectedValueOnce(
+      new Error("postgres://core-db.internal/continuous redaction-sentinel"),
+    );
+
+    const response = await executeAppServerCoreDynamicToolCall(
+      {
+        tool: "continuous.core.view",
+        arguments: {
+          view: "summary",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          config: {},
+        },
+        callId: "core-secret-error-call",
+        threadId: "thread-001",
+        turnId: "turn-001",
+      },
+      {
+        operatorEmail: "owner@continuoushq.com",
+        source: "control_plane",
+        allowedAccess: ["read"],
+        allowedCommands: ["core:view.summary"],
+        allowedTenants: ["continuous-demo"],
+        allowedWorkerRoles: ["*"],
+      },
+    );
+    const payload = JSON.parse(response.contentItems[0]?.text ?? "{}") as {
+      ok: boolean;
+      error: string;
+    };
+
+    expect(response.success).toBe(false);
+    expect(payload.ok).toBe(false);
+    expect(payload.error).toBe("Unknown app-server Core tool error");
+    expect(JSON.stringify(payload)).not.toContain("redaction-sentinel");
+    expect(JSON.stringify(payload)).not.toContain("postgres://");
   });
 });

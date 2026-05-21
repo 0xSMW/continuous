@@ -7,7 +7,7 @@ execution:
 | Tool | Mode | Purpose |
 |---|---|---|
 | `continuous.core.schema` | Read-only | Returns the Core app-server registry, command/view names, canonical `apiRoute: "/core"`, and excluded credential-admin commands |
-| `continuous.core.view` | Registry-backed read | Reads registered Core views with the same `view`, `core`, and `config` envelope used by `POST /core` read payloads |
+| `continuous.core.view` | Registry-backed read | Reads registered Core views such as `summary` and `ledger` with the same `view`, `core`, and `config` envelope used by `POST /core` read payloads |
 | `continuous.core.command` | Registry-backed command | Invokes an existing Core command with the same `command`, `core`, `idempotencyKey`, and `config` envelope used by `/core` |
 | `continuous.worker.schema` | Read-only | Returns worker contracts, runtime roles, registered commands, follow-up commands, planned future-worker metadata, worker tool schema, and integration boundary |
 | `continuous.worker.view` | Registry-backed read | Reads registered worker views with the same `view`, `worker`, and `config` envelope used by local worker tooling and `POST /worker` read payloads |
@@ -92,7 +92,7 @@ publish, send, spend, and tracking mutations stay blocked.
 Revenue `readiness` is exposed through `continuous.worker.view` with the same
 `view`, `worker`, and `config` payload as `/worker`; it returns dry-run launch
 checks, latest quote-review proof refs, and live credential blockers without a
-Revenue-specific app-server tool.
+family-specific app-server tool.
 Dispatch `customer_update.draft`,
 `closeout.prepare`, and `exception.route` are also schema-discoverable through
 the same registry-backed command list and keep customer-send, QA, Finance
@@ -213,6 +213,7 @@ bun run app-server:daemon:version
 bun run app-server:proxy
 bun run app-server:tools continuous.core.schema
 bun run app-server:tools continuous.core.view --payload='{"view":"summary","core":{"tenantSlug":"continuous-demo"},"config":{}}'
+bun run app-server:tools continuous.core.view --payload='{"view":"ledger","core":{"tenantSlug":"continuous-demo"},"config":{"collections":["objects","tasks","events"],"limit":5}}'
 bun run app-server:tools continuous.worker.schema
 bun run app-server:tools continuous.workflow.schema
 bun run app-server:tools continuous.workflow.view --payload='{"view":"overview","workflow":{"tenantSlug":"continuous-demo"},"config":{}}'
@@ -368,7 +369,8 @@ The route authorizes against the `app_server` control-plane route with exact
 bridge command scope, such as `app_server:worker.command.lead.read`,
 `app_server:worker.view.snapshot`, `app_server:worker.view.readiness`, or
 `app_server:worker.schema` for workers, and `app_server:core.command.task.create`,
-`app_server:core.view.summary`, or `app_server:core.schema` for Core. Core
+`app_server:core.view.summary`, `app_server:core.view.ledger`, or
+`app_server:core.schema` for Core. Core
 commands and views require tenant scope; worker commands and views require
 tenant and worker-role scope. Mutation and read tools require a durable managed
 control-plane credential except schema discovery. After those checks pass, the

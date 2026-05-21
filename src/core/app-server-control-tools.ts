@@ -1,3 +1,4 @@
+import { appServerToolErrorMessage } from "../app-server/errors";
 import { decideApproval, listApprovals, normalizeApprovalDecision, type ApprovalSubject } from "./approvals";
 import {
   executeWorkflowSteps,
@@ -1494,7 +1495,7 @@ export async function executeAppServerControlDynamicToolCall(
       tool: params.tool,
       callId: params.callId,
       data: null,
-      error: error instanceof Error ? error.message : "Unknown app-server control tool error",
+      error: appServerToolErrorMessage(error, "Unknown app-server control tool error"),
     });
   }
 }

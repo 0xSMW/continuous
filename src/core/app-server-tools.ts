@@ -1,10 +1,16 @@
 import type { JsonObject } from "../db/schema";
+import { appServerToolErrorMessage } from "../app-server/errors";
 import { executeAiInference } from "./ai-gateway";
 import { requestApproval } from "./approvals";
 import { reserveBudget, chargeBudget, releaseBudget } from "./budgets";
 import { grantCapability } from "./capabilities";
 import { recordEntitySetup } from "./entity";
 import { getHealth } from "./health";
+import {
+  coreLedgerOptionsFromConfig,
+  getCoreLedgerHealth,
+  getCoreLedgerSafe,
+} from "./ledger";
 import { scanObligations } from "./obligations";
 import { preparePayrollPreviewPacket, recordPayrollPreview } from "./payroll";
 import {
@@ -115,7 +121,7 @@ export const appServerCoreCommandNames = [
   "payroll.preview.packet.prepare",
 ] as const;
 
-export const appServerCoreViewNames = ["summary"] as const;
+export const appServerCoreViewNames = ["summary", "ledger"] as const;
 
 const appServerCoreCommandSet = new Set<string>(appServerCoreCommandNames);
 const appServerCoreViewSet = new Set<string>(appServerCoreViewNames);
@@ -1251,12 +1257,33 @@ export async function executeAppServerCoreTool(
       target,
       context,
     );
-    const result = await getCoreSummarySafe({ tenantSlug: target.tenantSlug });
-    const summaryError = result.ok ? null : "Core summary is unavailable.";
-    const health = getHealth({
-      dbOk: result.ok,
-      dbError: summaryError,
-      counts: result.summary.counts,
+    if (view === "summary") {
+      const result = await getCoreSummarySafe({ tenantSlug: target.tenantSlug });
+      const summaryError = result.ok ? null : "Core summary is unavailable.";
+      const health = getHealth({
+        dbOk: result.ok,
+        dbError: summaryError,
+        counts: result.summary.counts,
+      });
+
+      return {
+        core: {
+          tenantSlug: target.tenantSlug ?? null,
+        },
+        view,
+        health,
+        summary: result.summary,
+        error: summaryError,
+      };
+    }
+
+    const ledgerOptions = coreLedgerOptionsFromConfig(target.tenantSlug, objectValue(args.config));
+    const result = await getCoreLedgerSafe(ledgerOptions);
+    const ledgerError = result.ok ? null : "Core ledger is unavailable.";
+    const health = getCoreLedgerHealth({
+      ok: result.ok,
+      error: ledgerError,
+      ledger: result.ledger,
     });
 
     return {
@@ -1265,8 +1292,8 @@ export async function executeAppServerCoreTool(
       },
       view,
       health,
-      summary: result.summary,
-      error: summaryError,
+      ledger: result.ledger,
+      error: ledgerError,
     };
   }
 
@@ -1343,7 +1370,7 @@ export async function executeAppServerCoreDynamicToolCall(
       tool: params.tool,
       callId: params.callId,
       data: null,
-      error: error instanceof Error ? error.message : "Unknown app-server Core tool error",
+      error: appServerToolErrorMessage(error, "Unknown app-server Core tool error"),
     });
   }
 }

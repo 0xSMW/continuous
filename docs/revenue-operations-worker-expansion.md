@@ -9,6 +9,10 @@ recording without storing live credential material or moving money.
 
 ## Current Runtime
 
+The Revenue rows below are examples of the generic worker registry, not
+Revenue-specific API variants. The public surface remains `POST /worker` with
+selectors under `worker` and operation inputs under `config`.
+
 | Area | Current state |
 |---|---|
 | Worker identity | `Revenue Operations Worker`, autonomy level 2, owner-managed |

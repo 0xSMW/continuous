@@ -1,4 +1,5 @@
 import type { JsonObject } from "../db/schema";
+import { appServerToolErrorMessage } from "../app-server/errors";
 import { executeWorkerCommand, executeWorkerView, type WorkerTargetInput } from "./registry";
 import {
   assertTrustedLocalWorkerMutation,
@@ -604,7 +605,7 @@ export async function executeAppServerWorkerDynamicToolCall(
       tool: params.tool,
       callId: params.callId,
       data: null,
-      error: error instanceof Error ? error.message : "Unknown app-server worker tool error",
+      error: appServerToolErrorMessage(error, "Unknown app-server worker tool error"),
     });
   }
 }
