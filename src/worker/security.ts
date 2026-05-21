@@ -149,7 +149,7 @@ function allowsCommand(credential: ControlPlaneCredential, route: ControlPlaneRo
   }
 
   return (
-    credential.id === "legacy-worker-run-token" &&
+    credential.id === "local-bootstrap-control-plane-token" &&
     route === "worker" &&
     credential.commands.includes("worker:*")
   );
@@ -248,14 +248,14 @@ function normalizeTokenCatalog(input: {
   });
 }
 
-function legacyCredential(input: {
+function localBootstrapCredential(input: {
   expectedToken: string;
   operatorEmail: string;
   allowedTenants?: string | null;
   allowedWorkerRoles?: string | null;
 }): ControlPlaneCredential {
   return {
-    id: "legacy-worker-run-token",
+    id: "local-bootstrap-control-plane-token",
     token: input.expectedToken,
     operatorEmail: input.operatorEmail,
     scope: controlPlaneScopeFromEnv({
@@ -438,7 +438,7 @@ export function authorizeControlPlaneAccess(input: {
       }
 
       credentials = [
-        legacyCredential({
+        localBootstrapCredential({
           expectedToken: input.expectedToken!,
           operatorEmail: legacyOperatorEmail,
           allowedTenants: input.allowedTenants,

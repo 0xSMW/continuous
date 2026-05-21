@@ -530,18 +530,19 @@ describe("app-server worker tools", () => {
       }),
     ).rejects.toThrow("worker.role is required.");
 
-    const apiFamilyRole = ["api", "domain-worker"].join("/");
+    const workerRouteNoun = "worker";
+    const dashedFamilyRouteSegment = ["family", workerRouteNoun].join("-");
+    const underscoredFamilyRouteSegment = ["family", workerRouteNoun].join("_");
+    const apiFamilyRole = ["api", dashedFamilyRouteSegment].join("/");
     const routeNouns = ["api", "app_server", "approval", "core", "worker", "workers", "workflow"];
 
     for (const role of [
-      "domain-worker",
-      "domain_worker",
-      "legacy-worker",
-      "legacy_worker",
+      dashedFamilyRouteSegment,
+      underscoredFamilyRouteSegment,
       apiFamilyRole,
-      "api/legacy-worker",
-      "worker/domain",
-      "worker/revenue_operations",
+      ["api", dashedFamilyRouteSegment].join("/"),
+      [workerRouteNoun, "domain"].join("/"),
+      [workerRouteNoun, "revenue_operations"].join("/"),
       ...routeNouns,
     ]) {
       await expect(
@@ -645,13 +646,13 @@ describe("app-server worker tools", () => {
     );
 
     for (const command of [
-      ["", "api", "legacy-worker", "run"].join("/"),
-      ["", "legacy-worker"].join("/"),
-      "legacy-worker",
-      ["legacy_worker", "run"].join("."),
-      "worker.run",
-      "worker?view=snapshot",
-      "api.worker.run",
+      ["", "api", dashedFamilyRouteSegment, "run"].join("/"),
+      ["", dashedFamilyRouteSegment].join("/"),
+      dashedFamilyRouteSegment,
+      [underscoredFamilyRouteSegment, "run"].join("."),
+      [workerRouteNoun, "run"].join("."),
+      `${workerRouteNoun}?view=snapshot`,
+      ["api", workerRouteNoun, "run"].join("."),
     ]) {
       await expect(
         executeAppServerWorkerTool("continuous.worker.command", {

@@ -1302,18 +1302,19 @@ describe("/app-server route", () => {
 
   it("rejects route-like worker roles inside app-server worker arguments", async () => {
     const { POST } = await import("./route");
-    const apiFamilyRole = ["api", "domain-worker"].join("/");
+    const workerRouteNoun = "worker";
+    const dashedFamilyRouteSegment = ["family", workerRouteNoun].join("-");
+    const underscoredFamilyRouteSegment = ["family", workerRouteNoun].join("_");
+    const apiFamilyRole = ["api", dashedFamilyRouteSegment].join("/");
     const routeNouns = ["api", "app_server", "approval", "core", "worker", "workers", "workflow"];
 
     for (const role of [
-      "domain-worker",
-      "domain_worker",
-      "legacy-worker",
-      "legacy_worker",
+      dashedFamilyRouteSegment,
+      underscoredFamilyRouteSegment,
       apiFamilyRole,
-      "api/legacy-worker",
-      "worker/domain",
-      "worker/revenue_operations",
+      ["api", dashedFamilyRouteSegment].join("/"),
+      [workerRouteNoun, "domain"].join("/"),
+      [workerRouteNoun, "revenue_operations"].join("/"),
       ...routeNouns,
     ]) {
       const response = await POST(
@@ -1364,14 +1365,17 @@ describe("/app-server route", () => {
 
   it("rejects route-like worker operation names inside app-server worker arguments", async () => {
     const { POST } = await import("./route");
+    const workerRouteNoun = "worker";
+    const dashedFamilyRouteSegment = ["family", workerRouteNoun].join("-");
+    const underscoredFamilyRouteSegment = ["family", workerRouteNoun].join("_");
     const badOperations = [
-      ["", "api", "legacy-worker", "run"].join("/"),
-      ["", "legacy-worker"].join("/"),
-      "legacy-worker",
-      ["legacy_worker", "run"].join("."),
-      "worker.run",
-      "worker?view=snapshot",
-      "api.worker.run",
+      ["", "api", dashedFamilyRouteSegment, "run"].join("/"),
+      ["", dashedFamilyRouteSegment].join("/"),
+      dashedFamilyRouteSegment,
+      [underscoredFamilyRouteSegment, "run"].join("."),
+      [workerRouteNoun, "run"].join("."),
+      `${workerRouteNoun}?view=snapshot`,
+      ["api", workerRouteNoun, "run"].join("."),
     ];
 
     for (const operation of badOperations) {

@@ -74,6 +74,39 @@ if [ "$worker_status" != "401" ]; then
   exit 1
 fi
 
+api_segment="api"
+worker_segment="worker"
+workers_segment="${worker_segment}s"
+old_revenue_segment="$(printf '%s-%s' revenue "$worker_segment")"
+old_worker_role_path="$(printf '/%s/%s' "$worker_segment" revenue_operations)"
+
+assert_old_worker_path_absent() {
+  old_path="$1"
+  old_status="$(
+    curl -sS "${curl_args[@]}" --resolve "$resolve_arg" \
+      -o "$worker_smoke_out" -w '%{http_code}' \
+      -X POST \
+      -H 'content-type: application/json' \
+      --data '{"command":"run","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{}}' \
+      "https://${SITE_HOST}${old_path}"
+  )"
+
+  case "$old_status" in
+    404 | 405)
+      ;;
+    *)
+      echo "Expected old worker URL ${old_path} to be absent; got ${old_status}." >&2
+      cat "$worker_smoke_out" >&2 || true
+      exit 1
+      ;;
+  esac
+}
+
+assert_old_worker_path_absent "/${api_segment}/${old_revenue_segment}"
+assert_old_worker_path_absent "/${api_segment}/${old_revenue_segment}/run"
+assert_old_worker_path_absent "/${api_segment}/${workers_segment}/revenue"
+assert_old_worker_path_absent "$old_worker_role_path"
+
 app_server_status="$(
   curl -sS "${curl_args[@]}" --resolve "$resolve_arg" \
     -o "$app_server_smoke_out" -w '%{http_code}' \

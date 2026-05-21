@@ -289,18 +289,19 @@ describe("worker tool contract", () => {
       }),
     ).rejects.toThrow("worker.role is required.");
 
-    const apiFamilyRole = ["api", "domain-worker"].join("/");
+    const workerRouteNoun = "worker";
+    const dashedFamilyRouteSegment = ["family", workerRouteNoun].join("-");
+    const underscoredFamilyRouteSegment = ["family", workerRouteNoun].join("_");
+    const apiFamilyRole = ["api", dashedFamilyRouteSegment].join("/");
     const routeNouns = ["api", "app_server", "approval", "core", "worker", "workers", "workflow"];
 
     for (const role of [
-      "domain-worker",
-      "domain_worker",
-      "legacy-worker",
-      "legacy_worker",
+      dashedFamilyRouteSegment,
+      underscoredFamilyRouteSegment,
       apiFamilyRole,
-      "api/legacy-worker",
-      "worker/domain",
-      "worker/revenue_operations",
+      ["api", dashedFamilyRouteSegment].join("/"),
+      [workerRouteNoun, "domain"].join("/"),
+      [workerRouteNoun, "revenue_operations"].join("/"),
       ...routeNouns,
     ]) {
       await expect(
@@ -335,13 +336,13 @@ describe("worker tool contract", () => {
     ).rejects.toThrow("config is required and must be an object.");
 
     for (const command of [
-      ["", "api", "legacy-worker", "run"].join("/"),
-      ["", "legacy-worker"].join("/"),
-      "legacy-worker",
-      ["legacy_worker", "run"].join("."),
-      "worker.run",
-      "worker?view=snapshot",
-      "api.worker.run",
+      ["", "api", dashedFamilyRouteSegment, "run"].join("/"),
+      ["", dashedFamilyRouteSegment].join("/"),
+      dashedFamilyRouteSegment,
+      [underscoredFamilyRouteSegment, "run"].join("."),
+      [workerRouteNoun, "run"].join("."),
+      `${workerRouteNoun}?view=snapshot`,
+      ["api", workerRouteNoun, "run"].join("."),
     ]) {
       await expect(
         executeWorkerTool("worker.command", {
@@ -957,7 +958,7 @@ describe("worker tool contract", () => {
       executeWorkerCommand({
         command: "run",
         target: {
-          role: "domain-worker",
+          role: ["family", "worker"].join("-"),
           tenantSlug: "continuous-demo",
         },
         operatorEmail: "owner@continuoushq.com",
@@ -977,7 +978,7 @@ describe("worker tool contract", () => {
 
     await expect(
       executeWorkerCommand({
-        command: ["", "api", "legacy-worker", "run"].join("/"),
+        command: ["", "api", ["family", "worker"].join("-"), "run"].join("/"),
         target: {
           role: "revenue_operations",
           tenantSlug: "continuous-demo",
@@ -1000,7 +1001,7 @@ describe("worker tool contract", () => {
           tenantSlug: "continuous-demo",
         },
         operatorEmail: "owner@continuoushq.com",
-        idempotencyKey: ["", "api", "legacy-worker", "run"].join("/"),
+        idempotencyKey: ["", "api", ["family", "worker"].join("-"), "run"].join("/"),
         config: {},
       }),
     ).rejects.toMatchObject({

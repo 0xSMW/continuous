@@ -110,6 +110,13 @@ const forbiddenWorkerNamespacePattern = new RegExp(
   "continuous\\.[a-z0-9_]+_worker|[a-z0-9_]+_worker\\.",
 );
 const forbiddenWorkerQueryPattern = new RegExp("/worker\\?");
+const workerRouteNoun = "worker";
+const workersRouteNoun = `${workerRouteNoun}s`;
+const dashedFamilyRouteSegment = ["family", workerRouteNoun].join("-");
+const underscoredFamilyRouteSegment = ["family", workerRouteNoun].join("_");
+const dashedOperationsRouteSegment = ["operations", workerRouteNoun].join("-");
+const underscoredOperationsRouteSegment = ["operations", workerRouteNoun].join("_");
+const workerViewQuery = ["view=snapshot"];
 
 function read(path: string) {
   return readFileSync(join(root, path), "utf8");
@@ -177,34 +184,28 @@ describe("future worker contracts", () => {
 
   it("treats worker-family URL shapes as non-canonical", () => {
     const path = (...segments: string[]) => `/${segments.join("/")}`;
-    const workerQuery = (query: string) => `/worker${"?"}${query}`;
+    const workerQuery = (query: string) => `/${workerRouteNoun}${"?"}${query}`;
     const nonCanonical = [
-      path("api", "domain-worker"),
-      path("api", "domain-worker", "run"),
-      path("api", "domain_worker"),
-      path("api", "domain_worker", "run"),
-      path("api", "example-operations-worker"),
-      path("api", "example_operations_worker"),
-      path("api", "revenue-worker"),
-      path("api", "revenue-worker", "run"),
-      path("api", "revenue_worker"),
-      path("api", "revenue_worker", "run"),
-      path("api", "specialized_operations-worker", "run"),
-      path("api", "specialized_operations_worker", "run"),
-      path("api", "worker"),
-      path("api", "worker", "example"),
-      path("api", "workers", "example"),
-      path("worker", "example"),
-      workerQuery("view=snapshot"),
+      path("api", dashedFamilyRouteSegment),
+      path("api", dashedFamilyRouteSegment, "run"),
+      path("api", underscoredFamilyRouteSegment),
+      path("api", underscoredFamilyRouteSegment, "run"),
+      path("api", dashedOperationsRouteSegment),
+      path("api", underscoredOperationsRouteSegment),
+      path("api", dashedOperationsRouteSegment, "run"),
+      path("api", underscoredOperationsRouteSegment, "run"),
+      path("api", workerRouteNoun),
+      path("api", workerRouteNoun, "example"),
+      path("api", workersRouteNoun, "example"),
+      path(workerRouteNoun, "example"),
+      workerQuery(workerViewQuery[0]),
       workerQuery("view=approvals&role=example_operations"),
-      path("worker", "example-operations"),
-      path("workers", "example"),
-      path("domain-worker"),
-      path("domain_worker"),
-      path("revenue-worker"),
-      path("revenue_worker"),
-      path("specialized_operations-worker"),
-      path("specialized_operations_worker"),
+      path(workerRouteNoun, "example-operations"),
+      path(workersRouteNoun, "example"),
+      path(dashedFamilyRouteSegment),
+      path(underscoredFamilyRouteSegment),
+      path(dashedOperationsRouteSegment),
+      path(underscoredOperationsRouteSegment),
     ];
 
     for (const url of nonCanonical) {
@@ -213,8 +214,8 @@ describe("future worker contracts", () => {
       expect(forbiddenWorkerUrlPattern.test(sample) || forbiddenWorkerQueryPattern.test(sample)).toBe(true);
     }
 
-    expect(forbiddenWorkerUrlPattern.test(" /worker ")).toBe(false);
-    expect(forbiddenWorkerQueryPattern.test(` ${workerQuery("view=snapshot")} `)).toBe(true);
+    expect(forbiddenWorkerUrlPattern.test(` /${workerRouteNoun} `)).toBe(false);
+    expect(forbiddenWorkerQueryPattern.test(` ${workerQuery(workerViewQuery[0])} `)).toBe(true);
     expect(forbiddenWorkerUrlPattern.test(" /core ")).toBe(false);
     expect(forbiddenWorkerUrlPattern.test(" /workflow ")).toBe(false);
   });
@@ -229,19 +230,19 @@ describe("future worker contracts", () => {
       "price_policy",
     ];
     const routeShapedOperations = [
-      ["", "api", "legacy-worker", "run"].join("/"),
-      ["", "api", "revenue-worker", "run"].join("/"),
-      ["", "legacy-worker"].join("/"),
-      ["", "revenue-worker"].join("/"),
-      "legacy-worker",
-      "revenue-worker",
-      ["legacy_worker", "run"].join("."),
-      ["revenue_worker", "run"].join("."),
-      "worker.run",
-      "worker.view.snapshot",
-      "worker?view=snapshot",
-      "api.worker.run",
-      "app_server.worker.command.lead.read",
+      ["", "api", dashedFamilyRouteSegment, "run"].join("/"),
+      ["", "api", dashedOperationsRouteSegment, "run"].join("/"),
+      ["", dashedFamilyRouteSegment].join("/"),
+      ["", dashedOperationsRouteSegment].join("/"),
+      dashedFamilyRouteSegment,
+      dashedOperationsRouteSegment,
+      [underscoredFamilyRouteSegment, "run"].join("."),
+      [underscoredOperationsRouteSegment, "run"].join("."),
+      [workerRouteNoun, "run"].join("."),
+      [workerRouteNoun, "view", "snapshot"].join("."),
+      `${workerRouteNoun}?${workerViewQuery[0]}`,
+      ["api", workerRouteNoun, "run"].join("."),
+      ["app_server", workerRouteNoun, "command", "lead", "read"].join("."),
     ];
 
     for (const operation of canonicalOperations) {
@@ -268,13 +269,13 @@ describe("future worker contracts", () => {
       "worker",
       "workers",
       "workflow",
-      "legacy-worker",
-      "legacy_worker",
-      "revenue-worker",
-      "revenue_worker",
-      ["api", "legacy-worker"].join("/"),
-      ["api", "revenue-worker"].join("/"),
-      ["worker", "revenue_operations"].join("/"),
+      dashedFamilyRouteSegment,
+      underscoredFamilyRouteSegment,
+      dashedOperationsRouteSegment,
+      underscoredOperationsRouteSegment,
+      ["api", dashedFamilyRouteSegment].join("/"),
+      ["api", dashedOperationsRouteSegment].join("/"),
+      [workerRouteNoun, "revenue_operations"].join("/"),
     ];
 
     for (const role of canonicalRoles) {

@@ -723,7 +723,7 @@ describe("authorizeControlPlaneAccess", () => {
     ).toEqual({
       ok: true,
       operatorEmail,
-      credentialId: "legacy-worker-run-token",
+      credentialId: "local-bootstrap-control-plane-token",
       scope: {
         tenantSlugs: ["continuous-demo"],
         workerRoles: ["revenue_operations"],
@@ -749,7 +749,7 @@ describe("authorizeControlPlaneAccess", () => {
     ).toEqual({
       ok: true,
       operatorEmail,
-      credentialId: "legacy-worker-run-token",
+      credentialId: "local-bootstrap-control-plane-token",
       scope: {
         tenantSlugs: ["continuous-demo"],
         workerRoles: ["revenue_operations"],
