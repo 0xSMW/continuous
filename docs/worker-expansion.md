@@ -15,6 +15,19 @@ grounded in Core records instead of worker-private payloads.
 Use [Worker contract template](worker-contract-template.md) before coding any
 new worker family.
 
+## Queryable Expansion Metadata
+
+The code-owned expansion catalog is exposed at
+`workerToolSchema.registry.expansion` and through `continuous.worker.schema`.
+Clients should read that registry for worker launch order, first
+`command`/`view` pairs, Core object spines, incoming handoffs, acceptance
+checks, blockers, and launch gates. This document remains the narrative map;
+the registry is the machine-readable contract.
+
+Every expansion entry must keep execution on `/worker`. Worker family,
+packaged-worker, and tenant selection belong in the request payload, and all
+operation-specific inputs belong under `config`.
+
 ## Launch Order
 
 | Order | Worker | First outcome | Launch gate |

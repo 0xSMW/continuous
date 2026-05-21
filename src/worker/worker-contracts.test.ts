@@ -9,6 +9,7 @@ import {
   runtimeWorkerContracts,
   workerContractForRole,
   workerContracts,
+  workerExpansionCatalog,
   workerFollowUpCommands,
   workerFollowUpViews,
   workerApiRoute,
@@ -449,6 +450,7 @@ describe("future worker contracts", () => {
     const readinessScript = read("scripts/check-production-readiness-on-host.sh");
     const observabilityScript = read("scripts/check-observability-on-host.sh");
     const attestationScript = read("scripts/attest-control-plane-on-host.sh");
+    const coreWorkerLifecycleSmokeScript = read("scripts/smoke-core-worker-lifecycle-on-host.sh");
     const rotationScript = read("scripts/rotate-control-plane-token-on-host.sh");
 
     expect(deployment).toContain("control_plane.token_rotation.attest");
@@ -489,6 +491,9 @@ describe("future worker contracts", () => {
     expect(attestationScript).toContain("worker:permission.review");
     expect(attestationScript).toContain("workforce_operations");
     expect(attestationScript).toContain("systems_operations");
+    expect(coreWorkerLifecycleSmokeScript).toContain('command: "worker.upsert"');
+    expect(coreWorkerLifecycleSmokeScript).toContain('command: "worker.transition"');
+    expect(coreWorkerLifecycleSmokeScript).toContain("systems_operations");
     expect(rotationScript).toContain("control_plane.token_rotation.attest");
     expect(rotationScript).toContain("TOKEN_ROTATION_ATTESTATION_ID");
     expect(rotationScript).toContain("NEXT_WORKER_RUN_TOKEN");
@@ -506,6 +511,7 @@ describe("future worker contracts", () => {
     expect(deployScript).toContain("worker:sync.repair.plan");
     expect(deployScript).toContain("worker:permission.review");
     expect(deployScript).toContain("scripts/rotate-control-plane-token-on-host.sh");
+    expect(deployScript).toContain("scripts/smoke-core-worker-lifecycle-on-host.sh");
     expect(deployScript).toContain("preserving the existing bootstrap token");
     expect(deployScript).toContain('SITE_HOST="$SITE_HOST"');
     expect(deployWorkflow).toContain("core:control_plane.token_rotation.attest");
@@ -523,6 +529,7 @@ describe("future worker contracts", () => {
     expect(deployWorkflow).toContain("worker:permission.review");
     expect(deployWorkflow).toContain("scripts/attest-control-plane-on-host.sh");
     expect(deployWorkflow).toContain("scripts/rotate-control-plane-token-on-host.sh");
+    expect(deployWorkflow).toContain("scripts/smoke-core-worker-lifecycle-on-host.sh");
     expect(deployWorkflow).toContain("preserving the existing bootstrap token");
     expect(deployWorkflow).toContain('SITE_HOST="$SITE_HOST"');
   });
@@ -566,6 +573,15 @@ describe("future worker contracts", () => {
 
     expect(handoffs).toContain("Consumers must resolve handoffs from Core records");
     expect(handoffs).toContain("config.sourceRefs");
+
+    for (const entry of workerExpansionCatalog) {
+      if (entry.incomingHandoff) {
+        expect(handoffs).toContain(entry.incomingHandoff);
+      }
+      expect(entry.apiRoute).toBe(workerApiRoute);
+      expect(entry.firstCommand).not.toMatch(/_worker|worker\./);
+      expect(entry.firstView).not.toMatch(/_worker|worker\./);
+    }
   });
 
   it("has planned command metadata for every future contract without registered runtime", () => {

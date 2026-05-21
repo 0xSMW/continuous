@@ -54,6 +54,7 @@ describe("app-server worker tools", () => {
       throw new Error("Expected schema result.");
     }
     const registry = schema.registry;
+    const expansionKeys = registry.expansion.map((entry) => entry.key);
     const runtimeRoles = registry.runtimeContracts.map((contract) => contract.role);
     const plannedRoles = registry.plannedContracts.map((contract) => contract.role);
     const revenueFollowUpCommands = registry.followUpCommands.filter(
@@ -86,6 +87,25 @@ describe("app-server worker tools", () => {
     expect(registry.contracts.every((contract) => contract.apiRoute === "/worker")).toBe(true);
     expect(registry.commands.every((command) => command.apiRoute === "/worker")).toBe(true);
     expect(registry.views.every((view) => view.apiRoute === "/worker")).toBe(true);
+    expect(registry.expansion.every((entry) => entry.apiRoute === "/worker")).toBe(true);
+    expect(expansionKeys).toEqual(
+      expect.arrayContaining([
+        "revenue_operations",
+        "systems_operations",
+        "vertical_packages",
+        "package_quote_to_cash_field",
+      ]),
+    );
+    expect(registry.expansion.some((entry) => entry.wave === 12)).toBe(true);
+    expect(
+      registry.expansion.find((entry) => entry.key === "package_quote_to_cash_field"),
+    ).toEqual(
+      expect.objectContaining({
+        firstCommand: "package.flow.prepare",
+        firstView: "package_readiness",
+        incomingHandoff: "systems.connection_to_packaged_worker",
+      }),
+    );
     expect(runtimeRoles).toEqual([
       "revenue_operations",
       "owner_chief_of_staff",
@@ -700,6 +720,13 @@ describe("app-server worker tools", () => {
       tool?: string;
       data?: {
         manifest?: typeof appServerWorkerToolManifest;
+        registry?: {
+          expansion?: Array<{
+            key: string;
+            wave: number;
+            apiRoute: string;
+          }>;
+        };
       };
     };
 
@@ -711,6 +738,15 @@ describe("app-server worker tools", () => {
       "continuous.worker.command",
       "continuous.worker.view",
     ]);
+    expect(schemaPayload.data?.registry?.expansion?.some((entry) => entry.wave === 12)).toBe(true);
+    expect(schemaPayload.data?.registry?.expansion).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: "package_quote_to_cash_field",
+          apiRoute: "/worker",
+        }),
+      ]),
+    );
 
     const errorResponse = await executeAppServerWorkerDynamicToolCall({
       tool: "continuous.worker.command",

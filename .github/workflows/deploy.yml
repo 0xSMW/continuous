@@ -515,6 +515,9 @@ jobs:
             '.control_plane_attestation_status == "ok" and (.credentialId | length > 0) and (.revocationAuditId | length > 0) and (.sessionReviewViewId | length > 0) and (.authSessionId | length > 0)' \
             >/dev/null
 
+          APP_DIR="$APP_DIR" SITE_HOST="$SITE_HOST" TENANT_SLUG="continuous-demo" \
+            "$APP_DIR/scripts/smoke-core-worker-lifecycle-on-host.sh"
+
           PAYROLL_KEY="deploy-payroll-preview-smoke"
           PAYROLL_PAYLOAD="$(
             /usr/bin/jq -nc --arg key "$PAYROLL_KEY" --arg externalId "$PAYROLL_KEY" '{
@@ -630,7 +633,7 @@ jobs:
             >/dev/null
 
           SCHEMA="$(docker compose --profile tools run --rm migrate bun run worker:tool schema </dev/null)"
-          echo "$SCHEMA" | /usr/bin/jq -c '{commands:.registry.commands, views:.registry.views, contracts:[.registry.contracts[].role], routes:[.registry.contracts[].apiRoute], runtime:[.registry.runtimeContracts[].role], planned:[.registry.plannedContracts[].role], followUpCommandCount:(.registry.followUpCommands|length), followUpViewCount:(.registry.followUpViews|length), tools:[.tools[].name]}'
+          echo "$SCHEMA" | /usr/bin/jq -c '{commands:.registry.commands, views:.registry.views, contracts:[.registry.contracts[].role], routes:[.registry.contracts[].apiRoute], runtime:[.registry.runtimeContracts[].role], planned:[.registry.plannedContracts[].role], followUpCommandCount:(.registry.followUpCommands|length), followUpViewCount:(.registry.followUpViews|length), expansionCount:(.registry.expansion|length), expansionKeys:[.registry.expansion[].key], tools:[.tools[].name]}'
           echo "$SCHEMA" | /usr/bin/jq -e '
             (.registry.commands | map(.name) | index("run")) != null and
             (.registry.commands | any(.role == "revenue_operations" and .name == "lead.read" and .idempotency == "required" and .requiresTenant == true)) and
@@ -684,7 +687,37 @@ jobs:
             (.registry.commands | any(.name == "run" and .idempotency == "required")) and
             (.registry.commands | any(.name == "continue" and .idempotency == "required")) and
             (.registry.commands | any(.name == "adapters.reconcile" and .requiresTenant == true)) and
+            (.registry.expansion | length) >= 12 and
+            (.registry.expansion | all(.apiRoute == "/worker")) and
+            (.registry.expansion | map(.wave) | unique == [1,2,3,4,5,6,7,8,9,10,11,12]) and
+            (.registry.expansion | any(.key == "offer_pricing_operations" and .firstCommand == "margin.review.prepare" and .firstView == "price_policy" and .incomingHandoff == "revenue.quote_to_pricing")) and
+            (.registry.expansion | any(.key == "vertical_packages" and .firstCommand == "package.flow.prepare" and .firstView == "package_readiness" and .incomingHandoff == "systems.connection_to_packaged_worker")) and
+            (.registry.expansion | any(.key == "package_quote_to_cash_field" and .kind == "packaged_worker")) and
             (.tools | map(.name) == ["worker.view","worker.command"])
+          ' >/dev/null
+
+          APP_SERVER_SCHEMA_PAYLOAD='{"tool":"continuous.worker.schema","arguments":{},"callId":"deploy-app-server-schema-smoke","threadId":"deploy-smoke","turnId":"deploy-smoke"}'
+          APP_SERVER_SCHEMA_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/app-server \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              --data "$APP_SERVER_SCHEMA_PAYLOAD"
+          )"
+          echo "$APP_SERVER_SCHEMA_RESPONSE" | /usr/bin/jq -c '{api,error,success:.data.success,contentItemCount:(.data.contentItems | length)}'
+          echo "$APP_SERVER_SCHEMA_RESPONSE" | /usr/bin/jq -e '
+            .api == "continuous.app_server.v1" and
+            .error == null and
+            .data.success == true and
+            (.data.contentItems[0].text | fromjson |
+              .ok == true and
+              .tool == "continuous.worker.schema" and
+              (.data.registry.expansion | length) >= 12 and
+              (.data.registry.expansion | all(.apiRoute == "/worker")) and
+              (.data.registry.expansion | any(.key == "offer_pricing_operations" and .firstCommand == "margin.review.prepare" and .incomingHandoff == "revenue.quote_to_pricing")) and
+              (.data.registry.expansion | any(.key == "vertical_packages" and .firstCommand == "package.flow.prepare" and .incomingHandoff == "systems.connection_to_packaged_worker")) and
+              (.data.registry.expansion | any(.key == "package_quote_to_cash_field" and .firstView == "package_readiness"))
+            )
           ' >/dev/null
 
           WORKFORCE_HIRE_KEY="deploy-workforce-hire-smoke-$SMOKE_RUN_ID"

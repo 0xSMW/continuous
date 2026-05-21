@@ -12,6 +12,7 @@ import {
   plannedWorkerViews,
   runtimeWorkerContracts,
   workerContracts,
+  workerExpansionCatalog,
   workerFollowUpCommands,
   workerFollowUpViews,
 } from "./planned-workers";
@@ -120,6 +121,7 @@ export const workerToolSchema = {
     plannedViews: followUpViews,
     plannedFutureWorkerCommands: plannedWorkerCommands(),
     plannedFutureWorkerViews: plannedWorkerViews(),
+    expansion: workerExpansionCatalog,
   },
   $defs: {
     workerTarget: {

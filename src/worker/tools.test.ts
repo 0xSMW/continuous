@@ -15,6 +15,7 @@ import {
   plannedWorkerViews,
   runtimeWorkerContracts,
   workerContracts,
+  workerExpansionCatalog,
   workerFollowUpCommands,
   workerFollowUpViews,
 } from "./planned-workers";
@@ -1037,6 +1038,75 @@ describe("worker tool contract", () => {
     });
 
     expect(offenders).toEqual([]);
+  });
+
+  it("exposes queryable expansion metadata through the generic worker registry", () => {
+    const expansion = workerToolSchema.registry.expansion;
+    const waves = new Set(expansion.map((entry) => entry.wave));
+    const byKey = new Map(expansion.map((entry) => [entry.key, entry]));
+
+    expect(expansion).toBe(workerExpansionCatalog);
+    expect([...waves].sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    expect([...byKey.keys()]).toEqual(
+      expect.arrayContaining([
+        "revenue_operations",
+        "compliance_operations",
+        "offer_pricing_operations",
+        "customer_experience_operations",
+        "asset_supply_operations",
+        "growth_operations",
+        "vertical_packages",
+        "package_quote_to_cash_field",
+        "package_knowledge_delivery",
+      ]),
+    );
+    expect(byKey.get("revenue_operations")).toEqual(
+      expect.objectContaining({
+        apiRoute: "/worker",
+        workerRole: "revenue_operations",
+        firstCommand: "lead.read",
+        firstView: "snapshot",
+        status: "runtime",
+      }),
+    );
+    expect(byKey.get("offer_pricing_operations")).toEqual(
+      expect.objectContaining({
+        apiRoute: "/worker",
+        workerRole: "offer_pricing_operations",
+        firstCommand: "margin.review.prepare",
+        firstView: "price_policy",
+        incomingHandoff: "revenue.quote_to_pricing",
+        status: "candidate",
+      }),
+    );
+    expect(byKey.get("vertical_packages")).toEqual(
+      expect.objectContaining({
+        apiRoute: "/worker",
+        packageKey: "vertical_packages",
+        firstCommand: "package.flow.prepare",
+        firstView: "package_readiness",
+        incomingHandoff: "systems.connection_to_packaged_worker",
+        kind: "packaged_worker",
+      }),
+    );
+
+    for (const entry of expansion) {
+      expect(entry.schemaVersion).toBe("continuous.worker_expansion.v1");
+      expect(entry.apiRoute).toBe("/worker");
+      expect(entry.firstCommand.length).toBeGreaterThan(0);
+      expect(entry.firstView.length).toBeGreaterThan(0);
+      expect(entry.coreObjects.length).toBeGreaterThan(0);
+      expect(entry.acceptanceChecks.length).toBeGreaterThan(0);
+      expect(entry.firstBlocker.length).toBeGreaterThan(0);
+      expect(entry.launchGate.length).toBeGreaterThan(0);
+      expect(entry.sourceDocs.length).toBeGreaterThan(0);
+      if (entry.kind === "worker_family") {
+        expect(entry.workerRole).toBeTruthy();
+      }
+      if (entry.kind === "packaged_worker") {
+        expect(entry.packageKey).toBeTruthy();
+      }
+    }
   });
 
   it("validates worker run idempotency before invoking the worker", async () => {
