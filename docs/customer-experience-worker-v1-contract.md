@@ -78,6 +78,7 @@ fields. Operation inputs and read filters stay under `config`.
 | `promise` | `owner`, `dueAt`, `promiseText`, `sourceRefs`, `fulfillmentState` | `draft`, `approved`, `kept`, `missed`, `canceled` | `made_to_customer`, `blocks_recovery` |
 | `satisfaction_signal` | `source`, `severity`, `sentiment`, `detectedAt`, `sourceRefs` | `open`, `triaged`, `recovery_drafted`, `resolved` | `about_customer`, `from_conversation`, `from_review` |
 | `complaint` | `category`, `severity`, `requestedOutcome`, `facts`, `riskFlags` | `open`, `approval_pending`, `recovery_ready`, `resolved`, `rejected` | `about_customer`, `supported_by_evidence` |
+| `testimonial` | `source`, `claimRefs`, `consentRef`, `customerRef`, `evidencePacketId` | `draft`, `source_review`, `approved_for_use`, `blocked`, `expired` | `about_customer`, `supports_growth`, `supported_by_evidence` |
 | `review` | `platform`, `rating`, `bodyHash`, `occurredAt`, `responseState` | `new`, `drafted`, `approval_pending`, `responded`, `ignored` | `about_customer`, `references_promise` |
 
 ## Workflow
