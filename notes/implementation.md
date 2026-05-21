@@ -321,6 +321,12 @@ views from worker-payload `config`, keeps agency submission and legal advice
 blocked, and leaves live credentials, rule-source breadth, and receipt capture
 as the next launch gates.
 
+Compliance filing preparation now writes the documented filing workflow spine:
+filing draft preparation advances to validation, validation advances to
+review-ready or blocked, and the approval-request step advances review-ready
+packets to approval-pending while agency submission and legal advice remain
+blocked.
+
 Systems Operations is now documented as a first runtime slice on the generic
 `/worker` envelope. The slice is limited to dry-run repair planning, permission
 and automation review evidence, rollback packets, and blocked external

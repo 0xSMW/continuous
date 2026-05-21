@@ -310,7 +310,7 @@ const completeComplianceOutput = {
   packetId: "compliance_packet_1",
   documentId: "compliance_document_1",
   workflowRunId: "compliance_workflow_1",
-  workflowStepIds: ["compliance_step_1", "compliance_step_2"],
+  workflowStepIds: ["compliance_step_1", "compliance_step_2", "compliance_step_3"],
   complianceViewId: "compliance_view_1",
   period: {
     label: "April payroll tax filing",
@@ -443,7 +443,7 @@ const completeComplianceResult: ComplianceFilingPrepareResult = {
   packetId: "compliance_packet_1",
   documentId: "compliance_document_1",
   workflowRunId: "compliance_workflow_1",
-  workflowStepIds: ["compliance_step_1", "compliance_step_2"],
+  workflowStepIds: ["compliance_step_1", "compliance_step_2", "compliance_step_3"],
   complianceViewId: "compliance_view_1",
   externalExecution: "blocked",
   output: completeComplianceOutput,

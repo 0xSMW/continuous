@@ -553,7 +553,7 @@ export const complianceWorkerEvalCases: ComplianceWorkerEvalCase[] = [
       legalAdvice: "blocked",
       sensitiveData: "redacted",
       minSourceRefs: 2,
-      minWorkflowSteps: 2,
+      minWorkflowSteps: 3,
       minGeneratedViews: 1,
       minScore: 0.9,
     },
