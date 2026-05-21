@@ -88,6 +88,15 @@ Growth now has a first runtime fixture shape on the same generic `/worker`
 envelope: `campaign.draft` consumes `customer.signal_to_growth` refs and policy
 from `config`, prepares a source-backed campaign draft packet and `campaigns`
 view, and blocks publish, send, spend, and tracking mutation.
+Offer and Pricing now has a first runtime fixture shape on the same generic
+`/worker` envelope: `margin.review.prepare` consumes
+`revenue.quote_to_pricing` refs and policy from `config`, prepares a margin and
+discount review packet plus the `price_policy` view, and blocks price publish,
+quote mutation, and customer send. Customer Experience now has a first runtime
+fixture shape on the same generic `/worker` envelope: `recovery.draft` consumes
+`customer.signal_to_experience` refs and policy from `config`, prepares a
+recovery packet plus the `signals` view, and blocks customer sends, refunds,
+concessions, and promise mutation.
 
 | Worker | Required first fixture |
 |---|---|
@@ -97,8 +106,8 @@ view, and blocks publish, send, spend, and tracking mutation.
 | Workforce | implemented: `owner.staffing_need_to_workforce` and direct workforce refs can feed `hire.packet.prepare` for workforce packets with restricted-document proof and payroll blockers; `payroll_input.prepare` produces a dry-run payroll-input packet and readiness view while payroll submission and money movement stay blocked |
 | Compliance | implemented: `workforce.payroll_to_compliance` payroll preview feeds `filing.prepare` through `config.sourceRefs`, producing a filing draft packet, approval view, and blocked submission/legal-advice posture |
 | Systems | implemented: `core.connection_to_systems_review` can feed connection health scan and repair planning; failing connection sync issues produce dry-run repair plans, rollback packets, permission review evidence, and blocked external execution |
-| Offer and Pricing | `revenue.quote_to_pricing` quote draft with margin, discount, or change-order policy evidence |
-| Customer Experience | `customer.signal_to_experience` customer signal with source evidence and blocked recovery draft |
+| Offer and Pricing | implemented: `revenue.quote_to_pricing` quote draft with margin, discount, or change-order policy evidence feeds `margin.review.prepare`; Offer and Pricing then emits pricing review objects, packet/document/evidence, owner approval, generated `price_policy` view, budget/audit proof, and idempotent replay while price publish, quote mutation, and customer sends stay blocked |
+| Customer Experience | implemented: `customer.signal_to_experience` customer signal with source evidence feeds `recovery.draft`; Customer Experience then emits a recovery draft packet, escalation task, owner approval request, generated `signals` view, workflow/budget/audit proof, and no-send posture while customer sends, review responses, refunds, and concessions stay blocked |
 | Asset and Supply | `dispatch.asset_need_to_supply` material, asset, or vendor need tied to a work order and cash posture |
 | Growth | implemented: `customer.signal_to_growth` customer signal, review, or testimonial with source-backed claims and budget evidence feeds `campaign.draft`; Growth then emits `growth.campaign_to_owner_review` for owner publish review while publish/send/spend/tracking mutation stays blocked |
 | Vertical packaged workers | `systems.connection_to_packaged_worker` scoped connector unlock with permission, freshness, and rollback evidence |

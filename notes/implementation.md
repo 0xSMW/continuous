@@ -21,6 +21,7 @@
 | Canonical worker HTTP surface is guarded | Operator routes require bearer credentials, and production credentials now carry tenant, worker-role, route, read/write, and command scope through the control-plane token catalog |
 | Added canonical worker API | `/worker` is the forward control-plane route; worker role, tenant selection, command, idempotency, and config live in structured payload fields for mutation commands |
 | Added controlled execution config | Revenue approval continuation still uses `/worker` with `command=continue`; approved controlled-send receipt details live only under `config.execution`, require explicit connection/credential/receipt/rollback proof, persist as a safe summary plus redacted receipt, and are bound into the idempotency hash |
+| Closed Revenue command config boundaries | Revenue `lead.read`, lead action, `payment_link.prepare`, `continue`, and `approval.decide` configs now reject unknown top-level config fields through the shared worker registry; provider/source extension data must live inside documented nested objects such as records, lead packets, source refs, policy, receipt, or rollback |
 | Moved Revenue continuation onto Core lifecycle | Revenue `command=continue` still enters through the generic `/worker` command envelope with `config.approvalId`, but the continuation run now starts and completes through Core `worker.run.start` / `worker.run.complete`, including budget reservation, usage settlement, replay repair, and fail-closed unsupported approval kinds |
 | Normalized worker role naming | Strategy examples and contract guardrails now use role-based names such as `revenue_operations` instead of `_worker` identifiers, so future workers extend the same `/worker` command envelope |
 | Added worker command registry | `/worker` and `bun run worker:tool` now share registered command metadata, role allowlisting, config validation, idempotency rules, tenant requirements, and external-execution posture |
@@ -590,3 +591,24 @@ Production deploy smoke now hard-fails if Revenue `run` or `quote.prepare`
 falls back to a local `continuous.worker` run row. The smoke requires
 `continuous.core.worker_runs`, terminal `done` state, the expected command mode,
 and a used Core budget settlement with the returned reservation and usage ids.
+
+## 2026-05-21
+
+Expansion roadmap metadata now matches the promoted runtime surface more
+closely. Offer and Pricing's first `margin.review.prepare` fixture and Customer
+Experience's first `recovery.draft` fixture are marked implemented in the
+handoff map, and their remaining blockers are explicitly live credentials,
+rollback, receipt, and follow-up execution gates instead of missing first
+fixtures.
+
+The worker contract metadata now includes the registered Offer and Pricing
+`approvals` view and describes Growth `snapshot` as a runtime view. Asset and
+Supply is documented as a candidate catalog entry, while vertical packages are
+documented as packaged catalog bundles with no executable runtime handler yet;
+`runtime` stays reserved for registered executable worker families.
+
+The API naming audit did not find live `/api/*-worker`, `/worker/<role>`,
+`revenue_worker`, or route-shaped worker payload drift. Remaining API-shape work
+is not route naming; it is making readiness and execution metadata more
+machine-readable so clients can distinguish quote controlled-send approval from
+payment-provider execution, which remains blocked.

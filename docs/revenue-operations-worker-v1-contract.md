@@ -290,6 +290,12 @@ Revenue Operations compatibility path or worker-specific local mutation
 shortcut; HTTP and CLI callers both go through the registered `/worker` command
 envelope. Future workers must use `/worker` with role, command, idempotency,
 and config in structured fields; operation inputs are valid only under `config`.
+Revenue command schemas also reject unknown top-level `config` fields. Put
+source/provider details inside the documented nested payloads, such as
+`config.records[]`, `config.leadPacket`, `config.intake`, `config.sourceRefs`,
+`config.policy`, `config.execution.receipt`, or `config.execution.rollback`;
+do not add route-shaped fields such as `apiRoute`, continuation-kind switches,
+or provider dumps next to the command payload.
 
 ## Registry Entries
 
@@ -316,6 +322,10 @@ and local toolbox aliases resolve to the same handlers and validation rules.
 
 `config` is the command payload envelope. The route does not encode a worker
 family, operation target, customer, source system, or draft type in the URL.
+For public `/worker`, registered Revenue commands keep `config` closed at the
+top level: unsupported siblings are rejected before handler dispatch. Nested
+source records, lead packets, intake selectors, controlled-send receipts, and
+rollback proof remain the extension points for provider-specific details.
 
 For `command: "lead.read"`, use:
 

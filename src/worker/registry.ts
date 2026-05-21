@@ -474,7 +474,7 @@ const leadReadConfig: WorkerConfigSchema = {
     items: { type: "array", minItems: 1, maxItems: 25, items: jsonObjectConfig },
     leads: { type: "array", minItems: 1, maxItems: 25, items: jsonObjectConfig },
   },
-  additionalProperties: true,
+  additionalProperties: false,
 };
 const workerRunConfig: WorkerConfigSchema = {
   type: "object",
@@ -488,11 +488,11 @@ const workerRunConfig: WorkerConfigSchema = {
       properties: {
         baseCents: { type: "number", minimum: 0 },
       },
-      additionalProperties: true,
+      additionalProperties: false,
     },
     expectedAction: { type: "string" },
   },
-  additionalProperties: true,
+  additionalProperties: false,
 };
 const revenuePaymentLinkSourceRefsConfig: WorkerConfigSchema = {
   type: "object",
@@ -509,7 +509,19 @@ const revenuePaymentLinkSourceRefsConfig: WorkerConfigSchema = {
     customerName: { type: "string" },
     dueAt: { type: "string" },
   },
-  additionalProperties: true,
+  additionalProperties: false,
+};
+const revenuePaymentLinkPolicyConfig: WorkerConfigSchema = {
+  type: "object",
+  properties: {
+    requireOwnerApproval: { type: "boolean" },
+    providerPaymentLinkCreation: { type: "string" },
+    moneyMovement: { type: "string" },
+    externalExecution: { type: "string" },
+    externalMutation: { type: "boolean" },
+    externalSend: { type: "boolean" },
+  },
+  additionalProperties: false,
 };
 const revenuePaymentLinkPrepareConfig: WorkerConfigSchema = {
   type: "object",
@@ -532,9 +544,9 @@ const revenuePaymentLinkPrepareConfig: WorkerConfigSchema = {
     customerName: { type: "string" },
     dueAt: { type: "string" },
     sourceRefs: revenuePaymentLinkSourceRefsConfig,
-    policy: jsonObjectConfig,
+    policy: revenuePaymentLinkPolicyConfig,
   },
-  additionalProperties: true,
+  additionalProperties: false,
 };
 const ownerBriefConfig: WorkerConfigSchema = {
   type: "object",
@@ -1294,10 +1306,10 @@ const revenueDefinition: WorkerDefinition = {
               receipt: { type: "object", additionalProperties: true },
               rollback: { type: "object", additionalProperties: true },
             },
-            additionalProperties: true,
+            additionalProperties: false,
           },
         },
-        additionalProperties: true,
+        additionalProperties: false,
       },
       async handle(context) {
         const approvalId = optionalString(context.config.approvalId);
@@ -1346,7 +1358,7 @@ const revenueDefinition: WorkerDefinition = {
           },
           note: { type: "string" },
         },
-        additionalProperties: true,
+        additionalProperties: false,
       },
       async handle(context) {
         const approvalId = optionalString(context.config.approvalId);

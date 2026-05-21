@@ -1442,6 +1442,45 @@ describe("worker tool contract", () => {
     ).toBe(true);
   });
 
+  it("keeps Revenue command configs closed at the public worker boundary", () => {
+    const revenueCommand = (name: string) =>
+      registeredWorkerCommands().find(
+        (command) => command.role === "revenue_operations" && command.name === name,
+      );
+
+    const leadRead = revenueCommand("lead.read")?.configSchema;
+    const run = revenueCommand("run")?.configSchema;
+    const classify = revenueCommand("lead.classify")?.configSchema;
+    const responseDraft = revenueCommand("response.draft")?.configSchema;
+    const quotePrepare = revenueCommand("quote.prepare")?.configSchema;
+    const paymentLinkPrepare = revenueCommand("payment_link.prepare")?.configSchema;
+    const continuation = revenueCommand("continue")?.configSchema;
+    const approvalDecision = revenueCommand("approval.decide")?.configSchema;
+
+    for (const schema of [
+      leadRead,
+      run,
+      classify,
+      responseDraft,
+      quotePrepare,
+      paymentLinkPrepare,
+      continuation,
+      approvalDecision,
+    ]) {
+      expect(schema).toEqual(expect.objectContaining({ additionalProperties: false }));
+    }
+    expect(run?.properties?.pricing?.additionalProperties).toBe(false);
+    expect(paymentLinkPrepare?.properties?.sourceRefs?.additionalProperties).toBe(false);
+    expect(paymentLinkPrepare?.properties?.policy?.additionalProperties).toBe(false);
+    expect(continuation?.properties?.execution?.additionalProperties).toBe(false);
+    expect(continuation?.properties?.execution?.properties?.receipt?.additionalProperties).toBe(
+      true,
+    );
+    expect(continuation?.properties?.execution?.properties?.rollback?.additionalProperties).toBe(
+      true,
+    );
+  });
+
   it("keeps registry command and view names role-neutral", () => {
     const roleNamedOperationPattern =
       /^(?:revenue|dispatch|finance|workforce|owner|compliance|systems)[._-]|(?:[-_](?:worker|operations)|_worker)/;
@@ -1685,6 +1724,74 @@ describe("worker tool contract", () => {
     ).rejects.toThrow(
       "config.invoiceId, config.invoiceObjectId, config.sourceRefs.invoiceId or config.sourceRefs.invoiceObjectId is required for payment_link.prepare.",
     );
+  });
+
+  it("rejects route-shaped Revenue config fields before handler dispatch", async () => {
+    const legacyRevenueRoute = ["/api", "revenue-worker"].join("/");
+    const legacyRevenueApprovalRoute = ["/api", "revenue-worker", "approval"].join("/");
+
+    await expect(
+      executeWorkerTool("worker.command", {
+        command: "run",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "worker-run-route-field-001",
+        config: {
+          leadPacket: {
+            customerName: "Acme Roof Repair",
+          },
+          apiRoute: legacyRevenueRoute,
+        },
+      }),
+    ).rejects.toThrow("config contains unsupported fields: apiRoute.");
+
+    await expect(
+      executeWorkerTool("worker.command", {
+        command: "payment_link.prepare",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "payment-link-route-field-001",
+        config: {
+          invoiceObjectId: "33333333-3333-4333-8333-000000000006",
+          rawProviderDump: "inline-provider-payload",
+        },
+      }),
+    ).rejects.toThrow("config contains unsupported fields: rawProviderDump.");
+
+    await expect(
+      executeWorkerTool("worker.command", {
+        command: "continue",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "continue-route-field-001",
+        config: {
+          approvalId: "approval_uuid",
+          continuationKind: "payment_link",
+        },
+      }),
+    ).rejects.toThrow("config contains unsupported fields: continuationKind.");
+
+    await expect(
+      executeWorkerTool("worker.command", {
+        command: "approval.decide",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "approval-route-field-001",
+        config: {
+          approvalId: "approval_uuid",
+          action: "approved",
+          route: legacyRevenueApprovalRoute,
+        },
+      }),
+    ).rejects.toThrow("config contains unsupported fields: route.");
   });
 
   it("validates lead read idempotency before invoking the worker", async () => {

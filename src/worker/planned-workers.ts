@@ -313,6 +313,14 @@ const stateChannelViewConfig: PlannedWorkerConfigSchema = {
   additionalProperties: false,
 };
 
+const stateFilterViewConfig: PlannedWorkerConfigSchema = {
+  type: "object",
+  properties: {
+    state: stringSchema("Optional state filter."),
+  },
+  additionalProperties: false,
+};
+
 function windowSchema(): PlannedWorkerConfigSchema {
   return {
     type: "object",
@@ -1323,6 +1331,17 @@ export const workerContracts: PlannedWorkerContractMetadata[] = [
           additionalProperties: false,
         },
       },
+      {
+        role: "offer_pricing_operations",
+        name: "approvals",
+        toolAlias: "worker.view",
+        description: "List Offer and Pricing approval requests through the shared worker approval inbox.",
+        idempotency: "none",
+        sideEffects: "none",
+        externalExecution: "blocked",
+        requiresTenant: true,
+        configSchema: stateFilterViewConfig,
+      },
     ],
   },
   {
@@ -1554,7 +1573,7 @@ export const workerContracts: PlannedWorkerContractMetadata[] = [
         role: "growth_operations",
         name: "snapshot",
         toolAlias: "worker.view",
-        description: "Read the Growth Worker planned snapshot.",
+        description: "Read the Growth Worker runtime snapshot.",
         idempotency: "none",
         sideEffects: "none",
         externalExecution: "blocked",
@@ -1937,8 +1956,10 @@ export const workerExpansionCatalog: WorkerExpansionCatalogEntry[] = [
       "Margin policy exists",
       "External send remains blocked",
     ],
-    firstBlocker: "Pricing and margin policy fixture plus discount approval packet.",
-    launchGate: "Quote/margin policy fixture, approval for discounts, and price-change evidence packet.",
+    firstBlocker:
+      "Price-change, discount-exception, stale-cost-source, live price-publish, and customer-send handoff proofs remain.",
+    launchGate:
+      "Approved price-change and discount-exception fixtures, stale-source rejection, live price-book publish credential, customer-send handoff, and rollback proof.",
     contractPath: "docs/offer-pricing-worker-v1-contract.md",
     evidencePacket: "pricing_review_packet",
     externalExecution: "blocked",
