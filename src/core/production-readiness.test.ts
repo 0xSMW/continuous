@@ -66,6 +66,16 @@ describe("production readiness operations", () => {
     );
     expect(deployWorkflow).toContain('remote_uid="$(\n              ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "id -u"');
     expect(deployWorkflow).toContain('if [[ "$remote_uid" == "0" ]]; then');
+    expect(deployWorkflow).toContain("Preflight production readiness gate");
+    expect(deployWorkflow.indexOf("Preflight production readiness gate")).toBeLessThan(
+      deployWorkflow.indexOf("Upload release images"),
+    );
+    expect(deployWorkflow.indexOf("Preflight production readiness gate")).toBeLessThan(
+      deployWorkflow.indexOf("Deploy Compose stack"),
+    );
+    expect(deployWorkflow.indexOf("Preflight production readiness gate")).toBeLessThan(
+      deployWorkflow.indexOf("Production readiness gate"),
+    );
 
     expect(deploymentDocs).toContain("HOST=45.55.53.92 ./scripts/install-non-root-access.sh");
     expect(deploymentDocs).toContain("SSH_USER=continuous-deploy ./scripts/deploy.sh");

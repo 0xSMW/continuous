@@ -224,6 +224,14 @@ jobs:
             --exclude "/reports/recovery-drills/" \
             ./ "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
 
+      - name: Preflight production readiness gate
+        if: ${{ inputs.require_production_readiness == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" \
+            "cd '$DEPLOY_PATH' && ./scripts/check-production-readiness-on-host.sh"
+
       - name: Upload release images
         if: ${{ inputs.rollback_app_tag == '' }}
         shell: bash
