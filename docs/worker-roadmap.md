@@ -67,7 +67,7 @@ before promotion.
 |---|---|
 | Shared graph summary | Cross-domain task, event, budget, obligation, approval, and worker run snapshot |
 | Workflow | Daily brief and decision queue workflows with read-only evidence packets |
-| Capabilities | `owner_brief.generate`, `approval.request`, `worker.read`, restricted reveal |
+| Capabilities | `brief.generate`, `decision_queue.prepare`, `anomaly.triage`, `continue`, `approval.decide` |
 | Adapters | Read-only email, calendar, accounting, CRM, payment, and job data |
 | Launch gate | No mutation; owner brief factuality and missing-critical-item evals pass |
 
@@ -96,7 +96,7 @@ calendar/send credentials.
 |---|---|
 | Core objects | Job, appointment, crew, asset, material, closeout, customer update |
 | Workflow | Promise-to-delivery state machine with schedule proposal, customer update draft, closeout packet, and exception route |
-| Capabilities | `schedule.propose`, `response.draft`, `document_packet.prepare`, `exception.route`, `approval.request` |
+| Capabilities | `schedule.propose`, `customer_update.draft`, `closeout.prepare`, `exception.route`, `approval.decide` |
 | Adapters | Calendar dry-run, map/job system dry-run, customer-message approval |
 | Launch gate | No customer update without approval; schedule conflicts create exception tasks |
 
@@ -143,7 +143,7 @@ schedule readiness, and live HR/payroll credential gates.
 |---|---|
 | Core objects | Person, employment, contractor engagement, credential, compensation, document |
 | Workflow | Hire employee, engage contractor, credential renewal, payroll input readiness |
-| Capabilities | `document_packet.prepare`, `payroll.preview.record`, `payroll.preview.packet.prepare`, `approval.request` |
+| Capabilities | `hire.packet.prepare`, `payroll_input.prepare`, `contractor.packet.prepare`, `credential.review`, `schedule_readiness.prepare`, `approval.decide` |
 | Adapters | Signature/docs, calendar, HRIS/payroll dry-run, email |
 | Launch gate | Restricted documents and payroll blockers are visible without autonomous submission |
 
@@ -163,7 +163,7 @@ receipt/rejection capture.
 |---|---|
 | Core objects | Rule pack, obligation, filing requirement, filing draft, notice, license, insurance |
 | Workflow | Obligation intake, notice response, license renewal, filing draft, evidence export |
-| Capabilities | `filing.prepare`, `document_packet.prepare`, `sensitive_data.reveal`, `approval.request` |
+| Capabilities | `filing.prepare`, `approval.decide`, `snapshot`, `obligations`, `packet` |
 | Adapters | Document stores, calendar, agency portal/manual upload, email |
 | Launch gate | Submission and legal advice stay blocked until rule refs, approval, live credential scope, and receipt capture are proven |
 
@@ -181,7 +181,7 @@ and operation inputs stay under `config`.
 |---|---|
 | Core objects | Adapter, connection, sync job, webhook, permission grant, data-quality issue |
 | Workflow | Connector setup, sync repair, data-quality remediation, permission review |
-| Capabilities | `worker.read`, `approval.request`, `document_packet.prepare` |
+| Capabilities | `connector.health.scan`, `sync.repair.plan`, `data_quality.remediate`, `permission.review`, `automation.plan`, `approval.decide` |
 | Adapters | All platform adapters with scoped grants and rollback plans |
 | Launch gate | Sync repair proves reconciliation and least-privilege scope before mutation |
 
