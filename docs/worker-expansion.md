@@ -24,8 +24,8 @@ Clients should read that registry for worker launch order, first
 checks, blockers, and launch gates. This document remains the narrative map;
 the registry is the machine-readable contract.
 
-Every expansion entry must keep execution on `/worker`. Worker family,
-packaged-worker, and tenant selection belong in the request payload, and all
+Every expansion entry must keep execution on `/worker`. Worker role and tenant
+selection belong under `worker`; package or bundle selectors and
 operation-specific inputs belong under `config`.
 
 Status words are strict: `runtime` means registered and executable now,

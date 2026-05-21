@@ -1800,7 +1800,7 @@ jobs:
           fi
 
           SCHEDULER_WORKER_RUN_ID="$(
-            psql_db -Atc "select id from worker_runs where source = 'continuous.worker' and idempotency_key = 'scheduler-worker-run:$CONNECTION_ID:google_workspace_inbox:$CONNECTION_LEAD_READ_SOURCE_EVENT_ID' order by created_at desc limit 1;"
+            psql_db -Atc "select id from worker_runs where source = 'continuous.core.worker_runs' and idempotency_key = 'scheduler-worker-run:$CONNECTION_ID:google_workspace_inbox:$CONNECTION_LEAD_READ_SOURCE_EVENT_ID' order by created_at desc limit 1;"
           )"
           if [ -z "$SCHEDULER_WORKER_RUN_ID" ]; then
             echo "Scheduler did not hand the buffered lead selector to the Revenue Operations Worker run command." >&2
@@ -1808,10 +1808,10 @@ jobs:
           fi
 
           SCHEDULER_RUN_ROW="$(
-            psql_db -Atc "select state::text || '|' || coalesce(data->'output'->>'sourceEventId','') || '|' || coalesce(data->'output'->>'externalSend','') || '|' || coalesce(data->'output'->>'workflowRunId','') from worker_runs where id = '$SCHEDULER_WORKER_RUN_ID'::uuid;"
+            psql_db -Atc "select coalesce(source,'') || '|' || state::text || '|' || coalesce(mode,'') || '|' || coalesce(data->'output'->>'sourceEventId','') || '|' || coalesce(data->'output'->>'externalSend','') || '|' || coalesce(data->'completion'->'budget'->>'state','') || '|' || coalesce(data->'output'->>'workflowRunId','') from worker_runs where id = '$SCHEDULER_WORKER_RUN_ID'::uuid;"
           )"
           SCHEDULER_WORKFLOW_RUN_ID="${SCHEDULER_RUN_ROW##*|}"
-          if [ "$SCHEDULER_RUN_ROW" != "done|$CONNECTION_LEAD_READ_SOURCE_EVENT_ID|false|$SCHEDULER_WORKFLOW_RUN_ID" ] || [ -z "$SCHEDULER_WORKFLOW_RUN_ID" ]; then
+          if [ "$SCHEDULER_RUN_ROW" != "continuous.core.worker_runs|done|simulation|$CONNECTION_LEAD_READ_SOURCE_EVENT_ID|false|used|$SCHEDULER_WORKFLOW_RUN_ID" ] || [ -z "$SCHEDULER_WORKFLOW_RUN_ID" ]; then
             echo "Unexpected scheduler Revenue Operations Worker run row: $SCHEDULER_RUN_ROW" >&2
             exit 1
           fi
@@ -1973,18 +1973,27 @@ jobs:
               -d "$QUOTE_PREPARE_PAYLOAD"
           )"
 
-          echo "$QUOTE_PREPARE_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,workerRunId:.data.result.workerRunId,eventId:.data.result.eventId,workflowRunId:.data.result.workflowRunId,workflowStepCount:(.data.result.workflowStepIds | length),approvalRequestId:.data.result.approvalRequestId,quoteApprovalViewId:.data.result.quoteApprovalViewId,mode:.data.result.output.command,externalSend:.data.result.output.externalSend,classification:.data.result.output.classification}}'
+          echo "$QUOTE_PREPARE_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,workerRunId:.data.result.workerRunId,eventId:.data.result.eventId,workflowRunId:.data.result.workflowRunId,workflowStepCount:(.data.result.workflowStepIds | length),approvalRequestId:.data.result.approvalRequestId,quoteApprovalViewId:.data.result.quoteApprovalViewId,reservationId:.data.result.reservationId,usageEventId:.data.result.usageEventId,mode:.data.result.output.command,externalSend:.data.result.output.externalSend,classification:.data.result.output.classification}}'
           echo "$QUOTE_PREPARE_RESPONSE" | /usr/bin/jq -e \
             --arg sourceEventId "$LEAD_READ_SOURCE_EVENT_ID" \
-            '.error == null and .data.command == "quote.prepare" and .data.result.created == true and (.data.result.workerRunId | length > 0) and (.data.result.eventId | length > 0) and (.data.result.workflowRunId | length > 0) and (.data.result.workflowStepIds | length) == 4 and (.data.result.approvalRequestId | length > 0) and (.data.result.quoteApprovalViewId | length > 0) and .data.result.output.command == "quote.prepare" and .data.result.output.sourceEventId == $sourceEventId and .data.result.output.externalSend == false and .data.result.output.classification == "quote_ready_for_owner_approval" and .data.result.snapshot.controls.externalExecution == "disabled"' \
+            '.error == null and .data.command == "quote.prepare" and .data.result.created == true and (.data.result.workerRunId | length > 0) and (.data.result.eventId | length > 0) and (.data.result.workflowRunId | length > 0) and (.data.result.workflowStepIds | length) == 4 and (.data.result.approvalRequestId | length > 0) and (.data.result.quoteApprovalViewId | length > 0) and (.data.result.reservationId | length > 0) and (.data.result.usageEventId | length > 0) and .data.result.output.command == "quote.prepare" and .data.result.output.sourceEventId == $sourceEventId and .data.result.output.externalSend == false and .data.result.output.classification == "quote_ready_for_owner_approval" and .data.result.snapshot.controls.externalExecution == "disabled"' \
             >/dev/null
 
           QUOTE_PREPARE_WORKER_RUN_ID="$(echo "$QUOTE_PREPARE_RESPONSE" | /usr/bin/jq -r '.data.result.workerRunId')"
           QUOTE_PREPARE_EVENT_ID="$(echo "$QUOTE_PREPARE_RESPONSE" | /usr/bin/jq -r '.data.result.eventId')"
           QUOTE_PREPARE_WORKFLOW_RUN_ID="$(echo "$QUOTE_PREPARE_RESPONSE" | /usr/bin/jq -r '.data.result.workflowRunId')"
           QUOTE_PREPARE_AUDIT_ID="$(echo "$QUOTE_PREPARE_RESPONSE" | /usr/bin/jq -r '.data.result.auditEventId')"
+          QUOTE_PREPARE_RESERVATION_ID="$(echo "$QUOTE_PREPARE_RESPONSE" | /usr/bin/jq -r '.data.result.reservationId')"
+          QUOTE_PREPARE_USAGE_ID="$(echo "$QUOTE_PREPARE_RESPONSE" | /usr/bin/jq -r '.data.result.usageEventId')"
+          QUOTE_PREPARE_WORKER_RUN_ROW="$(
+            psql_db -Atc "select coalesce(source,'') || '|' || coalesce(state::text,'') || '|' || coalesce(mode,'') || '|' || coalesce(data->'input'->>'command','') || '|' || coalesce(data->'output'->>'command','') || '|' || coalesce(data->'output'->>'externalSend','') || '|' || coalesce(data->'completion'->'budget'->>'state','') || '|' || coalesce(data->'completion'->'budget'->>'reservationId','') || '|' || coalesce(data->'completion'->'budget'->>'usageEventId','') from worker_runs where id = '$QUOTE_PREPARE_WORKER_RUN_ID'::uuid;"
+          )"
+          if [ "$QUOTE_PREPARE_WORKER_RUN_ROW" != "continuous.core.worker_runs|done|quote_preparation|quote.prepare|quote.prepare|false|used|$QUOTE_PREPARE_RESERVATION_ID|$QUOTE_PREPARE_USAGE_ID" ]; then
+            echo "Unexpected Core-backed quote.prepare worker run row: $QUOTE_PREPARE_WORKER_RUN_ROW" >&2
+            exit 1
+          fi
           psql_db -At <<SQL
-          select 'quote_prepare_worker_run' as kind, state, mode, data->'input'->>'command', data->'output'->>'command', data->'output'->>'externalSend'
+          select 'quote_prepare_worker_run' as kind, source, state, mode, data->'input'->>'command', data->'output'->>'command', data->'completion'->'budget'->>'state'
           from worker_runs where id = '$QUOTE_PREPARE_WORKER_RUN_ID'::uuid;
           select 'quote_prepare_event' as kind, type, source, data->>'command'
           from events where id = '$QUOTE_PREPARE_EVENT_ID'::uuid;
@@ -2181,12 +2190,12 @@ jobs:
               -d "$WORKER_RUN_PAYLOAD"
           )"
 
-          echo "$WORKER_RUN_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,workerRunId:.data.result.workerRunId,eventId:.data.result.eventId,workflowRunId:.data.result.workflowRunId,workflowStepCount:(.data.result.workflowStepIds | length),sourceSnapshotEvidenceId:.data.result.sourceSnapshotEvidenceId,sourceObjectId:.data.result.output.sourceObjectId,sourceEventRowId:.data.result.output.sourceEventRowId,sourceEvidenceId:.data.result.output.sourceEvidenceId,externalSend:.data.result.output.externalSend,classification:.data.result.output.classification}}'
+          echo "$WORKER_RUN_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,workerRunId:.data.result.workerRunId,eventId:.data.result.eventId,workflowRunId:.data.result.workflowRunId,workflowStepCount:(.data.result.workflowStepIds | length),sourceSnapshotEvidenceId:.data.result.sourceSnapshotEvidenceId,reservationId:.data.result.reservationId,usageEventId:.data.result.usageEventId,sourceObjectId:.data.result.output.sourceObjectId,sourceEventRowId:.data.result.output.sourceEventRowId,sourceEvidenceId:.data.result.output.sourceEvidenceId,externalSend:.data.result.output.externalSend,classification:.data.result.output.classification}}'
           echo "$WORKER_RUN_RESPONSE" | /usr/bin/jq -e \
             --arg objectId "$LEAD_OBJECT_ID" \
             --arg eventId "$LEAD_EVENT_ID" \
             --arg evidenceId "$LEAD_EVIDENCE_ID" \
-            '.error == null and .data.command == "run" and .data.result.created == true and (.data.result.workerRunId | length > 0) and (.data.result.eventId | length > 0) and (.data.result.workflowRunId | length > 0) and (.data.result.workflowStepIds | length) == 4 and (.data.result.sourceSnapshotEvidenceId | length > 0) and .data.result.output.externalSend == false and .data.result.output.classification == "quote_ready_for_owner_approval" and .data.result.output.sourceObjectId == $objectId and .data.result.output.sourceEventRowId == $eventId and .data.result.output.sourceEvidenceId == $evidenceId and .data.result.output.workflowRunId == .data.result.workflowRunId and .data.result.snapshot.controls.externalExecution == "disabled"' \
+            '.error == null and .data.command == "run" and .data.result.created == true and (.data.result.workerRunId | length > 0) and (.data.result.eventId | length > 0) and (.data.result.workflowRunId | length > 0) and (.data.result.workflowStepIds | length) == 4 and (.data.result.sourceSnapshotEvidenceId | length > 0) and (.data.result.reservationId | length > 0) and (.data.result.usageEventId | length > 0) and .data.result.output.externalSend == false and .data.result.output.classification == "quote_ready_for_owner_approval" and .data.result.output.sourceObjectId == $objectId and .data.result.output.sourceEventRowId == $eventId and .data.result.output.sourceEvidenceId == $evidenceId and .data.result.output.workflowRunId == .data.result.workflowRunId and .data.result.snapshot.controls.externalExecution == "disabled"' \
             >/dev/null
 
           WORKER_RUN_ID="$(echo "$WORKER_RUN_RESPONSE" | /usr/bin/jq -r '.data.result.workerRunId')"
@@ -2194,9 +2203,19 @@ jobs:
           SOURCE_SNAPSHOT_ID="$(echo "$WORKER_RUN_RESPONSE" | /usr/bin/jq -r '.data.result.sourceSnapshotEvidenceId')"
           WORKER_APPROVAL_ID="$(echo "$WORKER_RUN_RESPONSE" | /usr/bin/jq -r '.data.result.approvalRequestId')"
           WORKFLOW_RUN_ID="$(echo "$WORKER_RUN_RESPONSE" | /usr/bin/jq -r '.data.result.workflowRunId')"
+          WORKER_RESERVATION_ID="$(echo "$WORKER_RUN_RESPONSE" | /usr/bin/jq -r '.data.result.reservationId')"
+          WORKER_USAGE_ID="$(echo "$WORKER_RUN_RESPONSE" | /usr/bin/jq -r '.data.result.usageEventId')"
+
+          WORKER_RUN_ROW="$(
+            psql_db -Atc "select coalesce(source,'') || '|' || coalesce(state::text,'') || '|' || coalesce(mode,'') || '|' || coalesce(data->'input'->>'command','') || '|' || coalesce(data->'output'->>'command','') || '|' || coalesce(data->'output'->>'externalSend','') || '|' || coalesce(data->'completion'->'budget'->>'state','') || '|' || coalesce(data->'completion'->'budget'->>'reservationId','') || '|' || coalesce(data->'completion'->'budget'->>'usageEventId','') from worker_runs where id = '$WORKER_RUN_ID'::uuid;"
+          )"
+          if [ "$WORKER_RUN_ROW" != "continuous.core.worker_runs|done|simulation|run|run|false|used|$WORKER_RESERVATION_ID|$WORKER_USAGE_ID" ]; then
+            echo "Unexpected Core-backed Revenue Operations Worker run row: $WORKER_RUN_ROW" >&2
+            exit 1
+          fi
 
           psql_db -At <<SQL
-          select 'worker_run' as kind, state, source, data->'output'->>'externalSend'
+          select 'worker_run' as kind, source, state, mode, data->'input'->>'command', data->'output'->>'externalSend', data->'completion'->'budget'->>'state'
           from worker_runs where id = '$WORKER_RUN_ID'::uuid;
           select 'worker_event' as kind, type, source
           from events where id = '$WORKER_EVENT_ID'::uuid;

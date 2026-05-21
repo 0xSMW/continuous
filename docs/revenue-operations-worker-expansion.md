@@ -1,8 +1,8 @@
 # Revenue Operations Worker Expansion
 
 The current Revenue Worker is a deterministic persisted runtime. It proves
-worker identity, capability grants, task ownership, budget reservation, usage,
-inference logging, worker run lifecycle, event emission, evidence capture,
+worker identity, capability grants, task ownership, Core worker-run budget
+reservation and usage settlement, inference logging, event emission, evidence capture,
 adapter receipts, approval requests, audit events, operator decisions, approval
 state, workflow state, object versioning, and approved controlled-send receipt
 recording without storing live credential material or moving money.
@@ -12,14 +12,14 @@ recording without storing live credential material or moving money.
 | Area | Current state |
 |---|---|
 | Worker identity | `Revenue Operations Worker`, autonomy level 2, owner-managed |
-| Core loop | One operator run creates workflow run/steps, worker run, source snapshot evidence, budget, inference, usage, event, adapter run/action, approval packet, task update, and object version records |
+| Core loop | One operator run starts a Core worker-run lifecycle, creates workflow run/steps, source snapshot evidence, inference, event, adapter run/action, approval packet, task update, and object version records, then completes the Core run with budget settlement |
 | Operator read views | `POST /worker` with payload `view: "snapshot"` or `view: "readiness"`, `worker.role: "revenue_operations"`, and read filters under `config`, bearer-token required; readiness reports dry-run proof, blockers, launch gates, and latest proof refs |
 | Approval controls | `POST /worker` with payload `view: "approvals"` for reads and `command: "approval.decide"` for decisions, bearer-token required |
 | Source read command | `POST /worker` with payload `command: "lead.read"`, `idempotencyKey`, `config.source`, optional `config.reader`, and direct `config.records[]` or an active connection reference; persists website-form, inbox, CRM, buffered connection, or read-only API-polled source records as Core lead object/event/evidence rows, updates connection cursor proof when connection-backed, and returns `config.intake` selectors |
-| Split classify/draft commands | `POST /worker` with payload `command: "lead.classify"` or `command: "response.draft"`; both accept `config.intake` selectors or direct fallback `config.leadPacket`, write worker run/event/evidence/audit/budget records, and keep external sends blocked |
-| Quote prepare command | `POST /worker` with payload `command: "quote.prepare"`; accepts the same `config.intake` selectors or direct fallback `config.leadPacket`, writes quote packet, approval, generated view, event/evidence/audit/budget records, and keeps external sends blocked |
+| Split classify/draft commands | `POST /worker` with payload `command: "lead.classify"` or `command: "response.draft"`; both accept `config.intake` selectors or direct fallback `config.leadPacket`, use the Core worker-run lifecycle, write event/evidence/audit records, and keep external sends blocked |
+| Quote prepare command | `POST /worker` with payload `command: "quote.prepare"`; accepts the same `config.intake` selectors or direct fallback `config.leadPacket`, uses the Core worker-run lifecycle, writes quote packet, approval, generated view, event/evidence/audit records, and keeps external sends blocked |
 | Payment-link prepare command | `POST /worker` with payload `command: "payment_link.prepare"`; accepts persisted invoice refs under `config.invoiceId`, `config.invoiceObjectId`, or keyed `config.sourceRefs`, writes a payment primitive, payment instruction when a bank account exists, packet, approval, generated view, workflow, budget, event/evidence/audit, and dry-run adapter receipt while live provider link creation and money movement stay blocked |
-| Run command | `POST /worker` with payload `command: "run"` and `config.intake` source selectors or Core references; direct `config.leadPacket` remains an operator/test fallback |
+| Run command | `POST /worker` with payload `command: "run"` and `config.intake` source selectors or Core references; direct `config.leadPacket` remains an operator/test fallback, and Core owns the worker-run row plus budget settlement |
 | Continuation command | `POST /worker` with payload `command: "continue"`, `idempotencyKey`, and `config.approvalId`; approved decisions default to blocked no-send execution packets, or record an approved controlled-send receipt when scoped details are supplied under `config.execution`; `revision_requested` decisions create revised packets plus fresh pending owner approval, and `rejected` decisions create closed no-send stop packets |
 | Adapter reconciliation commands | `POST /worker` with payload `command: "adapters.reconcile"` or `command: "adapters.retry"`, tenant-scoped and bearer-token required |
 | Scheduled internal drain | `worker-scheduler` posts `/workflow` `steps.execute`, `/worker` `lead.read` for pollable active connections, `/worker` `run` for returned intake selectors, `/worker` `adapters.retry`, and `/worker` `adapters.reconcile` on the internal Compose network with the same command envelopes |
@@ -47,8 +47,8 @@ smoke test.
 | Gate | Required proof |
 |---|---|
 | Auth | Configured operator user is bound to every side-effecting run and approval decision |
-| Idempotency | `worker_runs` owns first-class run lifecycle state, with event idempotency kept as a compatibility guard |
-| Budget | Reservation before model/tool work and usage attribution after |
+| Idempotency | Core `worker.run.start` / `worker.run.complete` owns first-class run lifecycle state for read/classify/draft/run/quote paths, with event idempotency kept as a compatibility guard |
+| Budget | Core reservation before model/tool work and usage attribution after |
 | Evidence | Source snapshot, prompt/result trace, approval, and adapter receipt |
 | Approval | First-class `approval_requests`, approval decision evidence, audit trail, and allowed workflow advancement while external execution remains blocked |
 | Adapter safety | Dry-run mode, receipt evidence, attempt metadata, reconciliation worker output, due retry execution, retry/review system tasks, workflow retry/review/post-retry states, live-credential readiness checks, rollback plans, and audit/evidence records are persisted; scoped live execution is still blocked |

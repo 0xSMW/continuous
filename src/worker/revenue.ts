@@ -4877,7 +4877,7 @@ export async function runRevenueWorker(input: {
   const capabilityId =
     command === "quote.prepare"
       ? context.quoteCapabilityId
-      : task?.capabilityId ?? context.quoteCapabilityId ?? context.briefCapabilityId;
+      : context.quoteCapabilityId ?? context.briefCapabilityId;
 
   if (!capabilityId) {
     throw new RevenueWorkerUnavailableError(
@@ -4903,7 +4903,7 @@ export async function runRevenueWorker(input: {
     sourceEventRowId,
     sourceEvidenceId,
   };
-  const runObjectId = task?.objectId ?? sourceObjectId;
+  const runObjectId = sourceObjectId;
   const inputHash = hashObject(
     command === "run"
       ? {
@@ -4932,305 +4932,134 @@ export async function runRevenueWorker(input: {
           leadPacket: leadPacket.sourceSnapshot,
         },
   );
+  const runInput = {
+    idempotencyKey: input.idempotencyKey,
+    command,
+    inputHash,
+    config: requestConfig,
+    resolvedConfig: config,
+    ...intakeTrace,
+    leadPacket: leadPacket.sourceSnapshot,
+    operator: {
+      userId: operator.id,
+      email: operator.email,
+    },
+    taskId: null,
+    objectId: runObjectId,
+    capabilityId,
+    connectionId: context.connectionId,
+    budgetAccountId: context.budgetAccountId,
+    routeId: context.routeId,
+    units: runUnits,
+    mode: runMode,
+  };
+  const coreRun = await startCoreWorkerRun({
+    operatorEmail: input.operatorEmail,
+    tenantSlug: context.worker.tenantSlug,
+    idempotencyKey: input.idempotencyKey,
+    worker: {
+      id: context.worker.id,
+      role: revenueWorkerRole,
+    },
+    command,
+    mode: runMode,
+    capabilityId,
+    connectionId: context.connectionId,
+    budgetAccountId: context.budgetAccountId,
+    units: runUnits,
+    input: runInput,
+    policy: {
+      externalExecution: "blocked",
+      externalSend: false,
+      moneyMovement: "blocked",
+    },
+    evidence: {
+      command,
+      required: ["lead_intake", "quote_packet", "owner_approval", "adapter_receipt"],
+      externalExecution: "blocked",
+      externalSend: false,
+    },
+    db,
+  });
+  const coreBudget = objectValue(coreRun.budget);
+  const coreReservationId = stringValue(coreBudget.reservationId);
+  const coreCapability = objectValue(coreRun.capability);
+  const coreCapabilityGrantId = stringValue(coreCapability.capabilityGrantId);
 
   const result = await db.transaction(async (tx) => {
     await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${source}:${input.idempotencyKey}`}))`,
+      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${coreWorkerRunSource}:${input.idempotencyKey}`}))`,
     );
 
-    const [existingRun] = await tx
-      .select({
-        id: workerRuns.id,
-        mode: workerRuns.mode,
-        taskId: workerRuns.taskId,
-        eventId: workerRuns.eventId,
-        data: workerRuns.data,
-      })
+    const [run] = await tx
+      .select()
       .from(workerRuns)
       .where(
         and(
           eq(workerRuns.tenantId, context.worker.tenantId),
-          eq(workerRuns.source, source),
-          eq(workerRuns.idempotencyKey, input.idempotencyKey),
+          eq(workerRuns.id, coreRun.workerRunId),
         ),
       )
       .limit(1);
 
-    if (existingRun) {
-      const storedInput = objectValue(existingRun.data.input);
-      const storedHash = stringValue(storedInput.inputHash);
-      const storedCommand = stringValue(storedInput.command);
-
-      if ((storedCommand && storedCommand !== command) || (!storedCommand && command !== "run")) {
-        throw new RevenueWorkerUnavailableError(
-          "worker_idempotency_conflict",
-          "This idempotency key was already used with a different worker command.",
-          409,
-        );
-      }
-
-      if (existingRun.mode !== runMode) {
-        throw new RevenueWorkerUnavailableError(
-          "worker_idempotency_conflict",
-          "This idempotency key was already used with a different worker command.",
-          409,
-        );
-      }
-
-      if (storedHash && storedHash !== inputHash) {
-        throw new RevenueWorkerUnavailableError(
-          "worker_idempotency_conflict",
-          "This idempotency key was already used with different worker input.",
-          409,
-        );
-      }
-
-      const output = outputData(existingRun.data);
-
-      return {
-        created: false as const,
-        workerRunId: existingRun.id,
-        eventId: existingRun.eventId ?? stringData(existingRun.data, "eventId"),
-        taskId: stringData(existingRun.data, "taskId") ?? existingRun.taskId,
-        sourceSnapshotEvidenceId: stringData(existingRun.data, "sourceSnapshotEvidenceId"),
-        evidenceId: stringData(existingRun.data, "evidenceId"),
-        reservationId: stringData(existingRun.data, "reservationId"),
-        inferenceId: stringData(existingRun.data, "inferenceId"),
-        usageEventId: stringData(existingRun.data, "usageEventId"),
-        adapterRunId: stringData(existingRun.data, "adapterRunId"),
-        adapterActionId: stringData(existingRun.data, "adapterActionId"),
-        adapterReceiptEvidenceId: stringData(existingRun.data, "adapterReceiptEvidenceId"),
-        approvalRequestId: stringData(existingRun.data, "approvalRequestId"),
-        quoteApprovalViewId:
-          stringData(output, "quoteApprovalViewId") ?? stringData(existingRun.data, "quoteApprovalViewId"),
-        auditEventId: stringData(existingRun.data, "auditEventId"),
-        workflowRunId: stringData(existingRun.data, "workflowRunId"),
-        workflowStepIds: getWorkflowStepIds(existingRun.data),
-        output,
-      };
+    if (!run) {
+      throw new RevenueWorkerUnavailableError(
+        "worker_run_missing",
+        "Core worker.run.start did not return a persisted Revenue Worker run.",
+        409,
+      );
     }
 
-    const [existingEvent] = await tx
-      .select({
-        id: events.id,
-        taskId: events.taskId,
-        data: events.data,
-      })
-      .from(events)
-      .where(
-        and(
-          eq(events.tenantId, context.worker.tenantId),
-          eq(events.source, source),
-          eq(events.idempotencyKey, input.idempotencyKey),
-        ),
-      )
-      .limit(1);
+    const existingInput = objectValue(run.data.input);
+    const existingRequest = objectValue(existingInput.request);
+    const storedHash = stringValue(existingRequest.inputHash) || stringValue(existingInput.inputHash);
 
-    if (existingEvent) {
-      if (command !== "run") {
-        throw new RevenueWorkerUnavailableError(
-          "worker_idempotency_conflict",
-          "This idempotency key was already used with a different worker command.",
-          409,
-        );
-      }
+    if (
+      stringValue(existingInput.command) !== command ||
+      run.mode !== runMode ||
+      (storedHash && storedHash !== inputHash)
+    ) {
+      throw new RevenueWorkerUnavailableError(
+        "worker_idempotency_conflict",
+        "This idempotency key was already used with different worker input.",
+        409,
+      );
+    }
 
-      const output = outputData(existingEvent.data);
-      const eventOutput = {
-        eventId: existingEvent.id,
-        taskId: existingEvent.taskId ?? null,
-        intake: objectValue(output.intake ?? existingEvent.data.intake),
-        sourceObjectId: stringData(existingEvent.data, "sourceObjectId"),
-        sourceEventRowId: stringData(existingEvent.data, "sourceEventRowId"),
-        sourceEvidenceId: stringData(existingEvent.data, "sourceEvidenceId"),
-        sourceSnapshotEvidenceId: stringData(existingEvent.data, "sourceSnapshotEvidenceId"),
-        evidenceId: stringData(existingEvent.data, "evidenceId"),
-        reservationId: stringData(existingEvent.data, "reservationId"),
-        inferenceId: stringData(existingEvent.data, "inferenceId"),
-        usageEventId: stringData(existingEvent.data, "usageEventId"),
-        adapterRunId: stringData(existingEvent.data, "adapterRunId"),
-        adapterActionId: stringData(existingEvent.data, "adapterActionId"),
-        adapterReceiptEvidenceId: stringData(existingEvent.data, "adapterReceiptEvidenceId"),
-        approvalRequestId: stringData(existingEvent.data, "approvalRequestId"),
-        quoteApprovalViewId:
-          stringData(output, "quoteApprovalViewId") ?? stringData(existingEvent.data, "quoteApprovalViewId"),
-        auditEventId: stringData(existingEvent.data, "auditEventId"),
-        workflowRunId: stringData(existingEvent.data, "workflowRunId"),
-        workflowStepIds: getWorkflowStepIds(existingEvent.data),
-      };
-      const [adoptedRun] = await tx
-        .insert(workerRuns)
-        .values({
-          tenantId: context.worker.tenantId,
-          workerId: context.worker.id,
-          taskId: existingEvent.taskId ?? context.task?.id ?? null,
-          eventId: existingEvent.id,
-          capabilityId: context.task?.capabilityId ?? context.quoteCapabilityId ?? context.briefCapabilityId,
-          connectionId: context.connectionId,
-          budgetAccountId: context.budgetAccountId,
-          source,
-          idempotencyKey: input.idempotencyKey,
-          state: "done",
-          mode: "legacy_event",
-          data: {
-            input: {
-              idempotencyKey: input.idempotencyKey,
-              config: requestConfig,
-              resolvedConfig: config,
-              ...intakeTrace,
-              inputHashUnavailable: true,
-              adoptedFromEvent: existingEvent.id,
-            },
-            output: {
-              ...output,
-              ...eventOutput,
-            },
-          },
-          endedAt: new Date(),
-        })
-        .returning({ id: workerRuns.id });
+    const existingOutput = outputData(run.data);
+
+    if (stringValue(existingOutput.command) === command) {
+      const existingCompletionBudget = objectValue(objectValue(run.data.completion).budget);
 
       return {
         created: false as const,
-        workerRunId: adoptedRun.id,
-        eventId: existingEvent.id,
-        taskId: existingEvent.taskId ?? null,
-        sourceSnapshotEvidenceId: stringData(existingEvent.data, "sourceSnapshotEvidenceId"),
-        evidenceId: stringData(existingEvent.data, "evidenceId"),
-        reservationId: stringData(existingEvent.data, "reservationId"),
-        inferenceId: stringData(existingEvent.data, "inferenceId"),
-        usageEventId: stringData(existingEvent.data, "usageEventId"),
-        adapterRunId: stringData(existingEvent.data, "adapterRunId"),
-        adapterActionId: stringData(existingEvent.data, "adapterActionId"),
-        adapterReceiptEvidenceId: stringData(existingEvent.data, "adapterReceiptEvidenceId"),
-        approvalRequestId: stringData(existingEvent.data, "approvalRequestId"),
+        needsCompletion: run.state === "running",
+        workerRunId: run.id,
+        eventId: run.eventId ?? stringData(run.data, "eventId"),
+        taskId: stringData(run.data, "taskId") ?? run.taskId,
+        sourceSnapshotEvidenceId: stringData(run.data, "sourceSnapshotEvidenceId"),
+        evidenceId: stringData(run.data, "evidenceId"),
+        reservationId:
+          stringData(run.data, "reservationId") ??
+          stringValue(existingCompletionBudget.reservationId) ??
+          coreReservationId ??
+          null,
+        inferenceId: stringData(run.data, "inferenceId"),
+        usageEventId: stringData(run.data, "usageEventId") ?? stringValue(existingCompletionBudget.usageEventId),
+        adapterRunId: stringData(run.data, "adapterRunId"),
+        adapterActionId: stringData(run.data, "adapterActionId"),
+        adapterReceiptEvidenceId: stringData(run.data, "adapterReceiptEvidenceId"),
+        approvalRequestId: stringData(run.data, "approvalRequestId"),
         quoteApprovalViewId:
-          stringData(output, "quoteApprovalViewId") ?? stringData(existingEvent.data, "quoteApprovalViewId"),
-        auditEventId: stringData(existingEvent.data, "auditEventId"),
-        workflowRunId: eventOutput.workflowRunId,
-        workflowStepIds: eventOutput.workflowStepIds,
-        output: {
-          ...output,
-          ...eventOutput,
-        },
+          stringData(existingOutput, "quoteApprovalViewId") ?? stringData(run.data, "quoteApprovalViewId"),
+        auditEventId: stringData(run.data, "auditEventId"),
+        workflowRunId: stringData(run.data, "workflowRunId"),
+        workflowStepIds: getWorkflowStepIds(run.data),
+        output: existingOutput,
       };
     }
 
     const now = new Date();
-    await tx.execute(sql`select id from budget_accounts where id = ${context.budgetAccountId} for update`);
-
-    const [budgetState] = await tx
-      .select({
-        policyId: budgetAccounts.policyId,
-        policyActive: budgetPolicies.active,
-        monthlyUnits: budgetPolicies.monthlyUnits,
-        perTaskUnits: budgetPolicies.perTaskUnits,
-        hardLimit: budgetPolicies.hardLimit,
-      })
-      .from(budgetAccounts)
-      .leftJoin(budgetPolicies, eq(budgetAccounts.policyId, budgetPolicies.id))
-      .where(and(eq(budgetAccounts.id, context.budgetAccountId), eq(budgetAccounts.active, true)))
-      .limit(1);
-
-    if (!budgetState?.policyId || !budgetState.policyActive) {
-      throw new RevenueWorkerUnavailableError(
-        "worker_budget_policy_missing",
-        "Revenue Worker budget account has no active policy.",
-      );
-    }
-
-    const perTaskUnits =
-      budgetState.perTaskUnits === null ? null : numberValue(budgetState.perTaskUnits);
-
-    if (perTaskUnits !== null && runUnits > perTaskUnits) {
-      throw new RevenueWorkerUnavailableError(
-        "worker_budget_per_task_exceeded",
-        `Revenue Worker ${commandLabel} requires ${runUnits} units, above the per-task limit of ${perTaskUnits}.`,
-      );
-    }
-
-    const [allocation] = await tx
-      .select({
-        units: sql<number>`coalesce(sum(${budgetAllocations.units}), 0)`,
-        startsAt: sql<Date | null>`min(${budgetAllocations.startsAt})`,
-        endsAt: sql<Date | null>`max(${budgetAllocations.endsAt})`,
-      })
-      .from(budgetAllocations)
-      .where(
-        and(
-          eq(budgetAllocations.accountId, context.budgetAccountId),
-          sql`${budgetAllocations.startsAt} <= ${now}`,
-          sql`${budgetAllocations.endsAt} > ${now}`,
-        ),
-      );
-
-    const usageConditions = [eq(usageEvents.accountId, context.budgetAccountId)];
-
-    if (allocation?.startsAt && allocation.endsAt) {
-      usageConditions.push(sql`${usageEvents.createdAt} >= ${allocation.startsAt}`);
-      usageConditions.push(sql`${usageEvents.createdAt} < ${allocation.endsAt}`);
-    }
-
-    const [used] = await tx
-      .select({ units: sql<number>`coalesce(sum(${usageEvents.units}), 0)` })
-      .from(usageEvents)
-      .where(and(...usageConditions));
-
-    const [held] = await tx
-      .select({ units: sql<number>`coalesce(sum(${budgetReservations.units}), 0)` })
-      .from(budgetReservations)
-      .where(
-        and(
-          eq(budgetReservations.accountId, context.budgetAccountId),
-          eq(budgetReservations.state, "held"),
-          sql`(${budgetReservations.expiresAt} is null or ${budgetReservations.expiresAt} > ${now})`,
-        ),
-      );
-
-    const monthlyUnits = numberValue(budgetState.monthlyUnits);
-    const allocatedUnits = numberValue(allocation?.units);
-    const allowanceUnits =
-      allocatedUnits > 0 && monthlyUnits > 0
-        ? Math.min(allocatedUnits, monthlyUnits)
-        : allocatedUnits > 0
-          ? allocatedUnits
-          : monthlyUnits;
-    const hardLimit = numberValue(budgetState.hardLimit) || 100;
-    const maxUnits = Math.floor((allowanceUnits * hardLimit) / 100);
-    const committedUnits = numberValue(used?.units) + numberValue(held?.units);
-
-    if (maxUnits <= 0 || committedUnits + runUnits > maxUnits) {
-      throw new RevenueWorkerUnavailableError(
-        "worker_budget_exceeded",
-        `Revenue Worker ${commandLabel} requires ${runUnits} units, with ${Math.max(maxUnits - committedUnits, 0)} units available.`,
-      );
-    }
-
-    const [grant] = await tx
-      .select({ id: capabilityGrants.id })
-      .from(capabilityGrants)
-      .innerJoin(capabilities, eq(capabilityGrants.capabilityId, capabilities.id))
-      .where(
-        and(
-          eq(capabilityGrants.tenantId, context.worker.tenantId),
-          eq(capabilityGrants.actorType, "worker"),
-          eq(capabilityGrants.actorId, context.worker.id),
-          eq(capabilityGrants.capabilityId, capabilityId),
-          eq(capabilityGrants.active, true),
-          eq(capabilities.active, true),
-          sql`(${capabilityGrants.startsAt} is null or ${capabilityGrants.startsAt} <= ${now})`,
-          sql`(${capabilityGrants.endsAt} is null or ${capabilityGrants.endsAt} > ${now})`,
-        ),
-      )
-      .limit(1);
-
-    if (!grant) {
-      throw new RevenueWorkerUnavailableError(
-        "worker_capability_not_granted",
-        "Revenue Worker is not actively granted the capability required for this run.",
-        403,
-      );
-    }
 
     if (!task) {
       const taskPriority =
@@ -5274,49 +5103,9 @@ export async function runRevenueWorker(input: {
       task = createdTask;
     }
 
-    const runInput = {
-      idempotencyKey: input.idempotencyKey,
-      command,
-      inputHash,
-      config: requestConfig,
-      resolvedConfig: config,
-      ...intakeTrace,
-      leadPacket: leadPacket.sourceSnapshot,
-      operator: {
-        userId: operator.id,
-        email: operator.email,
-      },
-      taskId: task?.id ?? null,
-      objectId: runObjectId,
-      capabilityId,
-      connectionId: context.connectionId,
-      budgetAccountId: context.budgetAccountId,
-      routeId: context.routeId,
-      units: runUnits,
-      mode: runMode,
-    };
-
-    const [workerRun] = await tx
-      .insert(workerRuns)
-      .values({
-        tenantId: context.worker.tenantId,
-        workerId: context.worker.id,
-        taskId: task?.id ?? null,
-        capabilityId,
-        connectionId: context.connectionId,
-        budgetAccountId: context.budgetAccountId,
-        source,
-        idempotencyKey: input.idempotencyKey,
-        state: "running",
-        mode: runMode,
-        data: {
-          input: runInput,
-          output: {},
-        },
-        startedAt: now,
-        updatedAt: now,
-      })
-      .returning({ id: workerRuns.id });
+    const workerRun = run;
+    const reservationId = coreReservationId || null;
+    const usageEventId = null;
 
     const [workflowDefinition] = await tx
       .select({
@@ -5399,18 +5188,6 @@ export async function runRevenueWorker(input: {
       })
       .returning({ id: auditEvents.id });
 
-    const [reservation] = await tx
-      .insert(budgetReservations)
-      .values({
-        tenantId: context.worker.tenantId,
-        accountId: context.budgetAccountId,
-        taskId: task?.id,
-        units: runUnits,
-        state: "used",
-        expiresAt: new Date(now.getTime() + 15 * 60 * 1000),
-      })
-      .returning({ id: budgetReservations.id });
-
     const [adapterRun] = await tx
       .insert(adapterRuns)
       .values({
@@ -5484,31 +5261,6 @@ export async function runRevenueWorker(input: {
         latencyMs: 240,
       })
       .returning({ id: inferences.id });
-
-    const [usage] = await tx
-      .insert(usageEvents)
-      .values({
-        tenantId: context.worker.tenantId,
-        accountId: context.budgetAccountId,
-        reservationId: reservation.id,
-        inferenceId: inference.id,
-        taskId: task?.id,
-        capabilityId,
-        actorType: "worker",
-        actorId: context.worker.id,
-        units: runUnits,
-        costUsd: "0.000000",
-        data: {
-          route: "low_cost_fast",
-          mode: runMode,
-          command,
-          workerRunId: workerRun.id,
-          ...intakeTrace,
-          workflowRunId: workflowRun.id,
-          adapterRunId: adapterRun.id,
-        },
-      })
-      .returning({ id: usageEvents.id });
 
     const [event] = await tx
       .insert(events)
@@ -5602,8 +5354,8 @@ export async function runRevenueWorker(input: {
           ...intakeTrace,
           sourceSnapshotEvidenceId: sourceSnapshotEvidence.id,
           inferenceId: inference.id,
-          usageEventId: usage.id,
-          reservationId: reservation.id,
+          usageEventId,
+          reservationId,
           runAuditId: runAudit.id,
           classification: leadPacket.classification,
           draftResponse: leadPacket.draftResponse,
@@ -5766,7 +5518,7 @@ export async function runRevenueWorker(input: {
           sourceSnapshotEvidenceId: sourceSnapshotEvidence.id,
           evidenceId: workerEvidence.id,
           inferenceId: inference.id,
-          usageEventId: usage.id,
+          usageEventId,
           adapterRunId: adapterRun.id,
           adapterActionId: action.id,
           adapterReceiptEvidenceId: receiptEvidence.id,
@@ -5775,7 +5527,7 @@ export async function runRevenueWorker(input: {
         policy: {
           externalSend: "approval_required",
           moneyMovement: "blocked",
-          capabilityGrantId: grant.id,
+          capabilityGrantId: coreCapabilityGrantId || null,
         },
         data: {
           operatorRunAuditId: runAudit.id,
@@ -6082,7 +5834,7 @@ export async function runRevenueWorker(input: {
           sourceSnapshotEvidenceId: sourceSnapshotEvidence.id,
           evidenceId: workerEvidence.id,
           inferenceId: inference.id,
-          usageEventId: usage.id,
+          usageEventId,
         },
       },
       {
@@ -6212,8 +5964,8 @@ export async function runRevenueWorker(input: {
           ...intakeTrace,
           sourceSnapshotEvidenceId: sourceSnapshotEvidence.id,
           inferenceId: inference.id,
-          usageEventId: usage.id,
-          reservationId: reservation.id,
+          usageEventId,
+          reservationId,
           runAuditId: runAudit.id,
           adapterRunId: adapterRun.id,
           adapterActionId: action.id,
@@ -6322,8 +6074,8 @@ export async function runRevenueWorker(input: {
           },
           cost: {
             units: runUnits,
-            reservationId: reservation.id,
-            usageEventId: usage.id,
+            reservationId,
+            usageEventId,
           },
           kpi: {
             quotePrepared: true,
@@ -6409,9 +6161,9 @@ export async function runRevenueWorker(input: {
           taskId: task?.id ?? null,
           sourceSnapshotEvidenceId: sourceSnapshotEvidence.id,
           evidenceId: workerEvidence.id,
-          reservationId: reservation.id,
+          reservationId,
           inferenceId: inference.id,
-          usageEventId: usage.id,
+          usageEventId,
           adapterRunId: adapterRun.id,
           adapterActionId: action.id,
           adapterReceiptEvidenceId: receiptEvidence.id,
@@ -6443,9 +6195,9 @@ export async function runRevenueWorker(input: {
       eventId: event.id,
       sourceSnapshotEvidenceId: sourceSnapshotEvidence.id,
       evidenceId: workerEvidence.id,
-      reservationId: reservation.id,
+      reservationId,
       inferenceId: inference.id,
-      usageEventId: usage.id,
+      usageEventId,
       adapterRunId: adapterRun.id,
       adapterActionId: action.id,
       adapterReceiptEvidenceId: receiptEvidence.id,
@@ -6462,30 +6214,42 @@ export async function runRevenueWorker(input: {
         eventId: event.id,
         taskId: task?.id,
         capabilityId,
-        state: "done",
-        endedAt: now,
         updatedAt: now,
         data: {
-          input: {
-            ...runInput,
-            workflowRunId: workflowRun.id,
-          },
+          ...objectValue(workerRun.data),
+          businessEventId: event.id,
+          businessAuditEventId: approvalAudit.id,
+          taskId: task?.id ?? null,
+          workflowRunId: workflowRun.id,
+          sourceSnapshotEvidenceId: sourceSnapshotEvidence.id,
+          evidenceId: workerEvidence.id,
+          reservationId,
+          inferenceId: inference.id,
+          usageEventId,
+          adapterRunId: adapterRun.id,
+          adapterActionId: action.id,
+          adapterReceiptEvidenceId: receiptEvidence.id,
+          approvalRequestId: approval.id,
+          auditEventId: approvalAudit.id,
           quoteApprovalViewId: quoteApprovalView.id,
-          output: runOutput,
+          pendingCompletion: {
+            output: runOutput,
+          },
         },
       })
       .where(eq(workerRuns.id, workerRun.id));
 
     return {
       created: true as const,
+      needsCompletion: true,
       workerRunId: workerRun.id,
       eventId: event.id,
       taskId: task?.id ?? null,
       sourceSnapshotEvidenceId: sourceSnapshotEvidence.id,
       evidenceId: workerEvidence.id,
-      reservationId: reservation.id,
+      reservationId,
       inferenceId: inference.id,
-      usageEventId: usage.id,
+      usageEventId,
       adapterActionId: action.id,
       adapterRunId: adapterRun.id,
       adapterReceiptEvidenceId: receiptEvidence.id,
@@ -6498,9 +6262,69 @@ export async function runRevenueWorker(input: {
     };
   });
 
+  const completion = result.needsCompletion
+    ? await completeCoreWorkerRun({
+        operatorEmail: input.operatorEmail,
+        tenantSlug: context.worker.tenantSlug,
+        idempotencyKey: input.idempotencyKey,
+        worker: {
+          id: context.worker.id,
+          role: revenueWorkerRole,
+        },
+        workerRunId: result.workerRunId,
+        state: "done",
+        reason: `Revenue Worker completed ${commandLabel} with external execution blocked.`,
+        output: result.output,
+        costUsd: 0,
+        evidence: {
+          command,
+          eventId: result.eventId,
+          auditEventId: result.auditEventId,
+          evidenceId: result.evidenceId,
+          sourceSnapshotEvidenceId: result.sourceSnapshotEvidenceId,
+          inferenceId: result.inferenceId,
+          adapterRunId: result.adapterRunId,
+          adapterActionId: result.adapterActionId,
+          adapterReceiptEvidenceId: result.adapterReceiptEvidenceId,
+          approvalRequestId: result.approvalRequestId,
+          quoteApprovalViewId: result.quoteApprovalViewId,
+          workflowRunId: result.workflowRunId,
+          ...intakeTrace,
+          externalExecution: "blocked",
+          externalSend: false,
+        },
+        db,
+      })
+    : null;
+  const completionBudget = objectValue(completion?.budget);
+  const settledReservationId = stringValue(completionBudget.reservationId) || result.reservationId;
+  const settledUsageEventId = stringValue(completionBudget.usageEventId) || result.usageEventId;
+  const settledOutput = {
+    ...result.output,
+    reservationId: settledReservationId,
+    usageEventId: settledUsageEventId,
+  };
+
   return {
     idempotencyKey: input.idempotencyKey,
-    ...result,
+    created: result.created,
+    workerRunId: result.workerRunId,
+    eventId: result.eventId,
+    taskId: result.taskId,
+    sourceSnapshotEvidenceId: result.sourceSnapshotEvidenceId,
+    evidenceId: result.evidenceId,
+    reservationId: settledReservationId,
+    inferenceId: result.inferenceId,
+    usageEventId: settledUsageEventId,
+    adapterRunId: result.adapterRunId,
+    adapterActionId: result.adapterActionId,
+    adapterReceiptEvidenceId: result.adapterReceiptEvidenceId,
+    approvalRequestId: result.approvalRequestId,
+    quoteApprovalViewId: result.quoteApprovalViewId,
+    auditEventId: result.auditEventId,
+    workflowRunId: result.workflowRunId,
+    workflowStepIds: result.workflowStepIds,
+    output: settledOutput,
     snapshot: await getRevenueWorkerSnapshot(db, selector),
   };
 }

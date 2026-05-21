@@ -182,9 +182,9 @@
 | Normalized worker ledger namespaces | Revenue, Owner, Dispatch, and Finance worker sources now write through `continuous.worker`, with event/schema names role-qualified under `worker.<role>.*` instead of worker-family-specific namespaces |
 | Expanded app-server Revenue proof | The CI integration suite now runs Revenue `lead.classify`, `response.draft`, and `quote.prepare` through `continuous.worker.command`, scores the split-command eval fixtures, and verifies generic worker ledger records in addition to the existing app-server `lead.read -> run` proof |
 | Constrained adapter auth metadata | `adapter.upsert` now normalizes `config.auth` to a non-secret `authMode`, rejects credential-shaped values, and emits only `authMode` in adapter responses, events, and audit records while managed credential refs stay on connections |
-| Hardened split Revenue actions | `lead.read`, `lead.classify`, `response.draft`, and `quote.prepare` now check worker budget capacity before reserving units, and empty run/classify/draft/quote configs fail before any synthetic lead defaults or worker-run records are written |
+| Hardened split Revenue actions | `lead.read`, `lead.classify`, `response.draft`, `run`, and `quote.prepare` now use Core worker-run budget gates before work, and empty run/classify/draft/quote configs fail before any synthetic lead defaults or worker-run records are written |
 | Hardened workflow approvals and local reads | `/workflow command=approval.decide` now requires the same top-level idempotency key discipline as other workflow mutations, local `worker.view` reads fail closed in production unless explicitly trusted, and deploy token scopes now include the registered Finance `payment_draft.prepare` command |
-| Registered Revenue quote preparation | `POST /worker` and `continuous.worker.command` now expose `command=quote.prepare` as a first-class Revenue command using the shared `worker`, `idempotencyKey`, and `config` envelope; it writes quote-preparation run/evidence/approval/view proof, preserves legacy `run` replay hashes, and keeps external sends blocked |
+| Registered Revenue quote preparation | `POST /worker` and `continuous.worker.command` now expose `command=quote.prepare` as a first-class Revenue command using the shared `worker`, `idempotencyKey`, and `config` envelope; it writes quote-preparation evidence/approval/view proof through the Core worker-run lifecycle and keeps external sends blocked |
 | Registered Revenue payment-link preparation | `POST /worker` and `continuous.worker.command` now expose `command=payment_link.prepare` as a first-class Revenue command using invoice refs under `config`; it writes a blocked payment packet, payment instruction for verified bank accounts, stable payment review view, adapter receipt, workflow/budget/evidence/audit proof, and keeps live provider link creation and money movement blocked |
 | Normalized payment-link API shape | `payment_link.prepare` accepts `config.invoiceId`, `config.invoiceObjectId`, or keyed `config.sourceRefs` through the canonical `/worker` envelope, with a stable `payment.approval.review` view key and per-run details stored in view data |
 | Enforced non-root customer-data deploys | The GitHub deploy workflow now rejects `require_production_readiness=true` when `DEPLOY_USER=root`, then verifies the remote SSH session has a non-zero UID before repository sync, so strict/customer-data deploys cannot silently use the bootstrap root path |
@@ -208,7 +208,7 @@
 | Strategy breadth versus current runtime | The running app is still a narrow persisted core demo; the updated strategy and docs now define the broader product surface that implementation should grow toward |
 | Worker runtime mode | First worker run is a deterministic simulation that writes the durable loop, operator identity, approval request, and audit events without external sends or money movement |
 | Worker selection | Runtime selection now accepts tenant or worker selectors and falls back only when a single active Revenue Worker exists |
-| Worker run lifecycle | `worker_runs` is now the idempotent lifecycle boundary for Revenue Worker runs, with events kept as the audit log |
+| Worker run lifecycle | Core `worker.run.start` and `worker.run.complete` are now the idempotent lifecycle boundary for Revenue Worker `lead.read`, `lead.classify`, `response.draft`, `run`, and `quote.prepare`, with role-qualified business events kept as the audit log |
 | Codex app-server boundary | The installed CLI can run over stdio or WebSocket and generate protocol bindings; keep Next MCP for Next.js diagnostics and keep app-server worker commands registry-backed rather than worker-family-specific. Remote bridges should pass authenticated transport context rather than operator identity in payloads |
 | Recovery boundary | App-only rollback is tag-based and destructive database restore is dump-backed; the drill harness makes the app/database compatibility procedure repeatable, but it still must be run on a disposable droplet and attested from its report before customer data |
 | Operator-token scope | The current production token now has hashed catalog metadata, per-command scope enforcement, durable auth session records, deploy-time token-rotation attestations, managed credential inventory, revocation enforcement, and operator session review views; broad use still needs broader operator review policy and customer-specific credential handling |
@@ -220,7 +220,7 @@
 | Registered worker view schemas | Worker views now publish and enforce `configSchema` metadata alongside commands, so reads such as `obligations` and `packet` keep filters under `config` and reject unsupported fields before handler execution |
 | Command body boundary | `/core`, `/worker`, `/workflow`, and `/approval` reject invalid credentials before body reads, cap command bodies at 1 MiB, and reject non-JSON, malformed JSON, and non-object command bodies after authentication instead of collapsing them into empty envelopes |
 | Local mutation trust boundary | `worker.command` and `continuous.worker.command` require transport-provided `WORKER_OPERATOR_EMAIL` and are disabled under `APP_ENV=production` unless `CONTINUOUS_TRUSTED_LOCAL_WORKER_TOOLS=true`; their payloads mirror `/worker`, and production automation should prefer the authenticated `/worker` route |
-| Worker ledger namespace boundary | Role-specific worker behavior is carried by `worker.role`, event type suffixes, command names, and persisted payloads; sources stay generic as `continuous.worker` so new worker families do not require new source namespaces |
+| Worker ledger namespace boundary | Role-specific worker behavior is carried by `worker.role`, event type suffixes, command names, and persisted payloads; business events stay generic as `continuous.worker`, while Core-owned run lifecycle rows use `continuous.core.worker_runs` so new worker families do not require route-shaped source namespaces |
 | Compliance launch boundary | The first Compliance slice can prepare filing packets and approval views, but live agency credentials, broader rule-source coverage, and receipt/rejection capture remain follow-ups before any submission path; legal advice remains blocked |
 | Hardened command-scoped control-plane auth | Catalog-backed control-plane credentials now reject explicit blank commands when command scopes exist, managed credential command lists fail closed on missing command names, malformed catalog payloads have regression coverage, and `/worker` read payloads reject worker-family-specific selector drift |
 | Unified worker HTTP envelopes | `/worker` now uses `POST` for both command and read controls: commands carry `command`, `worker`, `idempotencyKey`, and `config`, while reads carry `view`, `worker`, and `config`, with query-shaped worker reads rejected |
@@ -563,11 +563,10 @@ objects/events/evidence selectors, and records a role-qualified business event
 while the canonical run source stays `continuous.core.worker_runs`.
 
 Production deploy smoke now asserts the same API and lifecycle contract for
-direct and scheduler-owned Revenue `lead.read`: calls still go through
-`POST /worker` with `worker` and `config`, and the resulting read-only run must
-be `continuous.core.worker_runs`, `done`, `read_only`, and budget-settled before
-the deploy can pass. Revenue `run` stays on the existing command runtime source
-until that command is migrated to the Core worker-run lifecycle.
+direct and scheduler-owned Revenue `lead.read` and `run`, plus direct
+`quote.prepare`: calls still go through `POST /worker` with `worker` and
+`config`, and the resulting runs must be `continuous.core.worker_runs`, `done`,
+mode-correct, and budget-settled before the deploy can pass.
 
 The standalone production smoke now authenticates the worker schema through
 `/app-server`, verifies worker commands and views stay on `apiRoute: "/worker"`,
@@ -577,3 +576,14 @@ worker route also records authenticated malformed envelope, target, and config
 attempts into `control_plane_auth_sessions` before returning validation errors,
 so bad-shape probes are visible in the same audit stream as auth, scope, and
 managed-credential denials.
+
+Revenue `run` and `quote.prepare` now use the same Core `worker.run.start` and
+`worker.run.complete` lifecycle as the smaller Revenue actions. They still run
+through the generic `/worker` envelope with role and tenant under `worker` and
+operation inputs under `config`, while Core owns the worker-run row, held budget
+reservation, usage settlement, and completion audit.
+
+Production deploy smoke now hard-fails if Revenue `run` or `quote.prepare`
+falls back to a local `continuous.worker` run row. The smoke requires
+`continuous.core.worker_runs`, terminal `done` state, the expected command mode,
+and a used Core budget settlement with the returned reservation and usage ids.

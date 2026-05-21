@@ -3647,11 +3647,22 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .where(eq(workerRuns.id, first.workerRunId ?? ""))
       .limit(1);
     const data = objectValue(workerRun?.data);
+    const completion = objectValue(data.completion);
+    const completionBudget = objectValue(completion.budget);
     const output = objectValue(data.output);
+    const runInput = objectValue(data.input);
+    const runRequest = objectValue(runInput.request);
     const quote = objectValue(output.quote);
 
+    expect(workerRun?.source).toBe("continuous.core.worker_runs");
     expect(workerRun?.state).toBe(evalCase.expected.runState);
     expect(workerRun?.mode).toBe(evalCase.expected.runMode);
+    expect(runInput.command).toBe("run");
+    expect(runRequest.inputHash).toBeTruthy();
+    expect(data.businessEventId).toBe(first.eventId);
+    expect(completionBudget.state).toBe("used");
+    expect(completionBudget.reservationId).toBe(first.reservationId);
+    expect(completionBudget.usageEventId).toBe(first.usageEventId);
     expect(output.classification).toBe(evalCase.expected.classification);
     expect(output.sourceSnapshotEvidenceId).toBe(first.sourceSnapshotEvidenceId);
     expect(output.draftResponse).toContain(evalCase.expected.draftIncludes);
@@ -3747,7 +3758,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .from(workerRuns)
       .where(
         and(
-          eq(workerRuns.source, "continuous.worker"),
+          eq(workerRuns.source, "continuous.core.worker_runs"),
           eq(workerRuns.idempotencyKey, evalCase.idempotencyKey),
         ),
       );
@@ -3766,7 +3777,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .from(workerRuns)
       .where(
         and(
-          eq(workerRuns.source, "continuous.worker"),
+          eq(workerRuns.source, "continuous.core.worker_runs"),
           eq(workerRuns.idempotencyKey, evalCase.idempotencyKey),
         ),
       );
@@ -6291,10 +6302,11 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .limit(1);
     const runData = objectValue(workerRun?.data);
     const runInput = objectValue(runData.input);
-    const resolvedConfig = objectValue(runInput.resolvedConfig);
+    const runRequest = objectValue(runInput.request);
+    const resolvedConfig = objectValue(runRequest.resolvedConfig);
     const resolvedLead = objectValue(resolvedConfig.leadPacket);
 
-    expect(objectValue(runInput.config).intake).toEqual({
+    expect(objectValue(runRequest.config).intake).toEqual({
       objectId: objectResult.objectId,
       eventId: eventResult.eventId,
       evidenceId: evidenceResult.evidenceId,
@@ -6444,12 +6456,13 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .where(eq(workerRuns.id, first.workerRunId ?? ""))
       .limit(1);
     const runInput = objectValue(objectValue(workerRun?.data).input);
+    const runRequest = objectValue(runInput.request);
 
-    expect(objectValue(runInput.config).intake).toEqual({
+    expect(objectValue(runRequest.config).intake).toEqual({
       source: leadPacket.source,
       sourceEventId: leadPacket.sourceEventId,
     });
-    expect(objectValue(runInput.resolvedConfig).leadPacket).toMatchObject({
+    expect(objectValue(runRequest.resolvedConfig).leadPacket).toMatchObject({
       customerName: leadPacket.customerName,
       customerIntent: leadPacket.customerIntent,
       source: leadPacket.source,
@@ -6754,9 +6767,17 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .from(evidence)
       .where(eq(evidence.id, stringValue(quoteResult.adapterReceiptEvidenceId)))
       .limit(1);
+    const quoteRunData = objectValue(quoteRun?.data);
+    const quoteRunCompletion = objectValue(quoteRunData.completion);
+    const quoteRunBudget = objectValue(quoteRunCompletion.budget);
 
+    expect(quoteRun?.source).toBe("continuous.core.worker_runs");
+    expect(quoteRun?.state).toBe("done");
     expect(quoteRun?.mode).toBe("quote_preparation");
-    expect(objectValue(objectValue(quoteRun?.data).input).command).toBe("quote.prepare");
+    expect(objectValue(quoteRunData.input).command).toBe("quote.prepare");
+    expect(quoteRunBudget.state).toBe("used");
+    expect(quoteRunBudget.reservationId).toBe(quoteResult.reservationId);
+    expect(quoteRunBudget.usageEventId).toBe(quoteResult.usageEventId);
     expect(quoteEvent?.type).toBe("worker.revenue_operations.quote_prepare.completed");
     expect(quoteApproval?.kind).toBe("quote_approval");
     expect(quoteApproval?.state).toBe("pending");
@@ -7148,11 +7169,17 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .from(workerRuns)
       .where(eq(workerRuns.id, stringValue(runResult.workerRunId)))
       .limit(1);
+    const runRowData = objectValue(runRow?.data);
+    const runRowCompletion = objectValue(runRowData.completion);
+    const runRowBudget = objectValue(runRowCompletion.budget);
     const [quoteRun] = await db
       .select()
       .from(workerRuns)
       .where(eq(workerRuns.id, stringValue(quoteResult.workerRunId)))
       .limit(1);
+    const quoteRunData = objectValue(quoteRun?.data);
+    const quoteRunCompletion = objectValue(quoteRunData.completion);
+    const quoteRunBudget = objectValue(quoteRunCompletion.budget);
     const [quoteEvent] = await db
       .select()
       .from(events)
@@ -7176,11 +7203,20 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(readRunBudget.state).toBe("used");
     expect(readRunBudget.reservationId).toBe(readResult.reservationId);
     expect(readRunBudget.usageEventId).toBe(readResult.usageEventId);
-    expect(runRow?.source).toBe("continuous.worker");
+    expect(runRow?.source).toBe("continuous.core.worker_runs");
     expect(runRow?.state).toBe("done");
-    expect(objectValue(objectValue(runRow?.data).input).inputHash).toBeTruthy();
+    expect(objectValue(runRowData.input).command).toBe("run");
+    expect(objectValue(objectValue(runRowData.input).request).inputHash).toBeTruthy();
+    expect(runRowBudget.state).toBe("used");
+    expect(runRowBudget.reservationId).toBe(runResult.reservationId);
+    expect(runRowBudget.usageEventId).toBe(runResult.usageEventId);
+    expect(quoteRun?.source).toBe("continuous.core.worker_runs");
+    expect(quoteRun?.state).toBe("done");
     expect(quoteRun?.mode).toBe("quote_preparation");
-    expect(objectValue(objectValue(quoteRun?.data).input).command).toBe("quote.prepare");
+    expect(objectValue(quoteRunData.input).command).toBe("quote.prepare");
+    expect(quoteRunBudget.state).toBe("used");
+    expect(quoteRunBudget.reservationId).toBe(quoteResult.reservationId);
+    expect(quoteRunBudget.usageEventId).toBe(quoteResult.usageEventId);
     expect(quoteEvent?.type).toBe("worker.revenue_operations.quote_prepare.completed");
     expect(paymentLinkRun?.mode).toBe("payment_link_preparation");
     expect(objectValue(objectValue(paymentLinkRun?.data).input).command).toBe("payment_link.prepare");

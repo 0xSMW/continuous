@@ -231,8 +231,9 @@ bun run worker:tool worker.command --payload='{"command":"lead.read","worker":{"
 ```
 
 Connection-backed reads can also omit `records` when the referenced active
-connection has buffered records under `config.inbox`, `config.crm`, `records`,
-`sourceRecords`, or `leadRecords`. If `connection.config.polling.enabled=true`,
+connection has buffered records under connection-side `config.inbox`,
+`config.crm`, `config.records`, `config.sourceRecords`, or `config.leadRecords`.
+If `connection.config.polling.enabled=true`,
 `lead.read` performs a read-only provider poll using an environment-backed
 credential reference stored on the connection, then persists the returned source
 records with `sourceMode: connection_api`, cursor proof, and a redacted polling
