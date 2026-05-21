@@ -247,9 +247,10 @@ workflow data, not from a worker-specific URL. The step input carries
 `input.workerCommand.command`, `input.workerCommand.worker.role`, optional
 `input.workerCommand.worker.id`, `input.workerCommand.idempotencyKey`, and
 `input.workerCommand.config`; the executor derives tenant scope from the
-claimed workflow tenant, rejects cross-tenant targets, calls the shared worker
-registry, and records the command result on the workflow step, workflow run,
-and linked task outcome.
+claimed workflow tenant, rejects cross-tenant targets, runs the shared worker
+registry through a dedicated command-runner boundary outside workflow row
+locks, then reacquires the step lease to record the command result on the
+workflow step, workflow run, and linked task outcome.
 `packet_prepare`, `document_packet_prepare`, and `evidence_packet_prepare`
 steps reuse Core `packet.prepare` semantics from the workflow executor: the step
 payload provides packet content under `input.packet`, while tenant, operator,

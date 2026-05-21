@@ -466,9 +466,10 @@ Queued workflows can now invoke registered worker commands through a generic
 `worker_command` step kind. The workflow step carries `command`, `worker`, an
 optional step-scoped `idempotencyKey`, and command `config` in its input; the
 executor derives tenant scope from the claimed workflow tenant, rejects
-cross-tenant targets, calls the shared worker registry directly, and records the
-result on the workflow step, workflow run, and linked task outcome without
-adding worker-family routes.
+cross-tenant targets, calls the shared worker registry through a dedicated
+command-runner boundary outside workflow row locks, and then reacquires the
+claimed step lease to record the result on the workflow step, workflow run, and
+linked task outcome without adding worker-family routes.
 
 Live DigitalOcean state confirms DO-managed backups are enabled on
 `continuous-01` and available backup images exist. Provisioning still needs an

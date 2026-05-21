@@ -5317,6 +5317,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
     const workerCommandOutput = objectValue(executedWorkerCommandStep?.output);
     const workflowWorkerCommand = objectValue(workerCommandOutput.workerCommand);
     const workflowWorkerCommandResult = objectValue(workflowWorkerCommand.result);
+    const workflowWorkerCommandRunner = objectValue(workflowWorkerCommand.runner);
     const [workflowWorkerRun] = await db
       .select()
       .from(workerRuns)
@@ -5341,6 +5342,8 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(workflowWorkerCommand.command).toBe("lead.classify");
     expect(objectValue(workflowWorkerCommand.worker).role).toBe("revenue_operations");
     expect(workflowWorkerCommand.externalExecution).toBe("registry_controlled");
+    expect(workflowWorkerCommandRunner.boundary).toBe("outside_workflow_row_lock");
+    expect(workflowWorkerCommandRunner.leaseOwner).toBe(`ci-workflow-worker-command:${runId}`);
     expect(workflowWorkerCommandResult.workerRunId).toBeTruthy();
     expect(workflowWorkerRun?.mode).toBe("classification");
     expect(workerCommandRun?.state).toBe("awaiting_approval");

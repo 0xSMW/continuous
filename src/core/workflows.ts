@@ -456,6 +456,31 @@ function jsonValue(value: unknown): Json {
   }
 }
 
+type WorkflowWorkerCommandInput = ReturnType<typeof workflowWorkerCommandInput>;
+type WorkflowWorkerCommandExecution = {
+  input: WorkflowWorkerCommandInput;
+  result: WorkerCommandResult;
+};
+
+async function runWorkflowWorkerCommand(input: {
+  operator: Awaited<ReturnType<typeof loadOperatorContext>>;
+  step: typeof workflowSteps.$inferSelect;
+}): Promise<WorkflowWorkerCommandExecution> {
+  const commandInput = workflowWorkerCommandInput(input.step, input.operator);
+  const result = await executeWorkerCommand({
+    command: commandInput.command,
+    target: commandInput.target,
+    operatorEmail: input.operator.email,
+    idempotencyKey: commandInput.idempotencyKey,
+    config: commandInput.config,
+  });
+
+  return {
+    input: commandInput,
+    result,
+  };
+}
+
 function errorData(error: unknown, attempt: number, maxAttempts: number): JsonObject {
   return {
     message: error instanceof Error ? error.message : "Unknown workflow step execution error.",
@@ -552,6 +577,7 @@ async function completeWorkflowStep(input: {
   operator: Awaited<ReturnType<typeof loadOperatorContext>>;
   claimed: ClaimedWorkflowStep;
   now: Date;
+  workerCommandExecution?: WorkflowWorkerCommandExecution;
 }) {
   const { step: claimedStep, definition } = input.claimed;
   const claimOwner = claimedStep.leaseOwner;
@@ -1306,15 +1332,16 @@ async function completeWorkflowStep(input: {
     }
 
     if (step.kind === "worker_command") {
-      const workerCommandInput = workflowWorkerCommandInput(step, input.operator);
+      if (!input.workerCommandExecution) {
+        throw new RevenueWorkerUnavailableError(
+          "workflow_worker_command_runner_missing",
+          "Workflow worker_command steps require a command-runner result.",
+          500,
+        );
+      }
 
-      workerCommand = await executeWorkerCommand({
-        command: workerCommandInput.command,
-        target: workerCommandInput.target,
-        operatorEmail: input.operator.email,
-        idempotencyKey: workerCommandInput.idempotencyKey,
-        config: workerCommandInput.config,
-      });
+      const workerCommandInput = input.workerCommandExecution.input;
+      workerCommand = input.workerCommandExecution.result;
 
       workerCommandData = {
         worker: jsonValue(workerCommand.worker),
@@ -1325,6 +1352,10 @@ async function completeWorkflowStep(input: {
         workflowKey: definition.key,
         idempotencyKey: workerCommandInput.idempotencyKey,
         executedAt: input.now.toISOString(),
+        runner: {
+          boundary: "outside_workflow_row_lock",
+          leaseOwner: claimOwner,
+        },
         externalExecution: "registry_controlled",
       };
 
@@ -1577,7 +1608,17 @@ export async function executeWorkflowSteps(input: {
     }
 
     try {
-      const completed = await completeWorkflowStep({ db, operator, claimed, now: new Date() });
+      const workerCommandExecution =
+        claimed.step.kind === "worker_command"
+          ? await runWorkflowWorkerCommand({ operator, step: claimed.step })
+          : undefined;
+      const completed = await completeWorkflowStep({
+        db,
+        operator,
+        claimed,
+        now: new Date(),
+        workerCommandExecution,
+      });
       results.push({
         stepId: claimed.step.id,
         state: "done",

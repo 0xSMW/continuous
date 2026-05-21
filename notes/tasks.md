@@ -7,7 +7,6 @@
 ## Agent
 
 - Adopt the canonical Core `worker.run.start` and `worker.run.complete` lifecycle gate inside registered worker command execution so existing worker families stop carrying bespoke run/budget/evidence plumbing.
-- Move `worker_command` workflow execution out of the workflow row-lock transaction, or introduce a dedicated command-runner boundary, before long-running worker commands become normal scheduler traffic.
 - Promote Growth only after the first `growth_operations campaign.draft` slice can consume Customer Experience signal refs, write blocked campaign/draft/approval/view proof, and keep publish/send/spend/tracking mutation blocked.
 - Add DigitalOcean managed-backup verification to `scripts/create-droplet.sh`; live `continuous-01` backups are enabled and have available backup images, but provisioning should still verify the billable backup state explicitly.
 - Continue canonical workforce/filing/payment object coverage beyond the current Revenue runtime; `payment_link.prepare` now runs through `/worker` with invoice refs in `config` and blocked provider/money movement proof, entity setup now has a `locations` table plus Core `entity.setup.record`, worker identity/state now uses Core `worker.upsert` and `worker.transition`, payroll preview now has persisted statements, lines, liabilities, traces, Core record/packet commands, blocked payment/filing drafts, and Core `external_action.record` outcome proof, and AI-ops now has a deterministic Core `ai.infer` gateway with route, redaction, budget, inference, usage, audit, and evidence proof.
