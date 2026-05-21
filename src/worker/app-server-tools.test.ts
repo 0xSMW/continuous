@@ -112,11 +112,14 @@ describe("app-server worker tools", () => {
       "dispatch_operations",
       "finance_operations",
       "workforce_operations",
+      "compliance_operations",
       "systems_operations",
     ]);
-    expect(plannedRoles).toEqual(["compliance_operations"]);
+    expect(plannedRoles).toEqual([]);
     expect(registry.plannedCommands).toEqual(registry.followUpCommands);
     expect(registry.plannedViews).toEqual(registry.followUpViews);
+    expect(registry.plannedFutureWorkerCommands).toEqual([]);
+    expect(registry.plannedFutureWorkerViews).toEqual([]);
     expect(revenueFollowUpCommands.map((command) => command.name)).toEqual(["payment_link.prepare"]);
     expect(
       registry.plannedFutureWorkerCommands.some(
@@ -239,7 +242,59 @@ describe("app-server worker tools", () => {
           command.externalExecution === "dry_run",
       ),
     ).toBe(true);
+    expect(
+      registry.commands.find(
+        (command) => command.role === "compliance_operations" && command.name === "filing.prepare",
+      ),
+    ).toEqual(
+      expect.objectContaining({
+        apiRoute: "/worker",
+        idempotency: "required",
+        externalExecution: "blocked",
+        configSchema: expect.objectContaining({
+          required: ["filingRequirementId", "period"],
+          properties: expect.objectContaining({
+            filingRequirementId: expect.objectContaining({ type: "string" }),
+            period: expect.objectContaining({
+              type: "object",
+              required: ["from", "to"],
+              properties: expect.objectContaining({
+                from: expect.objectContaining({ type: "string" }),
+                to: expect.objectContaining({ type: "string" }),
+              }),
+            }),
+          }),
+        }),
+      }),
+    );
+    expect(
+      registry.commands
+        .filter((command) => command.role === "compliance_operations")
+        .map((command) => command.name),
+    ).toEqual(["filing.prepare", "approval.decide"]);
+    expect(
+      registry.views
+        .filter((view) => view.role === "compliance_operations")
+        .map((view) => view.name),
+    ).toEqual(["snapshot", "obligations", "packet"]);
+    expect(
+      registry.followUpCommands
+        .filter((command) => command.role === "compliance_operations")
+        .map((command) => command.name),
+    ).toEqual([
+      "obligation.scan",
+      "notice.response.prepare",
+      "license.renewal.prepare",
+      "evidence_binder.export",
+    ]);
     expect(registry.views.some((view) => view.role === "workforce_operations" && view.name === "readiness")).toBe(true);
+    expect(registry.views).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: "compliance_operations", name: "snapshot", apiRoute: "/worker" }),
+        expect.objectContaining({ role: "compliance_operations", name: "obligations", apiRoute: "/worker" }),
+        expect.objectContaining({ role: "compliance_operations", name: "packet", apiRoute: "/worker" }),
+      ]),
+    );
     expect(systemsCommandMetadata).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -874,7 +929,7 @@ describe("app-server worker tools", () => {
     );
   });
 
-  it("applies registry schemas to workforce commands through the app-server envelope", async () => {
+  it("applies registry schemas to workforce and compliance commands through the app-server envelope", async () => {
     await expect(
       executeAppServerWorkerTool("continuous.worker.command", {
         command: "hire.packet.prepare",
@@ -900,6 +955,20 @@ describe("app-server worker tools", () => {
         },
       }),
     ).rejects.toThrow("config.period is required for payroll_input.prepare.");
+
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.command", {
+        command: "filing.prepare",
+        worker: {
+          role: "compliance_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "app-server-compliance-filing-schema",
+        config: {
+          filingRequirementId: "filing_requirement_object_uuid",
+        },
+      }),
+    ).rejects.toThrow("config.period is required for filing.prepare.");
   });
 
   it("disables app-server worker mutations in production unless explicitly trusted", async () => {

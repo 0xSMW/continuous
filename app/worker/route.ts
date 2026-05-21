@@ -560,7 +560,6 @@ async function handleWorkerView(request: Request, body: Record<string, unknown>)
       target,
       view,
       config,
-      state: optionalString(config.state),
     });
 
     return Response.json(

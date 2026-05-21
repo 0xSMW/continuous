@@ -45,7 +45,7 @@ codes, and expected consumer output before a consuming worker writes records.
 | `revenue.quote_to_dispatch` | `revenue.quote.prepared`, approval `approved`, quote/job objects not externally sent | `dispatch_operations.schedule.propose` | `handoff.approval_not_approved`, `handoff.quote_missing_policy`, `handoff.job_already_scheduled`, `handoff.external_send_already_true` | Appointment draft, conflict evidence, approval request, dry-run calendar receipt |
 | `dispatch.closeout_to_finance` | `dispatch.closeout.prepared`, closeout `review_ready`, no unresolved critical exception task | `finance_operations.invoice.prepare` | `handoff.closeout_missing_proof`, `handoff.billable_lines_missing`, `handoff.exception_open`, `handoff.customer_ref_missing` | Invoice draft, cash packet, accounting dry-run receipt, owner approval request |
 | `finance.invoice_to_owner_review` | `finance.invoice.prepared` or `finance.cash_forecast.generated`, money movement `blocked` | `owner_chief_of_staff.decision_queue.prepare` | `handoff.money_movement_not_blocked`, `handoff.cash_packet_missing`, `handoff.source_evidence_missing` | Owner decision proposal with cash/evidence refs and no external execution |
-| `workforce.payroll_to_compliance` | `workforce.payroll_input.prepared`, payroll preview `approved_blocked` or `preview` | `compliance_operations.filing.prepare` | `handoff.payroll_state_invalid`, `handoff.tax_trace_missing`, `handoff.payment_instruction_unblocked` | Filing draft review packet with tax trace and blocked submission posture |
+| `workforce.payroll_to_compliance` | `workforce.payroll_input.prepared`, payroll preview `approved_blocked` or `preview` | `compliance_operations.filing.prepare` | `handoff.payroll_state_invalid`, `handoff.tax_trace_missing`, `handoff.payment_instruction_unblocked` | Filing draft review packet with tax trace, source refs, and blocked submission/legal-advice posture |
 | `systems.sync_issue_to_worker` | `systems.sync.repair.planned`, repair action `dry_run`, rollback document present | Consuming worker command named in source refs | `handoff.connection_scope_mismatch`, `handoff.repair_not_dry_run`, `handoff.rollback_missing`, `handoff.issue_severity_missing` | Consumer task or blocked action plan referencing the repair evidence |
 
 ## Fixture Requirements
@@ -70,6 +70,11 @@ launch blockers. Systems now has a first runtime fixture shape on the generic
 `/worker` envelope: connection and sync issues produce dry-run repair evidence,
 rollback packets, permission review proof, and blocked external execution for
 the consuming worker to verify before it trusts recovered data.
+Compliance now has a first runtime fixture shape on the same generic `/worker`
+envelope: `filing.prepare` consumes source refs from `config`, prepares filing
+draft packets and approval views, and blocks agency submission and legal advice.
+Live agency credentials, broader rule-source coverage, and receipt capture
+remain launch blockers.
 
 | Worker | Required first fixture |
 |---|---|
@@ -77,7 +82,7 @@ the consuming worker to verify before it trusts recovered data.
 | Dispatch/Ops | implemented: `revenue.quote_to_dispatch` approved quote with blocked adapter receipt produces a dry-run schedule proposal, blocked customer update draft, blocked closeout packet, and blocked exception route task |
 | Finance | implemented: `dispatch.closeout_to_finance` closeout packet with billable line summary produces a dry-run invoice draft; persisted invoice refs produce a blocked AR follow-up draft; and forecast window/account refs produce a blocked cash forecast, cash packet, owner approval request, and blocked money-movement posture |
 | Workforce | implemented: `hire.packet.prepare` produces a workforce packet with restricted-document proof and payroll blockers; `payroll_input.prepare` produces a dry-run payroll-input packet and readiness view while payroll submission and money movement stay blocked |
-| Compliance | `workforce.payroll_to_compliance` payroll preview with filing draft |
+| Compliance | implemented: `workforce.payroll_to_compliance` payroll preview feeds `filing.prepare` through `config.sourceRefs`, producing a filing draft packet, approval view, and blocked submission/legal-advice posture |
 | Systems | implemented: failing connection sync issue produces a dry-run repair plan, rollback packet, permission review evidence, and blocked external execution |
 | Offer and Pricing | `revenue.quote_to_pricing` quote draft with margin, discount, or change-order policy evidence |
 | Customer Experience | `customer.signal_to_experience` customer signal with source evidence and blocked recovery draft |

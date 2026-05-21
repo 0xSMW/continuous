@@ -46,7 +46,7 @@ const contracts = [
     path: "docs/compliance-operations-worker-v1-contract.md",
     role: "compliance_operations",
     evidencePacket: "compliance_packet",
-    runtime: false,
+    runtime: true,
   },
   {
     path: "docs/systems-operations-worker-v1-contract.md",
@@ -256,8 +256,10 @@ describe("future worker contracts", () => {
       "dispatch_operations",
       "finance_operations",
       "workforce_operations",
+      "compliance_operations",
       "systems_operations",
     ]);
+    expect(plannedWorkerContracts).toEqual([]);
     expect(workerContractForRole("revenue_operations")?.contractPath).toBe(
       "docs/revenue-operations-worker-v1-contract.md",
     );
@@ -374,7 +376,7 @@ describe("future worker contracts", () => {
     expect(source).not.toMatch(/\/api\/[a-z0-9_-]+[-_]worker/);
   });
 
-  it("links the future contracts from the worker expansion map", () => {
+  it("links non-runtime contracts from the worker expansion map", () => {
     const expansion = read("docs/worker-expansion.md");
 
     for (const contract of contracts.filter((item) => !item.runtime)) {
@@ -589,14 +591,19 @@ describe("future worker contracts", () => {
     }
   });
 
-  it("has planned command metadata for every future contract without registered runtime", () => {
+  it("has no planned command metadata once contract-backed workers are runtime", () => {
     const commandRoles = new Set(plannedWorkerCommands().map((command) => command.role));
     const viewRoles = new Set(plannedWorkerViews().map((view) => view.role));
     const plannedContracts = contracts.filter((contract) => !runtimeRoles.has(contract.role));
 
+    expect(plannedContracts).toEqual([]);
     expect(plannedWorkerContracts.map((contract) => contract.role)).toEqual(
       plannedContracts.map((contract) => contract.role),
     );
+    expect(plannedWorkerCommands()).toEqual([]);
+    expect(plannedWorkerViews()).toEqual([]);
+    expect(commandRoles.size).toBe(0);
+    expect(viewRoles.size).toBe(0);
 
     for (const contract of plannedContracts) {
       const planned = plannedWorkerContracts.find((item) => item.role === contract.role);

@@ -229,6 +229,72 @@ describe("/app-server route", () => {
     });
   });
 
+  it("bridges authenticated Compliance commands through the same app-server worker envelope", async () => {
+    mocks.env.CONTROL_PLANE_TOKENS_JSON = tokenCatalog(
+      ["app_server:worker.command.filing.prepare"],
+      {
+        allowedWorkerRoles: ["compliance_operations"],
+      },
+    );
+
+    const { POST } = await import("./route");
+    const payload = {
+      tool: "continuous.worker.command",
+      arguments: {
+        command: "filing.prepare",
+        worker: {
+          role: "compliance_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "app-server-route-compliance-filing-001",
+        config: {
+          filingRequirementId: "filing-requirement-1",
+          period: {
+            label: "2026-Q2",
+            from: "2026-04-01T00:00:00.000Z",
+            to: "2026-07-01T00:00:00.000Z",
+          },
+          sourceRefs: {
+            payrollRunId: "payroll-run-1",
+          },
+        },
+      },
+      callId: "call-compliance-001",
+      threadId: "thread-001",
+      turnId: "turn-001",
+    };
+    const response = await POST(
+      new Request("http://localhost/app-server", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.authorizeManagedControlPlaneCredential).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: "app_server",
+        access: "write",
+        command: "worker.command.filing.prepare",
+        tenantSlug: "continuous-demo",
+        workerRole: "compliance_operations",
+        requireManagedCredential: true,
+      }),
+    );
+    expect(mocks.executeAppServerWorkerDynamicToolCall).toHaveBeenCalledWith(payload, {
+      operatorEmail: "operator@example.com",
+      source: "control_plane",
+      allowedAccess: ["write"],
+      allowedCommands: ["worker:filing.prepare"],
+      allowedTenants: ["continuous-demo"],
+      allowedWorkerRoles: ["compliance_operations"],
+    });
+  });
+
   it("authorizes schema discovery through an explicit app-server schema command", async () => {
     const { POST } = await import("./route");
     const payload = {
@@ -341,6 +407,51 @@ describe("/app-server route", () => {
     expect(mocks.executeAppServerWorkerDynamicToolCall).not.toHaveBeenCalled();
   });
 
+  it("rejects Compliance bridge calls when token role scope omits Compliance", async () => {
+    mocks.env.CONTROL_PLANE_TOKENS_JSON = tokenCatalog([
+      "app_server:worker.command.filing.prepare",
+    ]);
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/app-server", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          tool: "continuous.worker.command",
+          arguments: {
+            command: "filing.prepare",
+            worker: {
+              role: "compliance_operations",
+              tenantSlug: "continuous-demo",
+            },
+            idempotencyKey: "app-server-route-compliance-role-denied-001",
+            config: {
+              filingRequirementId: "filing-requirement-1",
+              period: {
+                from: "2026-04-01T00:00:00.000Z",
+                to: "2026-07-01T00:00:00.000Z",
+              },
+            },
+          },
+          callId: "call-compliance-002",
+          threadId: "thread-001",
+          turnId: "turn-001",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "control_plane_worker_role_forbidden" },
+    });
+    expect(mocks.authorizeManagedControlPlaneCredential).not.toHaveBeenCalled();
+    expect(mocks.executeAppServerWorkerDynamicToolCall).not.toHaveBeenCalled();
+  });
+
   it("rejects malformed app-server tool-call payloads before dynamic dispatch", async () => {
     const { POST } = await import("./route");
     const missingTool = await POST(
@@ -422,6 +533,52 @@ describe("/app-server route", () => {
       error: {
         code: "invalid_app_server_tool_call",
         message: expect.stringContaining("Put worker operation inputs under arguments.config."),
+      },
+    });
+    expect(mocks.authorizeManagedControlPlaneCredential).not.toHaveBeenCalled();
+    expect(mocks.executeAppServerWorkerDynamicToolCall).not.toHaveBeenCalled();
+  });
+
+  it("rejects worker operation fields beside arguments.config before dynamic dispatch", async () => {
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/app-server", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          tool: "continuous.worker.command",
+          arguments: {
+            command: "lead.read",
+            worker: {
+              role: "revenue_operations",
+              tenantSlug: "continuous-demo",
+            },
+            idempotencyKey: "app-server-route-arguments-envelope-001",
+            source: "website_form",
+            records: [
+              {
+                sourceEventId: "form-001",
+                customerName: "Acme Roof Repair",
+              },
+            ],
+            config: {},
+          },
+          callId: "call-008",
+          threadId: "thread-001",
+          turnId: "turn-001",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "invalid_app_server_tool_call",
+        message:
+          "continuous.worker.command arguments fields must be command, worker, idempotencyKey, and config. Put worker operation inputs under arguments.config. Unexpected fields: source, records.",
       },
     });
     expect(mocks.authorizeManagedControlPlaneCredential).not.toHaveBeenCalled();

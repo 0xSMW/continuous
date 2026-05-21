@@ -143,6 +143,81 @@ describe("/worker route", () => {
     );
   });
 
+  it("routes Compliance commands without a family-specific API path", async () => {
+    const commandResult = {
+      worker: {
+        role: "compliance_operations",
+        id: null,
+        tenantSlug: "continuous-demo",
+      },
+      command: "filing.prepare",
+      result: {
+        filingDraftId: "filing-draft-1",
+        externalExecution: "blocked",
+      },
+    };
+    mocks.executeWorkerCommand.mockResolvedValue(commandResult);
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/worker", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "filing.prepare",
+          worker: {
+            role: "compliance_operations",
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "compliance-filing-001",
+          config: {
+            filingRequirementId: "filing-requirement-1",
+            period: {
+              label: "2026-Q2",
+              from: "2026-04-01T00:00:00.000Z",
+              to: "2026-07-01T00:00:00.000Z",
+            },
+            sourceRefs: {
+              payrollRunId: "payroll-run-1",
+            },
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      api: "continuous.worker.v1",
+      data: commandResult,
+      error: null,
+    });
+    expect(mocks.executeWorkerCommand).toHaveBeenCalledWith({
+      command: "filing.prepare",
+      target: {
+        role: "compliance_operations",
+        id: undefined,
+        tenantSlug: "continuous-demo",
+      },
+      config: {
+        filingRequirementId: "filing-requirement-1",
+        period: {
+          label: "2026-Q2",
+          from: "2026-04-01T00:00:00.000Z",
+          to: "2026-07-01T00:00:00.000Z",
+        },
+        sourceRefs: {
+          payrollRunId: "payroll-run-1",
+        },
+      },
+      idempotencyKey: "compliance-filing-001",
+      operatorEmail: "operator@example.com",
+    });
+  });
+
   it("rejects unauthorized POST commands before reading the request body", async () => {
     const getReader = vi.fn(() => {
       throw new Error("Body should not be read before auth succeeds.");
@@ -804,6 +879,43 @@ describe("/worker route", () => {
     expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
   });
 
+  it("rejects Compliance operation fields outside config", async () => {
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/worker", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "filing.prepare",
+          worker: {
+            role: "compliance_operations",
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "bad-compliance-envelope-001",
+          filingRequirementId: "filing-requirement-1",
+          period: {
+            label: "2026-Q2",
+            from: "2026-04-01T00:00:00.000Z",
+            to: "2026-07-01T00:00:00.000Z",
+          },
+          config: {},
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toEqual({
+      code: "invalid_worker_command_envelope",
+      message:
+        "Worker command payload fields must be command, worker, idempotencyKey, and config. Move operation inputs into config. Unexpected fields: filingRequirementId, period.",
+    });
+    expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
+  });
+
   it("rejects operation fields nested under the worker selector", async () => {
     const { POST } = await import("./route");
     const response = await POST(
@@ -1081,7 +1193,6 @@ describe("/worker route", () => {
       config: {
         state: "review_ready",
       },
-      state: "review_ready",
     });
     expect(mocks.authorizeManagedControlPlaneCredential).toHaveBeenCalledWith(
       expect.objectContaining({

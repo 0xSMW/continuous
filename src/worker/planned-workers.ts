@@ -835,17 +835,6 @@ export const workerContracts: PlannedWorkerContractMetadata[] = [
         requiresTenant: true,
         requiredConfig: ["objectIds", "purpose"],
       },
-      {
-        role: "compliance_operations",
-        name: "approval.decide",
-        toolAlias: "worker.command",
-        description: "Decide a compliance approval without agency submission or external mutation.",
-        idempotency: "none",
-        sideEffects: "internal",
-        externalExecution: "blocked",
-        requiresTenant: true,
-        requiredConfig: ["approvalId", "action"],
-      },
     ],
     views: [
       {
@@ -999,6 +988,7 @@ const runtimeWorkerRoles = new Set([
   "dispatch_operations",
   "finance_operations",
   "workforce_operations",
+  "compliance_operations",
   "systems_operations",
 ]);
 
@@ -1192,7 +1182,7 @@ export const workerExpansionCatalog: WorkerExpansionCatalogEntry[] = [
     order: 6,
     key: "compliance_operations",
     name: "Compliance Worker",
-    status: "planned_contract",
+    status: "runtime",
     kind: "worker_family",
     apiRoute: workerApiRoute,
     workerRole: "compliance_operations",
@@ -1216,8 +1206,8 @@ export const workerExpansionCatalog: WorkerExpansionCatalogEntry[] = [
       "Submission stays blocked until human approval",
       "Evidence binder is exportable",
     ],
-    firstBlocker: "Runtime handlers and CI evals are not implemented yet.",
-    launchGate: "Rule-pack coverage, due-date obligations, source refs, and human submission approval.",
+    firstBlocker: "Live agency credentials, source validation breadth, receipt capture, and submission rollback proof remain blocked.",
+    launchGate: "Rule-pack coverage, due-date obligations, source refs, human submission approval, and receipt/rejection capture.",
     contractPath: "docs/compliance-operations-worker-v1-contract.md",
     evidencePacket: "compliance_packet",
     externalExecution: "blocked",

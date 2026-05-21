@@ -75,6 +75,7 @@ const ids = {
   financeWorker: "aaaaaaaa-aaaa-4aaa-8aaa-000000000004",
   workforceWorker: "aaaaaaaa-aaaa-4aaa-8aaa-000000000005",
   systemsWorker: "aaaaaaaa-aaaa-4aaa-8aaa-000000000006",
+  complianceWorker: "aaaaaaaa-aaaa-4aaa-8aaa-000000000007",
   adapter: "56565656-5656-4565-8565-565656565656",
   dispatchAdapter: "56565656-5656-4565-8565-000000000002",
   financeAdapter: "56565656-5656-4565-8565-000000000003",
@@ -98,6 +99,8 @@ const ids = {
   workforceBudgetAllocation: "bbbbbbbb-bbbb-4bbb-8bbb-000000000013",
   systemsBudgetAccount: "bbbbbbbb-bbbb-4bbb-8bbb-000000000014",
   systemsBudgetAllocation: "bbbbbbbb-bbbb-4bbb-8bbb-000000000015",
+  complianceBudgetAccount: "bbbbbbbb-bbbb-4bbb-8bbb-000000000016",
+  complianceBudgetAllocation: "bbbbbbbb-bbbb-4bbb-8bbb-000000000017",
   systemsWorkerReadGrant: "10101010-1010-4010-8010-000000000001",
   systemsApprovalGrant: "10101010-1010-4010-8010-000000000002",
   systemsDocumentGrant: "10101010-1010-4010-8010-000000000003",
@@ -454,6 +457,39 @@ async function seed() {
           hire_packets_prepared: 0,
           payroll_inputs_prepared: 0,
           document_blockers_found: 0,
+          approval_requests_created: 0,
+        },
+      },
+      {
+        id: ids.complianceWorker,
+        tenantId: ids.tenant,
+        managerUserId: ids.owner,
+        kind: "synthetic",
+        state: "training",
+        name: "Compliance Operations Worker",
+        role: "compliance_operations",
+        mission:
+          "Prepare source-backed obligations, filing drafts, notice responses, renewals, and evidence binders while keeping agency submissions blocked.",
+        autonomyLevel: 2,
+        scope: {
+          flows: ["obligation_scan", "filing_prepare", "notice_response", "license_renewal", "evidence_export"],
+          systems: ["document_store", "calendar", "agency_portals"],
+        },
+        memory: {
+          compliance_context: "tenant_scoped",
+          restricted_documents: "metadata_only",
+        },
+        policy: {
+          external_execution: "blocked",
+          agency_submission: "blocked",
+          legal_advice: "blocked",
+          restricted_data: "redacted_by_default",
+        },
+        kpis: {
+          filings_prepared: 0,
+          obligations_scanned: 0,
+          notice_responses_prepared: 0,
+          evidence_binders_prepared: 0,
           approval_requests_created: 0,
         },
       },
@@ -815,6 +851,45 @@ async function seed() {
     .insert(capabilityGrants)
     .values(
       [
+        capIds.filingPrepare,
+        capIds.documentPacketPrepare,
+        capIds.approvalRequest,
+        capIds.sensitiveReveal,
+      ].map((capabilityId) => ({
+        tenantId: ids.tenant,
+        capabilityId,
+        actorType: "worker" as const,
+        actorId: ids.complianceWorker,
+        scope: {
+          tenant_id: ids.tenant,
+          objects: [
+            "rule_pack",
+            "obligation",
+            "filing_requirement",
+            "filing_draft",
+            "agency_notice",
+            "license",
+            "permit",
+            "insurance_policy",
+            "evidence_binder",
+          ],
+        },
+        policy: {
+          mode: "review_only",
+          autonomy_level: 2,
+          external_execution: "blocked",
+          agency_submission: "blocked",
+          legal_advice: "blocked",
+          restricted_data: "redacted_by_default",
+        },
+      })),
+    )
+    .onConflictDoNothing();
+
+  await db
+    .insert(capabilityGrants)
+    .values(
+      [
         { id: ids.systemsWorkerReadGrant, capabilityId: capIds.workerRead },
         { id: ids.systemsApprovalGrant, capabilityId: capIds.approvalRequest },
         { id: ids.systemsDocumentGrant, capabilityId: capIds.documentPacketPrepare },
@@ -1026,6 +1101,14 @@ async function seed() {
         targetId: ids.workforceWorker,
       },
       {
+        id: ids.complianceBudgetAccount,
+        tenantId: ids.tenant,
+        policyId: ids.budgetPolicy,
+        name: "Compliance Operations Worker monthly intelligence budget",
+        target: "worker",
+        targetId: ids.complianceWorker,
+      },
+      {
         id: ids.systemsBudgetAccount,
         tenantId: ids.tenant,
         policyId: ids.budgetPolicy,
@@ -1080,6 +1163,15 @@ async function seed() {
         tenantId: ids.tenant,
         poolId: ids.budgetPool,
         accountId: ids.workforceBudgetAccount,
+        units: 1000000,
+        startsAt: now,
+        endsAt: nextMonth,
+      },
+      {
+        id: ids.complianceBudgetAllocation,
+        tenantId: ids.tenant,
+        poolId: ids.budgetPool,
+        accountId: ids.complianceBudgetAccount,
         units: 1000000,
         startsAt: now,
         endsAt: nextMonth,
@@ -2682,6 +2774,7 @@ async function seed() {
             ids.dispatchWorker,
             ids.financeWorker,
             ids.workforceWorker,
+            ids.complianceWorker,
             ids.systemsWorker,
           ],
           adapterIds: [ids.adapter, ids.dispatchAdapter, ids.financeAdapter],

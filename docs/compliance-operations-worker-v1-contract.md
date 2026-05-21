@@ -27,7 +27,11 @@ All commands use `POST /worker`; no compliance-specific route is added.
   "idempotencyKey": "compliance-filing-941-2026q2",
   "config": {
     "filingRequirementId": "filing_requirement_object_uuid",
-    "period": "2026-Q2",
+    "period": {
+      "label": "2026-Q2",
+      "from": "2026-04-01T00:00:00.000Z",
+      "to": "2026-07-01T00:00:00.000Z"
+    },
     "sourceRefs": {
       "payrollRunId": "payroll_run_object_uuid"
     }
@@ -37,15 +41,26 @@ All commands use `POST /worker`; no compliance-specific route is added.
 
 ## Registry Entries
 
+Runtime entries:
+
 | Command or view | Tool surface | Required config | Idempotency | Side effects | External execution |
 |---|---|---|---|---|---|
 | `view: "snapshot"` payload | `worker.view` | `worker.role`, `config` | None | Read-only | Blocked |
+| `view: "obligations"` payload | `worker.view` | `worker.role`, optional `config.state`, optional `config.limit` | None | Read-only | Blocked |
+| `view: "packet"` payload | `worker.view` | `worker.role`, optional `config.packetId`, optional `config.filingDraftId` | None | Read-only | Blocked |
+| `filing.prepare` | `worker.command` | `config.filingRequirementId`, `config.period.from`, `config.period.to` | Required | Filing draft packet | Blocked |
+
+Follow-up metadata, not runtime handlers yet:
+
+| Command or view | Tool surface | Required config | Idempotency | Side effects | External execution |
+|---|---|---|---|---|---|
 | `obligation.scan` | `worker.command` | `config.scope`, `config.jurisdiction` | Required | Obligation proposals and evidence | Blocked |
 | `notice.response.prepare` | `worker.command` | `config.noticeId` | Required | Response draft, packet, approval request | Blocked |
 | `license.renewal.prepare` | `worker.command` | `config.licenseId` | Required | Renewal packet and blocker tasks | Blocked |
-| `filing.prepare` | `worker.command` | `config.filingRequirementId`, `config.period` | Required | Filing draft packet | Blocked |
 | `evidence_binder.export` | `worker.command` | `config.objectIds[]`, `config.purpose` | Required | Export document and audit evidence | Blocked |
-| `approval.decide` | `worker.command` | `config.approvalId`, `config.action`, optional `config.note` | None | Approval/task/workflow evidence only | Blocked |
+
+Compliance approvals are created by the runtime slice and decided through the
+shared `/approval` surface; that path does not submit to an agency.
 
 ## Core Object Map
 

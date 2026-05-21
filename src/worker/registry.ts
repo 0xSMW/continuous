@@ -50,6 +50,13 @@ import {
   workforceWorkerRole,
 } from "./workforce";
 import {
+  complianceWorkerRole,
+  getCompliancePacket,
+  getComplianceWorkerSnapshotSafe,
+  listComplianceObligations,
+  prepareComplianceFiling,
+} from "./compliance";
+import {
   getSystemsRepairs,
   getSystemsWorkerSnapshotSafe,
   planSystemsAutomation,
@@ -105,7 +112,6 @@ type WorkerViewContext = {
   target: WorkerTarget;
   operatorEmail: string;
   config: JsonObject;
-  state?: string;
 };
 
 type WorkerViewDefinition = {
@@ -714,6 +720,28 @@ const workforcePayrollInputConfig: WorkerConfigSchema = {
   },
   additionalProperties: true,
 };
+const complianceFilingPrepareConfig: WorkerConfigSchema = {
+  type: "object",
+  required: ["filingRequirementId", "period"],
+  properties: {
+    filingRequirementId: { type: "string" },
+    obligationId: { type: "string" },
+    period: {
+      type: "object",
+      required: ["from", "to"],
+      properties: {
+        label: { type: "string" },
+        from: { type: "string" },
+        to: { type: "string" },
+      },
+      additionalProperties: true,
+    },
+    sourceRefs: jsonObjectConfig,
+    validation: jsonObjectConfig,
+    policy: jsonObjectConfig,
+  },
+  additionalProperties: true,
+};
 const systemsConnectorHealthConfig: WorkerConfigSchema = {
   type: "object",
   required: ["checks"],
@@ -795,7 +823,6 @@ const systemsAutomationPlanConfig: WorkerConfigSchema = {
   },
   additionalProperties: true,
 };
-
 const revenueDefinition: WorkerDefinition = {
   role: revenueWorkerRole,
   commands: {
@@ -1117,7 +1144,7 @@ const revenueDefinition: WorkerDefinition = {
         const approvals = await listApprovals({
           operatorEmail: context.operatorEmail,
           tenantSlug: context.target.tenantSlug,
-          state: context.state,
+          state: optionalString(context.config.state),
           subject: "worker",
         });
 
@@ -1313,7 +1340,7 @@ const financeDefinition: WorkerDefinition = {
         const approvals = await listApprovals({
           operatorEmail: context.operatorEmail,
           tenantSlug: context.target.tenantSlug,
-          state: context.state,
+          state: optionalString(context.config.state),
           subject: "worker",
         });
 
@@ -1468,6 +1495,144 @@ const workerDefinitions: Record<string, WorkerDefinition> = {
               worker: responseTarget(context.target, readiness.worker ? context.target.tenantSlug : null),
               view: "readiness",
               readiness,
+            },
+            error: null,
+          };
+        },
+      },
+    },
+  },
+  [complianceWorkerRole]: {
+    role: complianceWorkerRole,
+    commands: {
+      "filing.prepare": {
+        name: "filing.prepare",
+        description: "Prepare a filing draft from source facts, rule refs, validation results, and approval gates.",
+        idempotency: "required",
+        sideEffects: "internal",
+        externalExecution: "blocked",
+        requiresTenant: true,
+        configSchema: complianceFilingPrepareConfig,
+        async handle(context) {
+          if (!context.idempotencyKey) {
+            throw new PlatformUnavailableError(
+              "invalid_idempotency_key",
+              "A string idempotency key is required.",
+              400,
+            );
+          }
+
+          return prepareComplianceFiling({
+            idempotencyKey: context.idempotencyKey,
+            tenantSlug: context.target.tenantSlug,
+            workerId: context.target.workerId,
+            operatorEmail: context.operatorEmail,
+            config: context.config,
+          });
+        },
+      },
+      "approval.decide": {
+        name: "approval.decide",
+        description: "Decide a compliance approval request without agency submission.",
+        idempotency: "none",
+        sideEffects: "internal",
+        externalExecution: "blocked",
+        requiresTenant: true,
+        configSchema: {
+          type: "object",
+          required: ["approvalId", "action"],
+          properties: {
+            approvalId: { type: "string" },
+            action: {
+              type: "string",
+              enum: ["approved", "rejected", "revision_requested"],
+            },
+            note: { type: "string" },
+          },
+          additionalProperties: true,
+        },
+        async handle(context) {
+          const approvalId = optionalString(context.config.approvalId);
+          const action = normalizeApprovalDecision(context.config.action);
+
+          if (!approvalId || !action) {
+            throw new PlatformUnavailableError(
+              "invalid_worker_command_config",
+              "config.approvalId and config.action are required for approval.decide.",
+              400,
+            );
+          }
+
+          return decideApproval({
+            approvalId,
+            operatorEmail: context.operatorEmail,
+            tenantSlug: context.target.tenantSlug,
+            action,
+            note: optionalString(context.config.note),
+            subject: "worker",
+          });
+        },
+      },
+    },
+    views: {
+      snapshot: {
+        name: "snapshot",
+        description: "Read the Compliance Operations Worker runtime snapshot.",
+        async handle(context) {
+          const result = await getComplianceWorkerSnapshotSafe({
+            tenantSlug: context.target.tenantSlug,
+            workerId: context.target.workerId,
+            role: context.target.role,
+          });
+
+          return {
+            status: result.ok ? 200 : 500,
+            data: {
+              worker: responseTarget(context.target),
+              view: "snapshot",
+              snapshot: result.snapshot,
+            },
+            error: result.error,
+          };
+        },
+      },
+      obligations: {
+        name: "obligations",
+        description: "Read obligations, filings, blockers, and due dates.",
+        async handle(context) {
+          const obligations = await listComplianceObligations({
+            tenantSlug: context.target.tenantSlug,
+            workerId: context.target.workerId,
+            operatorEmail: context.operatorEmail,
+            config: context.config,
+          });
+
+          return {
+            data: {
+              worker: responseTarget(context.target),
+              view: "obligations",
+              obligations,
+            },
+            error: null,
+          };
+        },
+      },
+      packet: {
+        name: "packet",
+        description: "Read compliance packet details, rule refs, approvals, redactions, and receipts.",
+        async handle(context) {
+          const packet = await getCompliancePacket({
+            tenantSlug: context.target.tenantSlug,
+            workerId: context.target.workerId,
+            operatorEmail: context.operatorEmail,
+            config: context.config,
+          });
+
+          return {
+            data: {
+              worker: responseTarget(context.target),
+              view: "packet",
+              packet,
             },
             error: null,
           };
@@ -1918,7 +2083,7 @@ const workerDefinitions: Record<string, WorkerDefinition> = {
             operatorEmail: context.operatorEmail,
             tenantSlug: context.target.tenantSlug,
             workerId: context.target.workerId,
-            state: context.state,
+            state: optionalString(context.config.state),
           });
 
           return {
@@ -1939,7 +2104,7 @@ const workerDefinitions: Record<string, WorkerDefinition> = {
             operatorEmail: context.operatorEmail,
             tenantSlug: context.target.tenantSlug,
             workerId: context.target.workerId,
-            state: context.state,
+            state: optionalString(context.config.state),
           });
 
           return {
@@ -2176,7 +2341,7 @@ const workerDefinitions: Record<string, WorkerDefinition> = {
           const approvals = await listApprovals({
             operatorEmail: context.operatorEmail,
             tenantSlug: context.target.tenantSlug,
-            state: context.state,
+            state: optionalString(context.config.state),
             subject: "worker",
           });
 
@@ -2328,7 +2493,6 @@ export async function executeWorkerView(input: {
   target?: WorkerTargetInput;
   operatorEmail: string;
   config?: unknown;
-  state?: string;
 }): Promise<WorkerViewResult> {
   const target = resolveWorkerTarget(input.target);
   const definition = workerDefinitions[target.role];
@@ -2357,6 +2521,5 @@ export async function executeWorkerView(input: {
     target,
     operatorEmail: input.operatorEmail,
     config,
-    state: input.state ?? optionalString(config.state),
   });
 }

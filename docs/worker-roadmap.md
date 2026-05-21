@@ -146,13 +146,23 @@ schedule readiness, and live HR/payroll credential gates.
 
 ## Phase 6: Compliance Worker
 
+Status: first runtime slice is registered on the generic `/worker` envelope for
+`command=filing.prepare`, `command=approval.decide`, and the `snapshot`,
+`obligations`, and `packet` views. Role and tenant selection stay under
+`worker`; filing requirement, period, source refs, and validation options stay
+under `config`. The slice prepares source-backed filing draft packets and
+review views while agency submission and legal advice remain blocked. Remaining
+Compliance work is obligation scan, notice response, license renewal, evidence
+binder export, live agency credentials, broader rule sources, and
+receipt/rejection capture.
+
 | Dependency | Implementation target |
 |---|---|
 | Core objects | Rule pack, obligation, filing requirement, filing draft, notice, license, insurance |
 | Workflow | Obligation intake, notice response, license renewal, filing draft, evidence export |
 | Capabilities | `filing.prepare`, `document_packet.prepare`, `sensitive_data.reveal`, `approval.request` |
 | Adapters | Document stores, calendar, agency portal/manual upload, email |
-| Launch gate | Human approval required for submissions; every rule claim has a source ref |
+| Launch gate | Submission and legal advice stay blocked until rule refs, approval, live credential scope, and receipt capture are proven |
 
 ## Phase 7: Systems Worker
 

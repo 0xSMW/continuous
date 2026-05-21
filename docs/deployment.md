@@ -150,7 +150,7 @@ payloads. Compose containers fail fast if the deploy operator is not provided.
 The deploy path also writes a hashed control-plane token catalog and scopes that
 credential to
 `CONTROL_PLANE_ALLOWED_TENANTS=continuous-demo` and
-`CONTROL_PLANE_ALLOWED_WORKER_ROLES=revenue_operations,owner_chief_of_staff,dispatch_operations,finance_operations,workforce_operations,systems_operations`;
+`CONTROL_PLANE_ALLOWED_WORKER_ROLES=revenue_operations,owner_chief_of_staff,dispatch_operations,finance_operations,workforce_operations,compliance_operations,systems_operations`;
 requests to `/worker`, `/core`, or `/workflow` must carry an allowed
 `tenantSlug`, and worker requests must carry an allowed `worker.role`. Use the
 CLI path over SSH for direct operator-controlled smoke runs:
@@ -324,6 +324,10 @@ payloads carry `view`, `worker`, and `config`; worker command payloads carry
 `command`, `worker`, `idempotencyKey`, and `config`. Worker-specific HTTP paths
 are intentionally absent; expand the worker control plane through registered
 `/worker` commands and payload fields.
+Compliance follows the same rule: `filing.prepare` and Compliance views use
+`worker.role` plus `config`, not a compliance-specific route. Agency submission
+and legal advice remain blocked until live credential scope, rule-source
+breadth, and receipt capture are proven.
 The deploy workflow smokes `lead.read`, the source-selector `run` path, a
 registered `quote.prepare` packet, a
 Core-created active buffered connection, one-shot scheduler `lead.read -> run`
@@ -332,7 +336,8 @@ task transition, approval request, capability grant, budget
 reserve/charge/release, object, object-link, event, evidence, document, packet,
 decision, generated-view, connector setup, connection health, shared approval
 inbox route, payroll preview packet handoff, and payroll
-approval handoff after each production rollout. It also runs the host
+approval handoff, plus Compliance `filing.prepare` packet proof after each
+production rollout. It also runs the host
 observability check so production rollout fails if app/db/Caddy service state,
 public health, TLS freshness, disk usage, or Caddy access logging are broken.
 Access-log evidence may come from `logs/caddy/access.log` or from the Caddy
@@ -349,7 +354,7 @@ Control-plane token catalog entries have this shape when provided directly via
     "tokenSha256": "hex_sha256_of_bearer_token",
     "operatorEmail": "owner@continuoushq.com",
     "allowedTenants": ["continuous-demo"],
-    "allowedWorkerRoles": ["revenue_operations", "owner_chief_of_staff", "dispatch_operations", "finance_operations", "workforce_operations", "systems_operations"],
+    "allowedWorkerRoles": ["revenue_operations", "owner_chief_of_staff", "dispatch_operations", "finance_operations", "workforce_operations", "compliance_operations", "systems_operations"],
     "allowedRoutes": ["core", "worker", "workflow", "approval", "app_server"],
     "allowedAccess": ["read", "write"],
     "allowedCommands": [
@@ -363,11 +368,15 @@ Control-plane token catalog entries have this shape when provided directly via
       "worker:view.readiness",
       "worker:view.health",
       "worker:view.repairs",
+      "worker:view.obligations",
+      "worker:view.packet",
       "worker:lead.read",
       "worker:quote.prepare",
       "worker:run",
       "worker:hire.packet.prepare",
       "worker:payroll_input.prepare",
+      "worker:filing.prepare",
+      "worker:approval.decide",
       "worker:connector.health.scan",
       "worker:sync.repair.plan",
       "worker:data_quality.remediate",
@@ -375,7 +384,10 @@ Control-plane token catalog entries have this shape when provided directly via
       "worker:automation.plan",
       "app_server:worker.schema",
       "app_server:worker.view.snapshot",
+      "app_server:worker.view.obligations",
+      "app_server:worker.view.packet",
       "app_server:worker.command.lead.read",
+      "app_server:worker.command.filing.prepare",
       "workflow:view.overview",
       "approval:view.inbox"
     ],
@@ -560,6 +572,7 @@ and route-qualified command; unrelated commands remain closed.
       "dispatch_operations",
       "finance_operations",
       "workforce_operations",
+      "compliance_operations",
       "systems_operations"
     ],
     "allowedRoutes": ["core", "worker", "workflow", "approval", "app_server"],
@@ -577,11 +590,14 @@ and route-qualified command; unrelated commands remain closed.
       "worker:view.readiness",
       "worker:view.health",
       "worker:view.repairs",
+      "worker:view.obligations",
+      "worker:view.packet",
       "worker:lead.read",
       "worker:quote.prepare",
       "worker:run",
       "worker:hire.packet.prepare",
       "worker:payroll_input.prepare",
+      "worker:filing.prepare",
       "worker:continue",
       "worker:approval.decide",
       "worker:connector.health.scan",
@@ -591,7 +607,10 @@ and route-qualified command; unrelated commands remain closed.
       "worker:automation.plan",
       "app_server:worker.schema",
       "app_server:worker.view.snapshot",
+      "app_server:worker.view.obligations",
+      "app_server:worker.view.packet",
       "app_server:worker.command.lead.read",
+      "app_server:worker.command.filing.prepare",
       "workflow:view.overview",
       "workflow:steps.execute",
       "workflow:approval.decide",
@@ -847,4 +866,7 @@ strict readiness gate re-checks the report artifact and checksum on every run.
   auth session ids in `/etc/continuous/production-readiness.env`, and keep
   the revocation path tested before adding multiple real operators or customer
   data.
+- Provision Compliance live agency credentials, broaden rule-source coverage,
+  and capture receipt/rejection proof before enabling filing submission paths;
+  legal advice and agency submission stay blocked in the current runtime slice.
 - Keep root SSH only for break-glass host bootstrap and systemd timer setup.

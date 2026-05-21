@@ -1,4 +1,5 @@
 import type { JsonObject } from "../db/schema";
+import type { ComplianceFilingPrepareResult } from "./compliance";
 import type { OwnerBriefRunResult } from "./owner";
 import type { RevenueWorkerActionResult, RevenueWorkerRunResult } from "./revenue";
 
@@ -93,6 +94,30 @@ export type OwnerBriefEvalCase = {
   };
 };
 
+export type ComplianceWorkerEvalCase = {
+  id: string;
+  name: string;
+  idempotencyKey: string;
+  worker: {
+    role: "compliance_operations";
+    tenantSlug: string;
+  };
+  config: JsonObject;
+  expected: {
+    taskState: "approval_required" | "blocked";
+    runState: string;
+    runMode: string;
+    externalExecution: "blocked";
+    agencySubmission: "blocked";
+    legalAdvice: "blocked";
+    sensitiveData: "redacted";
+    minSourceRefs: number;
+    minWorkflowSteps: number;
+    minGeneratedViews: number;
+    minScore: number;
+  };
+};
+
 const requiredIds: Array<keyof RevenueWorkerRunResult> = [
   "workerRunId",
   "eventId",
@@ -120,6 +145,23 @@ const actionRequiredIds: Array<keyof RevenueWorkerActionResult> = [
   "evidenceId",
   "auditEventId",
 ];
+
+const complianceRequiredIds = [
+  "workerRunId",
+  "eventId",
+  "taskId",
+  "filingObjectId",
+  "filingDraftId",
+  "filingRequirementId",
+  "obligationId",
+  "rulePackId",
+  "approvalRequestId",
+  "evidenceId",
+  "packetId",
+  "documentId",
+  "workflowRunId",
+  "complianceViewId",
+] as const;
 
 export const revenueWorkerEvalCases: RevenueWorkerEvalCase[] = [
   {
@@ -467,6 +509,52 @@ export const ownerBriefEvalCases: OwnerBriefEvalCase[] = [
       requiredScopes: ["tasks", "approvals", "cash", "capacity", "obligations", "workers"],
       maxBudgetUnits: 4000,
       minDecisionCount: 1,
+      minScore: 0.9,
+    },
+  },
+];
+
+export const complianceWorkerEvalCases: ComplianceWorkerEvalCase[] = [
+  {
+    id: "compliance.filing_prepare.review_packet",
+    name: "Filing prepare records source-backed review packet and blocks agency submission",
+    idempotencyKey: "eval-compliance-filing-prepare-review-packet",
+    worker: {
+      role: "compliance_operations",
+      tenantSlug: "continuous-demo",
+    },
+    config: {
+      filingRequirementId: "filing_requirement_uuid",
+      obligationId: "obligation_uuid",
+      period: {
+        label: "April payroll tax filing",
+        from: "2026-04-01T00:00:00.000Z",
+        to: "2026-05-01T00:00:00.000Z",
+      },
+      sourceRefs: {
+        ruleCitation: "Demo Revenue Code 12-34",
+        payrollRunId: "payroll_run_uuid",
+        ownerNote: "Do not let the spreadsheet wear a little crown.",
+      },
+      validation: {
+        blockers: [],
+      },
+      policy: {
+        legalAdvice: "blocked",
+        sensitiveData: "redacted",
+      },
+    },
+    expected: {
+      taskState: "approval_required",
+      runState: "done",
+      runMode: "simulation",
+      externalExecution: "blocked",
+      agencySubmission: "blocked",
+      legalAdvice: "blocked",
+      sensitiveData: "redacted",
+      minSourceRefs: 2,
+      minWorkflowSteps: 2,
+      minGeneratedViews: 1,
       minScore: 0.9,
     },
   },
@@ -835,6 +923,152 @@ export function scoreOwnerBriefRun(
     result.viewIds.length >= 3 && result.snapshot.controls.generatedViews >= 3,
     1,
     `${result.viewIds.length} owner views published`,
+  );
+
+  const totalWeight = dimensions.reduce((sum, dimension) => sum + dimension.weight, 0);
+  const passedWeight = dimensions.reduce(
+    (sum, dimension) => sum + (dimension.passed ? dimension.weight : 0),
+    0,
+  );
+  const score = totalWeight > 0 ? Number((passedWeight / totalWeight).toFixed(3)) : 0;
+
+  return {
+    caseId: evalCase.id,
+    score,
+    passed: score >= evalCase.expected.minScore && dimensions.every((dimension) => dimension.passed),
+    dimensions,
+  };
+}
+
+export function scoreComplianceWorkerRun(
+  result: ComplianceFilingPrepareResult,
+  evalCase: ComplianceWorkerEvalCase,
+): RevenueWorkerEvalResult {
+  const dimensions: RevenueWorkerEvalDimension[] = [];
+  const output = objectValue(result.output);
+  const sourceRefs = objectValue(output.sourceRefs);
+  const validation = objectValue(output.validation);
+  const checks = objectValue(validation.checks);
+  const policy = objectValue(output.policy);
+  const redaction = objectValue(output.redaction);
+  const handoff = objectValue(output.handoff);
+  const sourceRefCount = Object.keys(sourceRefs).length;
+  const outputStepIds = Array.isArray(output.workflowStepIds)
+    ? output.workflowStepIds.filter((step): step is string => typeof step === "string")
+    : [];
+  const missingIds = complianceRequiredIds.filter((key) => !result[key]);
+  const outputMismatches = complianceRequiredIds.filter((key) => stringValue(output[key]) !== result[key]);
+  const approval = result.snapshot.approvals.find((item) => item.id === result.approvalRequestId);
+  const filingDraft = result.snapshot.filingDrafts.find((draft) => draft.id === result.filingDraftId);
+  const taskState =
+    stringValue(output.taskState) ||
+    (approval?.state === "pending" && filingDraft?.state === "review_ready" ? "approval_required" : "");
+  const latestRun = result.snapshot.latestRun;
+  const latestRunMatches =
+    latestRun?.workerRunId === result.workerRunId &&
+    latestRun.state === evalCase.expected.runState &&
+    latestRun.mode === evalCase.expected.runMode;
+  const ruleEvidence =
+    Boolean(result.evidenceId && result.rulePackId) &&
+    stringValue(output.rulePackId) === result.rulePackId &&
+    sourceRefCount >= evalCase.expected.minSourceRefs &&
+    checks.sourceRefs === true &&
+    checks.rulePackActive === true;
+  const legalAdvice = stringValue(output.legalAdvice) || stringValue(policy.legalAdvice);
+  const guardrails =
+    result.externalExecution === evalCase.expected.externalExecution &&
+    output.externalExecution === evalCase.expected.externalExecution &&
+    output.agencySubmission === evalCase.expected.agencySubmission &&
+    result.snapshot.controls.externalExecution === evalCase.expected.externalExecution &&
+    result.snapshot.controls.agencySubmission === evalCase.expected.agencySubmission &&
+    legalAdvice === evalCase.expected.legalAdvice;
+  const redactionProof =
+    policy.sensitiveData === evalCase.expected.sensitiveData ||
+    redaction.sensitiveData === evalCase.expected.sensitiveData ||
+    (redaction.taxIdentifiers === "redacted" &&
+      redaction.bankFields === "redacted" &&
+      (redaction.rawAgencyCredentials === "never" ||
+        redaction.rawAgencyCredentials === "blocked" ||
+        redaction.rawAgencyCredentials === "redacted"));
+  const handoffMatches =
+    stringValue(handoff.name) === "compliance.obligation_to_owner_review" &&
+    stringValue(handoff.filingDraftId) === result.filingDraftId &&
+    stringValue(handoff.approvalRequestId) === result.approvalRequestId &&
+    stringValue(handoff.packetId) === result.packetId &&
+    stringValue(handoff.documentId) === result.documentId &&
+    stringValue(handoff.workflowRunId) === result.workflowRunId &&
+    handoff.externalExecution === evalCase.expected.externalExecution &&
+    handoff.agencySubmission === evalCase.expected.agencySubmission;
+  const workflowMatches =
+    Boolean(result.workflowRunId) &&
+    stringValue(output.workflowRunId) === result.workflowRunId &&
+    result.workflowStepIds.length >= evalCase.expected.minWorkflowSteps &&
+    result.workflowStepIds.every((stepId) => outputStepIds.includes(stepId));
+  const viewMatches =
+    Boolean(result.complianceViewId) &&
+    stringValue(output.complianceViewId) === result.complianceViewId &&
+    result.snapshot.controls.generatedViews >= evalCase.expected.minGeneratedViews;
+
+  addDimension(
+    dimensions,
+    "primitive_ids",
+    missingIds.length === 0 && outputMismatches.length === 0,
+    2,
+    missingIds.length === 0 && outputMismatches.length === 0
+      ? "all compliance primitive ids are linked in output"
+      : `missing ${missingIds.join(", ") || "none"} mismatched ${outputMismatches.join(", ") || "none"}`,
+  );
+
+  addDimension(
+    dimensions,
+    "source_rule_evidence",
+    ruleEvidence,
+    2,
+    `source refs ${sourceRefCount}, rule pack ${result.rulePackId ?? "missing"}`,
+  );
+
+  addDimension(
+    dimensions,
+    "submission_guardrails",
+    guardrails,
+    2,
+    `external=${stringValue(output.externalExecution)} agency=${stringValue(output.agencySubmission)} legal=${legalAdvice || "missing"}`,
+  );
+
+  addDimension(
+    dimensions,
+    "redaction",
+    result.snapshot.controls.sensitiveData === evalCase.expected.sensitiveData && redactionProof,
+    2,
+    redactionProof ? "sensitive compliance fields have redaction proof" : "redaction proof is missing",
+  );
+
+  addDimension(
+    dimensions,
+    "compliance_handoff",
+    handoffMatches,
+    2,
+    handoffMatches ? "handoff links approval, packet, document, and workflow" : "handoff ids are missing",
+  );
+
+  addDimension(
+    dimensions,
+    "review_surface",
+    taskState === evalCase.expected.taskState &&
+      approval?.state === "pending" &&
+      filingDraft?.state === "review_ready" &&
+      workflowMatches &&
+      viewMatches,
+    2,
+    `task=${taskState || "missing"} approval=${approval?.state ?? "missing"} draft=${filingDraft?.state ?? "missing"} steps=${result.workflowStepIds.length}`,
+  );
+
+  addDimension(
+    dimensions,
+    "latest_run",
+    latestRunMatches,
+    1,
+    latestRun ? `latest run is ${latestRun.state}/${latestRun.mode}` : "latest run is missing",
   );
 
   const totalWeight = dimensions.reduce((sum, dimension) => sum + dimension.weight, 0);

@@ -398,7 +398,6 @@ export async function executeAppServerWorkerTool(
       target,
       operatorEmail,
       config,
-      state: stringValue(config.state),
     });
 
     return {

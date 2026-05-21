@@ -67,7 +67,6 @@ describe("worker tool envelope forwarding", () => {
       config: {
         state: "pending",
       },
-      state: "pending",
     });
     expect(result).toMatchObject({
       view: "approvals",
@@ -130,7 +129,6 @@ describe("worker tool envelope forwarding", () => {
       config: {
         state: "pending",
       },
-      state: "pending",
     });
     expect(result).toMatchObject({
       view: "approvals",

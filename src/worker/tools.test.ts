@@ -643,6 +643,20 @@ describe("worker tool contract", () => {
           requiresTenant: true,
           externalExecution: "dry_run",
         }),
+        expect.objectContaining({
+          role: "compliance_operations",
+          name: "filing.prepare",
+          idempotency: "required",
+          requiresTenant: true,
+          externalExecution: "blocked",
+        }),
+        expect.objectContaining({
+          role: "compliance_operations",
+          name: "approval.decide",
+          idempotency: "none",
+          requiresTenant: true,
+          externalExecution: "blocked",
+        }),
       ]),
     );
     expect(workerToolSchema.registry.commands).toEqual(
@@ -790,6 +804,24 @@ describe("worker tool contract", () => {
             }),
           }),
         }),
+        expect.objectContaining({
+          role: "compliance_operations",
+          name: "filing.prepare",
+          configSchema: expect.objectContaining({
+            required: ["filingRequirementId", "period"],
+            properties: expect.objectContaining({
+              filingRequirementId: expect.objectContaining({ type: "string" }),
+              period: expect.objectContaining({
+                type: "object",
+                required: ["from", "to"],
+                properties: expect.objectContaining({
+                  from: expect.objectContaining({ type: "string" }),
+                  to: expect.objectContaining({ type: "string" }),
+                }),
+              }),
+            }),
+          }),
+        }),
       ]),
     );
     expect(workerToolSchema.registry.views).toEqual(
@@ -806,6 +838,9 @@ describe("worker tool contract", () => {
         expect.objectContaining({ role: "finance_operations", name: "approvals" }),
         expect.objectContaining({ role: "workforce_operations", name: "snapshot" }),
         expect.objectContaining({ role: "workforce_operations", name: "readiness" }),
+        expect.objectContaining({ role: "compliance_operations", name: "snapshot" }),
+        expect.objectContaining({ role: "compliance_operations", name: "obligations" }),
+        expect.objectContaining({ role: "compliance_operations", name: "packet" }),
       ]),
     );
     expect(workerToolSchema.$defs.workerTarget.properties.tenantSlug.type).toBe("string");
@@ -869,9 +904,7 @@ describe("worker tool contract", () => {
             (view) => view.role === "systems_operations",
           );
 
-    expect(workerToolSchema.registry.plannedContracts.map((contract) => contract.role)).toEqual([
-      "compliance_operations",
-    ]);
+    expect(workerToolSchema.registry.plannedContracts.map((contract) => contract.role)).toEqual([]);
     expect(workerToolSchema.registry.contracts.map((contract) => contract.role)).toEqual([
       "revenue_operations",
       "owner_chief_of_staff",
@@ -887,8 +920,11 @@ describe("worker tool contract", () => {
       "dispatch_operations",
       "finance_operations",
       "workforce_operations",
+      "compliance_operations",
       "systems_operations",
     ]);
+    expect(workerToolSchema.registry.plannedFutureWorkerCommands).toEqual([]);
+    expect(workerToolSchema.registry.plannedFutureWorkerViews).toEqual([]);
     expect(
       workerToolSchema.registry.plannedFutureWorkerCommands.some(
         (command) => command.role === "systems_operations",
@@ -973,6 +1009,42 @@ describe("worker tool contract", () => {
         (command) => command.role === "systems_operations" && command.name === "automation.plan",
       )?.configSchema?.properties?.trigger?.type,
     ).toBe("object");
+    expect(
+      workerToolSchema.registry.commands.find(
+        (command) => command.role === "compliance_operations" && command.name === "filing.prepare",
+      )?.configSchema,
+    ).toEqual(
+      expect.objectContaining({
+        required: ["filingRequirementId", "period"],
+        properties: expect.objectContaining({
+          filingRequirementId: expect.objectContaining({ type: "string" }),
+          period: expect.objectContaining({
+            type: "object",
+            required: ["from", "to"],
+          }),
+        }),
+      }),
+    );
+    expect(
+      workerToolSchema.registry.commands
+        .filter((command) => command.role === "compliance_operations")
+        .map((command) => command.name),
+    ).toEqual(["filing.prepare", "approval.decide"]);
+    expect(
+      workerToolSchema.registry.views
+        .filter((view) => view.role === "compliance_operations")
+        .map((view) => view.name),
+    ).toEqual(["snapshot", "obligations", "packet"]);
+    expect(
+      workerToolSchema.registry.followUpCommands
+        .filter((command) => command.role === "compliance_operations")
+        .map((command) => command.name),
+    ).toEqual([
+      "obligation.scan",
+      "notice.response.prepare",
+      "license.renewal.prepare",
+      "evidence_binder.export",
+    ]);
     expect(workerToolSchema.registry.plannedCommands).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -1000,12 +1072,13 @@ describe("worker tool contract", () => {
           name: "quote_review",
           evidencePacket: "quote_approval_packet",
         }),
-        expect.objectContaining({
-          role: "compliance_operations",
-          name: "snapshot",
-          requiresTenant: true,
-          evidencePacket: null,
-        }),
+      ]),
+    );
+    expect(workerToolSchema.registry.views).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: "compliance_operations", name: "snapshot", apiRoute: "/worker" }),
+        expect.objectContaining({ role: "compliance_operations", name: "obligations", apiRoute: "/worker" }),
+        expect.objectContaining({ role: "compliance_operations", name: "packet", apiRoute: "/worker" }),
       ]),
     );
     expect(systemsViewMetadata).toEqual(
@@ -1065,6 +1138,15 @@ describe("worker tool contract", () => {
         apiRoute: "/worker",
         workerRole: "revenue_operations",
         firstCommand: "lead.read",
+        firstView: "snapshot",
+        status: "runtime",
+      }),
+    );
+    expect(byKey.get("compliance_operations")).toEqual(
+      expect.objectContaining({
+        apiRoute: "/worker",
+        workerRole: "compliance_operations",
+        firstCommand: "filing.prepare",
         firstView: "snapshot",
         status: "runtime",
       }),
@@ -1562,6 +1644,22 @@ describe("worker tool contract", () => {
         },
       }),
     ).rejects.toThrow("config.amountCents must be greater than or equal to 0.");
+  });
+
+  it("validates compliance filing prepare envelopes before invoking the worker", async () => {
+    await expect(
+      executeWorkerTool("worker.command", {
+        command: "filing.prepare",
+        worker: {
+          role: "compliance_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "compliance-filing-schema-001",
+        config: {
+          filingRequirementId: "filing_requirement_object_uuid",
+        },
+      }),
+    ).rejects.toThrow("config.period is required for filing.prepare.");
   });
 
   it("requires tenant scope for adapter reconciliation", async () => {

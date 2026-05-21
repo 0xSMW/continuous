@@ -65,6 +65,8 @@
 | Added Finance payment draft runtime | `finance_operations` now registers `command=payment_draft.prepare`; it consumes bill or payment selectors from `config`/`config.sourceRefs`, writes a blocked payment object and payment instruction draft, cash packet, dual-control approval request, generated review view, workflow/budget/audit proof, and keeps ACH, payment links, bank writes, and money movement blocked |
 | Added Workforce packet runtime | `workforce_operations` now registers `command=hire.packet.prepare`, `command=payroll_input.prepare`, `view: "snapshot"`, and `view: "readiness"` on `/worker`; config stays in the generic worker envelope while the handlers write workforce packets, document/checklist proof, restricted-document redaction proof, payroll blockers, approvals, generated views, workflow/budget/audit records, and blocked/dry-run execution posture |
 | Split Workforce executable and planned contract entries | The Workforce V1 contract now separates currently executable registry entries from follow-up metadata entries, keeping `contractor.packet.prepare`, `credential.review`, and `schedule_readiness.prepare` planned until runtime handlers exist |
+| Added Compliance runtime slice | `compliance_operations` now runs `filing.prepare` plus compliance views through the generic `/worker` envelope; filing inputs live under `config`, while agency submission and legal advice stay blocked |
+| Added Compliance deploy smoke | Production deploy now exercises `/worker` `command=filing.prepare` for `compliance_operations`, proving filing packet, document, approval, generated view, workflow steps, handoff, and blocked agency/legal posture without adding compliance-specific routes |
 | Documented Systems Operations runtime promotion | Systems Operations is now treated in docs as a first runtime slice on the generic `/worker` envelope; repair planning stays dry-run, permission and automation execution stay blocked, and no systems-specific routes should be introduced |
 | Added authenticated app-server transport context | `continuous.worker.command` and `continuous.worker.view` can now receive operator identity, access, route-qualified command/view, tenant, and worker-role scope from an authenticated control-plane transport context instead of only `WORKER_OPERATOR_EMAIL`, while keeping `operatorEmail` out of tool payloads and preserving trusted-local guards for CLI use |
 | Added authenticated app-server bridge | `POST /app-server` now accepts only dynamic tool-call fields at the top level, authenticates through the `app_server` control-plane route with exact bridge command scope, builds worker-registry transport context server-side, and keeps worker operation inputs under `arguments.config` |
@@ -203,9 +205,11 @@
 | Alerting boundary | Deploy smoke now proves the host observability check, but recurring alerts are not complete until `scripts/install-observability-timer.sh` is run with a real `ALERT_WEBHOOK_URL` |
 | Readiness boundary | The production readiness gate is strict and opt-in; it is expected to fail until observability timer/webhook, a verified recovery drill report, production connector credentials, and non-root deploy use are all actually provisioned and attested |
 | Worker selector boundary | `/worker`, `worker.command`, and `continuous.worker.command` now treat `worker` as a strict selector object with only `role`, `id`, and `tenantSlug`; every operation-specific field must live under `config` |
+| App-server worker argument boundary | `/app-server` now rejects worker command/view arguments that put operation fields beside `arguments.config` before dynamic dispatch, keeping remote tool calls aligned with `/worker` and `worker:tool` |
 | Command body boundary | `/core`, `/worker`, `/workflow`, and `/approval` reject invalid credentials before body reads, cap command bodies at 1 MiB, and reject non-JSON, malformed JSON, and non-object command bodies after authentication instead of collapsing them into empty envelopes |
 | Local mutation trust boundary | `worker.command` and `continuous.worker.command` require transport-provided `WORKER_OPERATOR_EMAIL` and are disabled under `APP_ENV=production` unless `CONTINUOUS_TRUSTED_LOCAL_WORKER_TOOLS=true`; their payloads mirror `/worker`, and production automation should prefer the authenticated `/worker` route |
 | Worker ledger namespace boundary | Role-specific worker behavior is carried by `worker.role`, event type suffixes, command names, and persisted payloads; sources stay generic as `continuous.worker` so new worker families do not require new source namespaces |
+| Compliance launch boundary | The first Compliance slice can prepare filing packets and approval views, but live agency credentials, broader rule-source coverage, and receipt/rejection capture remain follow-ups before any submission path; legal advice remains blocked |
 | Hardened command-scoped control-plane auth | Catalog-backed control-plane credentials now reject explicit blank commands when command scopes exist, managed credential command lists fail closed on missing command names, malformed catalog payloads have regression coverage, and `/worker` read payloads reject worker-family-specific selector drift |
 | Unified worker HTTP envelopes | `/worker` now uses `POST` for both command and read controls: commands carry `command`, `worker`, `idempotencyKey`, and `config`, while reads carry `view`, `worker`, and `config`, with query-shaped worker reads rejected |
 | Removed local worker operator fallback | `worker.command`, `worker.view`, `continuous.worker.command`, and `continuous.worker.view` never default or accept operator identity from payloads; local CLI calls require `WORKER_OPERATOR_EMAIL`, while authenticated app-server bridges pass operator identity through transport context |
@@ -310,6 +314,12 @@ Workforce readiness now includes existing employment objects updated by
 `hire.packet.prepare`, so production deploy smoke can keep proving both hire
 packet visibility and payroll readiness rows through the generic `/worker`
 readiness view.
+
+Compliance Operations is now documented as a first runtime slice on the generic
+`/worker` envelope. The slice prepares filing draft packets and compliance
+views from worker-payload `config`, keeps agency submission and legal advice
+blocked, and leaves live credentials, rule-source breadth, and receipt capture
+as the next launch gates.
 
 Systems Operations is now documented as a first runtime slice on the generic
 `/worker` envelope. The slice is limited to dry-run repair planning, permission

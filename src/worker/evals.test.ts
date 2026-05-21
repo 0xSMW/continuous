@@ -1,14 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  complianceWorkerEvalCases,
   ownerBriefEvalCases,
   revenueWorkerActionEvalCases,
   revenueWorkerBlockedEvalCases,
   revenueWorkerEvalCases,
+  scoreComplianceWorkerRun,
   scoreOwnerBriefRun,
   scoreRevenueWorkerAction,
   scoreRevenueWorkerRun,
 } from "./evals";
+import type { ComplianceFilingPrepareResult, ComplianceWorkerSnapshot } from "./compliance";
 import type { OwnerBriefRunResult, OwnerWorkerSnapshot } from "./owner";
 import type {
   RevenueWorkerActionResult,
@@ -292,6 +295,161 @@ const completeOwnerResult: OwnerBriefRunResult = {
   snapshot: ownerSnapshot,
 };
 
+const completeComplianceOutput = {
+  command: "filing.prepare",
+  workerRunId: "compliance_run_1",
+  taskId: "compliance_task_1",
+  eventId: "compliance_event_1",
+  filingObjectId: "compliance_object_1",
+  filingDraftId: "compliance_draft_1",
+  filingRequirementId: "compliance_requirement_1",
+  obligationId: "compliance_obligation_1",
+  rulePackId: "compliance_rule_pack_1",
+  approvalRequestId: "compliance_approval_1",
+  evidenceId: "compliance_evidence_1",
+  packetId: "compliance_packet_1",
+  documentId: "compliance_document_1",
+  workflowRunId: "compliance_workflow_1",
+  workflowStepIds: ["compliance_step_1", "compliance_step_2"],
+  complianceViewId: "compliance_view_1",
+  period: {
+    label: "April payroll tax filing",
+    from: "2026-04-01T00:00:00.000Z",
+    to: "2026-05-01T00:00:00.000Z",
+  },
+  sourceRefs: {
+    ruleCitation: "Demo Revenue Code 12-34",
+    payrollRunId: "payroll_run_1",
+    ownerNote: "The spreadsheet is legally forbidden from wearing a little crown.",
+  },
+  validation: {
+    state: "review_required",
+    submission: "blocked",
+    checks: {
+      sourceRefs: true,
+      requirementActive: true,
+      rulePackActive: true,
+      obligationOpen: true,
+    },
+  },
+  policy: {
+    externalExecution: "blocked",
+    agencySubmission: "blocked",
+    legalAdvice: "blocked",
+    sensitiveData: "redacted",
+  },
+  redaction: {
+    taxIdentifiers: "redacted",
+    bankFields: "redacted",
+    rawAgencyCredentials: "never",
+  },
+  handoff: {
+    name: "compliance.obligation_to_owner_review",
+    filingDraftId: "compliance_draft_1",
+    approvalRequestId: "compliance_approval_1",
+    packetId: "compliance_packet_1",
+    documentId: "compliance_document_1",
+    workflowRunId: "compliance_workflow_1",
+    externalExecution: "blocked",
+    agencySubmission: "blocked",
+  },
+  blockers: [],
+  externalExecution: "blocked",
+  agencySubmission: "blocked",
+};
+
+const complianceSnapshot: ComplianceWorkerSnapshot = {
+  worker: {
+    id: "compliance_worker_1",
+    name: "Compliance Operations Worker",
+    role: "compliance_operations",
+    state: "active",
+    mission: "Prepare compliance filings",
+    autonomyLevel: 2,
+    scope: {},
+    policy: {},
+    kpis: {},
+    managerName: "Owner",
+    tenantName: "Continuous Demo",
+  },
+  budget: {
+    accountId: "compliance_budget_1",
+    name: "Compliance Worker monthly intelligence budget",
+    usedUnits: 3000,
+    heldUnits: 0,
+    events: 1,
+  },
+  controls: {
+    pendingApprovals: 1,
+    generatedViews: 1,
+    externalExecution: "blocked",
+    agencySubmission: "blocked",
+    sensitiveData: "redacted",
+  },
+  obligations: [
+    {
+      id: "compliance_obligation_1",
+      name: "April payroll tax filing",
+      kind: "payroll_tax",
+      state: "open",
+      dueAt: "2026-05-15T00:00:00.000Z",
+      data: {},
+    },
+  ],
+  filingDrafts: [
+    {
+      id: "compliance_draft_1",
+      requirementId: "compliance_requirement_1",
+      obligationId: "compliance_obligation_1",
+      state: "review_ready",
+      periodStart: "2026-04-01T00:00:00.000Z",
+      periodEnd: "2026-05-01T00:00:00.000Z",
+      data: completeComplianceOutput,
+    },
+  ],
+  approvals: [
+    {
+      id: "compliance_approval_1",
+      state: "pending",
+      kind: "compliance_filing_approval",
+      title: "Review Demo Agency Form 941 filing draft",
+      priority: "normal",
+    },
+  ],
+  latestRun: {
+    id: "compliance_run_1",
+    workerRunId: "compliance_run_1",
+    eventId: "compliance_event_1",
+    idempotencyKey: "eval-compliance-filing-prepare-review-packet",
+    state: "done",
+    mode: "simulation",
+    output: completeComplianceOutput,
+  },
+};
+
+const completeComplianceResult: ComplianceFilingPrepareResult = {
+  created: true,
+  idempotencyKey: "eval-compliance-filing-prepare-review-packet",
+  workerRunId: "compliance_run_1",
+  taskId: "compliance_task_1",
+  eventId: "compliance_event_1",
+  filingObjectId: "compliance_object_1",
+  filingDraftId: "compliance_draft_1",
+  filingRequirementId: "compliance_requirement_1",
+  obligationId: "compliance_obligation_1",
+  rulePackId: "compliance_rule_pack_1",
+  approvalRequestId: "compliance_approval_1",
+  evidenceId: "compliance_evidence_1",
+  packetId: "compliance_packet_1",
+  documentId: "compliance_document_1",
+  workflowRunId: "compliance_workflow_1",
+  workflowStepIds: ["compliance_step_1", "compliance_step_2"],
+  complianceViewId: "compliance_view_1",
+  externalExecution: "blocked",
+  output: completeComplianceOutput,
+  snapshot: complianceSnapshot,
+};
+
 describe("Revenue Worker evals", () => {
   it("covers direct lead packets and both canonical persisted-intake shapes", () => {
     const configs = revenueWorkerEvalCases.map((evalCase) => objectValue(evalCase.config));
@@ -467,6 +625,70 @@ describe("Owner Chief-of-Staff Worker evals", () => {
     );
 
     expect(result.passed).toBe(false);
+    expect(result.dimensions.find((dimension) => dimension.id === "redaction")?.passed).toBe(false);
+  });
+});
+
+describe("Compliance Worker evals", () => {
+  it("covers filing prepare as a source-backed compliance packet fixture", () => {
+    expect(complianceWorkerEvalCases).toEqual([
+      expect.objectContaining({
+        id: "compliance.filing_prepare.review_packet",
+        worker: expect.objectContaining({
+          role: "compliance_operations",
+        }),
+        expected: expect.objectContaining({
+          taskState: "approval_required",
+          externalExecution: "blocked",
+          agencySubmission: "blocked",
+          legalAdvice: "blocked",
+          sensitiveData: "redacted",
+        }),
+      }),
+    ]);
+  });
+
+  it("passes a run that links primitives, proves sources, redacts data, and blocks submission", () => {
+    const result = scoreComplianceWorkerRun(completeComplianceResult, complianceWorkerEvalCases[0]);
+
+    expect(result.passed).toBe(true);
+    expect(result.score).toBe(1);
+    expect(result.dimensions.every((dimension) => dimension.passed)).toBe(true);
+    expect(result.dimensions.find((dimension) => dimension.id === "compliance_handoff")?.passed).toBe(
+      true,
+    );
+  });
+
+  it("fails when source evidence and redaction proof are missing", () => {
+    const result = scoreComplianceWorkerRun(
+      {
+        ...completeComplianceResult,
+        output: {
+          ...completeComplianceOutput,
+          sourceRefs: {},
+          validation: {
+            ...objectValue(completeComplianceOutput.validation),
+            checks: {
+              ...objectValue(objectValue(completeComplianceOutput.validation).checks),
+              sourceRefs: false,
+              rulePackActive: false,
+            },
+          },
+          policy: {
+            externalExecution: "blocked",
+            agencySubmission: "blocked",
+            legalAdvice: "blocked",
+          },
+          redaction: {},
+        },
+      },
+      complianceWorkerEvalCases[0],
+    );
+
+    expect(result.passed).toBe(false);
+    expect(result.dimensions.find((dimension) => dimension.id === "source_rule_evidence")?.passed).toBe(
+      false,
+    );
     expect(result.dimensions.find((dimension) => dimension.id === "redaction")?.passed).toBe(false);
   });
 });

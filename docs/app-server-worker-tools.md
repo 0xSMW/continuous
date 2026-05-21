@@ -60,6 +60,13 @@ employment, period, payroll-run, earnings, deductions, and blockers under
 approvals, generated review views, workflow/budget/audit proof, and a
 `readiness` view while external execution, payroll submission, tax filing, and
 money movement remain blocked or dry-run.
+Compliance uses that same envelope for `filing.prepare` plus the `snapshot`,
+`obligations`, and `packet` views. Filing requirement, period, source refs,
+validation, and policy live under `config`. The runtime writes filing draft
+packets, approval requests, workflow/budget/audit proof, and keeps agency
+submission and legal advice blocked. Obligation scan, notice response, license
+renewal, evidence binder export, live credentials, broader rule sources, and
+receipt capture remain follow-ups.
 
 ```sh
 export WORKER_OPERATOR_EMAIL=owner@continuoushq.com
@@ -102,8 +109,9 @@ The app-server worker tools are intentionally narrow:
   under `config`.
 - Worker-specific options stay inside `config` and are validated by the
   command registry's `configSchema`.
-- Planned worker roles expose config schemas but remain non-executable until
-  handlers are registered; promoted roles move into the registered command list.
+- Follow-up commands expose config schemas but remain non-executable until
+  handlers are registered; promoted commands move into the registered command
+  list without changing the `/worker` route shape.
 - Caller supplies either `view`, `worker`, and `config` for reads, or
   `command`, `worker`, `idempotencyKey`, and `config` for commands.
 - Operator identity and scope must be supplied by authenticated transport

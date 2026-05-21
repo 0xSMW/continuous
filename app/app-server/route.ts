@@ -14,6 +14,16 @@ import {
   authorizeControlPlaneScope,
   type ControlPlaneAccess,
 } from "../../src/worker/security";
+import {
+  unexpectedEnvelopeFields,
+  validateWorkerConfigEnvelope,
+  validateWorkerTargetEnvelope,
+  workerCommandEnvelopeDescription,
+  workerCommandEnvelopeFieldSet,
+  workerEnvelopeFieldError,
+  workerViewEnvelopeDescription,
+  workerViewEnvelopeFieldSet,
+} from "../../src/worker/envelope";
 
 export const dynamic = "force-dynamic";
 
@@ -44,6 +54,67 @@ function bodyObject(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
+}
+
+function appServerWorkerArgumentsEnvelopeError(
+  subject: string,
+  allowedDescription: string,
+  unexpectedFields: string[],
+) {
+  return workerEnvelopeFieldError(subject, allowedDescription, unexpectedFields).replace(
+    "Move operation inputs into config.",
+    "Put worker operation inputs under arguments.config.",
+  );
+}
+
+function validateAppServerWorkerArguments(
+  args: Record<string, unknown>,
+  kind: "command" | "view",
+): { ok: true } | { ok: false; error: { code: string; message: string } } {
+  const fields = kind === "command" ? workerCommandEnvelopeFieldSet : workerViewEnvelopeFieldSet;
+  const description =
+    kind === "command" ? workerCommandEnvelopeDescription : workerViewEnvelopeDescription;
+  const subject =
+    kind === "command"
+      ? "continuous.worker.command arguments"
+      : "continuous.worker.view arguments";
+  const unexpectedFields = unexpectedEnvelopeFields(args, fields);
+
+  if (unexpectedFields.length > 0) {
+    return {
+      ok: false,
+      error: {
+        code: "invalid_app_server_tool_call",
+        message: appServerWorkerArgumentsEnvelopeError(subject, description, unexpectedFields),
+      },
+    };
+  }
+
+  const targetResult = validateWorkerTargetEnvelope(args.worker);
+
+  if (!targetResult.ok) {
+    return {
+      ok: false,
+      error: {
+        code: "invalid_app_server_tool_call",
+        message: targetResult.message,
+      },
+    };
+  }
+
+  const configResult = validateWorkerConfigEnvelope(args.config);
+
+  if (!configResult.ok) {
+    return {
+      ok: false,
+      error: {
+        code: "invalid_app_server_tool_call",
+        message: configResult.message,
+      },
+    };
+  }
+
+  return { ok: true };
 }
 
 async function readBody(
@@ -147,6 +218,15 @@ function appServerBridgeTarget(body: Record<string, unknown>):
   const workerRole = optionalString(worker.role);
 
   if (tool === "continuous.worker.command") {
+    const envelope = validateAppServerWorkerArguments(args, "command");
+
+    if (!envelope.ok) {
+      return {
+        ok: false,
+        error: envelope.error,
+      };
+    }
+
     const command = optionalString(args.command);
 
     if (!command) {
@@ -175,6 +255,15 @@ function appServerBridgeTarget(body: Record<string, unknown>):
   }
 
   if (tool === "continuous.worker.view") {
+    const envelope = validateAppServerWorkerArguments(args, "view");
+
+    if (!envelope.ok) {
+      return {
+        ok: false,
+        error: envelope.error,
+      };
+    }
+
     const view = optionalString(args.view);
 
     if (!view) {

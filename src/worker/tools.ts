@@ -385,7 +385,6 @@ export async function executeWorkerTool(name: string, payload: JsonObject = {}) 
       target,
       operatorEmail,
       config: viewConfig,
-      state: stringValue(viewConfig.state),
     });
 
     return {
