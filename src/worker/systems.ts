@@ -1464,11 +1464,18 @@ async function prepareSystemsCommand(input: {
         },
         db,
       });
+      const settledReservationId =
+        optionalString(objectValue(completion.budget).reservationId) ??
+        optionalString(replayOutput.budgetReservationId) ??
+        null;
+      const settledUsageEventId =
+        optionalString(objectValue(completion.budget).usageEventId) ??
+        optionalString(replayOutput.usageEventId) ??
+        null;
       const settledOutput = {
         ...replayOutput,
-        budgetReservationId:
-          optionalString(objectValue(completion.budget).reservationId) ?? optionalString(replayOutput.budgetReservationId),
-        usageEventId: optionalString(objectValue(completion.budget).usageEventId) ?? optionalString(replayOutput.usageEventId),
+        budgetReservationId: settledReservationId,
+        usageEventId: settledUsageEventId,
       } satisfies JsonObject;
       const [completedReplay] = await db
         .select({ data: workerRuns.data })
@@ -1540,11 +1547,18 @@ async function prepareSystemsCommand(input: {
     },
     db,
   });
+  const settledReservationId =
+    optionalString(objectValue(completion.budget).reservationId) ??
+    optionalString(result.output.budgetReservationId) ??
+    null;
+  const settledUsageEventId =
+    optionalString(objectValue(completion.budget).usageEventId) ??
+    optionalString(result.output.usageEventId) ??
+    null;
   const settledOutput = {
     ...result.output,
-    budgetReservationId:
-      optionalString(objectValue(completion.budget).reservationId) ?? optionalString(result.output.budgetReservationId),
-    usageEventId: optionalString(objectValue(completion.budget).usageEventId) ?? optionalString(result.output.usageEventId),
+    budgetReservationId: settledReservationId,
+    usageEventId: settledUsageEventId,
   } satisfies JsonObject;
   const [completedRun] = await db
     .select({ data: workerRuns.data })
