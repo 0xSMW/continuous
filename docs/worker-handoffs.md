@@ -51,7 +51,7 @@ codes, and expected consumer output before a consuming worker writes records.
 | Handoff | Producer event / state | Consumer command | Reject when | Expected consumer output |
 |---|---|---|---|---|
 | `revenue.quote_to_pricing` | `revenue.quote.prepared`, quote line items and policy refs present, external send `blocked` | `worker.role=offer_pricing_operations`, `command=margin.review.prepare` | `handoff.quote_missing_lines`, `handoff.margin_policy_missing`, `handoff.discount_policy_missing`, `handoff.external_send_already_true`, `handoff.evidence_packet_missing` | Pricing review packet with margin verdict, discount approval request, quote-line policy refs, generated `price_policy` view, and Core worker-run budget settlement |
-| `revenue.quote_to_dispatch` | `revenue.quote.prepared`, approval `approved`, quote/job objects not externally sent | `worker.role=dispatch_operations`, `command=schedule.propose` | `handoff.approval_not_approved`, `handoff.quote_missing_policy`, `handoff.job_already_scheduled`, `handoff.external_send_already_true` | Appointment draft, conflict evidence, approval request, dry-run calendar receipt |
+| `revenue.quote_to_dispatch` | `revenue.quote.prepared`, approval `approved`, quote/job objects not externally sent | `worker.role=dispatch_operations`, `command=schedule.propose` | `handoff.approval_not_approved`, `handoff.quote_missing_policy`, `handoff.job_already_scheduled`, `handoff.external_send_already_true` | Appointment draft, conflict evidence, approval request, dry-run calendar receipt, and Core worker-run budget settlement |
 | `dispatch.closeout_to_finance` | `dispatch.closeout.prepared`, closeout `review_ready`, no unresolved critical exception task | `worker.role=finance_operations`, `command=invoice.prepare` | `handoff.closeout_missing_proof`, `handoff.billable_lines_missing`, `handoff.exception_open`, `handoff.customer_ref_missing` | Invoice draft, cash packet, accounting dry-run receipt, owner approval request |
 | `finance.invoice_to_owner_review` | `finance.invoice.prepared` or `finance.cash_forecast.generated`, money movement `blocked` | `worker.role=owner_chief_of_staff`, `command=decision_queue.prepare` | `handoff.money_movement_not_blocked`, `handoff.cash_packet_missing`, `handoff.source_evidence_missing` | Owner decision proposal with cash/evidence refs and no external execution |
 | `owner.staffing_need_to_workforce` | `owner.decision.proposed` or capacity review packet with staffing need and budget posture | `worker.role=workforce_operations`, `command=hire.packet.prepare` or `command=payroll_input.prepare` | `handoff.owner_decision_missing`, `handoff.position_missing`, `handoff.budget_posture_missing`, `handoff.restricted_docs_uncontrolled` | Workforce packet, restricted-document proof, approval request, and payroll blocker visibility |
@@ -67,7 +67,7 @@ codes, and expected consumer output before a consuming worker writes records.
 
 Before a planned worker becomes executable, add at least one fixture for its
 incoming handoff. Dispatch/Ops now has executable fixtures through `POST /worker`
-payloads with `command: "schedule.propose"`, blocked
+payloads with `command: "schedule.propose"` plus Core worker-run settlement, blocked
 `command: "customer_update.draft"`, blocked `command: "closeout.prepare"`, and
 blocked `command: "exception.route"`. Finance now consumes
 `dispatch.closeout_to_finance` through `command: "invoice.prepare"` with Core

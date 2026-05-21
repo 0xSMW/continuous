@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { and, count, desc, eq, inArray, sql } from "drizzle-orm";
 
 import { db as defaultDb } from "../db/client";
+import { completeCoreWorkerRun, startCoreWorkerRun } from "../core/worker-runs";
 import {
   adapterActions,
   adapterRuns,
@@ -43,6 +44,7 @@ type Database = typeof defaultDb;
 export const dispatchWorkerRole = "dispatch_operations";
 
 const dispatchSource = "continuous.worker";
+const coreWorkerRunSource = "continuous.core.worker_runs";
 const scheduleCapabilityKey = "schedule.propose";
 const customerUpdateCapabilityKey = "response.draft";
 const closeoutCapabilityKey = "document_packet.prepare";
@@ -265,11 +267,19 @@ function traceHash(...parts: string[]) {
 }
 
 function outputData(data: JsonObject) {
-  return objectValue(data.output);
+  const output = objectValue(data.output);
+
+  if (Object.keys(output).length > 0) {
+    return output;
+  }
+
+  return objectValue(objectValue(data.pendingCompletion).output);
 }
 
 function getWorkflowStepIds(data: JsonObject) {
-  return stringList(data.workflowStepIds);
+  const outputSteps = stringList(outputData(data).workflowStepIds);
+
+  return outputSteps.length > 0 ? outputSteps : stringList(data.workflowStepIds);
 }
 
 function emptySnapshot(): DispatchWorkerSnapshot {
@@ -697,7 +707,12 @@ async function replayedScheduleProposal(
     idempotencyKey: run.idempotencyKey,
     workerRunId: run.id,
     taskId: run.taskId,
-    eventId: run.eventId ?? optionalString(data.eventId) ?? null,
+    eventId:
+      optionalString(output.eventId) ??
+      optionalString(data.businessEventId) ??
+      run.eventId ??
+      optionalString(data.eventId) ??
+      null,
     appointmentObjectId: optionalString(output.appointmentObjectId) ?? null,
     approvalRequestId: optionalString(data.approvalRequestId) ?? optionalString(output.approvalRequestId) ?? null,
     adapterRunId: optionalString(data.adapterRunId) ?? optionalString(output.adapterRunId) ?? null,
@@ -1324,10 +1339,64 @@ export async function proposeDispatchSchedule(input: {
     adapterReceiptEvidenceId: handoff.adapterReceipt?.id ?? null,
   });
   const now = new Date();
+  const coreRun = await startCoreWorkerRun({
+    operatorEmail: input.operatorEmail,
+    tenantSlug: context.worker.tenantSlug,
+    idempotencyKey: input.idempotencyKey,
+    worker: {
+      id: context.worker.id,
+      role: dispatchWorkerRole,
+    },
+    command: "schedule.propose",
+    mode: "dry_run",
+    connectionId,
+    capabilityId: context.capabilityId,
+    budgetAccountId: context.budgetAccountId,
+    units: scheduleProposalUnits,
+    input: {
+      inputHash,
+      config,
+      constraints,
+      sourceRefs: handoff.sourceRefs,
+      jobObjectId: handoff.jobObject.id,
+      quoteObjectId: handoff.quoteObject?.id ?? null,
+      approvalRequestId: handoff.approval?.id ?? null,
+      adapterReceiptEvidenceId: handoff.adapterReceipt?.id ?? null,
+    },
+    policy: {
+      ...objectValue(config.policy),
+      externalExecution: "dry_run",
+      externalMutation: false,
+      externalSend: false,
+      customerSend: "blocked",
+      calendarWrite: "blocked",
+    },
+    evidence: {
+      command: "schedule.propose",
+      jobObjectId: handoff.jobObject.id,
+      quoteObjectId: handoff.quoteObject?.id ?? null,
+      approvalRequestId: handoff.approval?.id ?? null,
+      adapterReceiptEvidenceId: handoff.adapterReceipt?.id ?? null,
+      externalExecution: "dry_run",
+      externalMutation: false,
+      externalSend: false,
+    },
+    db,
+  });
+  const coreBudget = objectValue(coreRun.budget);
+  const coreReservationId = optionalString(coreBudget.reservationId);
+
+  if (!coreReservationId) {
+    throw new PlatformUnavailableError(
+      "worker_run_budget_reservation_missing",
+      "Core worker.run.start did not return a Dispatch schedule budget reservation.",
+      409,
+    );
+  }
 
   const result = await db.transaction(async (tx) => {
     await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${dispatchSource}:${input.idempotencyKey}`}))`,
+      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${coreWorkerRunSource}:dispatch:schedule:${input.idempotencyKey}`}))`,
     );
 
     const [existingRun] = await tx
@@ -1336,24 +1405,32 @@ export async function proposeDispatchSchedule(input: {
       .where(
         and(
           eq(workerRuns.tenantId, context.worker.tenantId),
-          eq(workerRuns.source, dispatchSource),
-          eq(workerRuns.idempotencyKey, input.idempotencyKey),
+          eq(workerRuns.id, coreRun.workerRunId),
         ),
       )
       .limit(1);
 
-    if (existingRun) {
-      const existingInput = objectValue(objectValue(existingRun.data).input);
-      const existingHash = optionalString(existingInput.inputHash);
+    if (!existingRun) {
+      throw new PlatformUnavailableError(
+        "worker_run_missing",
+        "Core worker.run.start did not return a persisted Dispatch schedule worker run.",
+        409,
+      );
+    }
 
-      if (existingHash && existingHash !== inputHash) {
-        throw new PlatformUnavailableError(
-          "worker_idempotency_conflict",
-          "A Dispatch schedule proposal already exists for this idempotency key with different input.",
-          409,
-        );
-      }
+    const existingInput = objectValue(objectValue(existingRun.data).input);
+    const existingRequest = objectValue(existingInput.request);
+    const existingHash = optionalString(existingRequest.inputHash) ?? optionalString(existingInput.inputHash);
 
+    if (existingHash && existingHash !== inputHash) {
+      throw new PlatformUnavailableError(
+        "worker_idempotency_conflict",
+        "A Dispatch schedule proposal already exists for this idempotency key with different input.",
+        409,
+      );
+    }
+
+    if (optionalString(outputData(existingRun.data).workerRunId)) {
       return { replay: existingRun };
     }
 
@@ -1408,27 +1485,7 @@ export async function proposeDispatchSchedule(input: {
       adapterReceiptEvidenceId: handoff.adapterReceipt?.id ?? null,
     } satisfies JsonObject;
 
-    const [workerRun] = await tx
-      .insert(workerRuns)
-      .values({
-        tenantId: context.worker.tenantId,
-        workerId: context.worker.id,
-        taskId: task.id,
-        capabilityId: context.capabilityId,
-        connectionId: connectionId,
-        budgetAccountId: context.budgetAccountId,
-        source: dispatchSource,
-        idempotencyKey: input.idempotencyKey,
-        state: "running",
-        mode: "dry_run",
-        data: {
-          input: runInput,
-          output: {},
-        },
-        startedAt: now,
-        updatedAt: now,
-      })
-      .returning({ id: workerRuns.id });
+    const workerRunId = coreRun.workerRunId;
 
     const appointmentData = {
       jobObjectId: handoff.jobObject.id,
@@ -1511,7 +1568,7 @@ export async function proposeDispatchSchedule(input: {
         state: "approval_pending",
         idempotencyKey: input.idempotencyKey,
         data: {
-          workerRunId: workerRun.id,
+          workerRunId: workerRunId,
           appointmentObjectId: appointment.id,
           quoteObjectId: handoff.quoteObject?.id ?? null,
           sourceRefs: handoff.sourceRefs,
@@ -1530,7 +1587,7 @@ export async function proposeDispatchSchedule(input: {
       .values({
         tenantId: context.worker.tenantId,
         connectionId: connectionId,
-        workerRunId: workerRun.id,
+        workerRunId: workerRunId,
         mode: "dry_run",
         operation: "calendar_schedule_proposal",
         idempotencyKey: `${input.idempotencyKey}:adapter_run`,
@@ -1548,7 +1605,7 @@ export async function proposeDispatchSchedule(input: {
           reconciliationState: "matched",
         },
         data: {
-          workerRunId: workerRun.id,
+          workerRunId: workerRunId,
           workflowRunId: workflowRun.id,
           appointmentObjectId: appointment.id,
           proposedWindow: scheduleWindow,
@@ -1589,7 +1646,7 @@ export async function proposeDispatchSchedule(input: {
         receipt: {
           mode: "dry_run",
           adapterRunId: adapterRun.id,
-          workerRunId: workerRun.id,
+          workerRunId: workerRunId,
           externalMutation: false,
           externalSend: false,
           rollbackRequired: false,
@@ -1599,20 +1656,6 @@ export async function proposeDispatchSchedule(input: {
         updatedAt: now,
       })
       .returning({ id: adapterActions.id });
-
-    const [reservation] = await tx
-      .insert(budgetReservations)
-      .values({
-        tenantId: context.worker.tenantId,
-        accountId: context.budgetAccountId,
-        taskId: task.id,
-        units: scheduleProposalUnits,
-        state: "used",
-        expiresAt: new Date(now.getTime() + 15 * 60 * 1000),
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning({ id: budgetReservations.id });
 
     const [inference] = await tx
       .insert(inferences)
@@ -1653,29 +1696,6 @@ export async function proposeDispatchSchedule(input: {
       })
       .returning({ id: inferences.id });
 
-    const [usage] = await tx
-      .insert(usageEvents)
-      .values({
-        tenantId: context.worker.tenantId,
-        accountId: context.budgetAccountId,
-        reservationId: reservation.id,
-        inferenceId: inference.id,
-        taskId: task.id,
-        capabilityId: context.capabilityId,
-        actorType: "worker",
-        actorId: context.worker.id,
-        units: scheduleProposalUnits,
-        costUsd: "0.000000",
-        data: {
-          mode: "deterministic",
-          workerRunId: workerRun.id,
-          workflowRunId: workflowRun.id,
-          appointmentObjectId: appointment.id,
-        },
-        createdAt: now,
-      })
-      .returning({ id: usageEvents.id });
-
     const [event] = await tx
       .insert(events)
       .values({
@@ -1691,7 +1711,7 @@ export async function proposeDispatchSchedule(input: {
         connectionId: connectionId,
         idempotencyKey: input.idempotencyKey,
         data: {
-          workerRunId: workerRun.id,
+          workerRunId: workerRunId,
           workflowRunId: workflowRun.id,
           jobObjectId: handoff.jobObject.id,
           quoteObjectId: handoff.quoteObject?.id ?? null,
@@ -1712,7 +1732,7 @@ export async function proposeDispatchSchedule(input: {
     await tx
       .update(workerRuns)
       .set({ eventId: event.id, updatedAt: now })
-      .where(eq(workerRuns.id, workerRun.id));
+      .where(eq(workerRuns.id, workerRunId));
 
     await tx
       .update(adapterActions)
@@ -1767,7 +1787,7 @@ export async function proposeDispatchSchedule(input: {
         data: {
           mode: "dry_run",
           operation: "calendar_schedule_proposal",
-          workerRunId: workerRun.id,
+          workerRunId: workerRunId,
           workflowRunId: workflowRun.id,
           adapterRunId: adapterRun.id,
           adapterActionId: adapterAction.id,
@@ -1846,7 +1866,7 @@ export async function proposeDispatchSchedule(input: {
       .values({
         tenantId: context.worker.tenantId,
         taskId: task.id,
-        workerRunId: workerRun.id,
+        workerRunId: workerRunId,
         workflowRunId: workflowRun.id,
         eventId: event.id,
         objectId: appointment.id,
@@ -1882,7 +1902,7 @@ export async function proposeDispatchSchedule(input: {
           customerSend: "blocked",
         },
         data: {
-          workerRunId: workerRun.id,
+          workerRunId: workerRunId,
           workflowRunId: workflowRun.id,
           appointmentObjectId: appointment.id,
           adapterRunId: adapterRun.id,
@@ -2006,7 +2026,7 @@ export async function proposeDispatchSchedule(input: {
       data: {
         latest: {
           approvalRequestId: approval.id,
-          workerRunId: workerRun.id,
+          workerRunId: workerRunId,
           workflowRunId: workflowRun.id,
           taskId: task.id,
           jobObjectId: handoff.jobObject.id,
@@ -2072,7 +2092,7 @@ export async function proposeDispatchSchedule(input: {
         key: viewKey,
         version: viewVersion,
         viewId: view.id,
-        workerRunId: workerRun.id,
+        workerRunId: workerRunId,
         workflowRunId: workflowRun.id,
       },
       occurredAt: now,
@@ -2087,9 +2107,9 @@ export async function proposeDispatchSchedule(input: {
       actorId: context.worker.id,
       actorRef: `worker:${context.worker.id}`,
       targetType: "worker_run",
-      targetId: workerRun.id,
+      targetId: workerRunId,
       taskId: task.id,
-      workerRunId: workerRun.id,
+      workerRunId: workerRunId,
       approvalRequestId: approval.id,
       eventId: event.id,
       objectId: appointment.id,
@@ -2106,6 +2126,10 @@ export async function proposeDispatchSchedule(input: {
     });
 
     const output = {
+      command: "schedule.propose",
+      workerRunId,
+      taskId: task.id,
+      eventId: event.id,
       jobObjectId: handoff.jobObject.id,
       quoteObjectId: handoff.quoteObject?.id ?? null,
       appointmentObjectId: appointment.id,
@@ -2119,6 +2143,10 @@ export async function proposeDispatchSchedule(input: {
       workflowRunId: workflowRun.id,
       workflowStepIds,
       dispatchScheduleViewId: view.id,
+      budgetReservationId: coreReservationId,
+      reservationId: coreReservationId,
+      usageEventId: null,
+      inferenceId: inference.id,
       proposedWindow: scheduleWindow,
       conflicts: [],
       sourceRefs: handoff.sourceRefs,
@@ -2131,11 +2159,16 @@ export async function proposeDispatchSchedule(input: {
     await tx
       .update(workerRuns)
       .set({
-        state: "done",
         eventId: event.id,
+        taskId: task.id,
         data: {
-          input: runInput,
+          ...objectValue(existingRun.data),
+          input: {
+            ...existingInput,
+            request: runInput,
+          },
           output,
+          businessEventId: event.id,
           eventId: event.id,
           taskId: task.id,
           appointmentObjectId: appointment.id,
@@ -2149,14 +2182,12 @@ export async function proposeDispatchSchedule(input: {
           workflowRunId: workflowRun.id,
           workflowStepIds,
           dispatchScheduleViewId: view.id,
-          reservationId: reservation.id,
+          reservationId: coreReservationId,
           inferenceId: inference.id,
-          usageEventId: usage.id,
         },
-        endedAt: now,
         updatedAt: now,
       })
-      .where(eq(workerRuns.id, workerRun.id));
+      .where(eq(workerRuns.id, workerRunId));
 
     await tx
       .update(workers)
@@ -2171,7 +2202,7 @@ export async function proposeDispatchSchedule(input: {
 
     return {
       replay: null,
-      workerRunId: workerRun.id,
+      workerRunId: workerRunId,
       taskId: task.id,
       eventId: event.id,
       appointmentObjectId: appointment.id,
@@ -2189,9 +2220,99 @@ export async function proposeDispatchSchedule(input: {
     };
   });
 
+  const persistSettledScheduleOutput = async (
+    workerRunId: string,
+    output: JsonObject,
+    completionBudget: JsonObject,
+  ) => {
+    const settledReservationId =
+      optionalString(completionBudget.reservationId) ??
+      optionalString(output.budgetReservationId) ??
+      optionalString(output.reservationId) ??
+      null;
+    const settledUsageEventId = optionalString(completionBudget.usageEventId) ?? optionalString(output.usageEventId) ?? null;
+    const settledOutput = {
+      ...output,
+      budgetReservationId: settledReservationId,
+      reservationId: settledReservationId,
+      usageEventId: settledUsageEventId,
+    } satisfies JsonObject;
+    const [completedRun] = await db
+      .select({ data: workerRuns.data })
+      .from(workerRuns)
+      .where(eq(workerRuns.id, workerRunId))
+      .limit(1);
+
+    await db
+      .update(workerRuns)
+      .set({
+        data: {
+          ...objectValue(completedRun?.data),
+          output: settledOutput,
+          budgetReservationId: settledReservationId,
+          reservationId: settledReservationId,
+          usageEventId: settledUsageEventId,
+        },
+        updatedAt: new Date(),
+      })
+      .where(eq(workerRuns.id, workerRunId));
+
+    return settledOutput;
+  };
+
+  const settleScheduleCoreRun = async (workerRunId: string, output: JsonObject) => {
+    const completion = await completeCoreWorkerRun({
+      operatorEmail: input.operatorEmail,
+      tenantSlug: context.worker.tenantSlug,
+      idempotencyKey: input.idempotencyKey,
+      worker: {
+        id: context.worker.id,
+        role: dispatchWorkerRole,
+      },
+      workerRunId,
+      state: "done",
+      reason:
+        "Dispatch Operations Worker prepared a dry-run schedule proposal with external calendar writes and customer sends blocked.",
+      output,
+      costUsd: 0,
+      evidence: {
+        command: "schedule.propose",
+        eventId: optionalString(output.eventId) ?? null,
+        evidenceId: optionalString(output.evidenceId) ?? null,
+        adapterReceiptEvidenceId: optionalString(output.adapterReceiptEvidenceId) ?? null,
+        packetId: optionalString(output.packetId) ?? null,
+        documentId: optionalString(output.documentId) ?? null,
+        approvalRequestId: optionalString(output.approvalRequestId) ?? null,
+        workflowRunId: optionalString(output.workflowRunId) ?? null,
+        dispatchScheduleViewId: optionalString(output.dispatchScheduleViewId) ?? null,
+        inferenceId: optionalString(output.inferenceId) ?? null,
+        externalExecution: "dry_run",
+        externalMutation: false,
+        externalSend: false,
+      },
+      db,
+    });
+
+    return persistSettledScheduleOutput(workerRunId, output, objectValue(completion.budget));
+  };
+
   if (result.replay) {
-    return replayedScheduleProposal(db, context, result.replay);
+    const replayData = objectValue(result.replay.data);
+    const replayOutput = outputData(replayData);
+    const replayCompletionBudget = objectValue(objectValue(replayData.completion).budget);
+
+    if (result.replay.state === "running" && optionalString(replayOutput.workerRunId)) {
+      await settleScheduleCoreRun(coreRun.workerRunId, replayOutput);
+    } else {
+      await persistSettledScheduleOutput(coreRun.workerRunId, replayOutput, replayCompletionBudget);
+    }
+
+    const [settledReplay] = await db.select().from(workerRuns).where(eq(workerRuns.id, coreRun.workerRunId)).limit(1);
+
+    return replayedScheduleProposal(db, context, settledReplay ?? result.replay);
   }
+
+  const settledOutput = await settleScheduleCoreRun(result.workerRunId, result.output);
 
   return {
     created: true,
@@ -2210,7 +2331,7 @@ export async function proposeDispatchSchedule(input: {
     workflowRunId: result.workflowRunId,
     workflowStepIds: result.workflowStepIds,
     dispatchScheduleViewId: result.dispatchScheduleViewId,
-    output: result.output,
+    output: settledOutput,
     snapshot: await getDispatchWorkerSnapshot(db, {
       role: dispatchWorkerRole,
       tenantSlug: context.worker.tenantSlug,

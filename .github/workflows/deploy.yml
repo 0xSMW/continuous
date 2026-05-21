@@ -1420,9 +1420,57 @@ jobs:
             '.error == null and .data.view == "readiness" and (.data.readiness.documentBlockers | length) >= 1 and (.data.readiness.payrollBlockers | length) >= 1' \
             >/dev/null
 
+          DISPATCH_SCHEDULE_KEY="deploy-dispatch-schedule-smoke-$SMOKE_RUN_ID"
+          DISPATCH_SCHEDULE_PAYLOAD="$(
+            /usr/bin/jq -nc --arg key "$DISPATCH_SCHEDULE_KEY" '{
+              command: "schedule.propose",
+              worker: {role: "dispatch_operations", tenantSlug: "continuous-demo"},
+              idempotencyKey: $key,
+              config: {
+                sourceRefs: {
+                  customerObjectId: "33333333-3333-4333-8333-000000000001",
+                  quoteObjectId: "33333333-3333-4333-8333-000000000004",
+                  jobObjectId: "33333333-3333-4333-8333-000000000005"
+                },
+                constraints: {
+                  serviceWindow: "2026-05-21",
+                  durationMinutes: 120,
+                  crewSkills: ["roofing"]
+                }
+              }
+            }'
+          )"
+          DISPATCH_SCHEDULE_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/worker \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$DISPATCH_SCHEDULE_PAYLOAD"
+          )"
+          echo "$DISPATCH_SCHEDULE_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,workerRunId:.data.result.workerRunId,appointmentObjectId:.data.result.appointmentObjectId,approvalRequestId:.data.result.approvalRequestId,packetId:.data.result.packetId,viewId:.data.result.dispatchScheduleViewId,budgetReservationId:.data.result.output.budgetReservationId,usageEventId:.data.result.output.usageEventId,externalExecution:.data.result.output.externalExecution,externalMutation:.data.result.output.externalMutation,externalSend:.data.result.output.externalSend}}'
+          echo "$DISPATCH_SCHEDULE_RESPONSE" | /usr/bin/jq -e \
+            '.error == null and .data.command == "schedule.propose" and .data.worker.role == "dispatch_operations" and .data.result.created == true and (.data.result.workerRunId | length > 0) and (.data.result.appointmentObjectId | length > 0) and (.data.result.approvalRequestId | length > 0) and (.data.result.packetId | length > 0) and (.data.result.dispatchScheduleViewId | length > 0) and (.data.result.output.budgetReservationId | length > 0) and (.data.result.output.usageEventId | length > 0) and .data.result.output.command == "schedule.propose" and .data.result.output.externalExecution == "dry_run" and .data.result.output.externalMutation == false and .data.result.output.externalSend == false' \
+            >/dev/null
+          DISPATCH_SCHEDULE_WORKER_RUN_ID="$(echo "$DISPATCH_SCHEDULE_RESPONSE" | /usr/bin/jq -r '.data.result.workerRunId')"
+          DISPATCH_SCHEDULE_RESERVATION_ID="$(echo "$DISPATCH_SCHEDULE_RESPONSE" | /usr/bin/jq -r '.data.result.output.budgetReservationId')"
+          DISPATCH_SCHEDULE_USAGE_ID="$(echo "$DISPATCH_SCHEDULE_RESPONSE" | /usr/bin/jq -r '.data.result.output.usageEventId')"
+          DISPATCH_SCHEDULE_APPOINTMENT_ID="$(echo "$DISPATCH_SCHEDULE_RESPONSE" | /usr/bin/jq -r '.data.result.appointmentObjectId')"
+          DISPATCH_SCHEDULE_RUN_ROW="$(
+            psql_db -Atc "select coalesce(source,'') || '|' || coalesce(state::text,'') || '|' || coalesce(mode,'') || '|' || coalesce(data->'input'->>'command','') || '|' || coalesce(data->'output'->>'command','') || '|' || coalesce(data->'output'->>'externalExecution','') || '|' || coalesce(data->'output'->>'externalMutation','') || '|' || coalesce(data->'output'->>'externalSend','') || '|' || coalesce(data->'completion'->'budget'->>'state','') || '|' || coalesce(data->'completion'->'budget'->>'reservationId','') || '|' || coalesce(data->'completion'->'budget'->>'usageEventId','') from worker_runs where id = '$DISPATCH_SCHEDULE_WORKER_RUN_ID'::uuid;"
+          )"
+          if [ "$DISPATCH_SCHEDULE_RUN_ROW" != "continuous.core.worker_runs|done|dry_run|schedule.propose|schedule.propose|dry_run|false|false|used|$DISPATCH_SCHEDULE_RESERVATION_ID|$DISPATCH_SCHEDULE_USAGE_ID" ]; then
+            echo "Unexpected Dispatch schedule worker run row: $DISPATCH_SCHEDULE_RUN_ROW" >&2
+            exit 1
+          fi
+          DISPATCH_SCHEDULE_LEGACY_RUN_COUNT="$(psql_db -Atc "select count(*) from worker_runs where source = 'continuous.worker' and idempotency_key = '$DISPATCH_SCHEDULE_KEY';")"
+          if [ "$DISPATCH_SCHEDULE_LEGACY_RUN_COUNT" != "0" ]; then
+            echo "Dispatch schedule wrote legacy continuous.worker run rows: $DISPATCH_SCHEDULE_LEGACY_RUN_COUNT" >&2
+            exit 1
+          fi
+
           DISPATCH_CUSTOMER_UPDATE_KEY="deploy-dispatch-customer-update-smoke-$SMOKE_RUN_ID"
           DISPATCH_CUSTOMER_UPDATE_PAYLOAD="$(
-            /usr/bin/jq -nc --arg key "$DISPATCH_CUSTOMER_UPDATE_KEY" '{
+            /usr/bin/jq -nc --arg key "$DISPATCH_CUSTOMER_UPDATE_KEY" --arg appointment_id "$DISPATCH_SCHEDULE_APPOINTMENT_ID" '{
               command: "customer_update.draft",
               worker: {role: "dispatch_operations", tenantSlug: "continuous-demo"},
               idempotencyKey: $key,
@@ -1430,6 +1478,9 @@ jobs:
                 jobId: "33333333-3333-4333-8333-000000000005",
                 updateKind: "schedule_confirmed",
                 channel: "email",
+                sourceRefs: {
+                  appointmentObjectId: $appointment_id
+                },
                 messageContext: {
                   customerFacingSummary: "Your service window is prepared for dispatcher review before any customer message is sent."
                 }
