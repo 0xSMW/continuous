@@ -3,7 +3,6 @@
 ## User
 
 - Decide whether `www.continuoushq.com` and `www.getcontinuous.app` should serve the app; if yes, add those hostnames to `SITE_HOSTS` and rerun the domain deploy.
-- Confirm the production GitHub environment has `WORKER_OPERATOR_EMAIL` set to a seeded active operator such as `owner@continuoushq.com`; deploy now fails closed when that secret is missing.
 
 ## Agent
 
@@ -17,7 +16,7 @@
 - Extend the Owner Chief-of-Staff Worker beyond approval/revision continuations into stale-source handling and broader factuality evals.
 - Keep all worker-family HTTP controls on `/worker` with registered `worker`, `command` or `view`, `idempotencyKey` when needed, and `config` fields; do not add worker-family-specific URL or query shapes.
 - Keep worker identities role-based, such as `revenue_operations` and `dispatch_operations`; do not reintroduce legacy family-worker identifiers or `/api/*-worker`, `/api/*_worker`, or `/worker/<role>` naming in examples, docs, routes, scripts, or event namespaces.
-- Keep control-plane token catalogs and durable credential inventory on exact route-qualified command lists; do not use route-wide wildcards except for the legacy bootstrap token path while replacing it.
+- Keep control-plane token catalogs and durable credential inventory on exact route-qualified command lists; production auth must stay catalog-backed and fail closed without route, access, command, and operator identity scope.
 - Keep app-server/local worker mutation controls on the same explicit `command`, `worker`, `idempotencyKey`, and object `config` envelope as `POST /worker`, and keep app-server/local worker reads on `view`, `worker`, and read filters under `config`; do not add worker-family-specific package scripts, app-server tools, query fields, or top-level operator/context fields that bypass the command registry.
 - Keep the production object-storage Postgres backup timer healthy; `scripts/check-production-readiness.sh` now proves the timer, backup env, fresh local dump, and latest DigitalOcean Spaces backup object.
 - Run `scripts/recovery-drill.sh` against a disposable droplet, attest the resulting report with `scripts/attest-recovery-drill.sh`, install the observability timer with a real alert webhook, verify a deploy with `SSH_USER=continuous-deploy`, and make `scripts/check-production-readiness.sh` pass before using the production droplet for real customer data.

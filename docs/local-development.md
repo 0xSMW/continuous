@@ -163,12 +163,13 @@ curl -X POST http://localhost:3000/worker \
   }'
 ```
 
-Runs are bound to `WORKER_OPERATOR_EMAIL`, which must be set by the local
-operator shell or app-server bridge and must match a seeded user such as
-`owner@continuoushq.com`. A successful run records an approval request and
-audit trail while keeping external send and money movement blocked. Use
-`worker.command` with `command=lead.read` to persist source lead records before
-`worker.command` with `command=run`;
+HTTP runs are bound to the authenticated control-plane credential's
+`operatorEmail`. Trusted-local `worker.command` and app-server bridge calls use
+`WORKER_OPERATOR_EMAIL`, which must be set by the local operator shell or bridge
+and must match a seeded user such as `owner@continuoushq.com`. A successful run
+records an approval request and audit trail while keeping external send and
+money movement blocked. Use `worker.command` with `command=lead.read` to persist
+source lead records before `worker.command` with `command=run`;
 `config.leadPacket` is only the direct fallback for controlled local tests. If
 `CONTROL_PLANE_ALLOWED_TENANTS` is set, every operator route must include an
 allowed `tenantSlug`; if `CONTROL_PLANE_ALLOWED_WORKER_ROLES` is set, `/worker`

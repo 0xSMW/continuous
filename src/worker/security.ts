@@ -7,7 +7,6 @@ export type RunAuthInput = {
   expectedToken?: string;
   operatorEmail?: string | null;
   authorization?: string | null;
-  headerToken?: string | null;
 };
 
 export type RunAuthResult =
@@ -109,9 +108,9 @@ function valueOrDefault(value: unknown, fallback: string[]) {
   return list.length > 0 ? list : fallback;
 }
 
-function suppliedToken(input: { authorization?: string | null; headerToken?: string | null }) {
+function suppliedToken(input: { authorization?: string | null }) {
   const bearer = input.authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
-  return bearer ?? input.headerToken ?? "";
+  return bearer ?? "";
 }
 
 function hashToken(token: string) {
@@ -350,7 +349,6 @@ export function authorizeControlPlaneAccess(input: {
   expectedToken?: string;
   operatorEmail?: string | null;
   authorization?: string | null;
-  headerToken?: string | null;
   allowedTenants?: string | null;
   allowedWorkerRoles?: string | null;
   tokenCatalogJson?: string | null;
@@ -371,6 +369,15 @@ export function authorizeControlPlaneAccess(input: {
   const hasCatalog =
     Boolean(optionalScopeValue(input.tokenCatalogJson)) ||
     Boolean(optionalScopeValue(input.tokenCatalogB64));
+
+  if (input.appEnv === "production" && !hasCatalog) {
+    return {
+      ok: false,
+      status: 403,
+      code: "control_plane_token_catalog_required",
+      message: "Production control-plane access requires a route-scoped token catalog.",
+    };
+  }
 
   if (!hasCatalog && !input.expectedToken) {
     return {

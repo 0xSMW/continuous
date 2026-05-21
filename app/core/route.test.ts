@@ -569,7 +569,6 @@ describe("POST /core", () => {
       tenantSlug: "continuous-demo",
       credentialId: "bootstrap-operator",
       displayName: "Bootstrap operator",
-      credentialOperatorEmail: undefined,
       state: undefined,
       tokenFingerprint: "aabbccddeeff0011",
       allowedTenants: ["continuous-demo"],
@@ -849,6 +848,39 @@ describe("POST /core", () => {
 
     expect(response.status).toBe(400);
     expect(body.error.code).toBe("invalid_control_plane_credential");
+    expect(mocks.upsertControlPlaneCredential).not.toHaveBeenCalled();
+  });
+
+  it("rejects payload-supplied operator identity in managed credential upserts", async () => {
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "control_plane.credential.upsert",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "credential-upsert-operator-field-001",
+          config: {
+            credentialId: "bootstrap-operator",
+            operatorEmail: "other@example.com",
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toEqual({
+      code: "invalid_control_plane_credential",
+      message:
+        "Control-plane credential inventory accepts credential ids, token fingerprints, scopes, and evidence only. Remove unsupported or secret fields: operatorEmail.",
+    });
     expect(mocks.upsertControlPlaneCredential).not.toHaveBeenCalled();
   });
 

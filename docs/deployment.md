@@ -91,12 +91,14 @@ Each normal deploy tags app images as `sha-<commit>` by default, or the
 provided `app_tag`, and stores the prior app tag as `PREVIOUS_APP_TAG` in the
 remote `.env`.
 Deploys also derive a control-plane token catalog from the generated bootstrap
-secret in `WORKER_RUN_TOKEN`: the raw token remains in `.env` only for first
-deploy, host recovery, and operator smoke calls, while app containers receive a
-hashed `CONTROL_PLANE_TOKEN_CATALOG_B64` entry with explicit route, command,
-tenant, worker-role, and read/write scope. Future tokens can be added with
-`CONTROL_PLANE_TOKENS_JSON` or the base64 catalog without changing `/core`,
-`/worker`, `/workflow`, or `/approval`.
+secret in `WORKER_RUN_TOKEN`: production HTTP auth uses the hashed
+`CONTROL_PLANE_TOKEN_CATALOG_B64` entry with explicit route, command, tenant,
+worker-role, operator, and read/write scope. The raw token remains in `.env` so
+deploy smoke, scheduler, rotation, and host recovery can present it as a bearer
+credential; production routes refuse the legacy single-token path if the
+catalog is missing. Future tokens can be added with `CONTROL_PLANE_TOKENS_JSON`
+or the base64 catalog without changing `/core`, `/worker`, `/workflow`, or
+`/approval`.
 Deploy syncs still use `rsync --delete` to remove stale source files, but they
 protect `backups/`, `logs/`, and `reports/recovery-drills/` so database dumps,
 Caddy/observability logs, and recovery evidence survive releases.
@@ -125,10 +127,12 @@ openssl s_client -connect 45.55.53.92:443 -servername continuoushq.com </dev/nul
 
 The deploy path enables the generic worker command surface with a generated
 bearer token in `/opt/continuous/.env`. `WORKER_OPERATOR_EMAIL` is written into
-the deploy environment and must match an active user before approval records or
-operator decisions can be written; Compose containers fail fast if it is not
-provided. The deploy path also writes a hashed
-control-plane token catalog and scopes that credential to
+the deploy environment, must match an active user, and is used to generate the
+catalog credential identity plus trusted-local smoke tooling; public HTTP auth
+resolves operator identity from the catalog credential, not from request
+payloads. Compose containers fail fast if the deploy operator is not provided.
+The deploy path also writes a hashed control-plane token catalog and scopes that
+credential to
 `CONTROL_PLANE_ALLOWED_TENANTS=continuous-demo` and
 `CONTROL_PLANE_ALLOWED_WORKER_ROLES=revenue_operations,owner_chief_of_staff,dispatch_operations,finance_operations`;
 requests to `/worker`, `/core`, or `/workflow` must carry an allowed
@@ -356,11 +360,12 @@ Control-plane token catalog entries have this shape when provided directly via
 Read views are authorized as `<route>:view.<view>`, for example
 `worker:view.snapshot`. Production deploys generate the full current exact
 command catalog in `.github/workflows/deploy.yml` and `scripts/deploy.sh`.
-Treat the legacy single `WORKER_RUN_TOKEN` path as bootstrap-only. New
-control-plane credentials must set explicit `allowedRoutes`, `allowedAccess`,
-and `allowedCommands`; omitted route, access, or command scope fields fail
-closed, and `/core`, `/worker`, `/workflow`, and `/approval` also fail closed
-against the durable managed credential inventory after catalog auth succeeds.
+Treat the legacy single `WORKER_RUN_TOKEN` path as
+non-production/bootstrap-only; production control-plane auth requires a catalog
+credential with `operatorEmail`, `allowedRoutes`, `allowedAccess`, and
+`allowedCommands`. Omitted route, access, or command scope fields fail closed,
+and `/core`, `/worker`, `/workflow`, and `/approval` also fail closed against
+the durable managed credential inventory after catalog auth succeeds.
 
 ## Production Readiness Gate
 

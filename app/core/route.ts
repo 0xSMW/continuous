@@ -55,6 +55,7 @@ const forbiddenTokenRotationFields = new Set([
   "previousTokenSha256",
 ]);
 const forbiddenControlPlaneCredentialFields = new Set([
+  "operatorEmail",
   "token",
   "nextToken",
   "previousToken",
@@ -222,7 +223,6 @@ export async function GET(request: Request) {
     expectedToken: env.WORKER_RUN_TOKEN,
     operatorEmail: env.WORKER_OPERATOR_EMAIL,
     authorization: request.headers.get("authorization"),
-    headerToken: request.headers.get("x-worker-run-token"),
     allowedTenants: env.CONTROL_PLANE_ALLOWED_TENANTS,
     allowedWorkerRoles: env.CONTROL_PLANE_ALLOWED_WORKER_ROLES,
     tokenCatalogJson: env.CONTROL_PLANE_TOKENS_JSON,
@@ -326,7 +326,6 @@ export async function POST(request: Request) {
     expectedToken: env.WORKER_RUN_TOKEN,
     operatorEmail: env.WORKER_OPERATOR_EMAIL,
     authorization: request.headers.get("authorization"),
-    headerToken: request.headers.get("x-worker-run-token"),
     allowedTenants: env.CONTROL_PLANE_ALLOWED_TENANTS,
     allowedWorkerRoles: env.CONTROL_PLANE_ALLOWED_WORKER_ROLES,
     tokenCatalogJson: env.CONTROL_PLANE_TOKENS_JSON,
@@ -370,7 +369,6 @@ export async function POST(request: Request) {
     expectedToken: env.WORKER_RUN_TOKEN,
     operatorEmail: env.WORKER_OPERATOR_EMAIL,
     authorization: request.headers.get("authorization"),
-    headerToken: request.headers.get("x-worker-run-token"),
     allowedTenants: env.CONTROL_PLANE_ALLOWED_TENANTS,
     allowedWorkerRoles: env.CONTROL_PLANE_ALLOWED_WORKER_ROLES,
     tokenCatalogJson: env.CONTROL_PLANE_TOKENS_JSON,
@@ -539,7 +537,7 @@ export async function POST(request: Request) {
       return errorResponse(
         {
           code: "invalid_control_plane_credential",
-          message: `Control-plane credential inventory accepts credential ids and token fingerprints only. Remove raw token fields: ${forbiddenFields.join(", ")}.`,
+          message: `Control-plane credential inventory accepts credential ids, token fingerprints, scopes, and evidence only. Remove unsupported or secret fields: ${forbiddenFields.join(", ")}.`,
         },
         400,
       );
@@ -552,7 +550,6 @@ export async function POST(request: Request) {
         tenantSlug,
         credentialId: optionalString(config.credentialId) ?? auth.credentialId,
         displayName: optionalString(config.displayName),
-        credentialOperatorEmail: optionalString(config.operatorEmail),
         state: optionalString(config.state),
         tokenFingerprint: optionalString(config.tokenFingerprint),
         allowedTenants: config.allowedTenants,
@@ -605,7 +602,7 @@ export async function POST(request: Request) {
       return errorResponse(
         {
           code: "invalid_control_plane_credential",
-          message: `Control-plane credential revocation accepts credential ids and evidence only. Remove raw token fields: ${forbiddenFields.join(", ")}.`,
+          message: `Control-plane credential revocation accepts credential ids and evidence only. Remove unsupported or secret fields: ${forbiddenFields.join(", ")}.`,
         },
         400,
       );

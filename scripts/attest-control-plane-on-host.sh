@@ -87,12 +87,6 @@ env_value() {
 }
 
 WORKER_TOKEN="$(env_value WORKER_RUN_TOKEN)"
-WORKER_OPERATOR_EMAIL="$(env_value WORKER_OPERATOR_EMAIL)"
-
-if [ -z "$WORKER_OPERATOR_EMAIL" ]; then
-  echo "WORKER_OPERATOR_EMAIL is required in $APP_DIR/.env for control-plane attestation." >&2
-  exit 1
-fi
 
 if [ -z "$WORKER_TOKEN" ]; then
   echo "Missing bootstrap token for catalog seeding in $APP_DIR/.env." >&2
@@ -152,7 +146,6 @@ BOOTSTRAP_PAYLOAD="$(
     --arg key "control-plane-credential-upsert-$RUN_ID" \
     --arg tenant "$TENANT_SLUG" \
     --arg credentialId "$BOOTSTRAP_CREDENTIAL_ID" \
-    --arg operatorEmail "$WORKER_OPERATOR_EMAIL" \
     --arg fingerprint "$BOOTSTRAP_FINGERPRINT" \
     --argjson allowedCommands "$CONTROL_PLANE_ALLOWED_COMMANDS_JSON" '{
       command: "control_plane.credential.upsert",
@@ -161,7 +154,6 @@ BOOTSTRAP_PAYLOAD="$(
       config: {
         credentialId: $credentialId,
         displayName: "Bootstrap operator",
-        operatorEmail: $operatorEmail,
         tokenFingerprint: $fingerprint,
         allowedTenants: [$tenant],
         allowedWorkerRoles: [
@@ -195,7 +187,6 @@ DRILL_UPSERT_PAYLOAD="$(
     --arg key "control-plane-revocation-drill-upsert-$RUN_ID" \
     --arg tenant "$TENANT_SLUG" \
     --arg credentialId "$DRILL_CREDENTIAL_ID" \
-    --arg operatorEmail "$WORKER_OPERATOR_EMAIL" \
     --arg fingerprint "$DRILL_FINGERPRINT" '{
       command: "control_plane.credential.upsert",
       core: {tenantSlug: $tenant},
@@ -203,7 +194,6 @@ DRILL_UPSERT_PAYLOAD="$(
       config: {
         credentialId: $credentialId,
         displayName: "Deploy revocation drill credential",
-        operatorEmail: $operatorEmail,
         tokenFingerprint: $fingerprint,
         allowedTenants: [$tenant],
         allowedWorkerRoles: ["revenue_operations"],

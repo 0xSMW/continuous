@@ -87,7 +87,6 @@ export type ControlPlaneCredentialUpsertInput = {
   idempotencyKey: string;
   credentialId: string;
   displayName?: string;
-  credentialOperatorEmail?: string;
   state?: string;
   tokenFingerprint?: string;
   allowedTenants?: unknown;
@@ -259,10 +258,7 @@ function bearerToken(authorization?: string | null) {
 }
 
 function requestToken(request: Request) {
-  return (
-    bearerToken(request.headers.get("authorization")) ??
-    cleanString(request.headers.get("x-worker-run-token"))
-  );
+  return bearerToken(request.headers.get("authorization"));
 }
 
 export function controlPlaneTokenFingerprint(value?: string | null) {
@@ -864,9 +860,7 @@ export async function upsertControlPlaneCredential(input: ControlPlaneCredential
   });
   const credentialId = requiredStringMax(input.credentialId, "config.credentialId", 140);
   const displayName = cleanString(input.displayName) ?? credentialId;
-  const credentialOperatorEmail = (
-    cleanString(input.credentialOperatorEmail) ?? operator.email
-  ).toLowerCase();
+  const credentialOperatorEmail = operator.email.toLowerCase();
   const state = parseCredentialState(input.state);
   const tokenFingerprint = normalizeTokenFingerprint(
     input.tokenFingerprint,

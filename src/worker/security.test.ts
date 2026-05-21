@@ -118,13 +118,13 @@ describe("authorizeWorkerRead", () => {
     });
   });
 
-  it("rejects an invalid read token", () => {
+  it("rejects an invalid read bearer token", () => {
     expect(
       authorizeWorkerRead({
         appEnv: "production",
         expectedToken: acceptedCredential,
         operatorEmail,
-        headerToken: "wrong",
+        authorization: "Bearer wrong",
       }),
     ).toEqual({
       ok: false,
@@ -640,11 +640,33 @@ describe("authorizeControlPlaneAccess", () => {
     });
   });
 
-  it("limits the legacy bootstrap token to the worker route", () => {
+  it("requires catalog-backed credentials in production", () => {
     expect(
       authorizeControlPlaneAccess({
         enabled: true,
         appEnv: "production",
+        expectedToken: acceptedCredential,
+        operatorEmail,
+        authorization: `Bearer ${acceptedCredential}`,
+        allowedTenants: "continuous-demo",
+        allowedWorkerRoles: "revenue_operations",
+        route: "worker",
+        access: "write",
+        command: "run",
+      }),
+    ).toEqual({
+      ok: false,
+      status: 403,
+      code: "control_plane_token_catalog_required",
+      message: "Production control-plane access requires a route-scoped token catalog.",
+    });
+  });
+
+  it("limits the non-production legacy bootstrap token to the worker route", () => {
+    expect(
+      authorizeControlPlaneAccess({
+        enabled: true,
+        appEnv: "test",
         expectedToken: acceptedCredential,
         operatorEmail,
         authorization: `Bearer ${acceptedCredential}`,
@@ -667,7 +689,7 @@ describe("authorizeControlPlaneAccess", () => {
     expect(
       authorizeControlPlaneAccess({
         enabled: true,
-        appEnv: "production",
+        appEnv: "test",
         expectedToken: acceptedCredential,
         operatorEmail,
         authorization: `Bearer ${acceptedCredential}`,
@@ -695,7 +717,7 @@ describe("authorizeControlPlaneAccess", () => {
       expect(
         authorizeControlPlaneAccess({
           enabled: true,
-          appEnv: "production",
+          appEnv: "test",
           expectedToken: acceptedCredential,
           operatorEmail,
           authorization: `Bearer ${acceptedCredential}`,
@@ -718,7 +740,7 @@ describe("authorizeControlPlaneAccess", () => {
     expect(
       authorizeControlPlaneAccess({
         enabled: true,
-        appEnv: "production",
+        appEnv: "test",
         expectedToken: acceptedCredential,
         authorization: `Bearer ${acceptedCredential}`,
         route: "worker",

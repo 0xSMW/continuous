@@ -296,6 +296,8 @@ describe("future worker contracts", () => {
       'export const workerTargetEnvelopeFields = ["role", "id", "tenantSlug"] as const;',
     );
     expect(read("app/worker/route.ts")).not.toContain('request.headers.get("idempotency-key")');
+    expect(read("app/worker/route.ts")).not.toContain('request.headers.get("x-worker-run-token")');
+    expect(read("src/worker/security.ts")).not.toContain("headerToken");
   });
 
   it("has implementation-grade contracts for every worker", () => {
@@ -459,7 +461,7 @@ describe("future worker contracts", () => {
     expect(deployment).toContain("CONTROL_PLANE_CREDENTIAL_ID");
     expect(deployment).toContain("CONTROL_PLANE_CREDENTIAL_REVOCATION_AUDIT_ID");
     expect(deployment).toContain("CONTROL_PLANE_SESSION_REVIEW_VIEW_ID");
-    expect(deployment).toContain("legacy single `WORKER_RUN_TOKEN` path as bootstrap-only");
+    expect(deployment).toContain("control-plane auth requires a catalog");
     expect(compose).not.toContain("REVENUE_WORKER_");
     expect(readinessScript).toContain("TOKEN_ROTATION_ATTESTATION_ID");
     expect(readinessScript).toContain("CONTROL_PLANE_AUTH_AUDIT_ATTESTED_AT");
