@@ -4690,31 +4690,33 @@ maybeDescribe("Revenue Worker integration eval", () => {
     const storedContinuationInput = objectValue(storedContinuationData.input);
     const storedContinuationRequest = objectValue(storedContinuationInput.request);
     delete storedContinuationRequest.inputHash;
-    storedContinuationInput.request = storedContinuationRequest;
-    delete storedContinuationInput.inputHash;
     await db
       .update(workerRuns)
       .set({
         data: {
           ...storedContinuationData,
-          input: storedContinuationInput,
+          input: {
+            ...storedContinuationInput,
+            request: storedContinuationRequest,
+          },
         },
       })
       .where(eq(workerRuns.id, controlledContinuation.workerRunId ?? ""));
 
-    await expect(
-      continueRevenueWorker({
+    const replayWithoutRunHash = await continueRevenueWorker({
+      approvalId: first.approvalRequestId ?? "",
+      idempotencyKey: `ci-worker-controlled-send-continue-${runId}`,
+      tenantSlug: "continuous-demo",
+      operatorEmail: "owner@continuoushq.com",
+      config: {
         approvalId: first.approvalRequestId ?? "",
-        idempotencyKey: `ci-worker-controlled-send-continue-${runId}`,
-        tenantSlug: "continuous-demo",
-        operatorEmail: "owner@continuoushq.com",
-        config: {
-          approvalId: first.approvalRequestId ?? "",
-          execution: baseExecution,
-        },
-        db,
-      }),
-    ).rejects.toMatchObject({ code: "worker_continuation_idempotency_conflict" });
+        execution: baseExecution,
+      },
+      db,
+    });
+
+    expect(replayWithoutRunHash.created).toBe(false);
+    expect(replayWithoutRunHash.workerRunId).toBe(controlledContinuation.workerRunId);
   }, 120_000);
 
   it("claims, executes, and retries queued workflow steps", async () => {
