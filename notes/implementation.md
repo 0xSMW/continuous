@@ -680,7 +680,9 @@ in 42s, and `scripts/attest-recovery-drill.sh` copied and attested
 `reports/recovery-drills/continuous-recovery-20260521T194000Z.md` on
 production. Strict readiness now verifies the report checksum and drill host;
 the remaining strict gate failure is the missing real alert webhook in
-`/etc/continuous/observability.env`.
+`/etc/continuous/observability.env`. The attestation copy script now installs
+the report with the readiness/deploy group so non-root strict deploy runs can
+verify the same report artifact instead of depending on root-only permissions.
 
 `scripts/create-droplet.sh` now reconciles firewall rules when the named
 firewall already exists, instead of only setting SSH, HTTP, and HTTPS ingress
