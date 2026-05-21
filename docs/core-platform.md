@@ -67,7 +67,7 @@ evidence before packaged workers can safely act.
 7. Add adapters for Gmail or Google Workspace, calendar, QuickBooks, Stripe, website forms, and one CRM or spreadsheet path.
 8. Add evidence capture for messages, drafts, quote versions, approvals, sent receipts, invoices, and follow-ups.
 9. Add eval harnesses using historical lead and quote simulations before increasing autonomy.
-10. Add vertical packs only after the core Revenue Worker loop is stable.
+10. Add vertical packs only after the core Revenue Operations Worker loop is stable.
 
 ## MVP Object Set
 
@@ -156,7 +156,7 @@ approval-aware, evidence-backed, and renderer-neutral:
 | AI budget cycle | Intelligence allocations, reservations, usage, overages, approvals, and chargebacks are ledgered |
 | Synthetic-worker lifecycle | Manager, mission, scopes, capabilities, budget, model route, memory, evals, incidents, and retirement are governed |
 
-## Revenue Worker Slice
+## Revenue Operations Worker Slice
 
 The first worker should prove the whole platform loop:
 

@@ -19,7 +19,10 @@ quotes, send customer messages, or alter money movement.
 
 All commands and views use `POST /worker`; no pricing-specific route is added.
 Command names, worker selection, and view names are payload fields. Operation
-inputs and read filters stay under `config`.
+inputs and read filters stay under `config`. The runtime uses Core
+`worker.run.start` and `worker.run.complete` internally for idempotency,
+capability proof, and budget settlement; callers do not pass lifecycle fields in
+the worker payload.
 
 ```json
 {
@@ -65,7 +68,7 @@ inputs and read filters stay under `config`.
 |---|---|---|---|---|---|
 | `view: "snapshot"` payload | `worker.view` | `worker.role`, `config` | None | Read-only | Blocked |
 | `view: "price_policy"` payload | `worker.view` | `worker.role`, optional `config.quoteObjectId`, optional `config.priceBookId` | None | Read-only | Blocked |
-| `margin.review.prepare` | `worker.command` | `config.sourceRefs.quoteObjectId`, `config.sourceRefs.evidencePacketId`, and `config.policy` | Required | Margin verdict, discount approval packet, generated view, audit/evidence | Blocked |
+| `margin.review.prepare` | `worker.command` | `config.sourceRefs.quoteObjectId`, `config.sourceRefs.evidencePacketId`, and `config.policy` | Required | Core worker-run completion, budget settlement, margin verdict, discount approval packet, generated view, audit/evidence | Blocked |
 | `approval.decide` | `worker.command` | `config.approvalId`, `config.action`, optional `config.note` | Required | Approval/task/workflow evidence only | Blocked |
 
 ## Core Object Map

@@ -89,8 +89,8 @@
 | Narrowed approval decision subjects | Shared approval decisions now reject `approval.subject=all`; Core-owned approvals use the typed `core` subject, while `all` remains only an inbox filter |
 | Required explicit Revenue run input | Revenue `run`, `lead.classify`, `response.draft`, and `quote.prepare` now require `config.intake`, `config.leadPacket`, or `config.lead`, so worker runs cannot silently execute placeholder lead packets |
 | Proved app-server worker execution | The CI integration suite now executes Revenue `lead.read`/`run`, Owner `brief.generate`, and Dispatch `schedule.propose` through `continuous.worker.command`, proving the app-server boundary uses the same registry, payload envelope, and persisted worker records as `/worker` |
-| Added first Revenue Worker eval gate | `bun run test` now includes a CI-backed Postgres integration eval that runs the seeded worker, verifies persisted output/evaluation records, and checks idempotent replay |
-| Expanded Revenue Worker eval coverage | Revenue eval cases now cover direct lead packets, Core row intake refs, source-selector intake, a normal-urgency third service area, missing-fact owner review, pricing override behavior, and policy-risk external-send rejection before widening autonomy |
+| Added first Revenue Operations Worker eval gate | `bun run test` now includes a CI-backed Postgres integration eval that runs the seeded worker, verifies persisted output/evaluation records, and checks idempotent replay |
+| Expanded Revenue Operations Worker eval coverage | Revenue eval cases now cover direct lead packets, Core row intake refs, source-selector intake, a normal-urgency third service area, missing-fact owner review, pricing override behavior, and policy-risk external-send rejection before widening autonomy |
 | Added persistence-only adapter reconciliation | `worker.command` scans pending dry-run adapter runs/actions, writes matched/retry/review state, records audit/evidence, and creates blocked retry/review system tasks without external execution |
 | Added blocked adapter retry execution | `worker.command` drains due dry-run retry rows, writes blocked retry receipts/audit/evidence, closes retry system tasks, and leaves rows pending for reconciliation without external sends |
 | Added adapter execution readiness proof | Adapter retry/review tasks and retry execution receipts now persist live-credential scope checks, missing scopes, rollback plans, and blocked execution gates before any live send path exists |
@@ -137,12 +137,12 @@
 | Matched local worker envelopes to `/worker` | `worker.command` and `continuous.worker.command` no longer accept top-level `operatorEmail`; trusted local execution uses `WORKER_OPERATOR_EMAIL`, authenticated app-server transport uses context, and payloads stay `command`, `worker`, `idempotencyKey`, and `config` |
 | Added registry-owned worker config schemas | `/worker`, `worker:tool`, and `continuous.worker.command` now share per-command `configSchema` checks for required fields, enums, integer bounds, and non-empty arrays before handlers run |
 | Tightened selector/config boundaries | Shared approval decisions now require `approval.subject` in the `approval` selector object instead of accepting `config.subject`, and worker view filters stay under `config` on local tool calls |
-| Added the first authority ledger | Revenue Worker runs now create approval requests and audit events, and approval decisions create evidence before any external action is allowed |
-| Added first-class adapter dry-runs | Revenue Worker runs now create linked adapter runs/actions, receipt evidence, attempt metadata, and reconciliation state while external mutation remains disabled |
+| Added the first authority ledger | Revenue Operations Worker runs now create approval requests and audit events, and approval decisions create evidence before any external action is allowed |
+| Added first-class adapter dry-runs | Revenue Operations Worker runs now create linked adapter runs/actions, receipt evidence, attempt metadata, and reconciliation state while external mutation remains disabled |
 | Added persisted-intake no-send worker packets | `POST /worker` `command=run` now prefers `config.intake` Core object/event/evidence references, stores source snapshot evidence, hashes normalized input for idempotency, and derives classification, draft response, quote, and approval packet output from the resolved payload; `config.leadPacket` remains a direct operator/test fallback |
 | Bound Revenue quote approval UI | Revenue runs now publish/update the `quote.approval.review` generated view contract, link the view id into run output, and record event/audit proof while approval decisions still execute through `/approval` and `/worker command=continue` |
 | Made Revenue intake runs self-tasking | Revenue runs now create a worker-owned quote-review task when no active task is available, so persisted Core intake and source-selector runs still carry task, budget, approval, and eval links |
-| Added source-based worker intake | External callers can now run the Revenue Worker with `config.intake.source` and `config.intake.sourceEventId`; the worker resolves the matching Core object/event/evidence rows before preparing the no-send approval packet |
+| Added source-based worker intake | External callers can now run the Revenue Operations Worker with `config.intake.source` and `config.intake.sourceEventId`; the worker resolves the matching Core object/event/evidence rows before preparing the no-send approval packet |
 | Added read-only lead source intake | `POST /worker` `command=lead.read` now persists inbound lead source records as Core object/event/evidence rows, writes a read-only worker run plus budget/usage/audit records, and returns stable `config.intake` selectors for `command=run` |
 | Added inbox and CRM lead source readers | `lead.read` now accepts read-only `config.reader` metadata for inbox and CRM records, requires credential references instead of embedded credential material, normalizes message/deal fields, and persists source-reader proof without external execution |
 | Added connection-backed lead reads | `lead.read` can now omit direct records when `config.reader` references an active tenant connection; it reads buffered source records from connection config, persists the same Core intake selectors, updates `connections.lastSyncAt`, and records `lastLeadRead` cursor proof without embedding credentials |
@@ -154,8 +154,8 @@
 | Hardened split Revenue command guardrails | `lead.classify` and `response.draft` now have first-class eval cases and scoring; direct runtime calls reject empty config before synthetic lead defaults, `lead.read`/`lead.classify`/`response.draft` enforce budget policy and capacity, and connection-backed `lead.read` persists request hashes for replay-conflict detection |
 | Protected operational artifacts during deploy sync | Deploy rsync still deletes stale source files, but now excludes `backups/`, `logs/`, and `reports/recovery-drills/` so local database dumps, Caddy/observability logs, and recovery evidence are not removed during a release |
 | Added expansion readiness and handoff contracts | `docs/worker-readiness.md` tracks each worker against shared launch gates, and `docs/worker-handoffs.md` defines Core-record handoffs from Revenue into Owner, Dispatch, Finance, Workforce, Compliance, and Systems expansion paths |
-| Rejected mixed worker intake sources | Revenue Worker now treats persisted `config.intake` Core row references as authoritative and rejects requests that also include direct `config.leadPacket` or `config.lead` payloads |
-| Added Revenue workflow spine | Revenue Worker runs now create a `lead_to_cash` workflow run plus durable workflow steps for intake, packet preparation, adapter dry-run, approval request, and approval decision continuation |
+| Rejected mixed worker intake sources | Revenue Operations Worker now treats persisted `config.intake` Core row references as authoritative and rejects requests that also include direct `config.leadPacket` or `config.lead` payloads |
+| Added Revenue workflow spine | Revenue Operations Worker runs now create a `lead_to_cash` workflow run plus durable workflow steps for intake, packet preparation, adapter dry-run, approval request, and approval decision continuation |
 | Added worker continuation command | `POST /worker` `command=continue` is a generic idempotent continuation surface; V1 consumes `config.approvalId` for approved, revision-requested, or rejected approvals, prepares blocked no-send execution packets, revised approval packets, or rejected stop packets, creates document/evidence packet records, and keeps external execution blocked |
 | Added tag-based app rollback | Deploys now tag app images by commit, persist `PREVIOUS_APP_TAG`, and expose a no-migration rollback path through the deploy workflow and `scripts/rollback-app.sh` for compatible app-only rollbacks |
 | HTTPS is managed by Caddy | `continuoushq.com` and `getcontinuous.app` now point at the droplet, and Caddy issues and renews Let's Encrypt certificates from the persisted `caddy_data` volume |
@@ -220,8 +220,8 @@
 | GitHub deploy access | The manual deploy workflow adds the current GitHub runner as a temporary SSH `/32` on the DigitalOcean firewall, then removes it at the end; strict customer-data mode now requires a non-root deploy user before sync |
 | Strategy breadth versus current runtime | The running app is still a narrow persisted core demo; the updated strategy and docs now define the broader product surface that implementation should grow toward |
 | Worker runtime mode | First worker run is a deterministic simulation that writes the durable loop, operator identity, approval request, and audit events without external sends or money movement |
-| Worker selection | Runtime selection now accepts tenant or worker selectors and falls back only when a single active Revenue Worker exists |
-| Worker run lifecycle | Core `worker.run.start` and `worker.run.complete` are now the idempotent lifecycle boundary for Revenue Worker `lead.read`, `lead.classify`, `response.draft`, `run`, and `quote.prepare`, with role-qualified business events kept as the audit log |
+| Worker selection | Runtime selection now accepts tenant or worker selectors and falls back only when a single active Revenue Operations Worker exists |
+| Worker run lifecycle | Core `worker.run.start` and `worker.run.complete` are now the idempotent lifecycle boundary for Revenue Operations Worker `lead.read`, `lead.classify`, `response.draft`, `run`, `quote.prepare`, `payment_link.prepare`, and `continue`, Owner `brief.generate`, Customer Experience `recovery.draft`, and Offer/Pricing `margin.review.prepare`, with role-qualified business events kept as the audit log |
 | Codex app-server boundary | The installed CLI can run over stdio or WebSocket and generate protocol bindings; keep Next MCP for Next.js diagnostics and keep app-server worker commands registry-backed rather than worker-family-specific. Remote bridges should pass authenticated transport context rather than operator identity in payloads |
 | Recovery boundary | App-only rollback is tag-based and destructive database restore is dump-backed; the drill harness makes the app/database compatibility procedure repeatable, but it still must be run on a disposable droplet and attested from its report before customer data |
 | Operator-token scope | The current production token now has hashed catalog metadata, per-command scope enforcement, durable auth session records, deploy-time token-rotation attestations, managed credential inventory, revocation enforcement, and operator session review views; broad use still needs broader operator review policy and customer-specific credential handling |
@@ -237,6 +237,8 @@
 | Worker ledger namespace boundary | Role-specific worker behavior is carried by `worker.role`, event type suffixes, command names, and persisted payloads; business events stay generic as `continuous.worker`, while Core-owned run lifecycle rows use `continuous.core.worker_runs` so new worker families do not require route-shaped source namespaces |
 | Compliance launch boundary | The first Compliance slice can prepare filing packets and approval views, but live agency credentials, broader rule-source coverage, and receipt/rejection capture remain follow-ups before any submission path; legal advice remains blocked |
 | Hardened command-scoped control-plane auth | Catalog-backed control-plane credentials now reject explicit blank commands when command scopes exist, managed credential command lists fail closed on missing command names, malformed catalog payloads have regression coverage, and `/worker` read payloads reject worker-family-specific selector drift |
+| Reserved the legacy bootstrap credential id | Catalog-backed control-plane tokens can no longer claim the non-production legacy bootstrap credential id to regain `worker:*`; catalog credentials must use exact route-qualified command scopes while the local bootstrap wildcard remains limited to non-production legacy token auth |
+| Moved shared worker errors out of Revenue naming | Generic workflow and registry code now use `WorkerUnavailableError` from the worker error module instead of importing a Revenue-named error for platform-wide worker failures |
 | Unified worker HTTP envelopes | `/worker` now uses `POST` for both command and read controls: commands carry `command`, `worker`, `idempotencyKey`, and `config`, while reads carry `view`, `worker`, and `config`, with query-shaped worker reads rejected |
 | Removed local worker operator fallback | `worker.command`, `worker.view`, `continuous.worker.command`, and `continuous.worker.view` never default or accept operator identity from payloads; local CLI calls require `WORKER_OPERATOR_EMAIL`, while authenticated app-server bridges pass operator identity through transport context |
 | Removed runtime operator defaults | `WORKER_OPERATOR_EMAIL` no longer defaults in runtime config, catalog-backed credentials must carry their own `operatorEmail`, and the legacy bootstrap token path now fails closed unless deploy/local transport supplies an explicit operator |
@@ -280,12 +282,12 @@ the database, runs migrations, restarts the app, and checks health.
 
 The strategy now makes the broader entity/workforce/payroll/filing/compliance/
 payment/AI-ops core explicit. Next implementation should start from the
-canonical objects and open workflows rather than letting the Revenue Worker demo
+canonical objects and open workflows rather than letting the Revenue Operations Worker demo
 define the platform boundaries.
 
-### Revenue Worker Runtime
+### Revenue Operations Worker Runtime
 
-The first Revenue Worker slice uses the existing worker, task, event, evidence,
+The first Revenue Operations Worker slice uses the existing worker, task, event, evidence,
 budget, inference, usage, adapter, workflow, worker-run, approval, audit, and UI-contract
 primitives. Each run requires an idempotency key, writes a `worker_runs`
 lifecycle record and a `lead_to_cash` workflow run, binds a configured active
@@ -385,10 +387,11 @@ launch gates without adding Revenue-specific URLs or app-server tool names.
 Offer and Pricing is now a runtime worker family, not just a planned catalog
 candidate. Its first slice is `worker.role=offer_pricing_operations`,
 `command=margin.review.prepare`, and `view: "price_policy"` on `/worker`,
-consuming `revenue.quote_to_pricing` Core refs and writing pricing review
+consuming `revenue.quote_to_pricing` Core refs, starting and completing through
+Core `worker.run.start` / `worker.run.complete`, and writing pricing review
 objects, packet/document/evidence, approval, workflow steps, generated view,
-budget, and audit proof while price publish, quote mutation, and customer sends
-stay blocked.
+budget settlement, and audit proof while price publish, quote mutation, and
+customer sends stay blocked.
 
 Offer and Pricing generated-view naming is pinned to the registered
 `price_policy` view. Margin review and change-order review remain sections
@@ -404,8 +407,11 @@ and `config.priceBookId` from `continuous.worker.schema`.
 Offer and Pricing now has a seeded worker, capability grants, budget account,
 pricing-margin workflow definition, quote-line fixture, margin rule, discount
 policy, source quote evidence packet, runtime handler, integration test, and
-deploy app-server smoke. The public view name is `price_policy`, and all
-operation-specific inputs stay under `config`.
+deploy app-server smoke. The deploy smoke now asserts the persisted
+`continuous.core.worker_runs` row, completed budget usage, and absence of a
+duplicate local `continuous.worker` row for `margin.review.prepare`. The public
+view name is `price_policy`, and all operation-specific inputs stay under
+`config`.
 
 Customer Experience is now a runtime worker family, not just a planned catalog
 candidate. Its first slice is `worker.role=customer_experience_operations`,

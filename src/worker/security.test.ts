@@ -426,6 +426,37 @@ describe("authorizeControlPlaneAccess", () => {
     }
   });
 
+  it("rejects catalog entries that spoof the legacy bootstrap credential id", () => {
+    const tokenCatalogJson = JSON.stringify([
+      {
+        id: "local-bootstrap-control-plane-token",
+        tokenSha256: tokenSha256(),
+        operatorEmail,
+        allowedRoutes: ["worker"],
+        allowedAccess: ["write"],
+        allowedCommands: ["worker:*"],
+      },
+    ]);
+
+    expect(
+      authorizeControlPlaneAccess({
+        enabled: true,
+        appEnv: "production",
+        operatorEmail,
+        authorization: `Bearer ${acceptedCredential}`,
+        tokenCatalogJson,
+        route: "worker",
+        access: "write",
+        command: "run",
+      }),
+    ).toEqual({
+      ok: false,
+      status: 403,
+      code: "control_plane_token_catalog_invalid",
+      message: "Control-plane token catalog entry 1 uses a reserved bootstrap credential id.",
+    });
+  });
+
   it("rejects catalog tokens outside their command scope", () => {
     const tokenCatalogJson = JSON.stringify([
       {

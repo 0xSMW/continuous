@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PlatformUnavailableError } from "../../src/core/errors";
-import { RevenueWorkerUnavailableError } from "../../src/worker/revenue";
+import { WorkerUnavailableError } from "../../src/worker/errors";
 
 const mocks = vi.hoisted(() => ({
   authorizeManagedControlPlaneCredential: vi.fn(),
@@ -49,8 +49,8 @@ vi.mock("../../src/core/control-plane-auth", () => ({
   recordControlPlaneAuthAttempt: mocks.recordControlPlaneAuthAttempt,
 }));
 
-vi.mock("../../src/worker/revenue", () => ({
-  RevenueWorkerUnavailableError: class RevenueWorkerUnavailableError extends Error {
+vi.mock("../../src/worker/errors", () => ({
+  WorkerUnavailableError: class WorkerUnavailableError extends Error {
     status = 503;
     code = "worker_unavailable";
   },
@@ -825,7 +825,7 @@ describe("/workflow route scope", () => {
       ),
     );
     mocks.listApprovals.mockRejectedValueOnce(
-      new RevenueWorkerUnavailableError(
+      new WorkerUnavailableError(
         "Workflow approvals are unavailable.",
         "Workflow approvals are unavailable.",
         503,

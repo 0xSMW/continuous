@@ -11,7 +11,7 @@ raising autonomy or permitting external sends.
 | Operator identity | Yes | Resolved from the authenticated control-plane credential or trusted local `WORKER_OPERATOR_EMAIL`; it is not part of the command payload |
 | `worker.role` | Yes | Explicit lower_snake_case role selector such as `revenue_operations`; no default role is assumed, and route nouns such as `worker` or `api`, hyphenated family names, `api/*-worker` route fragments, or `*_worker` suffixes are invalid |
 | `worker.tenantSlug` | No | Required when an operator email spans tenants |
-| `worker.id` | No | Required when multiple Revenue Workers match |
+| `worker.id` | No | Required when multiple Revenue Operations Workers match |
 | `config.source` plus direct `config.records[]` / `config.record` or `config.reader` | Required for `lead.read` | Reads direct, connection-buffered, or read-only API-polled website-form, inbox, or CRM lead records into persisted Core source object/event/evidence rows |
 | `config.intake`, `config.leadPacket`, or `config.lead` | Required for `run`, `lead.classify`, `response.draft`, and `quote.prepare` | Prefer persisted Core lead source identity or object/event/evidence rows in `config.intake`; direct payloads are explicit operator/test fallbacks |
 | `config.invoiceId`, `config.invoiceObjectId`, or keyed `config.sourceRefs` | Required for `payment_link.prepare` | Tenant-scoped invoice row or invoice object anchor; payment-link prep writes a blocked payment packet, not a provider-side link |
@@ -301,7 +301,7 @@ payload.
 
 ## Registry Entries
 
-The Revenue Worker owns the first registered `/worker` commands. HTTP commands
+The Revenue Operations Worker owns the first registered `/worker` commands. HTTP commands
 and local toolbox aliases resolve to the same handlers and validation rules.
 
 | HTTP command or view | Tool surface | Required config | Idempotency | Side effects | External execution |
@@ -446,7 +446,7 @@ response whose `result.output` contains a blocked payment-link packet:
 
 | Check | Failure code |
 |---|---|
-| One active/training Revenue Worker selected | `worker_not_found` or `worker_selector_ambiguous` |
+| One active/training Revenue Operations Worker selected | `worker_not_found` or `worker_selector_ambiguous` |
 | Operator user exists and is active | `operator_not_found` |
 | Budget account and active policy exist | `worker_budget_missing` or `worker_budget_policy_missing` |
 | Budget capacity remains under policy | `worker_budget_exceeded` |

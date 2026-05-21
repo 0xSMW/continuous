@@ -126,7 +126,7 @@ when worker build tooling needs it.
 
 ## Revenue Operations Worker
 
-The seed data includes the Continuous Revenue Worker for a service-SMB
+The seed data includes the Continuous Revenue Operations Worker for a service-SMB
 lead-to-cash slice. Detailed snapshots are operator-only and require a
 route-scoped operator token from the catalog:
 

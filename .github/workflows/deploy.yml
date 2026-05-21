@@ -1285,6 +1285,24 @@ jobs:
               .data.result.output.handoff.name == "revenue.quote_to_pricing"
             )
           ' >/dev/null
+          APP_SERVER_PRICING_TOOL="$(echo "$APP_SERVER_PRICING_RESPONSE" | /usr/bin/jq -c '.data.contentItems[0].text | fromjson')"
+          APP_SERVER_PRICING_RUN_ID="$(echo "$APP_SERVER_PRICING_TOOL" | /usr/bin/jq -r '.data.result.workerRunId')"
+          APP_SERVER_PRICING_RESERVATION_ID="$(echo "$APP_SERVER_PRICING_TOOL" | /usr/bin/jq -r '.data.result.output.reservationId')"
+          APP_SERVER_PRICING_USAGE_ID="$(echo "$APP_SERVER_PRICING_TOOL" | /usr/bin/jq -r '.data.result.output.usageEventId')"
+          APP_SERVER_PRICING_RUN_ROW="$(
+            psql_db -Atc "select coalesce(source,'') || '|' || coalesce(state::text,'') || '|' || coalesce(mode,'') || '|' || coalesce(data->'input'->>'command','') || '|' || coalesce(data->'output'->>'command','') || '|' || coalesce(data->'output'->>'externalPublish','') || '|' || coalesce(data->'completion'->'budget'->>'state','') || '|' || coalesce(data->'completion'->'budget'->>'reservationId','') || '|' || coalesce(data->'completion'->'budget'->>'usageEventId','') from worker_runs where id = '$APP_SERVER_PRICING_RUN_ID'::uuid;"
+          )"
+          if [ "$APP_SERVER_PRICING_RUN_ROW" != "continuous.core.worker_runs|done|simulation|margin.review.prepare|margin.review.prepare|blocked|used|$APP_SERVER_PRICING_RESERVATION_ID|$APP_SERVER_PRICING_USAGE_ID" ]; then
+            echo "Unexpected app-server Core-backed Offer/Pricing run row: $APP_SERVER_PRICING_RUN_ROW" >&2
+            exit 1
+          fi
+          APP_SERVER_PRICING_LOCAL_RUN_COUNT="$(
+            psql_db -Atc "select count(*) from worker_runs where source = 'continuous.worker' and idempotency_key = '$APP_SERVER_PRICING_KEY';"
+          )"
+          if [ "$APP_SERVER_PRICING_LOCAL_RUN_COUNT" != "0" ]; then
+            echo "Offer/Pricing smoke wrote a local continuous.worker run: $APP_SERVER_PRICING_LOCAL_RUN_COUNT" >&2
+            exit 1
+          fi
 
           APP_SERVER_PRICING_VIEW_PAYLOAD='{"tool":"continuous.worker.view","arguments":{"view":"price_policy","worker":{"role":"offer_pricing_operations","tenantSlug":"continuous-demo"},"config":{"quoteObjectId":"33333333-3333-4333-8333-000000000004","priceBookId":"33333333-3333-4333-8333-000000000014"}},"callId":"deploy-app-server-pricing-view-smoke","threadId":"deploy-smoke","turnId":"deploy-smoke"}'
           APP_SERVER_PRICING_VIEW_RESPONSE="$(

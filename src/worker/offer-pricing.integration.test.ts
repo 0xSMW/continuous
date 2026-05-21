@@ -1,9 +1,11 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 
+import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { pool } from "../db/client";
+import { db, pool } from "../db/client";
+import { budgetReservations, usageEvents, workerRuns } from "../db/schema";
 import { executeAppServerWorkerTool } from "./app-server-tools";
 import { executeWorkerCommand, executeWorkerView } from "./registry";
 
@@ -140,6 +142,49 @@ maybeDescribe("Offer and Pricing Worker integration", () => {
     expect(objectValue(output.handoff).name).toBe("revenue.quote_to_pricing");
     expect(objectValue(output.marginVerdict).state).toBe("pass");
     expect(objectValue(output.discountVerdict).state).toBe("pass");
+    expectGeneratedId(output.reservationId);
+    expectGeneratedId(output.usageEventId);
+
+    const [run] = await db
+      .select()
+      .from(workerRuns)
+      .where(eq(workerRuns.id, stringValue(result.workerRunId)))
+      .limit(1);
+    const [localRun] = await db
+      .select({ id: workerRuns.id })
+      .from(workerRuns)
+      .where(
+        and(
+          eq(workerRuns.source, "continuous.worker"),
+          eq(workerRuns.idempotencyKey, idempotencyKey),
+        ),
+      )
+      .limit(1);
+    const [reservation] = await db
+      .select()
+      .from(budgetReservations)
+      .where(eq(budgetReservations.id, stringValue(output.reservationId)))
+      .limit(1);
+    const [usage] = await db
+      .select()
+      .from(usageEvents)
+      .where(eq(usageEvents.id, stringValue(output.usageEventId)))
+      .limit(1);
+
+    expect(run?.source).toBe("continuous.core.worker_runs");
+    expect(run?.state).toBe("done");
+    expect(run?.mode).toBe("simulation");
+    expect(objectValue(objectValue(run?.data).input).command).toBe("margin.review.prepare");
+    expect(objectValue(run?.data).command).toBe("margin.review.prepare");
+    expect(objectValue(objectValue(run?.data).budget).reservationId).toBe(output.reservationId);
+    expect(objectValue(objectValue(run?.data).completion).state).toBe("done");
+    expect(objectValue(objectValue(objectValue(run?.data).completion).budget).usageEventId).toBe(
+      output.usageEventId,
+    );
+    expect(localRun).toBeUndefined();
+    expect(reservation?.state).toBe("used");
+    expect(usage?.reservationId).toBe(output.reservationId);
+    expect(usage?.taskId).toBe(result.taskId);
 
     const view = await executeWorkerView({
       view: "price_policy",
@@ -168,5 +213,6 @@ maybeDescribe("Offer and Pricing Worker integration", () => {
     expect(replay.created).toBe(false);
     expect(replay.workerRunId).toBe(result.workerRunId);
     expect(replay.pricePolicyViewId).toBe(result.pricePolicyViewId);
+    expect(objectValue(replay.output).usageEventId).toBe(output.usageEventId);
   });
 });

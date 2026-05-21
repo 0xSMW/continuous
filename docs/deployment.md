@@ -204,7 +204,7 @@ exercises those Core lifecycle commands through `POST /app-server`, and
 
 For the HTTPS worker API path, call `POST /worker` with `command`, `worker`,
 `config`, and `idempotencyKey` fields as required by the command plus the bearer
-token from `/opt/continuous/.env`. Revenue Worker runs should first create the
+token from `/opt/continuous/.env`. Revenue Operations Worker runs should first create the
 lead object, `lead.received` event, and source snapshot through
 `command: "lead.read"`, then pass the stable source selector under `config.intake`:
 

@@ -6,6 +6,7 @@ import {
 } from "../core/approvals";
 import { PlatformUnavailableError } from "../core/errors";
 import type { JsonObject } from "../db/schema";
+import { WorkerUnavailableError } from "./errors";
 import {
   classifyRevenueLead,
   continueRevenueWorker,
@@ -15,7 +16,6 @@ import {
   prepareRevenuePaymentLink,
   prepareRevenueQuote,
   readRevenueLeads,
-  RevenueWorkerUnavailableError,
   runRevenueWorker,
 } from "./revenue";
 import {
@@ -3182,7 +3182,7 @@ export function resolveWorkerTarget(target: WorkerTargetInput = {}): WorkerTarge
 }
 
 export function workerErrorStatus(error: unknown, fallbackCode: string) {
-  if (error instanceof RevenueWorkerUnavailableError || error instanceof PlatformUnavailableError) {
+  if (error instanceof WorkerUnavailableError || error instanceof PlatformUnavailableError) {
     return {
       status: error.status,
       code: error.code,

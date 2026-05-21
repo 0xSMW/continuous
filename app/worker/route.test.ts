@@ -1300,7 +1300,7 @@ describe("/worker route", () => {
       expect(body.error).toEqual({
         code: "invalid_worker_target",
         message:
-          "worker.role must be a lower_snake_case role identifier such as revenue_operations; do not use route names, family-worker names, or URL fragments.",
+          "worker.role must be a lower_snake_case role identifier such as field_operations; do not use route names, family-worker names, or URL fragments.",
       });
     }
     expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
@@ -1346,7 +1346,7 @@ describe("/worker route", () => {
       expect(body.error).toEqual({
         code: "invalid_worker_command_envelope",
         message:
-          "Worker command and view names must be registered lower_snake_case or dotted operation identifiers such as lead.read or quote.prepare; do not use URL paths, route names, family-worker names, or query strings.",
+          "Worker command and view names must be registered lower_snake_case or dotted operation identifiers such as task.prepare or review.packet; do not use URL paths, route names, family-worker names, or query strings.",
       });
     }
     expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();

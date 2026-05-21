@@ -77,8 +77,8 @@ fi
 api_segment="api"
 worker_segment="worker"
 workers_segment="${worker_segment}s"
-old_revenue_segment="$(printf '%s-%s' revenue "$worker_segment")"
-old_worker_role_path="$(printf '/%s/%s' "$worker_segment" revenue_operations)"
+old_family_segment="$(printf '%s-%s' legacy "$worker_segment")"
+old_worker_role_path="$(printf '/%s/%s' "$worker_segment" legacy_operations)"
 
 assert_old_worker_path_absent() {
   old_path="$1"
@@ -87,7 +87,7 @@ assert_old_worker_path_absent() {
       -o "$worker_smoke_out" -w '%{http_code}' \
       -X POST \
       -H 'content-type: application/json' \
-      --data '{"command":"run","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{}}' \
+      --data '{"command":"run","worker":{"role":"legacy_operations","tenantSlug":"continuous-demo"},"config":{}}' \
       "https://${SITE_HOST}${old_path}"
   )"
 
@@ -102,9 +102,9 @@ assert_old_worker_path_absent() {
   esac
 }
 
-assert_old_worker_path_absent "/${api_segment}/${old_revenue_segment}"
-assert_old_worker_path_absent "/${api_segment}/${old_revenue_segment}/run"
-assert_old_worker_path_absent "/${api_segment}/${workers_segment}/revenue"
+assert_old_worker_path_absent "/${api_segment}/${old_family_segment}"
+assert_old_worker_path_absent "/${api_segment}/${old_family_segment}/run"
+assert_old_worker_path_absent "/${api_segment}/${workers_segment}/legacy"
 assert_old_worker_path_absent "$old_worker_role_path"
 
 app_server_status="$(

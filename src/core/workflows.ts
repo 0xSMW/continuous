@@ -17,7 +17,7 @@ import {
   type Json,
   type JsonObject,
 } from "../db/schema";
-import { RevenueWorkerUnavailableError } from "../worker/revenue";
+import { WorkerUnavailableError } from "../worker/errors";
 import { executeWorkerCommand, type WorkerCommandResult } from "../worker/registry";
 import { PlatformUnavailableError } from "./errors";
 import { scanObligationsForOperator } from "./obligations";
@@ -373,7 +373,7 @@ function optionalDate(value: unknown, field: string) {
   const date = new Date(string);
 
   if (Number.isNaN(date.getTime())) {
-    throw new RevenueWorkerUnavailableError(
+    throw new WorkerUnavailableError(
       "workflow_step_date_invalid",
       `${field} must be an ISO date string.`,
       400,
@@ -409,7 +409,7 @@ function workflowWorkerCommandInput(
   const role = stringValue(workerInput.role);
 
   if (!command) {
-    throw new RevenueWorkerUnavailableError(
+    throw new WorkerUnavailableError(
       "workflow_worker_command_missing",
       "Workflow worker_command steps require input.command.",
       400,
@@ -417,7 +417,7 @@ function workflowWorkerCommandInput(
   }
 
   if (!role) {
-    throw new RevenueWorkerUnavailableError(
+    throw new WorkerUnavailableError(
       "workflow_worker_role_missing",
       "Workflow worker_command steps require input.worker.role.",
       400,
@@ -427,7 +427,7 @@ function workflowWorkerCommandInput(
   const tenantSlug = stringValue(workerInput.tenantSlug);
 
   if (tenantSlug && tenantSlug !== operator.tenantSlug) {
-    throw new RevenueWorkerUnavailableError(
+    throw new WorkerUnavailableError(
       "workflow_worker_tenant_mismatch",
       "Workflow worker_command steps cannot target a different tenant.",
       403,
@@ -450,7 +450,7 @@ function jsonValue(value: unknown): Json {
   try {
     return JSON.parse(JSON.stringify(value ?? null)) as Json;
   } catch {
-    throw new RevenueWorkerUnavailableError(
+    throw new WorkerUnavailableError(
       "workflow_worker_result_invalid",
       "Workflow worker_command results must be JSON-serializable.",
       500,
@@ -487,7 +487,7 @@ function errorData(error: unknown, attempt: number, maxAttempts: number): JsonOb
   return {
     message: error instanceof Error ? error.message : "Unknown workflow step execution error.",
     code:
-      error instanceof RevenueWorkerUnavailableError
+      error instanceof WorkerUnavailableError
         ? error.code
         : error instanceof WorkflowStepLeaseLostError
           ? error.code
@@ -589,7 +589,7 @@ async function completeWorkflowStep(input: {
   }
 
   if (!executableWorkflowStepKinds.has(claimedStep.kind)) {
-    throw new RevenueWorkerUnavailableError(
+    throw new WorkerUnavailableError(
       "workflow_step_handler_missing",
       `Workflow step kind ${claimedStep.kind} does not have a registered executor.`,
       409,
@@ -628,7 +628,7 @@ async function completeWorkflowStep(input: {
       .for("update", { of: workflowRuns });
 
     if (!run) {
-      throw new RevenueWorkerUnavailableError(
+      throw new WorkerUnavailableError(
         "workflow_run_not_found",
         "No workflow run matches this step.",
         404,
@@ -658,7 +658,7 @@ async function completeWorkflowStep(input: {
           .for("update", { of: tasks });
 
         if (!taskRow) {
-          throw new RevenueWorkerUnavailableError(
+          throw new WorkerUnavailableError(
             "workflow_step_task_not_found",
             "Workflow step task does not exist in this tenant.",
             404,
@@ -686,7 +686,7 @@ async function completeWorkflowStep(input: {
       }
 
       if (!step.capabilityId) {
-        throw new RevenueWorkerUnavailableError(
+        throw new WorkerUnavailableError(
           "workflow_step_capability_required",
           "Capability execution steps require capabilityId.",
           400,
@@ -700,7 +700,7 @@ async function completeWorkflowStep(input: {
         .limit(1);
 
       if (!capability) {
-        throw new RevenueWorkerUnavailableError(
+        throw new WorkerUnavailableError(
           "workflow_step_capability_not_found",
           "Workflow step capability does not match an active capability.",
           404,
@@ -724,7 +724,7 @@ async function completeWorkflowStep(input: {
         .limit(1);
 
       if (!grant) {
-        throw new RevenueWorkerUnavailableError(
+        throw new WorkerUnavailableError(
           "workflow_step_capability_grant_missing",
           `No active grant allows ${executionActor.ref} to use ${capability.key}.`,
           403,
@@ -762,7 +762,7 @@ async function completeWorkflowStep(input: {
 
     if (currentFromState !== step.toState) {
       if (step.fromState && currentFromState !== step.fromState) {
-        throw new RevenueWorkerUnavailableError(
+        throw new WorkerUnavailableError(
           "workflow_step_state_mismatch",
           `Workflow step expected ${step.fromState}, but run is ${currentFromState}.`,
           409,
@@ -770,7 +770,7 @@ async function completeWorkflowStep(input: {
       }
 
       if (!canTransitionWorkflow(definitionView, currentFromState, step.toState)) {
-        throw new RevenueWorkerUnavailableError(
+        throw new WorkerUnavailableError(
           "workflow_step_transition_invalid",
           `Workflow ${definition.key} cannot execute ${currentFromState} to ${step.toState}.`,
           409,
@@ -1429,7 +1429,7 @@ async function completeWorkflowStep(input: {
 
     if (step.kind === "worker_command") {
       if (!input.workerCommandExecution) {
-        throw new RevenueWorkerUnavailableError(
+        throw new WorkerUnavailableError(
           "workflow_worker_command_runner_missing",
           "Workflow worker_command steps require a command-runner result.",
           500,
@@ -1788,7 +1788,7 @@ export async function startWorkflowRun(input: {
     .limit(1);
 
   if (!definition) {
-    throw new RevenueWorkerUnavailableError(
+    throw new WorkerUnavailableError(
       "workflow_definition_not_found",
       "No active workflow definition matches this key.",
       404,
@@ -1800,7 +1800,7 @@ export async function startWorkflowRun(input: {
   const initialState = input.initialState ?? orderedStates[0] ?? "draft";
 
   if (!isKnownWorkflowState(definitionView, initialState)) {
-    throw new RevenueWorkerUnavailableError(
+    throw new WorkerUnavailableError(
       "workflow_state_unknown",
       `Workflow definition ${definition.key} does not define state ${initialState}.`,
       400,
@@ -1996,7 +1996,7 @@ export async function transitionWorkflowRun(input: {
       .limit(1);
 
     if (!row) {
-      throw new RevenueWorkerUnavailableError(
+      throw new WorkerUnavailableError(
         "workflow_run_not_found",
         "No workflow run matches this id.",
         404,
@@ -2036,7 +2036,7 @@ export async function transitionWorkflowRun(input: {
         (existingHash && existingHash !== inputHash) ||
         (!existingHash && stringValue(existingInput.toState) !== input.toState)
       ) {
-        throw new RevenueWorkerUnavailableError(
+        throw new WorkerUnavailableError(
           "workflow_transition_idempotency_conflict",
           "A workflow transition already exists for this idempotency key with different input.",
           409,
@@ -2058,7 +2058,7 @@ export async function transitionWorkflowRun(input: {
     }
 
     if (!isKnownWorkflowState(definition, input.toState)) {
-      throw new RevenueWorkerUnavailableError(
+      throw new WorkerUnavailableError(
         "workflow_state_unknown",
         `Workflow definition ${definition.key} does not define state ${input.toState}.`,
         400,
@@ -2066,7 +2066,7 @@ export async function transitionWorkflowRun(input: {
     }
 
     if (!canTransitionWorkflow(definition, row.run.state, input.toState)) {
-      throw new RevenueWorkerUnavailableError(
+      throw new WorkerUnavailableError(
         "workflow_transition_invalid",
         `Workflow ${definition.key} cannot transition from ${row.run.state} to ${input.toState}.`,
         409,

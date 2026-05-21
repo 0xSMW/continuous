@@ -1,6 +1,6 @@
 # Revenue Operations Worker Expansion
 
-The current Revenue Worker is a deterministic persisted runtime. It proves
+The current Revenue Operations Worker is a deterministic persisted runtime. It proves
 worker identity, capability grants, task ownership, Core worker-run budget
 reservation and usage settlement, inference logging, event emission, evidence capture,
 adapter receipts, approval requests, audit events, operator decisions, approval

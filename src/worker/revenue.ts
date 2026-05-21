@@ -46,6 +46,7 @@ import {
 import { approvedAdapterExecutionReceiptFor } from "../core/adapters";
 import { recordExternalActionForOperator } from "../core/primitives";
 import { completeCoreWorkerRun, startCoreWorkerRun } from "../core/worker-runs";
+import { WorkerUnavailableError } from "./errors";
 import { pollLeadSourceConnection, type LeadSourcePollResult } from "./lead-source-connectors";
 
 type Database = typeof defaultDb;
@@ -78,16 +79,8 @@ export type RevenueWorkerSelector = {
   role?: string;
 };
 
-export class RevenueWorkerUnavailableError extends Error {
-  constructor(
-    readonly code: string,
-    message: string,
-    readonly status = 409,
-  ) {
-    super(message);
-    this.name = "RevenueWorkerUnavailableError";
-  }
-}
+export { WorkerUnavailableError };
+export const RevenueWorkerUnavailableError = WorkerUnavailableError;
 
 export type RevenueWorkerSnapshot = {
   worker: {

@@ -4,6 +4,7 @@ import { and, count, desc, eq, sql } from "drizzle-orm";
 
 import { PlatformUnavailableError } from "../core/errors";
 import { loadOperatorContext } from "../core/operators";
+import { completeCoreWorkerRun, startCoreWorkerRun } from "../core/worker-runs";
 import { db as defaultDb } from "../db/client";
 import {
   approvalRequests,
@@ -38,6 +39,7 @@ type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 export const offerPricingWorkerRole = "offer_pricing_operations";
 
 const source = "continuous.worker";
+const coreWorkerRunSource = "continuous.core.worker_runs";
 const marginReviewCapabilityKey = "margin.review.prepare";
 const marginReviewWorkflowKey = "pricing_margin_review";
 const marginReviewUnits = 2400;
@@ -289,7 +291,13 @@ function hashObject(value: unknown) {
 }
 
 function outputData(data: JsonObject) {
-  return objectValue(data.output);
+  const output = objectValue(data.output);
+
+  if (Object.keys(output).length > 0) {
+    return output;
+  }
+
+  return objectValue(objectValue(data.pendingCompletion).output);
 }
 
 function firstString(...values: unknown[]) {
@@ -942,38 +950,147 @@ export async function prepareOfferPricingMarginReview(input: {
     policyRefs: handoff.policyRefs,
     quoteLines: handoff.quoteLines,
   });
+  const [legacyRun] = await db
+    .select()
+    .from(workerRuns)
+    .where(
+      and(
+        eq(workerRuns.tenantId, context.worker.tenantId),
+        eq(workerRuns.source, source),
+        eq(workerRuns.idempotencyKey, input.idempotencyKey),
+      ),
+    )
+    .limit(1);
+
+  if (legacyRun) {
+    const existingInput = objectValue(objectValue(legacyRun.data).input);
+    const existingHash = optionalString(existingInput.inputHash);
+
+    if (existingHash && existingHash !== inputHash) {
+      throw new PlatformUnavailableError(
+        "worker_idempotency_conflict",
+        "An Offer and Pricing margin review already exists for this idempotency key with different input.",
+        409,
+      );
+    }
+
+    const output = outputData(objectValue(legacyRun.data));
+    const snapshot = await getOfferPricingWorkerSnapshot({
+      tenantSlug: input.tenantSlug,
+      workerId: input.workerId,
+      db,
+    });
+
+    return {
+      created: false,
+      idempotencyKey: input.idempotencyKey,
+      workerRunId: legacyRun.id,
+      taskId: legacyRun.taskId,
+      eventId: legacyRun.eventId,
+      pricingReviewObjectId: nullishString(output.pricingReviewObjectId),
+      approvalRequestId: nullishString(output.approvalRequestId),
+      evidenceId: nullishString(output.evidenceId),
+      packetId: nullishString(output.packetId),
+      documentId: nullishString(output.documentId),
+      workflowRunId: nullishString(output.workflowRunId),
+      workflowStepIds: stringList(output.workflowStepIds),
+      pricePolicyViewId: nullishString(output.pricePolicyViewId),
+      externalExecution: "blocked",
+      externalPublish: "blocked",
+      externalSend: false,
+      output,
+      snapshot,
+    };
+  }
+
+  const coreRun = await startCoreWorkerRun({
+    operatorEmail: input.operatorEmail,
+    tenantSlug: context.worker.tenantSlug,
+    idempotencyKey: input.idempotencyKey,
+    worker: {
+      id: context.worker.id,
+      role: offerPricingWorkerRole,
+    },
+    command: "margin.review.prepare",
+    mode: "simulation",
+    capabilityId: context.capabilityId,
+    budgetAccountId: context.budgetAccountId,
+    units: marginReviewUnits,
+    input: {
+      inputHash,
+      config,
+      sourceRefs: handoff.sourceRefs,
+      policyRefs: handoff.policyRefs,
+      quoteObjectId: handoff.quote.id,
+      evidencePacketId: handoff.evidencePacket.id,
+      quoteLines: handoff.quoteLines,
+    },
+    policy: {
+      externalExecution: "blocked",
+      externalPublish: "blocked",
+      externalSend: "blocked",
+    },
+    evidence: {
+      command: "margin.review.prepare",
+      required: ["revenue_quote_handoff", "price_policy_snapshot", "pricing_review_packet"],
+      externalExecution: "blocked",
+      externalPublish: "blocked",
+      externalSend: false,
+    },
+    db,
+  });
+  const coreBudget = objectValue(coreRun.budget);
+  const coreReservationId = nullishString(coreBudget.reservationId);
   const now = new Date();
 
   const result = await db.transaction(async (tx) => {
     await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${source}:offer_pricing:${input.idempotencyKey}`}))`,
+      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${coreWorkerRunSource}:offer_pricing:${input.idempotencyKey}`}))`,
     );
 
-    const [existingRun] = await tx
+    const [run] = await tx
       .select()
       .from(workerRuns)
       .where(
         and(
           eq(workerRuns.tenantId, context.worker.tenantId),
-          eq(workerRuns.source, source),
-          eq(workerRuns.idempotencyKey, input.idempotencyKey),
+          eq(workerRuns.id, coreRun.workerRunId),
         ),
       )
       .limit(1);
 
-    if (existingRun) {
-      const existingInput = objectValue(objectValue(existingRun.data).input);
-      const existingHash = optionalString(existingInput.inputHash);
+    if (!run) {
+      throw new PlatformUnavailableError(
+        "worker_run_missing",
+        "Core worker.run.start did not return a persisted Offer and Pricing worker run.",
+        409,
+      );
+    }
 
-      if (existingHash && existingHash !== inputHash) {
-        throw new PlatformUnavailableError(
-          "worker_idempotency_conflict",
-          "An Offer and Pricing margin review already exists for this idempotency key with different input.",
-          409,
-        );
-      }
+    const runData = objectValue(run.data);
+    const existingInput = objectValue(runData.input);
+    const existingRequest = objectValue(existingInput.request);
+    const existingHash = optionalString(existingRequest.inputHash) ?? optionalString(existingInput.inputHash);
 
-      return { status: "replay" as const, replay: existingRun };
+    if (
+      optionalString(existingInput.command) !== "margin.review.prepare" ||
+      run.mode !== "simulation" ||
+      (existingHash && existingHash !== inputHash)
+    ) {
+      throw new PlatformUnavailableError(
+        "worker_idempotency_conflict",
+        "An Offer and Pricing margin review already exists for this idempotency key with different input.",
+        409,
+      );
+    }
+
+    const existingOutput = outputData(runData);
+
+    if (
+      optionalString(existingOutput.command) === "margin.review.prepare" ||
+      (run.state !== "running" && optionalString(runData.command) === "margin.review.prepare")
+    ) {
+      return { status: "replay" as const, replay: run };
     }
 
     const [definition] = await tx
@@ -1139,31 +1256,6 @@ export async function prepareOfferPricingMarginReview(input: {
         updatedAt: now,
       })
       .returning({ id: tasks.id });
-
-    const [run] = await tx
-      .insert(workerRuns)
-      .values({
-        tenantId: context.worker.tenantId,
-        workerId: context.worker.id,
-        taskId: task.id,
-        capabilityId: context.capabilityId,
-        budgetAccountId: context.budgetAccountId,
-        source,
-        idempotencyKey: input.idempotencyKey,
-        state: "running",
-        mode: "simulation",
-        data: {
-          input: {
-            command: "margin.review.prepare",
-            inputHash,
-            config,
-          },
-        },
-        startedAt: now,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning({ id: workerRuns.id });
 
     const [workflowRun] = await tx
       .insert(workflowRuns)
@@ -1482,28 +1574,13 @@ export async function prepareOfferPricingMarginReview(input: {
       now,
     });
 
-    await tx.insert(usageEvents).values({
-      tenantId: context.worker.tenantId,
-      accountId: context.budgetAccountId,
-      taskId: task.id,
-      capabilityId: context.capabilityId,
-      actorType: "worker",
-      actorId: context.worker.id,
-      units: marginReviewUnits,
-      data: {
-        command: "margin.review.prepare",
-        mode: "simulation",
-        workerRunId: run.id,
-        workflowRunId: workflowRun.id,
-      },
-      createdAt: now,
-    });
-
     const output = {
       command: "margin.review.prepare",
       workerRunId: run.id,
       taskId: task.id,
       eventId: event.id,
+      reservationId: coreReservationId,
+      usageEventId: null,
       pricingReviewObjectId: reviewObject.id,
       approvalRequestId: approval.id,
       evidenceId: traceEvidence.id,
@@ -1547,17 +1624,29 @@ export async function prepareOfferPricingMarginReview(input: {
     await tx
       .update(workerRuns)
       .set({
+        taskId: task.id,
         eventId: event.id,
-        state: "done",
-        endedAt: now,
         updatedAt: now,
         data: {
-          input: {
-            command: "margin.review.prepare",
-            inputHash,
-            config,
-          },
+          ...runData,
+          businessEventId: event.id,
+          eventId: event.id,
+          command: "margin.review.prepare",
           output,
+          reservationId: coreReservationId,
+          usageEventId: null,
+          pricingReviewObjectId: reviewObject.id,
+          approvalRequestId: approval.id,
+          evidenceId: traceEvidence.id,
+          packetId: packet.id,
+          documentId: document.id,
+          workflowRunId: workflowRun.id,
+          workflowStepIds,
+          pricePolicyViewId,
+          pendingCompletion: {
+            output,
+          },
+          externalExecution: "blocked",
         },
       })
       .where(eq(workerRuns.id, run.id));
@@ -1600,9 +1689,75 @@ export async function prepareOfferPricingMarginReview(input: {
     };
   });
 
+  const persistSettledOutput = async (workerRunId: string, output: JsonObject, completionBudget: JsonObject) => {
+    const settledOutput = {
+      ...output,
+      reservationId: nullishString(completionBudget.reservationId) ?? nullishString(output.reservationId),
+      usageEventId: nullishString(completionBudget.usageEventId) ?? nullishString(output.usageEventId),
+    } as JsonObject;
+    const [completedRun] = await db
+      .select({ data: workerRuns.data })
+      .from(workerRuns)
+      .where(eq(workerRuns.id, workerRunId))
+      .limit(1);
+
+    await db
+      .update(workerRuns)
+      .set({
+        data: {
+          ...objectValue(completedRun?.data),
+          output: settledOutput,
+          reservationId: nullishString(settledOutput.reservationId),
+          usageEventId: nullishString(settledOutput.usageEventId),
+        },
+        updatedAt: new Date(),
+      })
+      .where(eq(workerRuns.id, workerRunId));
+
+    return settledOutput;
+  };
+
+  const settleCoreRun = async (workerRunId: string, output: JsonObject) => {
+    const completion = await completeCoreWorkerRun({
+      operatorEmail: input.operatorEmail,
+      tenantSlug: context.worker.tenantSlug,
+      idempotencyKey: input.idempotencyKey,
+      worker: {
+        id: context.worker.id,
+        role: offerPricingWorkerRole,
+      },
+      workerRunId,
+      state: "done",
+      reason: "Offer and Pricing Worker prepared a margin review packet with external publish blocked.",
+      output,
+      costUsd: 0,
+      evidence: {
+        command: "margin.review.prepare",
+        eventId: nullishString(output.eventId),
+        evidenceId: nullishString(output.evidenceId),
+        packetId: nullishString(output.packetId),
+        documentId: nullishString(output.documentId),
+        approvalRequestId: nullishString(output.approvalRequestId),
+        workflowRunId: nullishString(output.workflowRunId),
+        externalExecution: "blocked",
+        externalPublish: "blocked",
+        externalSend: false,
+      },
+      db,
+    });
+
+    return persistSettledOutput(workerRunId, output, objectValue(completion.budget));
+  };
+
   if (result.status === "replay") {
     const replay = result.replay;
-    const output = outputData(objectValue(replay.data));
+    const output = replay.state === "running"
+      ? await settleCoreRun(replay.id, outputData(objectValue(replay.data)))
+      : await persistSettledOutput(
+          replay.id,
+          outputData(objectValue(replay.data)),
+          objectValue(objectValue(objectValue(replay.data).completion).budget),
+        );
     const snapshot = await getOfferPricingWorkerSnapshot({
       tenantSlug: input.tenantSlug,
       workerId: input.workerId,
@@ -1614,7 +1769,7 @@ export async function prepareOfferPricingMarginReview(input: {
       idempotencyKey: input.idempotencyKey,
       workerRunId: replay.id,
       taskId: replay.taskId,
-      eventId: replay.eventId,
+      eventId: nullishString(output.eventId) ?? replay.eventId,
       pricingReviewObjectId: nullishString(output.pricingReviewObjectId),
       approvalRequestId: nullishString(output.approvalRequestId),
       evidenceId: nullishString(output.evidenceId),
@@ -1631,6 +1786,8 @@ export async function prepareOfferPricingMarginReview(input: {
     };
   }
 
+  const settledOutput = await settleCoreRun(result.workerRunId, result.output);
+
   const snapshot = await getOfferPricingWorkerSnapshot({
     tenantSlug: input.tenantSlug,
     workerId: input.workerId,
@@ -1643,6 +1800,7 @@ export async function prepareOfferPricingMarginReview(input: {
     externalExecution: "blocked",
     externalPublish: "blocked",
     externalSend: false,
+    output: settledOutput,
     snapshot,
   };
 }

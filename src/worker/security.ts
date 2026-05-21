@@ -51,6 +51,7 @@ type ControlPlaneCredential = {
   access: string[];
   commands: string[];
   expiresAt?: string;
+  legacyBootstrap?: boolean;
 };
 
 export type ControlPlaneScopeResult =
@@ -141,6 +142,8 @@ function allowsPattern(patterns: string[], value: string) {
   });
 }
 
+const localBootstrapCredentialId = "local-bootstrap-control-plane-token";
+
 function allowsCommand(credential: ControlPlaneCredential, route: ControlPlaneRoute, command: string) {
   const commandKey = `${route}:${command}`;
 
@@ -149,7 +152,7 @@ function allowsCommand(credential: ControlPlaneCredential, route: ControlPlaneRo
   }
 
   return (
-    credential.id === "local-bootstrap-control-plane-token" &&
+    credential.legacyBootstrap === true &&
     route === "worker" &&
     credential.commands.includes("worker:*")
   );
@@ -231,6 +234,12 @@ function normalizeTokenCatalog(input: {
       stringValue(definition.name) ??
       `control-plane-token-${index + 1}`;
 
+    if (id === localBootstrapCredentialId) {
+      throw new Error(
+        `Control-plane token catalog entry ${index + 1} uses a reserved bootstrap credential id.`,
+      );
+    }
+
     return {
       id,
       token,
@@ -255,7 +264,7 @@ function localBootstrapCredential(input: {
   allowedWorkerRoles?: string | null;
 }): ControlPlaneCredential {
   return {
-    id: "local-bootstrap-control-plane-token",
+    id: localBootstrapCredentialId,
     token: input.expectedToken,
     operatorEmail: input.operatorEmail,
     scope: controlPlaneScopeFromEnv({
@@ -265,6 +274,7 @@ function localBootstrapCredential(input: {
     routes: ["worker"],
     access: ["read", "write"],
     commands: ["worker:*"],
+    legacyBootstrap: true,
   };
 }
 

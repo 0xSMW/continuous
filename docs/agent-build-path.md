@@ -75,7 +75,7 @@ worker-role scope when needed through transport context after control-plane
 auth. `POST /app-server` accepts only dynamic tool-call fields at the top
 level, so operation-specific Core and worker inputs stay inside
 `arguments.config`. The
-Revenue Worker now records the
+Revenue Operations Worker now records the
 configured operator, active capability grant, approval request, audit event, and
 evidence before any external action can be approved. The shared approval service
 decides worker and workflow approvals by subject so new worker families do not

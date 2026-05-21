@@ -1709,7 +1709,7 @@ describe("/app-server route", () => {
         error: {
           code: "invalid_app_server_tool_call",
           message:
-            "worker.role must be a lower_snake_case role identifier such as revenue_operations; do not use route names, family-worker names, or URL fragments.",
+            "worker.role must be a lower_snake_case role identifier such as field_operations; do not use route names, family-worker names, or URL fragments.",
         },
       });
     }
@@ -1763,7 +1763,7 @@ describe("/app-server route", () => {
         error: {
           code: "invalid_app_server_tool_call",
           message:
-            "Worker command and view names must be registered lower_snake_case or dotted operation identifiers such as lead.read or quote.prepare; do not use URL paths, route names, family-worker names, or query strings.",
+            "Worker command and view names must be registered lower_snake_case or dotted operation identifiers such as task.prepare or review.packet; do not use URL paths, route names, family-worker names, or query strings.",
         },
       });
     }

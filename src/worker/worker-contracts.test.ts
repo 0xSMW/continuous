@@ -353,6 +353,9 @@ describe("future worker contracts", () => {
     const paymentLinkContractSchema = workerContractForRole("revenue_operations")?.commands.find(
       (command) => command.name === "payment_link.prepare",
     )?.configSchema;
+    const ownerCommandNames = workerContractForRole("owner_chief_of_staff")?.commands.map(
+      (command) => command.name,
+    );
 
     expect(workerContracts.map((contract) => contract.role)).toEqual(contractRoleList);
     expect(new Set(workerContracts.map((contract) => contract.apiRoute))).toEqual(
@@ -366,6 +369,13 @@ describe("future worker contracts", () => {
     expect(workerContractForRole("revenue_operations")?.contractPath).toBe(
       "docs/revenue-operations-worker-v1-contract.md",
     );
+    expect(ownerCommandNames).toEqual([
+      "brief.generate",
+      "decision_queue.prepare",
+      "anomaly.triage",
+      "approval.decide",
+      "continue",
+    ]);
     expect(revenueFollowUps.map((command) => command.name)).toEqual([]);
     expect(new Set(revenueFollowUps.map((command) => command.apiRoute))).toEqual(
       new Set(),

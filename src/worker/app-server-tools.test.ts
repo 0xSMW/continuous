@@ -310,6 +310,16 @@ describe("app-server worker tools", () => {
     ).toBe(true);
     expect(
       registry.commands.some(
+        (command) =>
+          command.role === "owner_chief_of_staff" &&
+          command.name === "continue" &&
+          command.apiRoute === "/worker" &&
+          command.configSchema?.required?.includes("approvalId") &&
+          command.externalExecution === "blocked",
+      ),
+    ).toBe(true);
+    expect(
+      registry.commands.some(
         (command) => command.role === "dispatch_operations" && command.name === "schedule.propose",
       ),
     ).toBe(true);
@@ -560,7 +570,7 @@ describe("app-server worker tools", () => {
           },
         }),
       ).rejects.toThrow(
-        "worker.role must be a lower_snake_case role identifier such as revenue_operations; do not use route names, family-worker names, or URL fragments.",
+        "worker.role must be a lower_snake_case role identifier such as field_operations; do not use route names, family-worker names, or URL fragments.",
       );
     }
 
@@ -664,7 +674,7 @@ describe("app-server worker tools", () => {
           config: {},
         }),
       ).rejects.toThrow(
-        "Worker command and view names must be registered lower_snake_case or dotted operation identifiers such as lead.read or quote.prepare; do not use URL paths, route names, family-worker names, or query strings.",
+        "Worker command and view names must be registered lower_snake_case or dotted operation identifiers such as task.prepare or review.packet; do not use URL paths, route names, family-worker names, or query strings.",
       );
     }
 

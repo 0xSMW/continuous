@@ -12,7 +12,7 @@ import {
   transitionWorkflowRun,
 } from "../../src/core/workflows";
 import type { JsonObject } from "../../src/db/schema";
-import { RevenueWorkerUnavailableError } from "../../src/worker/revenue";
+import { WorkerUnavailableError } from "../../src/worker/errors";
 import {
   authorizeControlPlaneAccess,
   authorizeControlPlaneScope,
@@ -178,7 +178,7 @@ function workflowErrorResponse(error: unknown, fallbackCode: string) {
       ? (error as { status: unknown; code: unknown; message?: unknown })
       : null;
   const workflowError =
-    error instanceof RevenueWorkerUnavailableError || error instanceof PlatformUnavailableError
+    error instanceof WorkerUnavailableError || error instanceof PlatformUnavailableError
       ? {
           status: error.status,
           code: error.code,
