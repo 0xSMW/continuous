@@ -893,7 +893,7 @@ jobs:
             (.registry.views | all(.apiRoute == "/worker")) and
             (.registry.plannedCommands == .registry.followUpCommands) and
             (.registry.plannedViews == .registry.followUpViews) and
-            (.registry.followUpCommands | length) == 9 and
+            (.registry.followUpCommands | all(.apiRoute == "/worker" and .toolAlias == "worker.command")) and
             (.registry.followUpViews | length) == 1 and
             (.registry.commands | any(.role == "compliance_operations" and .name == "filing.prepare" and .idempotency == "required" and .requiresTenant == true and .externalExecution == "blocked" and .configSchema.required == ["filingRequirementId","period"])) and
             (.registry.views | any(.role == "compliance_operations" and .name == "snapshot")) and
@@ -909,6 +909,7 @@ jobs:
             (.registry.followUpCommands | any(.role == "compliance_operations" and .name == "evidence_binder.export")) and
             (.registry.followUpCommands | any(.role == "workforce_operations" and .name == "contractor.packet.prepare")) and
             (.registry.followUpCommands | any(.role == "finance_operations" and .name == "expense_code.propose")) and
+            (.registry.followUpCommands | any(.role == "growth_operations" and .name == "attribution.review")) and
             (.registry.plannedFutureWorkerCommands | any(.role == "asset_supply_operations" and .name == "reorder.plan" and .apiRoute == "/worker" and .externalExecution == "dry_run")) and
             (.registry.plannedFutureWorkerCommands | any(.role == "vertical_packages" and .name == "package.flow.prepare" and .apiRoute == "/worker" and .configSchema.required == ["packageKey","sourceRefs","policy"])) and
             (.registry.plannedFutureWorkerViews | any(.role == "vertical_packages" and .name == "package_readiness" and .apiRoute == "/worker" and .configSchema.required == ["packageKey"])) and

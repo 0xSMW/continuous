@@ -525,3 +525,10 @@ draft consumes units; idempotent replay is resolved before that mutable check
 so retries do not double-consume budget. Growth snapshots and campaign views
 are also scoped to the authenticated operator's tenant and the Growth worker's
 own objects, runs, approvals, budget account, and generated views.
+
+Production deploy schema smoke now treats Growth's `attribution.review` as a
+remaining Growth follow-up after promoting `campaign.draft` to runtime, without
+pinning the registry to a brittle follow-up count. The smoke keeps asserting the
+generic `/worker` surface, shared `worker.command` tool alias, and named
+follow-up gates so new worker families can extend the registry without
+introducing worker-family routes.
