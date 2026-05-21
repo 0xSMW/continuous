@@ -257,6 +257,62 @@ describe("POST /core", () => {
     });
   });
 
+  it("returns tenant-scoped Core summaries through the POST view envelope", async () => {
+    mocks.getCoreSummarySafe.mockResolvedValue({
+      ok: true,
+      error: null,
+      summary: {
+        counts: {
+          tasks: 2,
+          objects: 4,
+        },
+        activeTasks: [],
+        recentEvents: [],
+      },
+    });
+    mocks.getHealth.mockReturnValue({
+      status: "ok",
+      checks: {
+        db: "ok",
+      },
+    });
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          view: "summary",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          config: {},
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.health.status).toBe("ok");
+    expect(body.data.counts.objects).toBe(4);
+    expect(mocks.authorizeManagedControlPlaneCredential).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: "core",
+        access: "read",
+        command: "view.summary",
+        tenantSlug: "continuous-demo",
+        requireManagedCredential: true,
+      }),
+    );
+    expect(mocks.getCoreSummarySafe).toHaveBeenCalledWith({
+      tenantSlug: "continuous-demo",
+    });
+  });
+
   it("rejects worker-only catalog tokens before Core dispatch", async () => {
     vi.stubEnv(
       "CONTROL_PLANE_TOKENS_JSON",
@@ -395,8 +451,8 @@ describe("POST /core", () => {
 
       expect(response.status).toBe(413);
       expect(body.error).toEqual({
-        code: "core_command_body_too_large",
-        message: "Core command body must be at most 1048576 bytes.",
+        code: "core_payload_body_too_large",
+        message: "Core payload body must be at most 1048576 bytes.",
       });
     }
     expect(mocks.createCoreTask).not.toHaveBeenCalled();
@@ -877,32 +933,32 @@ describe("POST /core", () => {
 
     await expect(missingContentType.json()).resolves.toMatchObject({
       error: {
-        code: "invalid_core_command_body",
+        code: "invalid_core_payload_body",
         message: "POST /core requires an application/json request body.",
       },
     });
     await expect(invalidContentType.json()).resolves.toMatchObject({
       error: {
-        code: "invalid_core_command_body",
+        code: "invalid_core_payload_body",
         message: "POST /core requires an application/json request body.",
       },
     });
     await expect(jsonpContentType.json()).resolves.toMatchObject({
       error: {
-        code: "invalid_core_command_body",
+        code: "invalid_core_payload_body",
         message: "POST /core requires an application/json request body.",
       },
     });
     await expect(malformedJson.json()).resolves.toMatchObject({
       error: {
-        code: "invalid_core_command_body",
-        message: "Core command body must be valid JSON.",
+        code: "invalid_core_payload_body",
+        message: "Core payload body must be valid JSON.",
       },
     });
     await expect(arrayBody.json()).resolves.toMatchObject({
       error: {
-        code: "invalid_core_command_body",
-        message: "Core command body must be a JSON object.",
+        code: "invalid_core_payload_body",
+        message: "Core payload body must be a JSON object.",
       },
     });
     expect(missingContentType.status).toBe(415);
@@ -3141,6 +3197,86 @@ describe("POST /core", () => {
         "Core command payload fields must be command, core, idempotencyKey, and config. Move operation inputs into config. Unexpected fields: title, objectId.",
     });
     expect(mocks.createCoreTask).not.toHaveBeenCalled();
+  });
+
+  it("rejects ad hoc top-level Core view fields", async () => {
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          view: "summary",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          state: "active",
+          config: {},
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toEqual({
+      code: "invalid_core_view_envelope",
+      message:
+        "Core view payload fields must be view, core, and config. Move operation inputs into config. Unexpected fields: state.",
+    });
+    expect(mocks.getCoreSummarySafe).not.toHaveBeenCalled();
+  });
+
+  it("rejects route-like Core command and view names before dispatch", async () => {
+    const { POST } = await import("./route");
+
+    for (const [field, value] of [
+      ["command", ["", "api", "core", "object.upsert"].join("/")],
+      ["command", "core.object.upsert"],
+      ["command", "family-worker.object.upsert"],
+      ["view", ["", "api", "core", "summary"].join("/")],
+      ["view", "core.summary"],
+    ] as const) {
+      const payload =
+        field === "command"
+          ? {
+              command: value,
+              core: {
+                tenantSlug: "continuous-demo",
+              },
+              idempotencyKey: `bad-core-${field}-${value.replaceAll(/[^a-z0-9]+/g, "-")}`,
+              config: {},
+            }
+          : {
+              view: value,
+              core: {
+                tenantSlug: "continuous-demo",
+              },
+              config: {},
+            };
+      const response = await POST(
+        new Request("http://localhost/core", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer test-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        }),
+      );
+      const body = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(body.error).toEqual({
+        code: field === "command" ? "invalid_core_command_envelope" : "invalid_core_view_envelope",
+        message:
+          "Core command and view names must be registered lower_snake_case or dotted operation identifiers such as object.upsert or summary; do not use URL paths, route names, family-worker names, or query strings.",
+      });
+    }
+    expect(mocks.createCoreTask).not.toHaveBeenCalled();
+    expect(mocks.getCoreSummarySafe).not.toHaveBeenCalled();
   });
 
   it("rejects malformed command config before dispatch", async () => {

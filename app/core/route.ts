@@ -46,7 +46,17 @@ import type { JsonObject } from "../../src/db/schema";
 export const dynamic = "force-dynamic";
 
 const apiVersion = "continuous.core.v1";
-const coreCommandEnvelopeFields = new Set(["command", "core", "idempotencyKey", "config"]);
+const coreCommandEnvelopeFieldList = ["command", "core", "idempotencyKey", "config"] as const;
+const coreViewEnvelopeFieldList = ["view", "core", "config"] as const;
+const coreTargetEnvelopeFields = new Set(["tenantSlug"]);
+const coreCommandEnvelopeFields = new Set<string>(coreCommandEnvelopeFieldList);
+const coreViewEnvelopeFields = new Set<string>(coreViewEnvelopeFieldList);
+const coreOperationPattern = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*(?:\.[a-z][a-z0-9]*(?:_[a-z0-9]+)*)*$/;
+const coreOperationDescription =
+  "Core command and view names must be registered lower_snake_case or dotted operation identifiers such as object.upsert or summary; do not use URL paths, route names, family-worker names, or query strings.";
+const coreCommandEnvelopeDescription = describeEnvelopeFields(coreCommandEnvelopeFieldList);
+const coreViewEnvelopeDescription = describeEnvelopeFields(coreViewEnvelopeFieldList);
+const coreTargetEnvelopeDescription = describeEnvelopeFields(["tenantSlug"]);
 const forbiddenTokenRotationFields = new Set([
   "token",
   "nextToken",
@@ -68,13 +78,102 @@ function optionalString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+function describeEnvelopeFields(fields: readonly string[]) {
+  if (fields.length === 1) {
+    return fields[0] ?? "";
+  }
+
+  return `${fields.slice(0, -1).join(", ")}, and ${fields[fields.length - 1]}`;
+}
+
 function bodyObject(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
 }
 
-function configObject(value: unknown) {
+function hasOwnField(body: Record<string, unknown>, field: string) {
+  return Object.prototype.hasOwnProperty.call(body, field);
+}
+
+function corePayloadKind(body: Record<string, unknown>) {
+  const hasCommand = hasOwnField(body, "command");
+  const hasView = hasOwnField(body, "view");
+
+  if (hasCommand && hasView) {
+    return "mixed";
+  }
+
+  if (hasCommand) {
+    return "command";
+  }
+
+  if (hasView) {
+    return "view";
+  }
+
+  return "missing";
+}
+
+function coreEnvelopeFieldError(subject: string, allowedDescription: string, unexpectedFields: string[]) {
+  return `${subject} fields must be ${allowedDescription}. Move operation inputs into config. Unexpected fields: ${unexpectedFields.join(", ")}.`;
+}
+
+function isCoreOperationIdentifier(value: string) {
+  const operation = value.trim();
+  const reservedRouteSegments = new Set(["api", "app_server", "core", "workers"]);
+
+  return (
+    coreOperationPattern.test(operation) &&
+    !operation.includes("_worker") &&
+    operation.split(".").every((segment) => !reservedRouteSegments.has(segment))
+  );
+}
+
+function validateCoreTargetEnvelope(value: unknown):
+  | { ok: true }
+  | { ok: false; error: { code: string; message: string } } {
+  if (value === undefined || value === null || !value || typeof value !== "object" || Array.isArray(value)) {
+    return {
+      ok: false,
+      error: {
+        code: "invalid_core_target",
+        message: "core must be an object with tenantSlug selector.",
+      },
+    };
+  }
+
+  const core = value as Record<string, unknown>;
+  const unexpectedFields = Object.keys(core).filter((field) => !coreTargetEnvelopeFields.has(field));
+
+  if (unexpectedFields.length > 0) {
+    return {
+      ok: false,
+      error: {
+        code: "invalid_core_target",
+        message: coreEnvelopeFieldError(
+          "Core target",
+          coreTargetEnvelopeDescription,
+          unexpectedFields,
+        ),
+      },
+    };
+  }
+
+  if (typeof core.tenantSlug !== "string" || !core.tenantSlug.trim()) {
+    return {
+      ok: false,
+      error: {
+        code: "invalid_core_target",
+        message: "core.tenantSlug is required.",
+      },
+    };
+  }
+
+  return { ok: true };
+}
+
+function configObject(value: unknown, errorCode = "invalid_core_command_config") {
   if (value === undefined || value === null) {
     return { ok: true as const, value: {} as Record<string, unknown> };
   }
@@ -86,7 +185,7 @@ function configObject(value: unknown) {
   return {
     ok: false as const,
     error: {
-      code: "invalid_core_command_config",
+      code: errorCode,
       message: "config must be an object when provided.",
     },
   };
@@ -232,20 +331,20 @@ async function readBody(
 > {
   return readJsonObjectBody(request, {
     invalidContentType: {
-        code: "invalid_core_command_body",
-        message: "POST /core requires an application/json request body.",
+      code: "invalid_core_payload_body",
+      message: "POST /core requires an application/json request body.",
     },
     invalidJson: {
-        code: "invalid_core_command_body",
-        message: "Core command body must be valid JSON.",
+      code: "invalid_core_payload_body",
+      message: "Core payload body must be valid JSON.",
     },
     invalidObject: {
-      code: "invalid_core_command_body",
-      message: "Core command body must be a JSON object.",
+      code: "invalid_core_payload_body",
+      message: "Core payload body must be a JSON object.",
     },
     tooLarge: (maxBytes) => ({
-      code: "core_command_body_too_large",
-      message: `Core command body must be at most ${maxBytes} bytes.`,
+      code: "core_payload_body_too_large",
+      message: `Core payload body must be at most ${maxBytes} bytes.`,
     }),
     maxBytes: defaultMaxJsonBodyBytes,
   });
@@ -315,8 +414,12 @@ function guardErrorResponse(error: { code: string; message: string; status: numb
   );
 }
 
-function unexpectedCorePayloadFields(body: Record<string, unknown>) {
+function unexpectedCoreCommandPayloadFields(body: Record<string, unknown>) {
   return Object.keys(body).filter((field) => !coreCommandEnvelopeFields.has(field));
+}
+
+function unexpectedCoreViewPayloadFields(body: Record<string, unknown>) {
+  return Object.keys(body).filter((field) => !coreViewEnvelopeFields.has(field));
 }
 
 function unexpectedTokenRotationFields(config: Record<string, unknown>) {
@@ -331,9 +434,7 @@ function coreCommandRequiresManagedCredential(command?: string) {
   return command !== "control_plane.token_rotation.attest" && command !== "control_plane.credential.upsert";
 }
 
-export async function GET(request: Request) {
-  const url = new URL(request.url);
-  const tenantSlug = optionalString(url.searchParams.get("tenantSlug"));
+async function handleCoreSummaryRead(request: Request, tenantSlug: string | undefined) {
   const auth = authorizeControlPlaneAccess({
     appEnv: env.APP_ENV,
     expectedToken: env.WORKER_RUN_TOKEN,
@@ -435,8 +536,86 @@ export async function GET(request: Request) {
   );
 }
 
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  return handleCoreSummaryRead(request, optionalString(url.searchParams.get("tenantSlug")));
+}
+
+async function handleCoreView(request: Request, body: Record<string, unknown>) {
+  const unexpectedFields = unexpectedCoreViewPayloadFields(body);
+  const view = optionalString(body.view);
+  const core = bodyObject(body.core);
+  const tenantSlug = optionalString(core.tenantSlug);
+  const targetResult = validateCoreTargetEnvelope(body.core);
+  const configResult = configObject(body.config, "invalid_core_view_config");
+
+  if (unexpectedFields.length > 0) {
+    return errorResponse(
+      {
+        code: "invalid_core_view_envelope",
+        message: coreEnvelopeFieldError(
+          "Core view payload",
+          coreViewEnvelopeDescription,
+          unexpectedFields,
+        ),
+      },
+      400,
+    );
+  }
+
+  if (!view) {
+    return errorResponse(
+      {
+        code: "invalid_core_view_envelope",
+        message: "Core view payload requires a non-empty view string.",
+      },
+      400,
+    );
+  }
+
+  if (!isCoreOperationIdentifier(view)) {
+    return errorResponse(
+      {
+        code: "invalid_core_view_envelope",
+        message: coreOperationDescription,
+      },
+      400,
+    );
+  }
+
+  if (!targetResult.ok) {
+    return errorResponse(targetResult.error, 400);
+  }
+
+  if (!hasOwnField(body, "config")) {
+    return errorResponse(
+      {
+        code: "invalid_core_view_config",
+        message: "config is required and must be an object.",
+      },
+      400,
+    );
+  }
+
+  if (!configResult.ok) {
+    return errorResponse(configResult.error, 400);
+  }
+
+  if (view !== "summary") {
+    return errorResponse(
+      {
+        code: "core_view_unsupported",
+        message: "Core view must be summary.",
+      },
+      400,
+    );
+  }
+
+  return handleCoreSummaryRead(request, tenantSlug);
+}
+
 export async function POST(request: Request) {
-  const preAuth = authorizeControlPlaneAccess({
+  const writePreAuth = authorizeControlPlaneAccess({
     enabled: env.WORKER_RUN_ENABLED,
     appEnv: env.APP_ENV,
     expectedToken: env.WORKER_RUN_TOKEN,
@@ -449,15 +628,29 @@ export async function POST(request: Request) {
     route: "core",
     access: "write",
   });
+  const readPreAuth = writePreAuth.ok
+    ? writePreAuth
+    : authorizeControlPlaneAccess({
+        appEnv: env.APP_ENV,
+        expectedToken: env.WORKER_RUN_TOKEN,
+        operatorEmail: env.WORKER_OPERATOR_EMAIL,
+        authorization: request.headers.get("authorization"),
+        allowedTenants: env.CONTROL_PLANE_ALLOWED_TENANTS,
+        allowedWorkerRoles: env.CONTROL_PLANE_ALLOWED_WORKER_ROLES,
+        tokenCatalogJson: env.CONTROL_PLANE_TOKENS_JSON,
+        tokenCatalogB64: env.CONTROL_PLANE_TOKEN_CATALOG_B64,
+        route: "core",
+        access: "read",
+      });
 
-  if (!preAuth.ok) {
+  if (!writePreAuth.ok && !readPreAuth.ok) {
     await recordControlPlaneAuthAttempt({
       request,
       route: "core",
       access: "write",
-      auth: preAuth,
+      auth: writePreAuth,
     });
-    return guardErrorResponse(preAuth);
+    return guardErrorResponse(writePreAuth);
   }
 
   const bodyResult = await readBody(request);
@@ -467,18 +660,89 @@ export async function POST(request: Request) {
       request,
       route: "core",
       access: "write",
-      auth: preAuth,
+      auth: writePreAuth.ok ? writePreAuth : readPreAuth,
     });
     return errorResponse(bodyResult.error, bodyResult.status);
   }
 
   const body = bodyResult.value;
-  const unexpectedFields = unexpectedCorePayloadFields(body);
+  const payloadKind = corePayloadKind(body);
+
+  if (payloadKind === "mixed") {
+    return errorResponse(
+      {
+        code: "invalid_core_payload_envelope",
+        message: "Core payload must contain either command or view, not both.",
+      },
+      400,
+    );
+  }
+
+  if (payloadKind === "missing") {
+    return errorResponse(
+      {
+        code: "invalid_core_payload_envelope",
+        message: "Core payload requires a non-empty command or view string.",
+      },
+      400,
+    );
+  }
+
+  if (payloadKind === "view") {
+    return handleCoreView(request, body);
+  }
+
+  const unexpectedFields = unexpectedCoreCommandPayloadFields(body);
   const command = optionalString(body.command);
   const core = bodyObject(body.core);
   const configResult = configObject(body.config);
   const config = configResult.ok ? configResult.value : {};
   const tenantSlug = optionalString(core.tenantSlug);
+
+  if (unexpectedFields.length > 0) {
+    return errorResponse(
+      {
+        code: "invalid_core_command_envelope",
+        message: coreEnvelopeFieldError(
+          "Core command payload",
+          coreCommandEnvelopeDescription,
+          unexpectedFields,
+        ),
+      },
+      400,
+    );
+  }
+
+  if (!command) {
+    return errorResponse(
+      {
+        code: "invalid_core_command_envelope",
+        message: "Core command payload requires a non-empty command string.",
+      },
+      400,
+    );
+  }
+
+  if (!isCoreOperationIdentifier(command)) {
+    return errorResponse(
+      {
+        code: "invalid_core_command_envelope",
+        message: coreOperationDescription,
+      },
+      400,
+    );
+  }
+
+  const targetResult = validateCoreTargetEnvelope(body.core);
+
+  if (!targetResult.ok) {
+    return errorResponse(targetResult.error, 400);
+  }
+
+  if (!configResult.ok) {
+    return errorResponse(configResult.error, 400);
+  }
+
   const auth = authorizeControlPlaneAccess({
     enabled: env.WORKER_RUN_ENABLED,
     appEnv: env.APP_ENV,
@@ -504,20 +768,6 @@ export async function POST(request: Request) {
       auth,
     });
     return guardErrorResponse(auth);
-  }
-
-  if (unexpectedFields.length > 0) {
-    return errorResponse(
-      {
-        code: "invalid_core_command_envelope",
-        message: `Core command payload fields must be command, core, idempotencyKey, and config. Move operation inputs into config. Unexpected fields: ${unexpectedFields.join(", ")}.`,
-      },
-      400,
-    );
-  }
-
-  if (!configResult.ok) {
-    return errorResponse(configResult.error, 400);
   }
 
   const scope = authorizeControlPlaneScope({

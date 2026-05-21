@@ -166,10 +166,11 @@ ssh root@45.55.53.92 'cd /opt/continuous && docker compose --profile tools run -
 The deploy path also starts the `worker-scheduler` profile. The scheduler uses
 `WORKER_SCHEDULER_BASE_URL=http://app:3000`, the route-scoped catalog token,
 and tenant `continuous-demo` to call the same production APIs an operator would
-call: `/workflow` with `command=steps.execute`, `/worker` with
-`command=lead.read` for active connections whose `config.polling.enabled` is
-true, `/worker` with `command=run` once for each returned intake selector, then
-`/worker` with `command=adapters.retry` and `command=adapters.reconcile`.
+call: `/workflow` with `command: "steps.execute"`, `/worker` with
+`command: "lead.read"` for active connections whose `config.polling.enabled` is
+true, `/worker` with `command: "run"` once for each returned intake selector,
+then `/worker` with `command: "adapters.retry"` and
+`command: "adapters.reconcile"`.
 Lead source, reader kind, provider, and
 connection credential references live under the `config` payload, not in the
 route name. `WORKER_SCHEDULER_LEAD_POLL_LIMIT` caps poll attempts per cycle and
@@ -181,7 +182,7 @@ For the HTTPS worker API path, call `POST /worker` with `command`, `worker`,
 `config`, and `idempotencyKey` fields as required by the command plus the bearer
 token from `/opt/continuous/.env`. Revenue Worker runs should first create the
 lead object, `lead.received` event, and source snapshot through
-`command=lead.read`, then pass the stable source selector under `config.intake`:
+`command: "lead.read"`, then pass the stable source selector under `config.intake`:
 
 ```json
 {

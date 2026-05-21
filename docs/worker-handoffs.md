@@ -61,16 +61,15 @@ codes, and expected consumer output before a consuming worker writes records.
 ## Fixture Requirements
 
 Before a planned worker becomes executable, add at least one fixture for its
-incoming handoff. Dispatch/Ops now has executable fixtures through
-`/worker command=schedule.propose`, blocked
-`/worker command=customer_update.draft`, blocked
-`/worker command=closeout.prepare`, and blocked
-`/worker command=exception.route`. Finance now consumes
-`dispatch.closeout_to_finance` through `/worker command=invoice.prepare`,
-consumes persisted invoice evidence through `/worker command=ar_followup.draft`,
+incoming handoff. Dispatch/Ops now has executable fixtures through `POST /worker`
+payloads with `command: "schedule.propose"`, blocked
+`command: "customer_update.draft"`, blocked `command: "closeout.prepare"`, and
+blocked `command: "exception.route"`. Finance now consumes
+`dispatch.closeout_to_finance` through `command: "invoice.prepare"`, consumes
+persisted invoice evidence through `command: "ar_followup.draft"`,
 and consumes forecast window/account refs through
-`/worker command=cash_forecast.generate`, and prepares blocked payment drafts
-through `/worker command=payment_draft.prepare` from bill/payment selectors.
+`command: "cash_forecast.generate"`, and prepares blocked payment drafts through
+`command: "payment_draft.prepare"` from bill/payment selectors.
 It produces cash packets, invoice or AR drafts, cash forecasts, payment
 instruction drafts, dual-control approval requests, generated review views, and
 `finance.invoice_to_owner_review` approval handoffs while customer sends,

@@ -179,15 +179,15 @@ registered behind one shared worker surface:
 
 | Surface | Behavior |
 |---|---|
-| `POST /core` | Canonical Core command surface for `task.create`, `task.transition`, `object.upsert`, `adapter.upsert`, `connection.upsert`, `connection.health.record`, `entity.setup.record`, `worker.upsert`, `worker.transition`, `object.link`, `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`, `document.packet.prepare`, `decision.record`, `approval.request`, `adapter.intent.record`, `rule.change.record`, `external_action.record`, `capability.grant`, `budget.reserve`, `budget.charge`, `budget.release`, `ai.infer`, `view.publish`, `customer_signal.record`, `payroll.preview.record`, `payroll.preview.packet.prepare`, `control_plane.token_rotation.attest`, `control_plane.credential.upsert`, `control_plane.credential.revoke`, and `control_plane.session.review`; invalid credentials fail before body reads, command bodies are capped at 1 MiB, tenant selection and command fields live in structured `core` and `config` payloads, and no other top-level command fields are accepted |
-| `GET /core?tenantSlug=...` | Tenant-scoped Core summary for active tasks, recent events, approvals, workers, capabilities, graph counts, and ledger counts |
+| `POST /core` | Canonical Core command and read surface. Commands include `task.create`, `task.transition`, `object.upsert`, `adapter.upsert`, `connection.upsert`, `connection.health.record`, `entity.setup.record`, `worker.upsert`, `worker.transition`, `object.link`, `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`, `document.packet.prepare`, `decision.record`, `approval.request`, `adapter.intent.record`, `rule.change.record`, `external_action.record`, `capability.grant`, `budget.reserve`, `budget.charge`, `budget.release`, `ai.infer`, `view.publish`, `customer_signal.record`, `payroll.preview.record`, `payroll.preview.packet.prepare`, `control_plane.token_rotation.attest`, `control_plane.credential.upsert`, `control_plane.credential.revoke`, and `control_plane.session.review`; read payloads use `view`, `core`, and `config`, with `view: "summary"` returning active tasks, recent events, approvals, workers, capabilities, graph counts, and ledger counts. Invalid credentials fail before body reads, payload bodies are capped at 1 MiB, tenant selection and operation inputs live in structured `core` and `config` payloads, and no other top-level operation fields are accepted |
+| `GET /core?tenantSlug=...` | Compatibility Core summary read; new callers should use the `POST /core` view envelope |
 | `POST /worker` with payload `view: "snapshot"` | Operator-only snapshot of worker state, active tasks, controls, budget usage, and recent events |
 | `POST /worker` with payload `view: "approvals"` | Operator-only approval queue for worker decisions |
 | `POST /worker` | Canonical worker command surface for Revenue `lead.read`, `lead.classify`, `response.draft`, `quote.prepare`, `payment_link.prepare`, `run`, `continue`, `approval.decide`, `adapters.reconcile`, and `adapters.retry`; Owner `brief.generate`, `decision_queue.prepare`, `anomaly.triage`, `approval.decide`, and `continue`; Dispatch `schedule.propose`, `customer_update.draft`, `closeout.prepare`, and `exception.route`; Finance `invoice.prepare`, `ar_followup.draft`, `cash_forecast.generate`, and `payment_draft.prepare`; Workforce `hire.packet.prepare` and `payroll_input.prepare`; Compliance `filing.prepare`; Systems `connector.health.scan`, `sync.repair.plan`, `data_quality.remediate`, `permission.review`, and `automation.plan`; Offer and Pricing `margin.review.prepare`; and Customer Experience `recovery.draft`; invalid credentials fail before body reads, command bodies are capped at 1 MiB, and worker role, tenant selection, idempotency, and operation config live in structured payload fields |
 | `/approval` | Shared operator approval inbox and decision surface across Core, workflow, and worker subjects; `POST /approval` uses auth-before-body, 1 MiB bounded command reads, top-level idempotency keys for decision replay, and structured `approval` / `config` payloads |
 | `/workflow` | Canonical workflow command surface for listing definitions/runs/steps and executing validated `start` / `transition` / `steps.execute` / `approval.decide` commands; `POST /workflow` uses auth-before-body, 1 MiB bounded command reads, top-level idempotency keys for mutation replay boundaries, and structured `workflow` / `config` payloads |
 | `/workflow?view=approvals` | Operator-only approval queue for workflow decisions backed by the shared approval service |
-| `worker-scheduler` | Internal production runner that calls the same `/workflow` and `/worker` command envelopes to drain workflow steps, poll Revenue lead sources through `command=lead.read`, hand returned selectors to `command=run`, and run Revenue adapter retry/reconciliation work |
+| `worker-scheduler` | Internal production runner that calls the same `/workflow` and `/worker` command envelopes to drain workflow steps, poll Revenue lead sources through `command: "lead.read"`, hand returned selectors to `command: "run"`, and run Revenue adapter retry/reconciliation work |
 | `bun run worker:tool worker.command` / `worker.view` | Canonical local command and read surfaces using the same worker/config payload shape |
 
 Worker-specific HTTP paths are not part of the public API. New worker families
@@ -204,19 +204,19 @@ send an explicit top-level `idempotencyKey` plus `approval.subject` of `core`,
 subject. Matching retries return the stored decision/evidence ids, while changed
 subject/action/note/target input fails before state changes.
 
-`command=lead.read` accepts direct source records or a read-only active
+`command: "lead.read"` accepts direct source records or a read-only active
 connection reference, including scheduler-triggered API polling when the
 connection config opts in. It stores Core lead object/event/evidence rows,
 writes a read-only worker run, attributes budget/usage, records connection
 cursor proof, and returns stable `config.intake` selectors.
-`command=lead.classify`,
-`command=response.draft`,
-`command=quote.prepare`, and
-`command=payment_link.prepare` can consume those selectors or invoice refs as
+`command: "lead.classify"`,
+`command: "response.draft"`,
+`command: "quote.prepare"`, and
+`command: "payment_link.prepare"` can consume those selectors or invoice refs as
 explicit persisted substeps, writing worker run, inference, usage, event,
 evidence, approval, generated-view, adapter receipt, and audit proof while
 external send, provider payment-link creation, and money movement remain
-blocked. One full `command=run` then accepts the
+blocked. One full `command: "run"` then accepts the
 same selectors, or exact Core object/event/evidence row references when an
 internal workflow already holds them. The worker stores a source snapshot, binds
 the idempotency key to a canonical input hash, derives classification, draft

@@ -49,14 +49,16 @@ Then open `http://localhost:3000`.
   `payroll.preview.record`, `payroll.preview.packet.prepare`,
   `external_action.record`, `control_plane.token_rotation.attest`,
   `control_plane.credential.upsert`, `control_plane.credential.revoke`, and
-  `control_plane.session.review`. Core mutation requests accept only
-  `command`, `core`, `idempotencyKey`, and `config` as top-level fields.
+  `control_plane.session.review`. Core read views use `POST /core` with
+  `view`, `core`, and `config`; the summary view is also available through
+  `GET /core?tenantSlug=...` for compatibility. Core mutation requests accept
+  only `command`, `core`, `idempotencyKey`, and `config` as top-level fields.
   `ai.infer` is the deterministic Core AI gateway: route selection, redaction,
   budget reservation/charge, inference, usage, audit, and evidence are written
   through one reusable command while live provider execution remains blocked.
 - `/approval` is the shared approval control-plane API. Use
   `GET /approval?view=inbox&tenantSlug=continuous-demo&subject=all`, or
-  `POST /approval` with `command=approval.decide`, structured `approval`, and
+  `POST /approval` with `command: "approval.decide"`, structured `approval`, and
   `config` fields. Approval mutation requests accept only `command`,
   `approval`, `idempotencyKey`, and `config` as top-level fields.
 - `/worker` is the canonical worker control-plane API. Use `POST /worker` with
@@ -65,12 +67,12 @@ Then open `http://localhost:3000`.
   side-effecting worker commands. Worker requests accept only the read or
   command envelope fields as top-level fields; `worker` is limited to role, id,
   and tenant selectors, and every operation-specific input lives under
-  `config`. Revenue
-  operations runs can first call
-  `command=lead.read` with `config.source` and
+  `config`. Revenue operations runs can first call `POST /worker` with
+  `command: "lead.read"`, `config.source`, and
   `config.records[]` to persist Core lead source snapshots, then call
-  `command=lead.classify`, `command=response.draft`, `command=quote.prepare`,
-  or the full `command=run` with the returned `config.intake` selector. The
+  `command: "lead.classify"`, `command: "response.draft"`,
+  `command: "quote.prepare"`, or the full `command: "run"` with the returned
+  `config.intake` selector. The
   split classify, draft, and quote-preparation commands write worker run,
   inference, usage, event, evidence, approval/view, and audit proof while
   external send remains blocked. Internal workflow handlers can still use
@@ -81,24 +83,25 @@ Then open `http://localhost:3000`.
   roles inherit the route from the registry instead of creating a role-specific
   URL.
 - Dispatch schedule proposals use the same shape:
-  `POST /worker` with `worker.role=dispatch_operations`,
-  `command=schedule.propose`, handoff ids in `config.sourceRefs`, and schedule
-  requirements in `config.constraints`; the first slice writes only dry-run
-  calendar receipts and approval records.
+  `POST /worker` with `worker.role: "dispatch_operations"`,
+  `command: "schedule.propose"`, handoff ids in `config.sourceRefs`, and
+  schedule requirements in `config.constraints`; the first slice writes only
+  dry-run calendar receipts and approval records.
 - `/workflow` is the canonical workflow control-plane API. Use `GET /workflow`
   for definitions/runs/steps, `GET /workflow?view=approvals` for workflow
-  approvals, and `POST /workflow` with `command=start`, `command=transition`,
-  `command=steps.execute`, or `command=approval.decide`. Queued workflow
+  approvals, and `POST /workflow` with `command: "start"`,
+  `command: "transition"`, `command: "steps.execute"`, or
+  `command: "approval.decide"`. Queued workflow
   execution can now prepare durable Core packets from packet-backed step kinds
   without adding packet-specific business-process routes. Workflow mutation
   requests accept only `command`, `workflow`, `idempotencyKey`, and `config` as
   top-level fields.
 - `worker-scheduler` is the internal production drain for queued platform work.
   It posts the same `/workflow` `steps.execute` envelope, polls active lead
-  source connections with `/worker command=lead.read`, hands returned selectors
-  to `/worker command=run`, then drains `/worker` adapter retry/reconcile
-  envelopes on a cadence; it does not introduce worker-family URLs or enable
-  external execution.
+  source connections with `POST /worker` payloads using `command: "lead.read"`,
+  hands returned selectors to `command: "run"`, then drains `/worker` adapter
+  retry/reconcile envelopes on a cadence; it does not introduce worker-family
+  URLs or enable external execution.
 Worker-specific HTTP routes and local family-specific mutation shortcuts are
 intentionally absent; new worker families extend `/worker` and generic
 `worker:tool` / app-server surfaces by registering commands, views, and

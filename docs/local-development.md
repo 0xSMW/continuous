@@ -181,8 +181,8 @@ be forged from shell JSON. Codex dynamic tool-call payloads use `tool` plus
 `idempotencyKey`, and `config` envelope. A
 successful run records an approval request and audit trail while keeping
 external send and money movement blocked. Use `worker.command` with
-`command=lead.read` to persist source lead records before `worker.command` with
-`command=run`;
+`command: "lead.read"` to persist source lead records before `worker.command`
+with `command: "run"`;
 `config.leadPacket` is only the direct fallback for controlled local tests. If
 `CONTROL_PLANE_ALLOWED_TENANTS` is set, every operator route must include an
 allowed `tenantSlug`; if `CONTROL_PLANE_ALLOWED_WORKER_ROLES` is set, `/worker`

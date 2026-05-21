@@ -162,9 +162,9 @@ envelope errors instead of moving context into the payload.
 It is not a worker-family API route; worker execution still goes through the
 same registry and payload envelope as `POST /worker`. The bridge accepts only
 `tool`, `arguments`, `callId`, `threadId`, and `turnId` at the top level. Put
-operation fields under `arguments.config`, and never send `operatorEmail`,
-bearer tokens, transport context, tenant scope, or worker-role scope in the
-payload.
+worker envelope fields under `arguments`, put operation-specific inputs under
+`arguments.config`, and never send `operatorEmail`, bearer tokens, transport
+context, tenant scope, or worker-role scope in the payload.
 
 `continuous.worker.command`, `continuous.worker.view`, `worker.command`, and
 `worker.view` are tool names; `/worker` is the HTTP route; `command`, `view`,
