@@ -6444,7 +6444,6 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(readinessProof.latestWorkerRunId).toBe(quoteResult.workerRunId);
     expect(readinessProof.quoteApprovalViewId).toBe(quoteResult.quoteApprovalViewId);
     expect(readinessProof.adapterReceiptEvidenceId).toBe(quoteResult.adapterReceiptEvidenceId);
-    expect(launchGates.every((gate) => gate.state === "blocked")).toBe(true);
     expect(launchGates.map((gate) => gate.key)).toEqual([
       "lead_source_connection",
       "lead_source_connection_health",
@@ -6453,6 +6452,10 @@ maybeDescribe("Revenue Worker integration eval", () => {
       "controlled_send_receipt_and_rollback",
       "cash_and_payment_handoff_credentials",
     ]);
+    expect(launchGates.some((gate) => gate.state === "blocked")).toBe(true);
+    expect(launchGates.find((gate) => gate.key === "controlled_customer_send_credentials")?.state).toBe("blocked");
+    expect(launchGates.find((gate) => gate.key === "controlled_send_receipt_and_rollback")?.state).toBe("blocked");
+    expect(launchGates.find((gate) => gate.key === "cash_and_payment_handoff_credentials")?.state).toBe("blocked");
 
     const paymentLink = await executeWorkerCommand({
       command: "payment_link.prepare",
