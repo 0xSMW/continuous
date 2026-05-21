@@ -491,3 +491,10 @@ Production deploy and control-plane attestation catalogs now include exact
 `app_server:core.*` scopes, and deploy smoke exercises Core schema, summary
 view, and `task.create` command calls through `POST /app-server` before worker
 app-server command smoke.
+
+Revenue live-source readiness now distinguishes manual connection-backed
+`lead.read` from scheduler-owned polling. The scheduler stamps non-secret
+provenance under `config.scheduler`, Revenue persists that as
+`lastLeadRead.schedulerProof`, and the readiness gate only treats
+`scheduler_lead_read_cursor` as ready when the proof is verified for the
+connection and scheduler idempotency key.

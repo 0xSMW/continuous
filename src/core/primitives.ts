@@ -73,6 +73,7 @@ const externalActionSource = "continuous.core.external_actions";
 const adapterSource = "continuous.core.adapters";
 const connectionSource = "continuous.core.connections";
 const connectionHealthSource = "continuous.core.connection_health";
+const schedulerSource = "continuous.worker_scheduler";
 const customerSignalTypes = new Set([
   "satisfaction_signal",
   "feedback_item",
@@ -1139,7 +1140,11 @@ function buildConnectionHealthReport(input: {
 
     const lastLeadRead = jsonObject(config.lastLeadRead);
     const readAt = cleanString(lastLeadRead.readAt);
-    const hasSchedulerCoverage = Boolean(input.connection.lastSyncAt || readAt);
+    const schedulerProof = jsonObject(lastLeadRead.schedulerProof);
+    const hasSchedulerCoverage =
+      Boolean(input.connection.lastSyncAt || readAt) &&
+      schedulerProof.state === "verified" &&
+      schedulerProof.source === schedulerSource;
 
     if (!pollingEnabled || input.connection.state !== "active") {
       return connectionHealthCheck(
@@ -1162,6 +1167,8 @@ function buildConnectionHealthReport(input: {
       {
         lastSyncAt: input.connection.lastSyncAt?.toISOString() ?? null,
         lastLeadReadAt: readAt ?? null,
+        schedulerProofState: cleanString(schedulerProof.state) ?? null,
+        schedulerProofSource: cleanString(schedulerProof.source) ?? null,
       },
     );
   });

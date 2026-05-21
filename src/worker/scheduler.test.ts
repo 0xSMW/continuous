@@ -148,6 +148,12 @@ describe("worker scheduler", () => {
             credentialRef: "connection:conn-google-workspace",
             mode: "read_only",
           },
+          scheduler: {
+            source: "continuous.worker_scheduler",
+            leaseOwner: "scheduler-test",
+            connectionId: "conn-google-workspace",
+            leadPollIdempotencyKey: "scheduler-lead-read:conn-google-workspace:123",
+          },
         },
       },
     });

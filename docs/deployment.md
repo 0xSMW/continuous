@@ -176,10 +176,13 @@ then `/worker` with `command: "adapters.retry"` and
 `command: "adapters.reconcile"`.
 Lead source, reader kind, provider, and
 connection credential references live under the `config` payload, not in the
-route name. `WORKER_SCHEDULER_LEAD_POLL_LIMIT` caps poll attempts per cycle and
-defaults to `5`. The scheduler does not execute external sends or money
-movement; it only drains queued internal work already covered by the command
-registry and workflow step ledger.
+route name. Scheduler-owned lead reads also stamp non-secret provenance under
+`config.scheduler`; the Revenue readiness view only treats
+`scheduler_lead_read_cursor` as ready when that provenance matches the
+connection and scheduler idempotency key. `WORKER_SCHEDULER_LEAD_POLL_LIMIT`
+caps poll attempts per cycle and defaults to `5`. The scheduler does not execute
+external sends or money movement; it only drains queued internal work already
+covered by the command registry and workflow step ledger.
 
 For the HTTPS worker API path, call `POST /worker` with `command`, `worker`,
 `config`, and `idempotencyKey` fields as required by the command plus the bearer

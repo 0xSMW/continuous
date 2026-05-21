@@ -536,7 +536,15 @@ async function runLeadPollCommands(input: {
             tenantSlug: input.config.tenantSlug,
           },
           idempotencyKey: command.idempotencyKey,
-          config: command.config,
+          config: {
+            ...command.config,
+            scheduler: {
+              source: schedulerSource,
+              leaseOwner: input.config.leaseOwner,
+              connectionId: command.connectionId,
+              leadPollIdempotencyKey: command.idempotencyKey,
+            },
+          },
         },
       });
       const revenueRuns: ScheduledRevenueRunResult[] = [];

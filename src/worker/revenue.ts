@@ -51,6 +51,7 @@ type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 const revenueWorkerRole = "revenue_operations";
 const revenueWorkflowKey = "lead_to_cash";
 const source = "continuous.worker";
+const schedulerSource = "continuous.worker_scheduler";
 const connectionHealthSource = "continuous.core.connection_health";
 const runUnits = 12000;
 const leadReadUnits = 1000;
@@ -2087,6 +2088,43 @@ function lastSourceCursor(records: ParsedLeadSourceRecord[]) {
   return last?.sourceCursor ?? last?.sourceEventId ?? null;
 }
 
+function schedulerLeadReadProof(input: {
+  config: JsonObject;
+  connectionId: string;
+  idempotencyKey: string;
+}) {
+  const scheduler = objectValue(input.config.scheduler);
+  const leadPollIdempotencyKey = firstStringValue(
+    scheduler.leadPollIdempotencyKey,
+    scheduler.idempotencyKey,
+  );
+  const connectionId = firstStringValue(scheduler.connectionId);
+  const source = firstStringValue(scheduler.source);
+  const leaseOwner = firstStringValue(scheduler.leaseOwner);
+  const expectedPrefix = `scheduler-lead-read:${input.connectionId}:`;
+  const verified =
+    source === schedulerSource &&
+    connectionId === input.connectionId &&
+    leadPollIdempotencyKey === input.idempotencyKey &&
+    input.idempotencyKey.startsWith(expectedPrefix) &&
+    Boolean(leaseOwner);
+
+  if (!source && !connectionId && !leadPollIdempotencyKey && !leaseOwner) {
+    return null;
+  }
+
+  return {
+    schemaVersion: "worker.scheduler.lead_read_cursor_proof.v1",
+    state: verified ? "verified" : "ignored",
+    source: source || null,
+    leaseOwner: leaseOwner || null,
+    connectionId: connectionId || null,
+    leadPollIdempotencyKey: leadPollIdempotencyKey || null,
+    expectedPrefix,
+    externalExecution: "blocked",
+  } satisfies JsonObject;
+}
+
 function revisedPacketFromOriginal(params: {
   originalOutput: JsonObject;
   revisionNote: string;
@@ -3162,7 +3200,14 @@ function connectionHasSchedulerCursor(input: {
   connection: typeof connections.$inferSelect;
   config: JsonObject;
 }) {
-  return Boolean(input.connection.lastSyncAt || lastLeadReadAt(input.config));
+  const lastLeadRead = objectValue(input.config.lastLeadRead);
+  const schedulerProof = objectValue(lastLeadRead.schedulerProof);
+
+  return (
+    Boolean(input.connection.lastSyncAt || lastLeadReadAt(input.config)) &&
+    schedulerProof.state === "verified" &&
+    schedulerProof.source === schedulerSource
+  );
 }
 
 function latestConnectionHealthStatus(data: JsonObject) {
@@ -3815,6 +3860,13 @@ export async function readRevenueLeads(input: {
         context.worker.tenantId,
         sourceRequest.sourceReader,
       );
+  const schedulerProof = connectionRead
+    ? schedulerLeadReadProof({
+        config: requestConfig,
+        connectionId: connectionRead.connection.id,
+        idempotencyKey: input.idempotencyKey,
+      })
+    : null;
   const sourceReader = connectionRead?.sourceReader ?? {
     ...sourceRequest.sourceReader,
     sourceMode: "payload" as const,
@@ -4165,6 +4217,7 @@ export async function readRevenueLeads(input: {
       connectionId: connectionRead?.connection.id ?? null,
       cursor: lastSourceCursor(records),
       pollingReceipt: connectionRead?.pollingReceipt ?? null,
+      schedulerProof,
       externalExecution: "blocked",
       externalSend: false,
     };
@@ -4191,6 +4244,7 @@ export async function readRevenueLeads(input: {
               cursor: lastSourceCursor(records),
               apiCursor: apiCursor || null,
               pollingReceipt: connectionRead.pollingReceipt,
+              schedulerProof,
               readAt: now.toISOString(),
               externalExecution: "blocked",
             },

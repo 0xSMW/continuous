@@ -7205,6 +7205,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
       workerRunId: bufferedResult.workerRunId,
       readCount: 1,
       cursor: bufferedMessageId,
+      schedulerProof: null,
       externalExecution: "blocked",
     });
 
@@ -7236,9 +7237,110 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(launchReadinessData.launchReady).toBe(false);
     expect(launchGates.find((gate) => gate.key === "lead_source_connection")?.state).toBe("ready");
     expect(launchGates.find((gate) => gate.key === "lead_source_connection_health")?.state).toBe("ready");
-    expect(launchGates.find((gate) => gate.key === "scheduler_lead_read_cursor")?.state).toBe("ready");
+    expect(launchGates.find((gate) => gate.key === "scheduler_lead_read_cursor")?.state).toBe("blocked");
     expect(launchGates.find((gate) => gate.key === "controlled_customer_send_credentials")?.state).toBe("blocked");
     expect(JSON.stringify(launchReadinessData)).not.toContain("configured-fixture");
+
+    const schedulerMessageId = `gmail:scheduler:${runId}`;
+    await db
+      .update(connections)
+      .set({
+        config: {
+          ...objectValue(updatedConnection?.config),
+          inbox: {
+            messages: [
+              {
+                messageId: bufferedMessageId,
+                threadId: `thread:buffered:${runId}`,
+                from: "Buffered Buyer <buffered@example.com>",
+                subject: "Need gutter repair estimate",
+                snippet: "The gutter pulled away during the last storm.",
+                receivedAt: "2026-05-19T04:00:00.000Z",
+              },
+              {
+                messageId: schedulerMessageId,
+                threadId: `thread:scheduler:${runId}`,
+                from: "Scheduler Buyer <scheduler@example.com>",
+                subject: "Need fascia repair estimate",
+                snippet: "The fascia board needs repair before more rain.",
+                receivedAt: "2026-05-19T04:10:00.000Z",
+              },
+            ],
+          },
+        },
+      })
+      .where(eq(connections.id, connection.id));
+
+    const schedulerIdempotencyKey = `scheduler-lead-read:${connection.id}:${runId}`;
+    const schedulerRead = await executeWorkerCommand({
+      command: "lead.read",
+      target: {
+        role: "revenue_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: schedulerIdempotencyKey,
+      config: {
+        source: "google_workspace_inbox",
+        reader: {
+          kind: "inbox",
+          provider: "google_workspace",
+          credentialRef: `connection:${connection.id}`,
+          mode: "read_only",
+        },
+        scheduler: {
+          source: "continuous.worker_scheduler",
+          leaseOwner: "integration-test-scheduler",
+          connectionId: connection.id,
+          leadPollIdempotencyKey: schedulerIdempotencyKey,
+        },
+      },
+    });
+    const schedulerResult = objectValue(schedulerRead.result);
+    const schedulerOutput = objectValue(schedulerResult.output);
+    const schedulerProof = objectValue(schedulerOutput.schedulerProof);
+    const [schedulerUpdatedConnection] = await db
+      .select()
+      .from(connections)
+      .where(eq(connections.id, connection.id))
+      .limit(1);
+    const schedulerLastLeadRead = objectValue(objectValue(schedulerUpdatedConnection?.config).lastLeadRead);
+    const storedSchedulerProof = objectValue(schedulerLastLeadRead.schedulerProof);
+    const schedulerReadiness = await executeWorkerView({
+      view: "readiness",
+      target: {
+        role: "revenue_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+    });
+    const schedulerReadinessData = objectValue(schedulerReadiness.data.readiness);
+    const schedulerLaunchGates = Array.isArray(schedulerReadinessData.launchGates)
+      ? schedulerReadinessData.launchGates.map((gate) => objectValue(gate))
+      : [];
+
+    expect(schedulerResult.readCount).toBe(1);
+    expect(schedulerOutput.cursor).toBe(schedulerMessageId);
+    expect(schedulerProof).toMatchObject({
+      state: "verified",
+      source: "continuous.worker_scheduler",
+      leaseOwner: "integration-test-scheduler",
+      connectionId: connection.id,
+      leadPollIdempotencyKey: schedulerIdempotencyKey,
+    });
+    expect(schedulerLastLeadRead).toMatchObject({
+      command: "lead.read",
+      workerRunId: schedulerResult.workerRunId,
+      readCount: 1,
+      cursor: schedulerMessageId,
+    });
+    expect(storedSchedulerProof).toMatchObject({
+      state: "verified",
+      source: "continuous.worker_scheduler",
+      connectionId: connection.id,
+      leadPollIdempotencyKey: schedulerIdempotencyKey,
+    });
+    expect(schedulerLaunchGates.find((gate) => gate.key === "scheduler_lead_read_cursor")?.state).toBe("ready");
 
     await expect(
       executeWorkerCommand({
