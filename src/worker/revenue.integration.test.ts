@@ -4621,9 +4621,12 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .from(workerRuns)
       .where(eq(workerRuns.id, controlledContinuation.workerRunId ?? ""))
       .limit(1);
+    const continuationRunData = objectValue(continuationRun?.data);
+    const continuationRunInput = objectValue(continuationRunData.input);
+    const continuationRunRequest = objectValue(continuationRunInput.request);
     const continuationDataJson = JSON.stringify(continuationRun?.data);
-    const storedConfig = objectValue(objectValue(continuationRun?.data).input).config;
-    const storedExecutionConfig = objectValue(objectValue(storedConfig).execution);
+    const storedConfig = objectValue(continuationRunRequest.config);
+    const storedExecutionConfig = objectValue(storedConfig.execution);
 
     expect(workflowRun?.state).toBe("execution_recorded");
     expect(objectValue(workflowRun?.blockers).open).toEqual([]);
@@ -4636,7 +4639,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(adapterRun?.connectionId).toBe(sendConnection.id);
     expect(adapterRun?.writeCount).toBe(1);
     expect(objectValue(adapterRun?.receipt).externalSend).toBe(true);
-    expect(objectValue(storedConfig).approvalId).toBe(first.approvalRequestId);
+    expect(storedConfig.approvalId).toBe(first.approvalRequestId);
     expect(storedExecutionConfig.provided).toBe(true);
     expect(storedExecutionConfig.inputHash).toBeTruthy();
     for (const forbidden of [

@@ -307,7 +307,7 @@ and local toolbox aliases resolve to the same handlers and validation rules.
 | `quote.prepare` | `worker.command` | One of `config.intake`, `config.leadPacket`, or `config.lead` | Required | Core worker-run lifecycle, budget/usage, inference, source evidence, dry-run adapter receipt, approval request, generated quote review view, audit | Blocked |
 | `payment_link.prepare` | `worker.command` | `config.invoiceId`, `config.invoiceObjectId`, or keyed `config.sourceRefs`; optional `config.quoteObjectId`, `config.bankAccountId`, `config.policy` | Required | Core worker-run lifecycle, budget/usage, payment object, payment row, payment instruction when a bank account exists, payment-link packet, approval request, generated payment review view, dry-run adapter receipt, workflow, audit | Blocked |
 | `run` | `worker.command` | One of `config.intake`, `config.leadPacket`, or `config.lead` | Required | Core worker-run lifecycle, budget/usage, workflow, approval, dry-run adapter receipt | Blocked |
-| `continue` | `worker.command` | `config.approvalId`; optional `config.execution` for approved controlled-send receipt recording | Required | Quote approval continuations only: approved execution packet, optional controlled-send receipt, revised approval packet, or rejected stop packet, workflow step, task outcome, audit/evidence; payment-link approvals fail closed until their provider-link continuation branch exists | Approved only |
+| `continue` | `worker.command` | `config.approvalId`; optional `config.execution` for approved controlled-send receipt recording | Required | Core worker-run lifecycle, budget/usage, and quote approval continuation proof only: approved execution packet, optional controlled-send receipt, revised approval packet, or rejected stop packet, workflow step, task outcome, audit/evidence; payment-link approvals fail closed until their provider-link continuation branch exists | Approved only |
 | `approval.decide` | `worker.command` | `config.approvalId`, `config.action`, optional `config.note` | Required | Approval/task/workflow evidence only | Blocked |
 | `adapters.reconcile` | `worker.command` | Tenant-scoped `worker.tenantSlug`, optional integer `config.limit` | None | Adapter reconciliation audit/evidence plus retry/review system tasks | Blocked |
 | `adapters.retry` | `worker.command` | Tenant-scoped `worker.tenantSlug`, optional integer `config.limit` | None | Executes due dry-run retry rows, closes retry tasks, and writes blocked receipt evidence with live-credential readiness and rollback proof | Blocked |
@@ -447,7 +447,7 @@ response whose `result.output` contains a blocked payment-link packet:
 
 | Record | Required behavior |
 |---|---|
-| `worker_runs` | Core `worker.run.start` / `worker.run.complete` owns lifecycle, idempotency, budget settlement, and input/output for `lead.read`, `lead.classify`, `response.draft`, `run`, `quote.prepare`, and `payment_link.prepare`; continuation local paths remain follow-up migrations |
+| `worker_runs` | Core `worker.run.start` / `worker.run.complete` owns lifecycle, idempotency, budget settlement, and input/output for `lead.read`, `lead.classify`, `response.draft`, `run`, `quote.prepare`, `payment_link.prepare`, and quote approval `continue` |
 | `workflow_runs` | Owns the lead-to-cash state machine for the prepared worker action |
 | `workflow_steps` | Records intake resolved, packet prepared, adapter dry-run recorded, approval requested, approval decision transitions, worker continuations, and adapter reconciliation transitions |
 | `budget_reservations` | Core worker-run completion reserves and marks deterministic simulation units as used for the migrated Revenue commands |
@@ -470,9 +470,11 @@ Revenue `workflowRunId`. Retryable adapter failures append
 `post_retry_reconciled`. These states remain no-send and keep external
 execution blocked.
 
-`POST /worker` with `command=continue` creates a separate idempotent
-`worker_runs` continuation record and `workflow_steps.kind=worker_continuation`
-entry. V1 supports `approved`, `revision_requested`, and `rejected` approvals.
+`POST /worker` with `command=continue` starts a Core-owned idempotent
+`worker_runs` continuation run, writes the business workflow proof, then
+completes the Core run for budget settlement and replay repair. The business
+workflow still records `workflow_steps.kind=worker_continuation`. V1 supports
+`approved`, `revision_requested`, and `rejected` quote approvals.
 Approved continuation prepares a no-send execution packet, stores
 evidence/document packet records, moves the workflow to `execution_blocked`,
 leaves the task in `waiting`, and keeps adapter execution blocked when
