@@ -46,6 +46,7 @@ const contractRoles = [
   "growth_operations",
   "vertical_packages",
 ];
+type JsonRecord = Record<string, unknown>;
 
 beforeEach(() => {
   process.env.WORKER_OPERATOR_EMAIL = "owner@continuoushq.com";
@@ -81,6 +82,12 @@ function routeFiles(dir: string): string[] {
 
     return entry.isFile() && entry.name === "route.ts" ? [path] : [];
   });
+}
+
+function objectValue(value: unknown): JsonRecord {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as JsonRecord)
+    : {};
 }
 
 function workerFamilyApiEntries(dir: string): string[] {
@@ -1567,15 +1574,69 @@ describe("worker tool contract", () => {
       promotionByKey.get("asset_supply_operations")?.commandPayloadTemplate.payload.config.sourceRefs,
     ).toEqual({
       handoff: "dispatch.asset_need_to_supply",
-      requiredCoreRefs: [
-        "Vendor",
-        "InventoryItem",
-        "PurchaseOrder",
-        "Asset",
-        "Facility",
-        "MaintenanceEvent",
-      ],
+      workOrderObjectId: "<workOrderObjectId>",
+      materialObjectId: "<materialObjectId>",
+      evidencePacketId: "<evidencePacketId>",
     });
+    expect(
+      objectValue(promotionByKey.get("asset_supply_operations")?.commandPayloadTemplate.payload.config.policy),
+    ).toEqual(
+      expect.objectContaining({
+        maxDraftSpendCents: 0,
+        requiresOwnerApproval: true,
+        allowPurchase: false,
+      }),
+    );
+    expect(
+      promotionByKey.get("offer_pricing_operations")?.commandPayloadTemplate.payload.config,
+    ).toEqual(
+      expect.objectContaining({
+        sourceRefs: expect.objectContaining({
+          handoff: "revenue.quote_to_pricing",
+          quoteObjectId: "<quoteObjectId>",
+          evidencePacketId: "<evidencePacketId>",
+        }),
+        policy: expect.objectContaining({
+          marginRuleId: "<marginRuleId>",
+          discountPolicyId: "<discountPolicyId>",
+          requireOwnerApproval: true,
+        }),
+      }),
+    );
+    expect(
+      promotionByKey.get("customer_experience_operations")?.commandPayloadTemplate.payload.config,
+    ).toEqual(
+      expect.objectContaining({
+        sourceRefs: expect.objectContaining({
+          handoff: "customer.signal_to_experience",
+          customerObjectId: "<customerObjectId>",
+          customerSignalObjectId: "<customerSignalObjectId>",
+          evidencePacketId: "<evidencePacketId>",
+        }),
+        policy: expect.objectContaining({
+          requiresOwnerApproval: true,
+          allowExternalSend: false,
+        }),
+      }),
+    );
+    expect(
+      promotionByKey.get("growth_operations")?.commandPayloadTemplate.payload.config,
+    ).toEqual(
+      expect.objectContaining({
+        sourceRefs: expect.objectContaining({
+          handoff: "customer.signal_to_growth",
+          customerSignalObjectId: "<customerSignalObjectId>",
+          budgetReservationId: "<budgetReservationId>",
+          evidencePacketId: "<evidencePacketId>",
+        }),
+        policy: expect.objectContaining({
+          channel: "<channel>",
+          audience: "<audience>",
+          requiresOwnerApproval: true,
+          allowPublish: false,
+        }),
+      }),
+    );
     expect(
       promotionByKey.get("package_quote_to_cash_field")?.commandPayloadTemplate.payload,
     ).toEqual(
@@ -1587,6 +1648,15 @@ describe("worker tool contract", () => {
         },
         config: expect.objectContaining({
           packageKey: "quote_to_cash_field",
+          sourceRefs: expect.objectContaining({
+            handoff: "systems.connection_to_packaged_worker",
+            connectionId: "<connectionId>",
+            permissionGrantId: "<permissionGrantId>",
+          }),
+          policy: expect.objectContaining({
+            allowExternalExecution: false,
+            requireRollbackProof: true,
+          }),
         }),
       }),
     );
@@ -1680,21 +1750,23 @@ describe("worker tool contract", () => {
       const promotion = promotionByKey.get(entry.key);
 
       expect(promotion).toBeTruthy();
-      expect(promotion?.apiRoute).toBe("/worker");
-      expect(promotion?.firstCommand).toBe(entry.firstCommand);
-      expect(promotion?.firstView).toBe(entry.firstView);
-      expect(promotion?.commandPayloadTemplate.apiRoute).toBe("/worker");
-      expect(promotion?.commandPayloadTemplate.tool).toBe("continuous.worker.command");
-      expect(promotion?.commandPayloadTemplate.payload.command).toBe(entry.firstCommand);
-      expect(promotion?.commandPayloadTemplate.payload.worker.role).toBe(entry.workerRole);
-      expect(promotion?.commandPayloadTemplate.payload.config.policy.externalExecution).toBe(
-        entry.externalExecution,
-      );
-      expect(promotion?.viewPayloadTemplate.apiRoute).toBe("/worker");
-      expect(promotion?.viewPayloadTemplate.tool).toBe("continuous.worker.view");
-      expect(promotion?.viewPayloadTemplate.payload.view).toBe(entry.firstView);
+      if (!promotion) {
+        throw new Error(`Missing promotion plan entry for ${entry.key}`);
+      }
+      expect(promotion.apiRoute).toBe("/worker");
+      expect(promotion.firstCommand).toBe(entry.firstCommand);
+      expect(promotion.firstView).toBe(entry.firstView);
+      expect(promotion.commandPayloadTemplate.apiRoute).toBe("/worker");
+      expect(promotion.commandPayloadTemplate.tool).toBe("continuous.worker.command");
+      expect(promotion.commandPayloadTemplate.payload.command).toBe(entry.firstCommand);
+      expect(promotion.commandPayloadTemplate.payload.worker.role).toBe(entry.workerRole);
+      expect(objectValue(promotion.commandPayloadTemplate.payload.config)).not.toEqual({});
+      expect(JSON.stringify(promotion.commandPayloadTemplate.payload.config)).not.toContain("requiredCoreRefs");
+      expect(promotion.viewPayloadTemplate.apiRoute).toBe("/worker");
+      expect(promotion.viewPayloadTemplate.tool).toBe("continuous.worker.view");
+      expect(promotion.viewPayloadTemplate.payload.view).toBe(entry.firstView);
       expect(JSON.stringify(promotion)).not.toMatch(/\/api(?:\/|$)|revenue[-_]worker/i);
-      expect(promotion?.promotionChecklist.map((item) => item.key)).toEqual(
+      expect(promotion.promotionChecklist.map((item) => item.key)).toEqual(
         expect.arrayContaining([
           "contract_current",
           "registry_metadata",

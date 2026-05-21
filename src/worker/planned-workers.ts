@@ -121,6 +121,8 @@ export type WorkerExpansionPromotionProof = {
   expected: string;
 };
 
+type WorkerCommandConfigTemplate = Record<string, unknown>;
+
 export type WorkerExpansionPromotionPlanEntry = {
   schemaVersion: "continuous.worker_expansion_promotion.v1";
   key: string;
@@ -150,17 +152,7 @@ export type WorkerExpansionPromotionPlanEntry = {
         tenantSlug: "<tenantSlug>";
       };
       idempotencyKey: string;
-      config: {
-        packageKey?: string;
-        sourceRefs: {
-          handoff?: string;
-          requiredCoreRefs: string[];
-        };
-        policy: {
-          externalExecution: ExternalExecution;
-          requireOwnerApproval: true;
-        };
-      };
+      config: WorkerCommandConfigTemplate;
     };
   };
   viewPayloadTemplate: {
@@ -2660,18 +2652,174 @@ function expansionExecutionState(
   return "schema_only_until_handler_registered";
 }
 
-function expansionPromotionConfig(entry: WorkerExpansionCatalogEntry) {
-  return {
-    ...(entry.packageKey ? { packageKey: entry.packageKey } : {}),
-    sourceRefs: {
-      ...(entry.incomingHandoff ? { handoff: entry.incomingHandoff } : {}),
-      requiredCoreRefs: entry.coreObjects,
-    },
-    policy: {
-      externalExecution: entry.externalExecution,
-      requireOwnerApproval: true as const,
-    },
-  };
+function handoffRef(entry: WorkerExpansionCatalogEntry): Record<string, string> {
+  return entry.incomingHandoff ? { handoff: entry.incomingHandoff } : {};
+}
+
+function expansionPromotionConfig(entry: WorkerExpansionCatalogEntry): WorkerCommandConfigTemplate {
+  switch (entry.firstCommand) {
+    case "lead.read":
+      return {
+        source: "<leadSource>",
+        records: [
+          {
+            sourceEventId: "<sourceEventId>",
+          },
+        ],
+      };
+    case "brief.generate":
+      return {
+        window: {
+          from: "<fromIso>",
+          to: "<toIso>",
+        },
+        scopes: ["tasks", "approvals", "cash", "worker_health"],
+        includeEvidence: true,
+      };
+    case "schedule.propose":
+      return {
+        sourceRefs: {
+          ...handoffRef(entry),
+          jobId: "<jobId>",
+          workOrderId: "<workOrderId>",
+          evidencePacketId: "<evidencePacketId>",
+        },
+        constraints: {
+          from: "<fromIso>",
+          to: "<toIso>",
+          timezone: "<ianaTimezone>",
+        },
+      };
+    case "invoice.prepare":
+      return {
+        sourceRefs: {
+          ...handoffRef(entry),
+          jobId: "<jobId>",
+          closeoutId: "<closeoutId>",
+          customerObjectId: "<customerObjectId>",
+          evidencePacketId: "<evidencePacketId>",
+        },
+        policy: {
+          requiresOwnerApproval: true,
+          allowExternalSend: false,
+          allowMoneyMovement: false,
+        },
+      };
+    case "hire.packet.prepare":
+      return {
+        personId: "<personId>",
+        positionId: "<positionId>",
+        workLocationId: "<workLocationId>",
+        policy: {
+          requiresOwnerApproval: true,
+          allowPayrollMutation: false,
+        },
+      };
+    case "filing.prepare":
+      return {
+        filingRequirementId: "<filingRequirementId>",
+        period: {
+          start: "<periodStart>",
+          end: "<periodEnd>",
+        },
+        sourceRefs: {
+          rulePackId: "<rulePackId>",
+          evidencePacketId: "<evidencePacketId>",
+        },
+        policy: {
+          requiresOwnerApproval: true,
+          allowAgencySubmission: false,
+          requireLegalReview: true,
+        },
+      };
+    case "connector.health.scan":
+      return {
+        checks: ["scopes", "sync_lag", "schema_drift", "error_rate"],
+        sourceRefs: {
+          connectionId: "<connectionId>",
+          permissionGrantId: "<permissionGrantId>",
+        },
+        policy: {
+          allowPermissionChange: false,
+          allowRepairApply: false,
+        },
+      };
+    case "margin.review.prepare":
+      return {
+        sourceRefs: {
+          ...handoffRef(entry),
+          quoteObjectId: "<quoteObjectId>",
+          evidencePacketId: "<evidencePacketId>",
+        },
+        policy: {
+          marginRuleId: "<marginRuleId>",
+          discountPolicyId: "<discountPolicyId>",
+          requireOwnerApproval: true,
+        },
+      };
+    case "recovery.draft":
+      return {
+        sourceRefs: {
+          ...handoffRef(entry),
+          customerObjectId: "<customerObjectId>",
+          customerSignalObjectId: "<customerSignalObjectId>",
+          evidencePacketId: "<evidencePacketId>",
+        },
+        policy: {
+          requiresOwnerApproval: true,
+          allowExternalSend: false,
+        },
+      };
+    case "reorder.plan":
+      return {
+        sourceRefs: {
+          ...handoffRef(entry),
+          workOrderObjectId: "<workOrderObjectId>",
+          materialObjectId: "<materialObjectId>",
+          evidencePacketId: "<evidencePacketId>",
+        },
+        policy: {
+          maxDraftSpendCents: 0,
+          requiresOwnerApproval: true,
+          allowPurchase: false,
+        },
+      };
+    case "campaign.draft":
+      return {
+        sourceRefs: {
+          ...handoffRef(entry),
+          customerSignalObjectId: "<customerSignalObjectId>",
+          budgetReservationId: "<budgetReservationId>",
+          evidencePacketId: "<evidencePacketId>",
+        },
+        policy: {
+          channel: "<channel>",
+          audience: "<audience>",
+          requiresOwnerApproval: true,
+          allowPublish: false,
+        },
+      };
+    case "package.flow.prepare":
+      return {
+        packageKey: entry.packageKey ?? "vertical_packages",
+        sourceRefs: {
+          ...handoffRef(entry),
+          connectionId: "<connectionId>",
+          permissionGrantId: "<permissionGrantId>",
+        },
+        policy: {
+          allowExternalExecution: false,
+          requireRollbackProof: true,
+        },
+      };
+    default:
+      return {
+        sourceRefs: handoffRef(entry),
+        policy: {
+          requiresOwnerApproval: true,
+        },
+      };
+  }
 }
 
 function expansionPromotionChecklist(entry: WorkerExpansionCatalogEntry): WorkerExpansionPromotionProof[] {

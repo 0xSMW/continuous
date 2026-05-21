@@ -1,5 +1,15 @@
 # Implementation Notes
 
+## 2026-05-22
+
+### Decisions
+
+| Decision | Rationale |
+|---|---|
+| Made worker expansion promotion payloads command-shaped | Future workers should learn the generic `/worker` API from registry metadata: route and worker selectors stay stable, while command-specific inputs live under `config.sourceRefs`, `config.policy`, and other schema-owned config fields |
+| Aligned post-Systems wave numbering | `docs/worker-roadmap.md`, `docs/worker-expansion.md`, and `workerExpansionCatalog` now use the same 8-12 wave order for Offer/Pricing, Customer Experience, Asset/Supply, Growth, and packaged workers |
+| Made handoff docs name real config gates | Handoff rows now show the required first-command `config` fields instead of only minimal selectors, so future workers do not drift into route-specific or generic Core-ref payloads |
+
 ## 2026-05-19
 
 ### Decisions

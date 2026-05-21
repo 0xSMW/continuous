@@ -520,7 +520,7 @@ describe("future worker contracts", () => {
     expect(roadmap).toContain("New worker families extend `/worker`");
     expect(roadmap).toContain("Revenue Completion Gate");
     expect(roadmap).toContain("Controlled send");
-    expect(roadmap).toContain("Phase 9+: Packaged Worker Waves");
+    expect(roadmap).toContain("Phase 8+: Post-Systems Worker Waves");
     expect(roadmap).toContain("Offer and Pricing Worker");
     expect(roadmap).toContain("Vertical packaged workers");
     expect(roadmap).toContain("keep operation inputs under `config`");

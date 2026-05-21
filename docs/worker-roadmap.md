@@ -211,7 +211,7 @@ and operation inputs stay under `config`.
 | Adapters | All platform adapters with scoped grants and rollback plans |
 | Launch gate | Sync repair proves reconciliation and least-privilege scope before mutation |
 
-## Phase 9+: Packaged Worker Waves
+## Phase 8+: Post-Systems Worker Waves
 
 Systems is the platform reliability gate, not the end of the worker catalog.
 After Systems can prove connector health, least-privilege scopes, sync repair,
@@ -223,11 +223,11 @@ execution behind approval until receipts and rollback evidence are present.
 
 | Wave | Worker family | First packaged outcome | Owner orchestration gate |
 |---|---|---|---|
-| 9 | Offer and Pricing Worker | Runtime `margin.review.prepare` command and `price_policy` view for price book, quote-line, margin, and discount packets; change-order packets remain follow-up | Owner verifies Revenue quote evidence, margin rules, approval policy, and package refs before command execution |
-| 10 | Customer Experience Worker | Runtime `recovery.draft` command and `signals` view for source-backed recovery packets; escalation and review-response packets remain follow-up | Owner verifies Revenue/Dispatch customer messages, customer-signal records, approval posture, and blocked send/refund paths |
-| 11 | Asset and Supply Worker | Inventory, vendor, purchase, maintenance, and stockout packets | Owner verifies Dispatch closeout, Finance cash, Systems sync refs, and purchase blockers before mutation |
-| 12 | Growth Worker | Runtime `campaign.draft` command and `campaigns` view for source-backed campaign, channel, audience, content draft, and budget packets | Owner verifies customer signal, review, budget, source-claim evidence, approval, and blocked publish/send/spend/tracking paths |
-| 13 | Vertical packaged workers | Quote-to-Cash Field, Knowledge Delivery, Inventory/Replenishment, Compliance QA, and Maintenance bundles | Owner verifies which existing family commands the package composes, which Core refs are accepted, and which approvals block execution |
+| 8 | Offer and Pricing Worker | Runtime `margin.review.prepare` command and `price_policy` view for price book, quote-line, margin, and discount packets; change-order packets remain follow-up | Owner verifies Revenue quote evidence, margin rules, approval policy, and package refs before command execution |
+| 9 | Customer Experience Worker | Runtime `recovery.draft` command and `signals` view for source-backed recovery packets; escalation and review-response packets remain follow-up | Owner verifies Revenue/Dispatch customer messages, customer-signal records, approval posture, and blocked send/refund paths |
+| 10 | Asset and Supply Worker | Inventory, vendor, purchase, maintenance, and stockout packets | Owner verifies Dispatch closeout, Finance cash, Systems sync refs, and purchase blockers before mutation |
+| 11 | Growth Worker | Runtime `campaign.draft` command and `campaigns` view for source-backed campaign, channel, audience, content draft, and budget packets | Owner verifies customer signal, review, budget, source-claim evidence, approval, and blocked publish/send/spend/tracking paths |
+| 12 | Vertical packaged workers | Quote-to-Cash Field, Knowledge Delivery, Inventory/Replenishment, Compliance QA, and Maintenance bundles | Owner verifies which existing family commands the package composes, which Core refs are accepted, and which approvals block execution |
 
 Post-Systems workers must still register commands on `/worker`, keep selectors
 under `worker`, keep operation inputs under `config`, reuse shared approval and
