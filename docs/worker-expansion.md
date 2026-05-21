@@ -28,6 +28,10 @@ Every expansion entry must keep execution on `/worker`. Worker family,
 packaged-worker, and tenant selection belong in the request payload, and all
 operation-specific inputs belong under `config`.
 
+Status words are strict: `runtime` means registered and executable now,
+`candidate` means contract/catalog metadata only, and `packaged` means a
+cataloged composed bundle that is not launch-ready runtime.
+
 ## Launch Order
 
 | Order | Worker | First outcome | Launch gate |
@@ -56,7 +60,7 @@ packets.
 | Sales and Revenue Capture | Revenue Operations Worker | Runtime live | Lead, customer, offer, quote, booking, job, invoice, payment, review | First controlled external send with receipt, rollback/escalation, connector readiness |
 | Customer / Client / Patient Experience | Customer Experience Worker | First runtime slice | Customer, conversation, promise, satisfaction signal, complaint, testimonial, review | Recovery draft packet, generated signals view, no-send proof, approved outbound message gate |
 | Operations / Service Delivery | Operations Worker | Partially covered by Dispatch/Ops | Job, work order, schedule, checklist, closeout, exception, asset/material ref | Live calendar/job-system credential gate, conflict exceptions, closeout completeness eval |
-| Supply Chain, Assets, and Facilities | Asset and Supply Worker | V1 contract planned | Vendor, inventory item, purchase order, asset, facility, maintenance event, stockout | Dry-run reorder/maintenance plan, approval for purchase/asset actions, rollback plan |
+| Supply Chain, Assets, and Facilities | Asset and Supply Worker | Candidate; contract planned, dry-run posture only | Vendor, inventory item, purchase order, asset, facility, maintenance event, stockout | Dry-run reorder/maintenance plan, approval for purchase/asset actions, rollback plan |
 | Workforce and HR | Workforce Worker | First runtime slice | Person, employment, contractor engagement, position, credential, compensation, document | `hire.packet.prepare` and `payroll_input.prepare` produce restricted-document proof, workforce packets, approvals, readiness views, and payroll blocker visibility; contractor, credential, and schedule readiness remain follow-ups |
 | Finance and Admin | Finance Worker | Runtime started | Invoice, bill, payment, expense, receipt, cash forecast, reconciliation item | Expense coding fixture, live accounting/payment readiness, dual-control approval |
 | Risk, Legal, Compliance, and Quality | Compliance Worker | Runtime started | Rule pack, obligation, filing requirement, notice, license, policy, evidence binder | Source-backed rule claims, human submission approval, exportable evidence binder |
@@ -72,9 +76,9 @@ decisions; changing the order should update this table before code.
 |---:|---|---|---|---|---|---|
 | 8 | Offer and Pricing Worker | Runtime `POST /worker` slice with `command: "margin.review.prepare"` and `view: "price_policy"` | Offer, price book, quote line, margin rule, discount policy | `revenue.quote_to_pricing` | Quote lines have source evidence, margin policy exists, external send remains blocked | Price-change, discount-exception, and live publish/send gates |
 | 9 | Customer Experience Worker | Runtime `POST /worker` command `recovery.draft`, `view: "signals"` | Customer, conversation, promise, satisfaction signal, complaint, review | `customer.signal_to_experience` | Signal type/source/severity are present, customer ref is tenant-scoped, outbound recovery is blocked | External send credentials, rollback proof, and receipt capture |
-| 10 | Asset and Supply Worker | Planned `POST /worker` command `reorder.plan`, `view: "stockouts"` | Vendor, inventory item, purchase order, asset, facility, maintenance event | `dispatch.asset_need_to_supply` | Need is tied to job/work order, purchase action is unapproved, cash impact is visible | Dry-run purchase/maintenance receipt and rollback plan |
+| 10 | Asset and Supply Worker | Candidate `/worker` command `reorder.plan`, `view: "stockouts"` | Vendor, inventory item, purchase order, asset, facility, maintenance event | `dispatch.asset_need_to_supply` | Need is tied to job/work order, purchase action is unapproved, cash impact is visible | Dry-run purchase/maintenance receipt and rollback plan |
 | 11 | Growth Worker | Runtime `POST /worker` command `campaign.draft`, `view: "campaigns"` | Campaign, channel, audience, content draft, attribution event, budget reservation | `customer.signal_to_growth` | Customer signal, review, budget, source-claim evidence, and no-publish policy are present under `config.sourceRefs` and `config.policy` | External publish, send, spend, and tracking approval/proof gates |
-| 12 | Vertical packaged workers | Planned `POST /worker` command `package.flow.prepare`, `view: "package_readiness"` with package selection under `config.packageKey` | Composed family objects plus connection readiness refs | `systems.connection_to_packaged_worker` | Required connector freshness, least-privilege grant, and rollback evidence pass | Package-specific handoff fixture and launch smoke |
+| 12 | Vertical packaged workers | Cataloged packaged bundle `/worker` command `package.flow.prepare`, `view: "package_readiness"` with package selection under `config.packageKey` | Composed family objects plus connection readiness refs | `systems.connection_to_packaged_worker` | Required connector freshness, least-privilege grant, and rollback evidence pass | Package-specific handoff fixture and launch smoke |
 
 ## ICP Packaged Workers
 

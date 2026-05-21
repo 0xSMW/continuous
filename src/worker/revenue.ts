@@ -4382,7 +4382,7 @@ function replayedRevenueActionResult(
     created: false,
     idempotencyKey: run.idempotencyKey,
     workerRunId: run.id,
-    eventId: run.eventId ?? stringData(run.data, "eventId"),
+    eventId: stringData(run.data, "eventId") ?? run.eventId,
     reservationId: stringData(run.data, "reservationId"),
     inferenceId: stringData(run.data, "inferenceId"),
     usageEventId: stringData(run.data, "usageEventId"),
@@ -4496,121 +4496,96 @@ async function runRevenueActionCommand(input: {
     ...intakeTrace,
     leadPacket: leadPacket.sourceSnapshot,
   });
+  const actionRunInput = {
+    command: input.command,
+    inputHash,
+    config: requestConfig,
+    resolvedConfig: config,
+    ...intakeTrace,
+    leadPacket: leadPacket.sourceSnapshot,
+    operator: {
+      userId: operator.id,
+      email: operator.email,
+    },
+  };
+  const coreRun = await startCoreWorkerRun({
+    operatorEmail: input.operatorEmail,
+    tenantSlug: context.worker.tenantSlug,
+    idempotencyKey: input.idempotencyKey,
+    worker: {
+      id: context.worker.id,
+      role: revenueWorkerRole,
+    },
+    command: input.command,
+    mode,
+    taskId: context.task?.id,
+    capabilityId,
+    budgetAccountId: context.budgetAccountId,
+    units,
+    input: actionRunInput,
+    policy: {
+      externalExecution: "blocked",
+      externalSend: false,
+      moneyMovement: "blocked",
+    },
+    evidence: {
+      command: input.command,
+      required: ["lead_intake", "inference_trace", "action_evidence", "action_audit"],
+      externalExecution: "blocked",
+      externalSend: false,
+    },
+    db,
+  });
+  const coreBudget = objectValue(coreRun.budget);
+  const coreReservationId = stringValue(coreBudget.reservationId);
 
   const result = await db.transaction(async (tx) => {
     await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${source}:${input.idempotencyKey}`}))`,
+      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${coreWorkerRunSource}:${input.idempotencyKey}`}))`,
     );
 
-    const [existingRun] = await tx
+    const [run] = await tx
       .select()
       .from(workerRuns)
       .where(
         and(
           eq(workerRuns.tenantId, context.worker.tenantId),
-          eq(workerRuns.source, source),
-          eq(workerRuns.idempotencyKey, input.idempotencyKey),
+          eq(workerRuns.id, coreRun.workerRunId),
         ),
       )
       .limit(1);
 
-    if (existingRun) {
-      const existingInput = objectValue(existingRun.data.input);
-      const existingHash = stringValue(existingInput.inputHash);
+    if (!run) {
+      throw new RevenueWorkerUnavailableError(
+        "worker_run_missing",
+        "Core worker.run.start did not return a persisted Revenue Worker action run.",
+        409,
+      );
+    }
 
-      if (stringValue(existingInput.command) !== input.command || (existingHash && existingHash !== inputHash)) {
-        throw new RevenueWorkerUnavailableError(
-          "worker_idempotency_conflict",
-          "This idempotency key was already used with different worker input.",
-          409,
-        );
-      }
+    const existingInput = objectValue(run.data.input);
+    const existingRequest = objectValue(existingInput.request);
+    const existingHash = stringValue(existingRequest.inputHash) || stringValue(existingInput.inputHash);
 
+    if (stringValue(existingInput.command) !== input.command || (existingHash && existingHash !== inputHash)) {
+      throw new RevenueWorkerUnavailableError(
+        "worker_idempotency_conflict",
+        "This idempotency key was already used with different worker input.",
+        409,
+      );
+    }
+
+    const existingOutput = outputData(run.data);
+
+    if (stringValue(existingOutput.command) === input.command) {
       return {
         created: false as const,
-        run: existingRun,
+        run,
       };
     }
 
     const now = new Date();
-    await assertWorkerBudgetCapacity(tx, {
-      budgetAccountId: context.budgetAccountId,
-      units,
-      label: input.command,
-    });
-
-    const [grant] = await tx
-      .select({ id: capabilityGrants.id })
-      .from(capabilityGrants)
-      .innerJoin(capabilities, eq(capabilityGrants.capabilityId, capabilities.id))
-      .where(
-        and(
-          eq(capabilityGrants.tenantId, context.worker.tenantId),
-          eq(capabilityGrants.actorType, "worker"),
-          eq(capabilityGrants.actorId, context.worker.id),
-          eq(capabilityGrants.capabilityId, capabilityId),
-          eq(capabilityGrants.active, true),
-          eq(capabilities.active, true),
-          sql`(${capabilityGrants.startsAt} is null or ${capabilityGrants.startsAt} <= ${now})`,
-          sql`(${capabilityGrants.endsAt} is null or ${capabilityGrants.endsAt} > ${now})`,
-        ),
-      )
-      .limit(1);
-
-    if (!grant) {
-      throw new RevenueWorkerUnavailableError(
-        "worker_capability_not_granted",
-        `Revenue Worker is not actively granted ${input.command}.`,
-        403,
-      );
-    }
-
     const output = revenueActionOutput(input.command, leadPacket);
-    const [reservation] = await tx
-      .insert(budgetReservations)
-      .values({
-        tenantId: context.worker.tenantId,
-        accountId: context.budgetAccountId,
-        taskId: context.task?.id,
-        units,
-        state: "used",
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning({ id: budgetReservations.id });
-    const [run] = await tx
-      .insert(workerRuns)
-      .values({
-        tenantId: context.worker.tenantId,
-        workerId: context.worker.id,
-        taskId: context.task?.id ?? null,
-        capabilityId,
-        budgetAccountId: context.budgetAccountId,
-        source,
-        idempotencyKey: input.idempotencyKey,
-        state: "running",
-        mode,
-        data: {
-          input: {
-            command: input.command,
-            inputHash,
-            config: requestConfig,
-            resolvedConfig: config,
-            ...intakeTrace,
-            leadPacket: leadPacket.sourceSnapshot,
-            operator: {
-              userId: operator.id,
-              email: operator.email,
-            },
-          },
-          reservationId: reservation.id,
-          externalExecution: "blocked",
-        },
-        startedAt: now,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning({ id: workerRuns.id });
     const [inference] = await tx
       .insert(inferences)
       .values({
@@ -4643,29 +4618,6 @@ async function runRevenueActionCommand(input: {
         createdAt: now,
       })
       .returning({ id: inferences.id });
-    const [usage] = await tx
-      .insert(usageEvents)
-      .values({
-        tenantId: context.worker.tenantId,
-        accountId: context.budgetAccountId,
-        reservationId: reservation.id,
-        inferenceId: inference.id,
-        taskId: context.task?.id,
-        capabilityId,
-        actorType: "worker",
-        actorId: context.worker.id,
-        units,
-        costUsd: "0.000000",
-        data: {
-          command: input.command,
-          mode,
-          workerRunId: run.id,
-          ...intakeTrace,
-          externalExecution: "blocked",
-        },
-        createdAt: now,
-      })
-      .returning({ id: usageEvents.id });
     const [event] = await tx
       .insert(events)
       .values({
@@ -4712,8 +4664,8 @@ async function runRevenueActionCommand(input: {
           ...intakeTrace,
           leadPacket: leadPacket.sourceSnapshot,
           inferenceId: inference.id,
-          usageEventId: usage.id,
-          reservationId: reservation.id,
+          usageEventId: null,
+          reservationId: coreReservationId || null,
           externalExecution: "blocked",
           externalSend: false,
         },
@@ -4745,8 +4697,8 @@ async function runRevenueActionCommand(input: {
           output,
           evidenceId: actionEvidence.id,
           inferenceId: inference.id,
-          usageEventId: usage.id,
-          reservationId: reservation.id,
+          usageEventId: null,
+          reservationId: coreReservationId || null,
           ...intakeTrace,
           externalExecution: "blocked",
           externalSend: false,
@@ -4759,30 +4711,20 @@ async function runRevenueActionCommand(input: {
       .update(workerRuns)
       .set({
         eventId: event.id,
-        state: "done",
         data: {
-          input: {
-            command: input.command,
-            inputHash,
-            config: requestConfig,
-            resolvedConfig: config,
-            ...intakeTrace,
-            leadPacket: leadPacket.sourceSnapshot,
-            operator: {
-              userId: operator.id,
-              email: operator.email,
-            },
+          ...objectValue(run.data),
+          businessEventId: event.id,
+          businessAuditEventId: audit.id,
+          pendingCompletion: {
+            output,
           },
-          output,
           eventId: event.id,
-          reservationId: reservation.id,
+          reservationId: coreReservationId || null,
           inferenceId: inference.id,
-          usageEventId: usage.id,
           evidenceId: actionEvidence.id,
           auditEventId: audit.id,
           externalExecution: "blocked",
         },
-        endedAt: now,
         updatedAt: now,
       })
       .where(eq(workerRuns.id, run.id));
@@ -4812,14 +4754,41 @@ async function runRevenueActionCommand(input: {
       created: true as const,
       workerRunId: run.id,
       eventId: event.id,
-      reservationId: reservation.id,
+      reservationId: coreReservationId || null,
       inferenceId: inference.id,
-      usageEventId: usage.id,
+      usageEventId: null,
       evidenceId: actionEvidence.id,
       auditEventId: audit.id,
       output,
     };
   });
+  const completion = result.created
+    ? await completeCoreWorkerRun({
+        operatorEmail: input.operatorEmail,
+        tenantSlug: context.worker.tenantSlug,
+        idempotencyKey: input.idempotencyKey,
+        worker: {
+          id: context.worker.id,
+          role: revenueWorkerRole,
+        },
+        workerRunId: result.workerRunId,
+        state: "done",
+        reason: `Revenue Worker completed ${input.command} with external execution blocked.`,
+        output: result.output,
+        costUsd: 0,
+        evidence: {
+          command: input.command,
+          eventId: result.eventId,
+          auditEventId: result.auditEventId,
+          evidenceId: result.evidenceId,
+          inferenceId: result.inferenceId,
+          ...intakeTrace,
+          externalExecution: "blocked",
+          externalSend: false,
+        },
+        db,
+      })
+    : null;
   const snapshot = await getRevenueWorkerSnapshot(db, {
     tenantSlug: input.tenantSlug,
     workerId: context.worker.id,
@@ -4830,14 +4799,18 @@ async function runRevenueActionCommand(input: {
     return replayedRevenueActionResult(result.run, snapshot);
   }
 
+  const completionBudget = objectValue(completion?.budget);
+  const settledReservationId = stringValue(completionBudget.reservationId) || result.reservationId;
+  const settledUsageEventId = stringValue(completionBudget.usageEventId) || result.usageEventId;
+
   return {
     created: true,
     idempotencyKey: input.idempotencyKey,
     workerRunId: result.workerRunId,
     eventId: result.eventId,
-    reservationId: result.reservationId,
+    reservationId: settledReservationId,
     inferenceId: result.inferenceId,
-    usageEventId: result.usageEventId,
+    usageEventId: settledUsageEventId,
     evidenceId: result.evidenceId,
     auditEventId: result.auditEventId,
     output: result.output,

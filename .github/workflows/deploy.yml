@@ -1628,7 +1628,7 @@ jobs:
 
           LEAD_READ_WORKER_RUN_ID="$(echo "$LEAD_READ_RESPONSE" | /usr/bin/jq -r '.data.result.workerRunId')"
           LEAD_READ_WORKER_RUN_ROW="$(
-            psql_db -Atc "select coalesce(source,'') || '|' || coalesce(state,'') || '|' || coalesce(mode,'') || '|' || coalesce(data->'output'->>'readCount','') || '|' || coalesce(data->'output'->>'externalSend','') || '|' || coalesce(data->'completion'->'budget'->>'state','') from worker_runs where id = '$LEAD_READ_WORKER_RUN_ID'::uuid;"
+            psql_db -Atc "select coalesce(source,'') || '|' || coalesce(state::text,'') || '|' || coalesce(mode,'') || '|' || coalesce(data->'output'->>'readCount','') || '|' || coalesce(data->'output'->>'externalSend','') || '|' || coalesce(data->'completion'->'budget'->>'state','') from worker_runs where id = '$LEAD_READ_WORKER_RUN_ID'::uuid;"
           )"
           echo "lead_read_worker_run|$LEAD_READ_WORKER_RUN_ROW"
           if [ "$LEAD_READ_WORKER_RUN_ROW" != "continuous.core.worker_runs|done|read_only|1|false|used" ]; then
@@ -1784,7 +1784,7 @@ jobs:
           fi
 
           CONNECTION_LEAD_READ_ROW="$(
-            psql_db -Atc "select coalesce(source,'') || '|' || coalesce(state,'') || '|' || coalesce(mode,'') || '|' || coalesce(data->'output'->>'connectionId','') || '|' || coalesce(data->'output'->>'cursor','') || '|' || coalesce(data->'output'->'sourceReader'->>'sourceMode','') || '|' || coalesce(data->'completion'->'budget'->>'state','') from worker_runs where id = '$CONNECTION_LEAD_READ_WORKER_RUN_ID'::uuid;"
+            psql_db -Atc "select coalesce(source,'') || '|' || coalesce(state::text,'') || '|' || coalesce(mode,'') || '|' || coalesce(data->'output'->>'connectionId','') || '|' || coalesce(data->'output'->>'cursor','') || '|' || coalesce(data->'output'->'sourceReader'->>'sourceMode','') || '|' || coalesce(data->'completion'->'budget'->>'state','') from worker_runs where id = '$CONNECTION_LEAD_READ_WORKER_RUN_ID'::uuid;"
           )"
           if [ "$CONNECTION_LEAD_READ_ROW" != "continuous.core.worker_runs|done|read_only|$CONNECTION_ID|$CONNECTION_LEAD_READ_SOURCE_EVENT_ID|connection_buffer|used" ]; then
             echo "Unexpected scheduler connection-backed lead.read worker run row: $CONNECTION_LEAD_READ_ROW" >&2
@@ -1878,6 +1878,13 @@ jobs:
           LEAD_CLASSIFY_EVIDENCE_ID="$(echo "$LEAD_CLASSIFY_RESPONSE" | /usr/bin/jq -r '.data.result.evidenceId')"
           LEAD_CLASSIFY_AUDIT_ID="$(echo "$LEAD_CLASSIFY_RESPONSE" | /usr/bin/jq -r '.data.result.auditEventId')"
           LEAD_CLASSIFY_USAGE_ID="$(echo "$LEAD_CLASSIFY_RESPONSE" | /usr/bin/jq -r '.data.result.usageEventId')"
+          LEAD_CLASSIFY_WORKER_RUN_ROW="$(
+            psql_db -Atc "select coalesce(source,'') || '|' || coalesce(state,'') || '|' || coalesce(mode,'') || '|' || coalesce(data->'input'->>'command','') || '|' || coalesce(data->'output'->>'externalExecution','') || '|' || coalesce(data->'completion'->'budget'->>'state','') || '|' || coalesce(data->'completion'->'budget'->>'usageEventId','') from worker_runs where id = '$LEAD_CLASSIFY_WORKER_RUN_ID'::uuid;"
+          )"
+          if [ "$LEAD_CLASSIFY_WORKER_RUN_ROW" != "continuous.core.worker_runs|done|classification|lead.classify|blocked|used|$LEAD_CLASSIFY_USAGE_ID" ]; then
+            echo "Unexpected Core-backed lead.classify worker run row: $LEAD_CLASSIFY_WORKER_RUN_ROW" >&2
+            exit 1
+          fi
           psql_db -At <<SQL
           select 'lead_classify_worker_run' as kind, state, mode, data->'input'->>'command', data->'output'->>'externalExecution'
           from worker_runs where id = '$LEAD_CLASSIFY_WORKER_RUN_ID'::uuid;
@@ -1924,6 +1931,13 @@ jobs:
           RESPONSE_DRAFT_EVIDENCE_ID="$(echo "$RESPONSE_DRAFT_RESPONSE" | /usr/bin/jq -r '.data.result.evidenceId')"
           RESPONSE_DRAFT_AUDIT_ID="$(echo "$RESPONSE_DRAFT_RESPONSE" | /usr/bin/jq -r '.data.result.auditEventId')"
           RESPONSE_DRAFT_USAGE_ID="$(echo "$RESPONSE_DRAFT_RESPONSE" | /usr/bin/jq -r '.data.result.usageEventId')"
+          RESPONSE_DRAFT_WORKER_RUN_ROW="$(
+            psql_db -Atc "select coalesce(source,'') || '|' || coalesce(state,'') || '|' || coalesce(mode,'') || '|' || coalesce(data->'input'->>'command','') || '|' || coalesce(data->'output'->>'externalExecution','') || '|' || coalesce(data->'completion'->'budget'->>'state','') || '|' || coalesce(data->'completion'->'budget'->>'usageEventId','') from worker_runs where id = '$RESPONSE_DRAFT_WORKER_RUN_ID'::uuid;"
+          )"
+          if [ "$RESPONSE_DRAFT_WORKER_RUN_ROW" != "continuous.core.worker_runs|done|draft|response.draft|blocked|used|$RESPONSE_DRAFT_USAGE_ID" ]; then
+            echo "Unexpected Core-backed response.draft worker run row: $RESPONSE_DRAFT_WORKER_RUN_ROW" >&2
+            exit 1
+          fi
           psql_db -At <<SQL
           select 'response_draft_worker_run' as kind, state, mode, data->'input'->>'command', data->'output'->>'externalExecution'
           from worker_runs where id = '$RESPONSE_DRAFT_WORKER_RUN_ID'::uuid;

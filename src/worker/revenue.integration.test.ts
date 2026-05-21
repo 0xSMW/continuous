@@ -6618,13 +6618,23 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .from(usageEvents)
       .where(eq(usageEvents.id, stringValue(classifyResult.usageEventId)))
       .limit(1);
+    const classifyRunData = objectValue(classifyRun?.data);
+    const classifyCompletion = objectValue(classifyRunData.completion);
+    const classifyBudget = objectValue(classifyCompletion.budget);
 
+    expect(classifyRun?.source).toBe("continuous.core.worker_runs");
+    expect(classifyRun?.state).toBe("done");
     expect(classifyRun?.mode).toBe("classification");
-    expect(objectValue(objectValue(classifyRun?.data).input).command).toBe("lead.classify");
+    expect(objectValue(classifyRunData.input).command).toBe("lead.classify");
+    expect(objectValue(classifyRunData.output).command).toBe("lead.classify");
+    expect(classifyBudget.state).toBe("used");
+    expect(classifyBudget.reservationId).toBe(classifyResult.reservationId);
+    expect(classifyBudget.usageEventId).toBe(classifyResult.usageEventId);
     expect(classifyEvent?.type).toBe("worker.revenue_operations.lead_classify.completed");
     expect(classifyEvidence?.kind).toBe("trace");
     expect(classifyAudit?.type).toBe("worker.revenue_operations.lead_classify.completed");
     expect(classifyUsage?.units).toBeGreaterThan(0);
+    expect(classifyUsage?.inferenceId).toBe(classifyResult.inferenceId);
 
     const [draftRun] = await db
       .select()
@@ -6651,13 +6661,23 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .from(usageEvents)
       .where(eq(usageEvents.id, stringValue(draftResult.usageEventId)))
       .limit(1);
+    const draftRunData = objectValue(draftRun?.data);
+    const draftCompletion = objectValue(draftRunData.completion);
+    const draftBudget = objectValue(draftCompletion.budget);
 
+    expect(draftRun?.source).toBe("continuous.core.worker_runs");
+    expect(draftRun?.state).toBe("done");
     expect(draftRun?.mode).toBe("draft");
-    expect(objectValue(objectValue(draftRun?.data).input).command).toBe("response.draft");
+    expect(objectValue(draftRunData.input).command).toBe("response.draft");
+    expect(objectValue(draftRunData.output).command).toBe("response.draft");
+    expect(draftBudget.state).toBe("used");
+    expect(draftBudget.reservationId).toBe(draftResult.reservationId);
+    expect(draftBudget.usageEventId).toBe(draftResult.usageEventId);
     expect(draftEvent?.type).toBe("worker.revenue_operations.response_draft.completed");
     expect(draftEvidence?.kind).toBe("draft");
     expect(draftAudit?.type).toBe("worker.revenue_operations.response_draft.completed");
     expect(draftUsage?.units).toBeGreaterThan(0);
+    expect(draftUsage?.inferenceId).toBe(draftResult.inferenceId);
 
     const quote = await executeWorkerCommand({
       command: "quote.prepare",
@@ -7203,9 +7223,13 @@ maybeDescribe("Revenue Worker integration eval", () => {
       expect(score.dimensions.filter((dimension) => !dimension.passed)).toEqual([]);
       expect(score.passed).toBe(true);
       expect(score.score).toBeGreaterThanOrEqual(evalCase.expected.minScore);
-      expect(run?.source).toBe("continuous.worker");
+      expect(run?.source).toBe("continuous.core.worker_runs");
       expect(run?.mode).toBe(evalCase.expected.runMode);
       expect(run?.state).toBe(evalCase.expected.runState);
+      expect(objectValue(objectValue(run?.data).completion).budget).toMatchObject({
+        state: "used",
+        usageEventId: result.usageEventId,
+      });
       expect(event?.type).toBe(`worker.revenue_operations.${evalCase.command.replace(".", "_")}.completed`);
       expect(audit?.type).toBe(event?.type);
     }
@@ -8022,7 +8046,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
           },
         }),
       ).rejects.toMatchObject({
-        code: "worker_budget_exceeded",
+        code: "worker_run_budget_exceeded",
       });
     } finally {
       await db.delete(budgetReservations).where(eq(budgetReservations.id, held.id));

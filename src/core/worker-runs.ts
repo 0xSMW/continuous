@@ -953,6 +953,8 @@ export async function completeCoreWorkerRun(input: CompleteCoreWorkerRunInput) {
     const runBudget = objectValue(runData.budget);
     const reservationId = cleanString(runBudget.reservationId);
     const now = new Date();
+    const completionInferenceId = optionalUuid(cleanString(evidenceInput.inferenceId), "config.evidence.inferenceId");
+    const outputCommand = cleanString(output.command);
     let budgetSettlement: JsonObject = {
       state: "none",
     };
@@ -997,24 +999,35 @@ export async function completeCoreWorkerRun(input: CompleteCoreWorkerRunInput) {
       }
 
       if (state === "done") {
+        const usageData: JsonObject = {
+          workerRunId,
+          reason,
+          output,
+          externalExecution: "blocked",
+        };
+
+        if (outputCommand) {
+          usageData.command = outputCommand;
+        }
+
+        if (completionInferenceId) {
+          usageData.inferenceId = completionInferenceId;
+        }
+
         const [usage] = await tx
           .insert(usageEvents)
           .values({
             tenantId: operator.tenantId,
             accountId: reservation.accountId,
             reservationId: reservation.id,
+            inferenceId: completionInferenceId,
             taskId: selected.run.taskId ?? reservation.taskId,
             capabilityId: selected.run.capabilityId,
             actorType: "worker",
             actorId: selected.worker.id,
             units: reservation.units,
             costUsd,
-            data: {
-              workerRunId,
-              reason,
-              output,
-              externalExecution: "blocked",
-            },
+            data: usageData,
             createdAt: now,
           })
           .returning();
