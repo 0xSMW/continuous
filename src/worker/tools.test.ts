@@ -514,7 +514,9 @@ describe("worker tool contract", () => {
               approvalId: expect.objectContaining({ type: "string" }),
               execution: expect.objectContaining({
                 type: "object",
+                required: ["connectionId", "credentialRef", "recipient", "receipt", "rollback"],
                 properties: expect.objectContaining({
+                  connectionId: expect.objectContaining({ type: "string" }),
                   receipt: expect.objectContaining({ type: "object" }),
                   rollback: expect.objectContaining({ type: "object" }),
                 }),

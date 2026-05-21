@@ -170,9 +170,9 @@ Approval decisions use the same route:
 Worker continuations also stay on the same route. The command consumes persisted
 approval state; the URL does not encode the worker family or continuation type.
 For an approved controlled send, execution data stays under `config.execution`
-and must include scoped connection, managed credential reference, receipt, and
-rollback/escalation proof. No continuation uses a worker-family API route or
-top-level operation fields.
+and must include an explicit `connectionId`, managed credential reference,
+recipient, receipt, and rollback/escalation proof. No continuation uses a
+worker-family API route or top-level operation fields.
 
 ```json
 {
@@ -399,9 +399,10 @@ evidence/document packet records, moves the workflow to `execution_blocked`,
 leaves the task in `waiting`, and keeps adapter execution blocked when
 `config.execution` is absent. Approved continuation with `config.execution`
 records a controlled customer-message receipt, hashes the managed credential
-reference instead of storing it, requires write scope plus rollback/escalation
-proof, moves the workflow to `execution_recorded`, and rejects replay when the
-same idempotency key is reused with changed execution config. Revision
+reference instead of storing it, persists only a safe summary of
+`config.execution`, requires write scope plus rollback/escalation proof, moves
+the workflow to `execution_recorded`, and rejects replay when the same
+idempotency key is reused with changed or unhashed execution config. Revision
 continuation prepares a revised no-send quote packet, stores the revised packet
 evidence/document packet, creates a fresh pending `quote_revision_approval`,
 moves the workflow back to `approval_requested`, updates the task back to

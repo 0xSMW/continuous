@@ -1427,6 +1427,33 @@ function controlledExecutionConfig(config: JsonObject) {
   return Object.keys(execution).length > 0 ? execution : null;
 }
 
+function storedContinuationConfig(params: {
+  approvalId: string;
+  config: JsonObject;
+  execution: JsonObject | null;
+}) {
+  const extraFields = Object.keys(params.config).filter(
+    (field) => field !== "approvalId" && field !== "execution",
+  );
+  const stored: JsonObject = {
+    approvalId: params.approvalId,
+  };
+
+  if (params.execution) {
+    stored.execution = {
+      schemaVersion: "worker.execution_config_summary.v1",
+      provided: true,
+      inputHash: hashObject(params.execution),
+    };
+  }
+
+  if (extraFields.length > 0) {
+    stored.extraFields = extraFields.sort();
+  }
+
+  return stored;
+}
+
 function assertNoInlineCredentialMaterial(value: unknown, path = "config.execution") {
   if (Array.isArray(value)) {
     value.forEach((item, index) => assertNoInlineCredentialMaterial(item, `${path}[${index}]`));
@@ -1458,7 +1485,7 @@ function assertNoInlineCredentialMaterial(value: unknown, path = "config.executi
     if (secretish && !isReference && typeof nested === "string" && nested.trim()) {
       throw new RevenueWorkerUnavailableError(
         "worker_controlled_send_secret_material",
-        `${path}.${key} looks like inline credential material. Use a managed credential reference such as env:NAME or vault:PATH.`,
+        `${path}.${key} looks like inline credential material. Use a managed credential reference such as managed:customer-message-sender.`,
         400,
       );
     }
@@ -1509,22 +1536,19 @@ function hasScope(granted: string[], required: string) {
 async function controlledSendReceiptFor(input: {
   tx: Transaction;
   tenantId: string;
-  config: JsonObject;
-  fallbackConnectionId: string;
+  execution: JsonObject | null;
   adapterRunId: string;
   adapterActionId: string;
   now: Date;
 }) {
-  const execution = controlledExecutionConfig(input.config);
+  const execution = input.execution;
 
   if (!execution) {
     return null;
   }
 
   assertNoInlineCredentialMaterial(execution);
-  const connectionId = uuidValue(
-    execution.connectionId ?? objectValue(execution.connection).id ?? input.fallbackConnectionId,
-  );
+  const connectionId = uuidValue(execution.connectionId);
 
   if (!connectionId) {
     throw new RevenueWorkerUnavailableError(
@@ -1584,7 +1608,7 @@ async function controlledSendReceiptFor(input: {
   if (!credentialRef) {
     throw new RevenueWorkerUnavailableError(
       "worker_controlled_send_credential_required",
-      "Controlled send receipt recording requires a managed credential reference such as config.execution.credentialRef=env:NAME.",
+      "Controlled send receipt recording requires a managed credential reference such as config.execution.credentialRef=managed:customer-message-sender.",
       409,
     );
   }
@@ -1667,6 +1691,18 @@ async function controlledSendReceiptFor(input: {
 
   const channel = firstStringValue(execution.channel, message.channel, "email");
   const operation = firstStringValue(execution.operation, "customer_message.send");
+  const receiptProviderMessageId = firstStringValue(receipt.providerMessageId, receipt.messageId);
+  const receiptStatus = firstStringValue(receipt.status, "recorded");
+  const receiptSentAt = firstStringValue(receipt.sentAt, receipt.deliveredAt, receipt.createdAt);
+  const rollbackSteps = stringListOrSingle(rollback.steps);
+  const rollbackEvidenceRequired = Array.from(
+    new Set([
+      ...stringListOrSingle(rollback.evidenceRequired),
+      "adapter_receipt",
+      "rollback_plan",
+      "escalation_owner",
+    ]),
+  );
 
   return {
     schemaVersion: "worker.controlled_send_receipt.v1",
@@ -1686,23 +1722,18 @@ async function controlledSendReceiptFor(input: {
       hash: credentialRefHash(credentialRef),
     },
     receipt: {
-      ...receipt,
       receiptId,
+      ...(receiptProviderMessageId ? { providerMessageId: receiptProviderMessageId } : {}),
+      ...(receiptSentAt ? { sentAt: receiptSentAt } : {}),
+      status: receiptStatus,
     },
     rollback: {
-      ...rollback,
       state: "ready",
       strategy: rollbackStrategy,
       escalationOwner,
+      ...(rollbackSteps.length > 0 ? { steps: rollbackSteps } : {}),
       required: true,
-      evidenceRequired: Array.from(
-        new Set([
-          ...stringListOrSingle(rollback.evidenceRequired),
-          "adapter_receipt",
-          "rollback_plan",
-          "escalation_owner",
-        ]),
-      ),
+      evidenceRequired: rollbackEvidenceRequired,
     },
     externalExecution: "recorded",
     externalMutation: true,
@@ -5424,6 +5455,12 @@ export async function continueRevenueWorker(input: {
   const context = await loadWorkerContext(db, selector);
   const operator = await loadOperator(db, context.worker.tenantId, input.operatorEmail);
   const now = new Date();
+  const requestedExecution = controlledExecutionConfig(commandConfig);
+  const storedConfig = storedContinuationConfig({
+    approvalId,
+    config: commandConfig,
+    execution: requestedExecution,
+  });
   const inputHash = hashObject({
     approvalId,
     config: commandConfig,
@@ -5469,7 +5506,15 @@ export async function continueRevenueWorker(input: {
       const existingInput = objectValue(existingRun.data.input);
       const existingHash = stringValue(existingInput.inputHash);
 
-      if (existingHash && existingHash !== inputHash) {
+      if (!existingHash) {
+        throw new RevenueWorkerUnavailableError(
+          "worker_continuation_idempotency_conflict",
+          "Idempotency key belongs to a worker continuation without a config hash. Use a new idempotency key.",
+          409,
+        );
+      }
+
+      if (existingHash !== inputHash) {
         throw new RevenueWorkerUnavailableError(
           "worker_continuation_idempotency_conflict",
           "Idempotency key already belongs to a different worker continuation payload.",
@@ -5574,7 +5619,6 @@ export async function continueRevenueWorker(input: {
     const approvalDecision = objectValue(approval.decision);
     const approvalContinuation = objectValue(approvalDecision.continuation);
     const originalOutput = outputData(originalRun.data);
-    const requestedExecution = controlledExecutionConfig(commandConfig);
 
     if (requestedExecution && approval.state !== "approved") {
       throw new RevenueWorkerUnavailableError(
@@ -5615,7 +5659,7 @@ export async function continueRevenueWorker(input: {
             input: {
               idempotencyKey: input.idempotencyKey,
               inputHash,
-              config: commandConfig,
+              config: storedConfig,
               ...continuationInput,
               operator: {
                 userId: operator.id,
@@ -5638,8 +5682,7 @@ export async function continueRevenueWorker(input: {
       const controlledSendReceipt = await controlledSendReceiptFor({
         tx,
         tenantId: context.worker.tenantId,
-        config: commandConfig,
-        fallbackConnectionId: originalRun.connectionId ?? context.connectionId,
+        execution: requestedExecution,
         adapterRunId,
         adapterActionId,
         now,
@@ -6137,7 +6180,7 @@ export async function continueRevenueWorker(input: {
             input: {
               idempotencyKey: input.idempotencyKey,
               inputHash,
-              config: commandConfig,
+              config: storedConfig,
               ...continuationInput,
               operator: {
                 userId: operator.id,
@@ -6195,7 +6238,7 @@ export async function continueRevenueWorker(input: {
             input: {
               idempotencyKey: input.idempotencyKey,
               inputHash,
-              config: commandConfig,
+              config: storedConfig,
               ...continuationInput,
               operator: {
                 userId: operator.id,
@@ -6647,7 +6690,7 @@ export async function continueRevenueWorker(input: {
             input: {
               idempotencyKey: input.idempotencyKey,
               inputHash,
-              config: commandConfig,
+              config: storedConfig,
               ...continuationInput,
               operator: {
                 userId: operator.id,
@@ -6704,7 +6747,7 @@ export async function continueRevenueWorker(input: {
           input: {
             idempotencyKey: input.idempotencyKey,
             inputHash,
-            config: commandConfig,
+            config: storedConfig,
             ...continuationInput,
             operator: {
               userId: operator.id,
@@ -7335,7 +7378,7 @@ export async function continueRevenueWorker(input: {
           input: {
             idempotencyKey: input.idempotencyKey,
             inputHash,
-            config: commandConfig,
+            config: storedConfig,
             ...continuationInput,
             operator: {
               userId: operator.id,

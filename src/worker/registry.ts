@@ -953,7 +953,8 @@ const revenueDefinition: WorkerDefinition = {
           execution: {
             type: "object",
             description:
-              "Optional approved controlled-send receipt config: connectionId, credentialRef, requiredScopes, recipient, receipt, and rollback.",
+              "Optional approved controlled-send receipt config. If supplied, connectionId, managed credentialRef, recipient, receipt, and rollback are required.",
+            required: ["connectionId", "credentialRef", "recipient", "receipt", "rollback"],
             properties: {
               connectionId: { type: "string" },
               credentialRef: { type: "string" },

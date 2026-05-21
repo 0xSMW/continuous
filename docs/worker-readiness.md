@@ -49,7 +49,7 @@ internal/dry-run proof to real-world action.
 | Worker command | Current posture | Required live gate | First proof to add |
 |---|---|---|---|
 | `revenue_operations.lead.read` | Internal read/persist; direct records and buffered sources are proven | Env-backed Gmail or CRM credential ref, scoped connection health, redacted polling receipt, scheduler `lastLeadRead` evidence | Production-safe connection fixture plus scheduler polling smoke |
-| `revenue_operations.continue` | Approval continuation defaults to blocked no-send proof and can record approved controlled-send receipts from `config.execution` | Production sender credential, provider delivery receipt, retry/reconcile path, rollback/escalation packet | Production controlled customer-send receipt with no token leakage |
+| `revenue_operations.continue` | Approval continuation defaults to blocked no-send proof and can record approved controlled-send receipts from explicit `config.execution` with safe config persistence | Production sender credential, provider delivery receipt, retry/reconcile path, rollback/escalation packet | Production controlled customer-send receipt with no token leakage |
 | `dispatch_operations.schedule.propose` | Calendar write is dry-run | Calendar credential grant, conflict receipt, owner approval, rollback/cancel path | Dry-run-to-approved calendar fixture |
 | `dispatch_operations.customer_update.draft` | Customer send is blocked | Approved send policy, customer channel credential, delivery receipt, retry/reconcile path | Customer-update send gate smoke |
 | `finance_operations.invoice.prepare` | Accounting adapter remains dry-run | Accounting credential grant, draft receipt, owner approval, undo/void posture | Accounting draft receipt fixture |

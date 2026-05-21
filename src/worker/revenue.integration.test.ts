@@ -3648,16 +3648,27 @@ maybeDescribe("Revenue Worker integration eval", () => {
       requiredScopes: ["customer_message.send"],
       channel: "email",
       recipient: "buyer@example.com",
+      debugValue: "inline-material-that-must-not-persist",
       receipt: {
         receiptId: `receipt:${runId}`,
         providerMessageId: `message:${runId}`,
         sentAt: "2026-05-19T09:30:00.000Z",
+        rawProviderDump: "inline-receipt-material-that-must-not-persist",
       },
       rollback: {
         strategy: "send_followup_correction",
         escalationOwner: "owner@continuoushq.com",
         steps: ["send correction email", "open owner review task"],
+        rawProviderDump: "inline-rollback-material-that-must-not-persist",
       },
+    };
+    const baseExecutionWithoutConnection = {
+      credentialRef: baseExecution.credentialRef,
+      requiredScopes: baseExecution.requiredScopes,
+      channel: baseExecution.channel,
+      recipient: baseExecution.recipient,
+      receipt: baseExecution.receipt,
+      rollback: baseExecution.rollback,
     };
     const baseExecutionWithoutCredential = {
       connectionId: baseExecution.connectionId,
@@ -3667,6 +3678,20 @@ maybeDescribe("Revenue Worker integration eval", () => {
       receipt: baseExecution.receipt,
       rollback: baseExecution.rollback,
     };
+
+    await expect(
+      continueRevenueWorker({
+        approvalId: first.approvalRequestId ?? "",
+        idempotencyKey: `ci-worker-controlled-send-no-connection-${runId}`,
+        tenantSlug: "continuous-demo",
+        operatorEmail: "owner@continuoushq.com",
+        config: {
+          approvalId: first.approvalRequestId ?? "",
+          execution: baseExecutionWithoutConnection,
+        },
+        db,
+      }),
+    ).rejects.toMatchObject({ code: "worker_controlled_send_connection_required" });
 
     await expect(
       continueRevenueWorker({
@@ -3764,7 +3789,14 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(receipt.providerMessageId).toBe(`message:${runId}`);
     expect(rollback.strategy).toBe("send_followup_correction");
     expect(rollback.escalationOwner).toBe("owner@continuoushq.com");
-    expect(outputJson).not.toContain("managed:customer-message-sender");
+    for (const forbidden of [
+      "managed:customer-message-sender",
+      "inline-material-that-must-not-persist",
+      "inline-receipt-material-that-must-not-persist",
+      "inline-rollback-material-that-must-not-persist",
+    ]) {
+      expect(outputJson).not.toContain(forbidden);
+    }
 
     const [workflowRun] = await db
       .select()
@@ -3786,6 +3818,14 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .from(adapterRuns)
       .where(eq(adapterRuns.id, first.adapterRunId ?? ""))
       .limit(1);
+    const [continuationRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(eq(workerRuns.id, controlledContinuation.workerRunId ?? ""))
+      .limit(1);
+    const continuationDataJson = JSON.stringify(continuationRun?.data);
+    const storedConfig = objectValue(objectValue(continuationRun?.data).input).config;
+    const storedExecutionConfig = objectValue(objectValue(storedConfig).execution);
 
     expect(workflowRun?.state).toBe("execution_recorded");
     expect(objectValue(workflowRun?.blockers).open).toEqual([]);
@@ -3798,6 +3838,17 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(adapterRun?.connectionId).toBe(sendConnection.id);
     expect(adapterRun?.writeCount).toBe(1);
     expect(objectValue(adapterRun?.receipt).externalSend).toBe(true);
+    expect(objectValue(storedConfig).approvalId).toBe(first.approvalRequestId);
+    expect(storedExecutionConfig.provided).toBe(true);
+    expect(storedExecutionConfig.inputHash).toBeTruthy();
+    for (const forbidden of [
+      "managed:customer-message-sender",
+      "inline-material-that-must-not-persist",
+      "inline-receipt-material-that-must-not-persist",
+      "inline-rollback-material-that-must-not-persist",
+    ]) {
+      expect(continuationDataJson).not.toContain(forbidden);
+    }
 
     const replay = await continueRevenueWorker({
       approvalId: first.approvalRequestId ?? "",
@@ -3829,6 +3880,33 @@ maybeDescribe("Revenue Worker integration eval", () => {
               providerMessageId: `changed:${runId}`,
             },
           },
+        },
+        db,
+      }),
+    ).rejects.toMatchObject({ code: "worker_continuation_idempotency_conflict" });
+
+    const storedContinuationData = objectValue(continuationRun?.data);
+    const storedContinuationInput = objectValue(storedContinuationData.input);
+    delete storedContinuationInput.inputHash;
+    await db
+      .update(workerRuns)
+      .set({
+        data: {
+          ...storedContinuationData,
+          input: storedContinuationInput,
+        },
+      })
+      .where(eq(workerRuns.id, controlledContinuation.workerRunId ?? ""));
+
+    await expect(
+      continueRevenueWorker({
+        approvalId: first.approvalRequestId ?? "",
+        idempotencyKey: `ci-worker-controlled-send-continue-${runId}`,
+        tenantSlug: "continuous-demo",
+        operatorEmail: "owner@continuoushq.com",
+        config: {
+          approvalId: first.approvalRequestId ?? "",
+          execution: baseExecution,
         },
         db,
       }),
