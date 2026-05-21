@@ -219,10 +219,8 @@ jobs:
           df -h / "$APP_DIR" /var/lib/docker 2>/dev/null || df -h /
 
           if command -v docker >/dev/null 2>&1; then
-            docker compose --profile scheduler stop app caddy worker-scheduler >/dev/null 2>&1 || true
-            docker compose --profile scheduler rm -f app caddy worker-scheduler >/dev/null 2>&1 || true
             docker container prune -f >/dev/null || true
-            docker system prune -af >/dev/null || true
+            docker image prune -f >/dev/null || true
             docker builder prune -af >/dev/null || true
             docker images "$APP_IMAGE" --format '{{.Repository}} {{.Tag}}' | while read -r image_repo image_tag; do
               if [ -z "$image_repo" ] || [ -z "$image_tag" ] || [ "$image_tag" = "<none>" ]; then

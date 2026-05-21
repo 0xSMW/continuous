@@ -169,10 +169,8 @@ cleanup_release_storage() {
   df -h / "$APP_DIR" /var/lib/docker 2>/dev/null || df -h /
   docker system df || true
 
-  docker compose --profile scheduler stop app caddy worker-scheduler >/dev/null 2>&1 || true
-  docker compose --profile scheduler rm -f app caddy worker-scheduler >/dev/null 2>&1 || true
   docker container prune -f >/dev/null || true
-  docker system prune -af >/dev/null || true
+  docker image prune -f >/dev/null || true
   docker builder prune -af >/dev/null || true
   find /var/lib/docker/containers -type f -name '*-json.log' -exec truncate -s 0 {} + 2>/dev/null || true
   find "$APP_DIR/releases" -mindepth 2 -maxdepth 2 -type f ! -path "$APP_DIR/releases/$APP_TAG/*" -delete 2>/dev/null || true
