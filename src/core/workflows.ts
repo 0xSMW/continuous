@@ -1114,11 +1114,20 @@ async function completeWorkflowStep(input: {
           .limit(1);
 
         if (obligationTask) {
+          const obligationScanData = jsonObject(obligationScanRecord);
+          const obligationItems = Array.isArray(obligationScanData.obligations)
+            ? obligationScanData.obligations.map((item) => jsonObject(item))
+            : [];
+          const hasObligationBlockers =
+            Array.isArray(obligationScanData.blockers) && obligationScanData.blockers.length > 0;
+          const obligationState = stringValue(obligationItems[0]?.state) ?? (hasObligationBlockers ? "blocked" : "open");
+
           await tx
             .update(tasks)
             .set({
               outcome: {
                 ...obligationTask.outcome,
+                obligationState,
                 lastWorkflowObligationScan: {
                   ...obligationScanRecord,
                   workflowRunId: run.id,
