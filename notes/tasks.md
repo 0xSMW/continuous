@@ -6,7 +6,7 @@
 
 ## Agent
 
-- Continue canonical workforce/filing/payment object coverage before widening the Revenue Worker runtime; entity setup now has a `locations` table plus Core `entity.setup.record`, payroll preview now has persisted statements, lines, liabilities, traces, Core record/packet commands, blocked payment/filing drafts, and Core `external_action.record` outcome proof, and AI-ops now has a deterministic Core `ai.infer` gateway with route, redaction, budget, inference, usage, audit, and evidence proof.
+- Continue canonical workforce/filing/payment object coverage before widening the Revenue Worker runtime; entity setup now has a `locations` table plus Core `entity.setup.record`, worker identity/state now uses Core `worker.upsert` and `worker.transition`, payroll preview now has persisted statements, lines, liabilities, traces, Core record/packet commands, blocked payment/filing drafts, and Core `external_action.record` outcome proof, and AI-ops now has a deterministic Core `ai.infer` gateway with route, redaction, budget, inference, usage, audit, and evidence proof.
 - Extend approved payroll handoffs into scoped live credential checks, rollback paths, and dual-control execution workers before any submission or money movement.
 - Extend customer-signal workflows, generated views, and eval fixtures beyond the seeded SatisfactionSignal, FeedbackItem, Complaint, Testimonial, and Review primitives.
 - Wire implementation handlers, retries, and generated views into the expanded operating workflow catalog; queued approval and packet handoffs now execute through `/workflow`.

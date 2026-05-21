@@ -53,7 +53,7 @@ shell history, and logs never carry bearer values:
 ```sh
 read -rsp "Route-scoped operator token: " CONTROL_PLANE_OPERATOR_TOKEN
 CONTROL_PLANE_TOKEN_SHA256="$(printf '%s' "$CONTROL_PLANE_OPERATOR_TOKEN" | shasum -a 256 | awk '{print $1}')"
-export CONTROL_PLANE_TOKENS_JSON='[{"id":"local-operator","tokenSha256":"'"$CONTROL_PLANE_TOKEN_SHA256"'","operatorEmail":"owner@continuoushq.com","allowedTenants":["continuous-demo"],"allowedWorkerRoles":["revenue_operations"],"allowedRoutes":["core","worker","workflow","approval","app_server"],"allowedAccess":["read","write"],"allowedCommands":["core:view.summary","core:task.create","core:object.upsert","core:entity.setup.record","worker:view.snapshot","worker:view.approvals","worker:lead.read","worker:run","worker:quote.prepare","worker:adapters.reconcile","worker:adapters.retry","app_server:worker.schema","app_server:worker.view.snapshot","app_server:worker.command.lead.read","workflow:view.overview","approval:view.inbox","approval:approval.decide"]}]'
+export CONTROL_PLANE_TOKENS_JSON='[{"id":"local-operator","tokenSha256":"'"$CONTROL_PLANE_TOKEN_SHA256"'","operatorEmail":"owner@continuoushq.com","allowedTenants":["continuous-demo"],"allowedWorkerRoles":["revenue_operations"],"allowedRoutes":["core","worker","workflow","approval","app_server"],"allowedAccess":["read","write"],"allowedCommands":["core:view.summary","core:task.create","core:object.upsert","core:entity.setup.record","core:worker.upsert","core:worker.transition","worker:view.snapshot","worker:view.approvals","worker:lead.read","worker:run","worker:quote.prepare","worker:adapters.reconcile","worker:adapters.retry","app_server:worker.schema","app_server:worker.view.snapshot","app_server:worker.command.lead.read","workflow:view.overview","approval:view.inbox","approval:approval.decide"]}]'
 ```
 
 Core side effects use a structured command payload. For local-only testing,
@@ -99,7 +99,7 @@ curl -X POST http://localhost:3000/core \
 
 The additional Core write commands are `task.transition`, `object.link`,
 `adapter.upsert`, `connection.upsert`, `connection.health.record`, `entity.setup.record`,
-`event.ingest`, `evidence.attach`, `document.create`, `decision.record`, `packet.prepare`,
+`worker.upsert`, `worker.transition`, `event.ingest`, `evidence.attach`, `document.create`, `decision.record`, `packet.prepare`,
 `document.packet.prepare`, `approval.request`, `adapter.intent.record`,
 `rule.change.record`, `external_action.record`, `capability.grant`, `budget.reserve`, `budget.charge`,
 `budget.release`, `ai.infer`, `view.publish`, `customer_signal.record`, `payroll.preview.record`, and

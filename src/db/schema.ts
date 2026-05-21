@@ -146,6 +146,7 @@ export const userState = pgEnum("user_state", [
 
 export const workerKind = pgEnum("worker_kind", [
   "agent",
+  "synthetic",
   "human",
   "robot",
   "service",
@@ -220,7 +221,7 @@ export const workers = pgTable(
     managerUserId: uuid("manager_user_id").references(() => users.id, {
       onDelete: "set null",
     }),
-    kind: workerKind("kind").notNull().default("agent"),
+    kind: workerKind("kind").notNull().default("synthetic"),
     state: workerState("state").notNull().default("draft"),
     name: text("name").notNull(),
     role: text("role").notNull(),

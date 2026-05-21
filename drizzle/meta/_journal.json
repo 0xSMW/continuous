@@ -85,6 +85,20 @@
       "when": 1779313376167,
       "tag": "0011_romantic_infant_terrible",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1779319000000,
+      "tag": "0012_worker_kind_synthetic",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1779319000001,
+      "tag": "0013_worker_kind_synthetic_default",
+      "breakpoints": true
     }
   ]
 }

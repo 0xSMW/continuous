@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   recordEntitySetup: vi.fn(),
   recordExternalAction: vi.fn(),
   recordRuleChange: vi.fn(),
+  transitionCoreWorker: vi.fn(),
   reviewControlPlaneSessions: vi.fn(),
   revokeControlPlaneCredential: vi.fn(),
   releaseBudget: vi.fn(),
@@ -36,6 +37,7 @@ const mocks = vi.hoisted(() => ({
   upsertCoreAdapter: vi.fn(),
   upsertCoreConnection: vi.fn(),
   upsertCoreObject: vi.fn(),
+  upsertCoreWorker: vi.fn(),
   recordControlPlaneAuthAttempt: vi.fn(),
 }));
 
@@ -106,6 +108,11 @@ vi.mock("../../src/core/tasks", () => ({
   transitionCoreTask: mocks.transitionCoreTask,
 }));
 
+vi.mock("../../src/core/workers", () => ({
+  transitionCoreWorker: mocks.transitionCoreWorker,
+  upsertCoreWorker: mocks.upsertCoreWorker,
+}));
+
 const exactCoreRouteCommands = [
   "core:view.summary",
   "core:task.create",
@@ -115,6 +122,8 @@ const exactCoreRouteCommands = [
   "core:connection.upsert",
   "core:connection.health.record",
   "core:entity.setup.record",
+  "core:worker.upsert",
+  "core:worker.transition",
   "core:object.link",
   "core:event.ingest",
   "core:evidence.attach",
@@ -2412,6 +2421,156 @@ describe("POST /core", () => {
       message:
         "config.bankAccount.accountNumber must be stored as a managed credential reference or masked value, not raw secret material.",
     });
+  });
+
+  it("dispatches worker.upsert with identity and policy config payload", async () => {
+    mocks.upsertCoreWorker.mockResolvedValue({
+      recorded: true,
+      created: true,
+      updated: false,
+      transitioned: false,
+      workerId: "worker-1",
+      objectId: "object-1",
+      objectVersionId: "version-1",
+      eventId: "event-1",
+      evidenceId: "evidence-1",
+      auditEventId: "audit-1",
+      worker: {
+        id: "worker-1",
+        kind: "synthetic",
+        state: "draft",
+        name: "Compliance Operations Worker",
+        role: "compliance_operations",
+        mission: "Prepare source-backed compliance filings.",
+        managerUserId: "11111111-1111-4111-8111-111111111111",
+        autonomyLevel: 1,
+        retiredAt: null,
+      },
+    });
+
+    const response = await postCore("worker.upsert", "worker-upsert-route-test-001", {
+      kind: "synthetic",
+      state: "draft",
+      name: "Compliance Operations Worker",
+      role: "compliance_operations",
+      mission: "Prepare source-backed compliance filings.",
+      managerUserId: "11111111-1111-4111-8111-111111111111",
+      autonomyLevel: 1,
+      scope: {
+        flows: ["filing_prepare"],
+      },
+      memory: {
+        retention: "tenant_scoped",
+      },
+      policy: {
+        externalExecution: "blocked",
+      },
+      kpis: {
+        filingsPrepared: 0,
+      },
+      lifecycle: {
+        workflowKey: "synthetic_worker_lifecycle",
+      },
+      evidence: {
+        packet: "synthetic_worker_packet",
+      },
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.command).toBe("worker.upsert");
+    expect(body.data.result.workerId).toBe("worker-1");
+    expect(mocks.upsertCoreWorker).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operatorEmail: "operator@example.com",
+        tenantSlug: "continuous-demo",
+        idempotencyKey: "worker-upsert-route-test-001",
+        kind: "synthetic",
+        state: "draft",
+        name: "Compliance Operations Worker",
+        role: "compliance_operations",
+        mission: "Prepare source-backed compliance filings.",
+        managerUserId: "11111111-1111-4111-8111-111111111111",
+        autonomyLevel: 1,
+        scope: {
+          flows: ["filing_prepare"],
+        },
+        memory: {
+          retention: "tenant_scoped",
+        },
+        policy: {
+          externalExecution: "blocked",
+        },
+        kpis: {
+          filingsPrepared: 0,
+        },
+        lifecycle: {
+          workflowKey: "synthetic_worker_lifecycle",
+        },
+        evidence: {
+          packet: "synthetic_worker_packet",
+        },
+      }),
+    );
+  });
+
+  it("dispatches worker.transition with state-change config payload", async () => {
+    mocks.transitionCoreWorker.mockResolvedValue({
+      recorded: true,
+      created: false,
+      updated: true,
+      transitioned: true,
+      workerId: "worker-1",
+      objectId: "object-1",
+      objectVersionId: "version-2",
+      eventId: "event-1",
+      evidenceId: "evidence-1",
+      auditEventId: "audit-1",
+      worker: {
+        id: "worker-1",
+        kind: "synthetic",
+        state: "training",
+        name: "Compliance Operations Worker",
+        role: "compliance_operations",
+        mission: "Prepare source-backed compliance filings.",
+        managerUserId: null,
+        autonomyLevel: 1,
+        retiredAt: null,
+      },
+    });
+
+    const response = await postCore("worker.transition", "worker-transition-route-test-001", {
+      workerId: "22222222-2222-4222-8222-222222222222",
+      toState: "training",
+      reason: "Launch simulation checks",
+      lifecycle: {
+        workflowKey: "synthetic_worker_lifecycle",
+      },
+      evidence: {
+        checklist: ["scope", "budget", "eval"],
+      },
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.command).toBe("worker.transition");
+    expect(body.data.result.transitioned).toBe(true);
+    expect(mocks.transitionCoreWorker).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operatorEmail: "operator@example.com",
+        tenantSlug: "continuous-demo",
+        idempotencyKey: "worker-transition-route-test-001",
+        workerId: "22222222-2222-4222-8222-222222222222",
+        toState: "training",
+        reason: "Launch simulation checks",
+        lifecycle: {
+          workflowKey: "synthetic_worker_lifecycle",
+        },
+        evidence: {
+          checklist: ["scope", "budget", "eval"],
+        },
+      }),
+    );
   });
 
   it("dispatches adapter.intent.record with adapter config payload", async () => {

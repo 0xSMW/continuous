@@ -22,6 +22,7 @@ Status values:
 | Workflow | Workflow definition, run/step shape, approval step, and terminal states are defined |
 | Capabilities | Typed capability keys and grants define read, draft, prepare, approve, and execute boundaries |
 | Budget | Budget account, reservation, usage event, and overage posture are present |
+| Lifecycle | Core `worker.upsert` and `worker.transition` prove identity, manager, mission, scope, autonomy, state, object-version, event, evidence, and audit records before runtime promotion |
 | Approval | Shared approval inbox can carry the worker's subject, decision, and continuation shape |
 | Adapter | Dry-run adapter intent/receipt/retry/reconciliation exists; live execution gate is named |
 | Eval | Golden cases or deploy smoke prove key behavior and idempotency |

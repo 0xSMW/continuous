@@ -38,6 +38,7 @@ import {
 } from "../core/primitives";
 import { preparePayrollPreviewPacket, recordPayrollPreview } from "../core/payroll";
 import { createCoreTask, transitionCoreTask } from "../core/tasks";
+import { transitionCoreWorker, upsertCoreWorker } from "../core/workers";
 import { executeWorkflowSteps, startWorkflowRun, transitionWorkflowRun } from "../core/workflows";
 import { db, pool } from "../db/client";
 import {
@@ -747,6 +748,159 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(replay.created).toBe(false);
     expect(replay.taskId).toBe(first.taskId);
     expect(taskCount.value).toBe(1);
+  }, 120_000);
+
+  it("records Core workers as lifecycle-owned objects with event, evidence, and audit proof", async () => {
+    const runId = randomUUID();
+    const upsertKey = `ci-core-worker-upsert-${runId}`;
+    const transitionKey = `ci-core-worker-transition-${runId}`;
+    const first = await upsertCoreWorker({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: upsertKey,
+      kind: "synthetic",
+      state: "draft",
+      name: "Compliance Operations Worker CI",
+      role: `compliance_operations_ci_${runId}`,
+      mission: "Prepare source-backed compliance filing packets while external execution stays blocked.",
+      autonomyLevel: 1,
+      scope: {
+        flows: ["filing_prepare"],
+      },
+      policy: {
+        externalExecution: "blocked",
+      },
+      lifecycle: {
+        workflowKey: "synthetic_worker_lifecycle",
+      },
+      evidence: {
+        packet: "synthetic_worker_packet",
+      },
+      db,
+    });
+
+    expect(first.created).toBe(true);
+    expect(first.worker.kind).toBe("synthetic");
+    expect(first.worker.state).toBe("draft");
+    expect(first.objectId).toBeTruthy();
+    expect(first.objectVersionId).toBeTruthy();
+    expect(first.eventId).toBeTruthy();
+    expect(first.evidenceId).toBeTruthy();
+    expect(first.auditEventId).toBeTruthy();
+
+    const [worker] = await db.select().from(workers).where(eq(workers.id, first.workerId)).limit(1);
+    const [object] = await db.select().from(objects).where(eq(objects.id, first.objectId ?? "")).limit(1);
+    const [event] = await db.select().from(events).where(eq(events.id, first.eventId ?? "")).limit(1);
+    const [trace] = await db.select().from(evidence).where(eq(evidence.id, first.evidenceId ?? "")).limit(1);
+    const [audit] = await db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.id, first.auditEventId))
+      .limit(1);
+
+    expect(worker?.role).toBe(`compliance_operations_ci_${runId}`);
+    expect(object?.type).toBe("worker");
+    expect(object?.source).toBe("continuous.core.workers");
+    expect(object?.externalId).toBe(`worker:${first.workerId}`);
+    expect(event?.type).toBe("worker.created");
+    expect(event?.objectId).toBe(first.objectId);
+    expect(trace?.kind).toBe("trace");
+    expect(trace?.objectId).toBe(first.objectId);
+    expect(audit?.type).toBe("worker.created");
+    expect(audit?.targetType).toBe("worker");
+    expect(audit?.targetId).toBe(first.workerId);
+    expect(objectValue(audit?.data).externalExecution).toBe("blocked");
+
+    const replay = await upsertCoreWorker({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: upsertKey,
+      kind: "synthetic",
+      state: "draft",
+      name: "Compliance Operations Worker CI",
+      role: `compliance_operations_ci_${runId}`,
+      mission: "Prepare source-backed compliance filing packets while external execution stays blocked.",
+      autonomyLevel: 1,
+      scope: {
+        flows: ["filing_prepare"],
+      },
+      policy: {
+        externalExecution: "blocked",
+      },
+      lifecycle: {
+        workflowKey: "synthetic_worker_lifecycle",
+      },
+      evidence: {
+        packet: "synthetic_worker_packet",
+      },
+      db,
+    });
+
+    expect(replay.recorded).toBe(false);
+    expect(replay.workerId).toBe(first.workerId);
+    await expect(
+      upsertCoreWorker({
+        operatorEmail: "owner@continuoushq.com",
+        tenantSlug: "continuous-demo",
+        idempotencyKey: upsertKey,
+        kind: "synthetic",
+        state: "draft",
+        name: "Changed Worker",
+        role: `compliance_operations_ci_${runId}`,
+        mission: "Prepare source-backed compliance filing packets while external execution stays blocked.",
+        db,
+      }),
+    ).rejects.toMatchObject({
+      code: "core_command_idempotency_conflict",
+      status: 409,
+    });
+
+    await expect(
+      transitionCoreWorker({
+        operatorEmail: "owner@continuoushq.com",
+        tenantSlug: "continuous-demo",
+        idempotencyKey: `ci-core-worker-invalid-transition-${runId}`,
+        workerId: first.workerId,
+        toState: "active",
+        reason: "Skip simulation",
+        db,
+      }),
+    ).rejects.toMatchObject({
+      code: "worker_transition_invalid",
+      status: 409,
+    });
+
+    const transitioned = await transitionCoreWorker({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: transitionKey,
+      workerId: first.workerId,
+      toState: "training",
+      reason: "Start simulation",
+      lifecycle: {
+        workflowKey: "synthetic_worker_lifecycle",
+      },
+      evidence: {
+        checklist: ["scope", "budget", "eval"],
+      },
+      db,
+    });
+    const [updatedWorker] = await db
+      .select()
+      .from(workers)
+      .where(eq(workers.id, first.workerId))
+      .limit(1);
+    const [transitionEvent] = await db
+      .select()
+      .from(events)
+      .where(eq(events.id, transitioned.eventId ?? ""))
+      .limit(1);
+
+    expect(transitioned.transitioned).toBe(true);
+    expect(transitioned.worker.state).toBe("training");
+    expect(updatedWorker?.state).toBe("training");
+    expect(transitionEvent?.type).toBe("worker.transitioned");
+    expect(transitionEvent?.objectId).toBe(first.objectId);
   }, 120_000);
 
   it("runs Core AI gateway inference with route policy, redaction, budget, and replay proof", async () => {

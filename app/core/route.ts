@@ -7,6 +7,7 @@ import { recordEntitySetup } from "../../src/core/entity";
 import { getHealth } from "../../src/core/health";
 import { preparePayrollPreviewPacket, recordPayrollPreview } from "../../src/core/payroll";
 import { getCoreSummarySafe } from "../../src/core/summary";
+import { transitionCoreWorker, upsertCoreWorker } from "../../src/core/workers";
 import {
   authorizeManagedControlPlaneCredential,
   attestControlPlaneTokenRotation,
@@ -1060,6 +1061,112 @@ export async function POST(request: Request) {
     }
   }
 
+  if (command === "worker.upsert") {
+    const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
+
+    if (!idempotency.ok) {
+      return errorResponse(
+        {
+          code: "invalid_idempotency_key",
+          message: idempotency.message,
+        },
+        400,
+      );
+    }
+
+    try {
+      const result = await upsertCoreWorker({
+        operatorEmail: auth.operatorEmail,
+        idempotencyKey: idempotency.key,
+        tenantSlug,
+        workerId: optionalString(config.workerId) ?? optionalString(config.id),
+        kind: optionalString(config.kind),
+        state: optionalString(config.state),
+        name: optionalString(config.name),
+        role: optionalString(config.role),
+        mission: optionalString(config.mission),
+        managerUserId: config.managerUserId,
+        scope: config.scope,
+        memory: config.memory,
+        policy: config.policy,
+        kpis: config.kpis,
+        autonomyLevel: config.autonomyLevel,
+        lifecycle: config.lifecycle,
+        evidence: config.evidence,
+      });
+
+      return Response.json(
+        {
+          api: apiVersion,
+          data: {
+            command,
+            core: {
+              tenantSlug: tenantSlug ?? null,
+            },
+            result,
+          },
+          error: null,
+        },
+        {
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    } catch (error) {
+      return coreErrorResponse(error, "core_worker_upsert_failed");
+    }
+  }
+
+  if (command === "worker.transition") {
+    const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
+
+    if (!idempotency.ok) {
+      return errorResponse(
+        {
+          code: "invalid_idempotency_key",
+          message: idempotency.message,
+        },
+        400,
+      );
+    }
+
+    try {
+      const result = await transitionCoreWorker({
+        operatorEmail: auth.operatorEmail,
+        idempotencyKey: idempotency.key,
+        tenantSlug,
+        workerId: optionalString(config.workerId) ?? optionalString(config.id) ?? "",
+        state: optionalString(config.state),
+        toState: optionalString(config.toState),
+        reason: optionalString(config.reason),
+        lifecycle: config.lifecycle,
+        evidence: config.evidence,
+      });
+
+      return Response.json(
+        {
+          api: apiVersion,
+          data: {
+            command,
+            core: {
+              tenantSlug: tenantSlug ?? null,
+            },
+            result,
+          },
+          error: null,
+        },
+        {
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    } catch (error) {
+      return coreErrorResponse(error, "core_worker_transition_failed");
+    }
+  }
+
   if (command === "event.ingest") {
     const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
 
@@ -2076,7 +2183,7 @@ export async function POST(request: Request) {
     {
       code: "core_command_unsupported",
       message:
-        "Core command must be task.create, task.transition, object.upsert, adapter.upsert, connection.upsert, connection.health.record, entity.setup.record, object.link, event.ingest, evidence.attach, document.create, packet.prepare, document.packet.prepare, decision.record, approval.request, adapter.intent.record, rule.change.record, external_action.record, capability.grant, budget.reserve, budget.charge, budget.release, ai.infer, view.publish, customer_signal.record, payroll.preview.record, or payroll.preview.packet.prepare.",
+        "Core command must be task.create, task.transition, object.upsert, adapter.upsert, connection.upsert, connection.health.record, entity.setup.record, worker.upsert, worker.transition, object.link, event.ingest, evidence.attach, document.create, packet.prepare, document.packet.prepare, decision.record, approval.request, adapter.intent.record, rule.change.record, external_action.record, capability.grant, budget.reserve, budget.charge, budget.release, ai.infer, view.publish, customer_signal.record, payroll.preview.record, or payroll.preview.packet.prepare.",
     },
     400,
   );

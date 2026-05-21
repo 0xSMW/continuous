@@ -179,7 +179,7 @@ registered behind one shared worker surface:
 
 | Surface | Behavior |
 |---|---|
-| `POST /core` | Canonical Core command surface for `task.create`, `task.transition`, `object.upsert`, `adapter.upsert`, `connection.upsert`, `connection.health.record`, `entity.setup.record`, `object.link`, `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`, `document.packet.prepare`, `decision.record`, `approval.request`, `adapter.intent.record`, `rule.change.record`, `external_action.record`, `capability.grant`, `budget.reserve`, `budget.charge`, `budget.release`, `ai.infer`, `view.publish`, `customer_signal.record`, `payroll.preview.record`, `payroll.preview.packet.prepare`, `control_plane.token_rotation.attest`, `control_plane.credential.upsert`, `control_plane.credential.revoke`, and `control_plane.session.review`; invalid credentials fail before body reads, command bodies are capped at 1 MiB, tenant selection and command fields live in structured `core` and `config` payloads, and no other top-level command fields are accepted |
+| `POST /core` | Canonical Core command surface for `task.create`, `task.transition`, `object.upsert`, `adapter.upsert`, `connection.upsert`, `connection.health.record`, `entity.setup.record`, `worker.upsert`, `worker.transition`, `object.link`, `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`, `document.packet.prepare`, `decision.record`, `approval.request`, `adapter.intent.record`, `rule.change.record`, `external_action.record`, `capability.grant`, `budget.reserve`, `budget.charge`, `budget.release`, `ai.infer`, `view.publish`, `customer_signal.record`, `payroll.preview.record`, `payroll.preview.packet.prepare`, `control_plane.token_rotation.attest`, `control_plane.credential.upsert`, `control_plane.credential.revoke`, and `control_plane.session.review`; invalid credentials fail before body reads, command bodies are capped at 1 MiB, tenant selection and command fields live in structured `core` and `config` payloads, and no other top-level command fields are accepted |
 | `GET /core?tenantSlug=...` | Tenant-scoped Core summary for active tasks, recent events, approvals, workers, capabilities, graph counts, and ledger counts |
 | `POST /worker` with payload `view: "snapshot"` | Operator-only snapshot of worker state, active tasks, controls, budget usage, and recent events |
 | `POST /worker` with payload `view: "approvals"` | Operator-only approval queue for worker decisions |
@@ -225,11 +225,17 @@ and real adapter execution are implemented.
 
 Core writes are platform-level, not worker-specific. `POST /core` now
 creates and transitions accountable tasks, upserts typed business objects with
-object versions, links objects into a navigable business graph, ingests events,
-attaches evidence, creates document packets, records decisions, requests
-platform approvals, prepares durable evidence packets, grants scoped capabilities, moves AI budget through
+object versions, creates and transitions synthetic/human/robot/service workers
+with worker object/version metadata, links objects into a navigable business
+graph, ingests events, attaches evidence, creates document packets, records
+decisions, requests platform approvals, prepares durable evidence packets,
+grants scoped capabilities, moves AI budget through
 reserve/charge/release ledger states, and publishes renderer-neutral generated
-views. `entity.setup.record` records legal entity facts, identifiers, work
+views. `worker.upsert` owns worker identity, manager, mission, role, scope,
+memory, policy, KPI, and autonomy setup. `worker.transition` owns lifecycle
+movement through `draft`, `training`, `active`, `paused`, and `retired` with
+reason and evidence packets; it does not execute tools or mutate external
+systems. `entity.setup.record` records legal entity facts, identifiers, work
 locations, masked bank-account references, blocked payment instructions, an
 entity setup workflow run, a setup packet, trace evidence, and audit proof
 through the same Core envelope. `adapter.upsert` and `connection.upsert` create or update connector

@@ -38,7 +38,7 @@ Useful app surfaces for worker development:
 | `/` | Static public landing page; operational dashboard data stays behind authenticated control-plane routes |
 | `/health` | Redacted machine health check |
 | `/core` | Operator-gated, tenant-scoped persisted primitive summary |
-| `POST /core` | Canonical Core command surface with `command`, `core`, `config`, and `idempotencyKey` payload fields for tasks, task transitions, entity setup, approvals, capability grants, budget ledger operations, objects, object links, events, evidence, documents, packets, decisions, generated views, adapter intents, rule changes, customer signals, and payroll preview artifacts |
+| `POST /core` | Canonical Core command surface with `command`, `core`, `config`, and `idempotencyKey` payload fields for tasks, task transitions, workers, entity setup, approvals, capability grants, budget ledger operations, objects, object links, events, evidence, documents, packets, decisions, generated views, adapter intents, rule changes, customer signals, and payroll preview artifacts |
 | `/approval?view=inbox` | Shared operator-gated approval inbox across Core, workflow, and worker subjects |
 | `POST /approval` | Shared approval decision surface with `command`, explicit `approval.subject`, and `config` payload fields |
 | `POST /worker` with `view`, `worker`, and `config` | Canonical operator-gated worker read surface |
@@ -167,7 +167,7 @@ The same surface owns the persisted Core primitives used by future workers:
 
 Other supported Core commands are `task.transition`, `object.link`,
 `adapter.upsert`, `connection.upsert`, `connection.health.record`, `entity.setup.record`,
-`event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`, `document.packet.prepare`,
+`worker.upsert`, `worker.transition`, `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`, `document.packet.prepare`,
 `decision.record`, `approval.request`, `adapter.intent.record`,
 `rule.change.record`, `capability.grant`, `budget.reserve`, `budget.charge`,
 `budget.release`, `ai.infer`, `view.publish`, `customer_signal.record`, `payroll.preview.record`, and
