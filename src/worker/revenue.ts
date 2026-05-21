@@ -60,6 +60,7 @@ const leadReadUnits = 1000;
 const leadClassifyUnits = 2000;
 const responseDraftUnits = 4000;
 const paymentLinkPrepareUnits = 3000;
+const revenueContinuationApprovalKinds = new Set(["quote_approval", "quote_revision_approval"]);
 type RevenueRunCommand = "run" | "quote.prepare";
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -247,6 +248,9 @@ export type RevenuePaymentLinkPrepareResult = {
   workerRunId: string | null;
   taskId: string | null;
   eventId: string | null;
+  reservationId: string | null;
+  inferenceId: string | null;
+  usageEventId: string | null;
   paymentObjectId: string | null;
   paymentId: string | null;
   paymentInstructionId: string | null;
@@ -495,106 +499,6 @@ function centsForIntent(intent: string, serviceArea: string) {
   }
 
   return 15900;
-}
-
-async function assertWorkerBudgetCapacity(
-  tx: Transaction,
-  params: {
-    budgetAccountId: string;
-    units: number;
-    label: string;
-  },
-) {
-  const now = new Date();
-
-  await tx.execute(sql`select id from budget_accounts where id = ${params.budgetAccountId} for update`);
-
-  const [budgetState] = await tx
-    .select({
-      policyId: budgetAccounts.policyId,
-      policyActive: budgetPolicies.active,
-      monthlyUnits: budgetPolicies.monthlyUnits,
-      perTaskUnits: budgetPolicies.perTaskUnits,
-      hardLimit: budgetPolicies.hardLimit,
-    })
-    .from(budgetAccounts)
-    .leftJoin(budgetPolicies, eq(budgetAccounts.policyId, budgetPolicies.id))
-    .where(and(eq(budgetAccounts.id, params.budgetAccountId), eq(budgetAccounts.active, true)))
-    .limit(1);
-
-  if (!budgetState?.policyId || !budgetState.policyActive) {
-    throw new RevenueWorkerUnavailableError(
-      "worker_budget_policy_missing",
-      "Revenue Worker budget account has no active policy.",
-    );
-  }
-
-  const perTaskUnits =
-    budgetState.perTaskUnits === null ? null : numberValue(budgetState.perTaskUnits);
-
-  if (perTaskUnits !== null && params.units > perTaskUnits) {
-    throw new RevenueWorkerUnavailableError(
-      "worker_budget_per_task_exceeded",
-      `Revenue Worker ${params.label} requires ${params.units} units, above the per-task limit of ${perTaskUnits}.`,
-    );
-  }
-
-  const [allocation] = await tx
-    .select({
-      units: sql<number>`coalesce(sum(${budgetAllocations.units}), 0)`,
-      startsAt: sql<Date | null>`min(${budgetAllocations.startsAt})`,
-      endsAt: sql<Date | null>`max(${budgetAllocations.endsAt})`,
-    })
-    .from(budgetAllocations)
-    .where(
-      and(
-        eq(budgetAllocations.accountId, params.budgetAccountId),
-        sql`${budgetAllocations.startsAt} <= ${now}`,
-        sql`${budgetAllocations.endsAt} > ${now}`,
-      ),
-    );
-
-  const usageConditions = [eq(usageEvents.accountId, params.budgetAccountId)];
-
-  if (allocation?.startsAt && allocation.endsAt) {
-    usageConditions.push(sql`${usageEvents.createdAt} >= ${allocation.startsAt}`);
-    usageConditions.push(sql`${usageEvents.createdAt} < ${allocation.endsAt}`);
-  }
-
-  const [used] = await tx
-    .select({ units: sql<number>`coalesce(sum(${usageEvents.units}), 0)` })
-    .from(usageEvents)
-    .where(and(...usageConditions));
-
-  const [held] = await tx
-    .select({ units: sql<number>`coalesce(sum(${budgetReservations.units}), 0)` })
-    .from(budgetReservations)
-    .where(
-      and(
-        eq(budgetReservations.accountId, params.budgetAccountId),
-        eq(budgetReservations.state, "held"),
-        sql`(${budgetReservations.expiresAt} is null or ${budgetReservations.expiresAt} > ${now})`,
-      ),
-    );
-
-  const monthlyUnits = numberValue(budgetState.monthlyUnits);
-  const allocatedUnits = numberValue(allocation?.units);
-  const allowanceUnits =
-    allocatedUnits > 0 && monthlyUnits > 0
-      ? Math.min(allocatedUnits, monthlyUnits)
-      : allocatedUnits > 0
-        ? allocatedUnits
-        : monthlyUnits;
-  const hardLimit = numberValue(budgetState.hardLimit) || 100;
-  const maxUnits = Math.floor((allowanceUnits * hardLimit) / 100);
-  const committedUnits = numberValue(used?.units) + numberValue(held?.units);
-
-  if (maxUnits <= 0 || committedUnits + params.units > maxUnits) {
-    throw new RevenueWorkerUnavailableError(
-      "worker_budget_exceeded",
-      `Revenue Worker ${params.label} requires ${params.units} units, with ${Math.max(maxUnits - committedUnits, 0)} units available.`,
-    );
-  }
 }
 
 function formatUsd(cents: number) {
@@ -6343,41 +6247,6 @@ export async function prepareRevenueQuote(input: {
   });
 }
 
-function replayedRevenuePaymentLinkResult(
-  run: typeof workerRuns.$inferSelect,
-  snapshot: RevenueWorkerSnapshot,
-): RevenuePaymentLinkPrepareResult {
-  const output = outputData(run.data);
-
-  return {
-    created: false,
-    idempotencyKey: run.idempotencyKey,
-    workerRunId: run.id,
-    taskId: stringData(run.data, "taskId") ?? run.taskId,
-    eventId: run.eventId ?? stringData(run.data, "eventId"),
-    paymentObjectId: stringData(run.data, "paymentObjectId"),
-    paymentId: stringData(run.data, "paymentId"),
-    paymentInstructionId: stringData(run.data, "paymentInstructionId"),
-    invoiceObjectId: stringData(run.data, "invoiceObjectId"),
-    invoiceId: stringData(run.data, "invoiceId"),
-    quoteObjectId: stringData(run.data, "quoteObjectId"),
-    approvalRequestId: stringData(run.data, "approvalRequestId"),
-    adapterRunId: stringData(run.data, "adapterRunId"),
-    adapterActionId: stringData(run.data, "adapterActionId"),
-    adapterReceiptEvidenceId: stringData(run.data, "adapterReceiptEvidenceId"),
-    evidenceId: stringData(run.data, "evidenceId"),
-    draftEvidenceId: stringData(run.data, "draftEvidenceId"),
-    packetId: stringData(run.data, "packetId"),
-    documentId: stringData(run.data, "documentId"),
-    workflowRunId: stringData(run.data, "workflowRunId"),
-    workflowStepIds: getWorkflowStepIds(run.data),
-    paymentReviewViewId: stringData(run.data, "paymentReviewViewId"),
-    auditEventId: stringData(run.data, "auditEventId"),
-    output,
-    snapshot,
-  };
-}
-
 export async function prepareRevenuePaymentLink(input: {
   idempotencyKey: string;
   operatorEmail: string;
@@ -6441,81 +6310,151 @@ export async function prepareRevenuePaymentLink(input: {
       currency: refs.currency,
     },
   });
+  const runInput = {
+    idempotencyKey: input.idempotencyKey,
+    command: "payment_link.prepare",
+    inputHash,
+    config: requestConfig,
+    resolved: {
+      invoiceId: refs.invoice.id,
+      invoiceObjectId: refs.invoiceObject.id,
+      quoteObjectId: refs.quoteObject?.id ?? null,
+      sourcePaymentId: refs.sourcePayment?.payment?.id ?? null,
+      sourcePaymentObjectId: refs.sourcePayment?.paymentObject?.id ?? null,
+      bankAccountId: refs.bankAccount?.id ?? null,
+      amountCents: refs.amountCents,
+      currency: refs.currency,
+    },
+    operator: {
+      userId: operator.id,
+      email: operator.email,
+    },
+    capabilityId,
+    connectionId: context.connectionId,
+    budgetAccountId: context.budgetAccountId,
+    routeId: context.routeId,
+    units: paymentLinkPrepareUnits,
+    mode: "payment_link_preparation",
+  };
+  const coreRun = await startCoreWorkerRun({
+    operatorEmail: input.operatorEmail,
+    tenantSlug: context.worker.tenantSlug,
+    idempotencyKey: input.idempotencyKey,
+    worker: {
+      id: context.worker.id,
+      role: revenueWorkerRole,
+    },
+    command: "payment_link.prepare",
+    mode: "payment_link_preparation",
+    capabilityId,
+    connectionId: context.connectionId,
+    budgetAccountId: context.budgetAccountId,
+    units: paymentLinkPrepareUnits,
+    input: runInput,
+    policy: {
+      externalExecution: "blocked",
+      externalMutation: false,
+      providerPaymentLinkCreation: "blocked",
+      moneyMovement: "blocked",
+    },
+    evidence: {
+      command: "payment_link.prepare",
+      required: ["invoice_draft", "payment_link_packet", "manager_approval", "adapter_receipt"],
+      externalExecution: "blocked",
+      providerPaymentLinkCreation: "blocked",
+      moneyMovement: "blocked",
+    },
+    db,
+  });
+  const coreBudget = objectValue(coreRun.budget);
+  const coreReservationId = stringValue(coreBudget.reservationId);
+  const coreCapability = objectValue(coreRun.capability);
+  const coreCapabilityGrantId = stringValue(coreCapability.capabilityGrantId);
 
   const result = await db.transaction(async (tx) => {
     await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${source}:payment_link.prepare:${input.idempotencyKey}`}))`,
+      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${coreWorkerRunSource}:payment_link.prepare:${input.idempotencyKey}`}))`,
     );
 
-    const [existingRun] = await tx
+    const [run] = await tx
       .select()
       .from(workerRuns)
       .where(
         and(
           eq(workerRuns.tenantId, context.worker.tenantId),
-          eq(workerRuns.source, source),
-          eq(workerRuns.idempotencyKey, input.idempotencyKey),
+          eq(workerRuns.id, coreRun.workerRunId),
         ),
       )
       .limit(1);
 
-    if (existingRun) {
-      const existingInput = objectValue(existingRun.data.input);
-      const existingHash = stringValue(existingInput.inputHash);
+    if (!run) {
+      throw new RevenueWorkerUnavailableError(
+        "worker_run_missing",
+        "Core worker.run.start did not return a persisted Revenue payment-link run.",
+        409,
+      );
+    }
 
-      if (
-        existingRun.mode !== "payment_link_preparation" ||
-        stringValue(existingInput.command) !== "payment_link.prepare" ||
-        (existingHash && existingHash !== inputHash)
-      ) {
-        throw new RevenueWorkerUnavailableError(
-          "worker_idempotency_conflict",
-          "This idempotency key was already used with different worker input.",
-          409,
-        );
-      }
+    const existingInput = objectValue(run.data.input);
+    const existingRequest = objectValue(existingInput.request);
+    const existingHash = stringValue(existingRequest.inputHash) || stringValue(existingInput.inputHash);
 
+    if (
+      run.mode !== "payment_link_preparation" ||
+      stringValue(existingInput.command) !== "payment_link.prepare" ||
+      (existingHash && existingHash !== inputHash)
+    ) {
+      throw new RevenueWorkerUnavailableError(
+        "worker_idempotency_conflict",
+        "This idempotency key was already used with different worker input.",
+        409,
+      );
+    }
+
+    const existingOutput = outputData(run.data);
+
+    if (stringValue(existingOutput.command) === "payment_link.prepare") {
+      const existingCompletionBudget = objectValue(objectValue(run.data.completion).budget);
       return {
         created: false as const,
-        run: existingRun,
+        needsCompletion: run.state === "running",
+        workerRunId: run.id,
+        taskId: stringData(run.data, "taskId") ?? run.taskId,
+        eventId: stringData(run.data, "eventId") ?? run.eventId,
+        reservationId:
+          stringData(run.data, "reservationId") ??
+          stringValue(existingCompletionBudget.reservationId) ??
+          coreReservationId ??
+          null,
+        inferenceId: stringData(run.data, "inferenceId"),
+        usageEventId: stringData(run.data, "usageEventId") ?? stringValue(existingCompletionBudget.usageEventId),
+        paymentObjectId: stringData(run.data, "paymentObjectId"),
+        paymentId: stringData(run.data, "paymentId"),
+        paymentInstructionId: stringData(run.data, "paymentInstructionId"),
+        invoiceObjectId: stringData(run.data, "invoiceObjectId"),
+        invoiceId: stringData(run.data, "invoiceId"),
+        quoteObjectId: stringData(run.data, "quoteObjectId"),
+        approvalRequestId: stringData(run.data, "approvalRequestId"),
+        adapterRunId: stringData(run.data, "adapterRunId"),
+        adapterActionId: stringData(run.data, "adapterActionId"),
+        adapterReceiptEvidenceId: stringData(run.data, "adapterReceiptEvidenceId"),
+        evidenceId: stringData(run.data, "evidenceId"),
+        draftEvidenceId: stringData(run.data, "draftEvidenceId"),
+        packetId: stringData(run.data, "packetId"),
+        documentId: stringData(run.data, "documentId"),
+        workflowRunId: stringData(run.data, "workflowRunId"),
+        workflowStepIds: getWorkflowStepIds(run.data),
+        paymentReviewViewId: stringData(run.data, "paymentReviewViewId"),
+        auditEventId: stringData(run.data, "auditEventId"),
+        output: existingOutput,
       };
     }
 
     const now = new Date();
     const state = refs.amountCents > 0 && refs.bankAccount ? "approval_required" : "blocked";
     const paymentAmountCents = Math.max(0, Math.round(refs.amountCents));
-
-    await assertWorkerBudgetCapacity(tx, {
-      budgetAccountId: context.budgetAccountId,
-      units: paymentLinkPrepareUnits,
-      label: "payment_link.prepare",
-    });
-
-    const [grant] = await tx
-      .select({ id: capabilityGrants.id })
-      .from(capabilityGrants)
-      .innerJoin(capabilities, eq(capabilityGrants.capabilityId, capabilities.id))
-      .where(
-        and(
-          eq(capabilityGrants.tenantId, context.worker.tenantId),
-          eq(capabilityGrants.actorType, "worker"),
-          eq(capabilityGrants.actorId, context.worker.id),
-          eq(capabilityGrants.capabilityId, capabilityId),
-          eq(capabilityGrants.active, true),
-          eq(capabilities.active, true),
-          sql`(${capabilityGrants.startsAt} is null or ${capabilityGrants.startsAt} <= ${now})`,
-          sql`(${capabilityGrants.endsAt} is null or ${capabilityGrants.endsAt} > ${now})`,
-        ),
-      )
-      .limit(1);
-
-    if (!grant) {
-      throw new RevenueWorkerUnavailableError(
-        "worker_capability_not_granted",
-        "Revenue Worker is not actively granted payment_link.prepare.",
-        403,
-      );
-    }
+    const reservationId = coreReservationId || null;
+    const usageEventId = null;
 
     const [workflowDefinition] = await tx
       .select({
@@ -6703,43 +6642,7 @@ export async function prepareRevenuePaymentLink(input: {
       })
       .returning({ id: tasks.id });
 
-    const [workerRun] = await tx
-      .insert(workerRuns)
-      .values({
-        tenantId: context.worker.tenantId,
-        workerId: context.worker.id,
-        taskId: task.id,
-        capabilityId,
-        connectionId: context.connectionId,
-        budgetAccountId: context.budgetAccountId,
-        source,
-        idempotencyKey: input.idempotencyKey,
-        state: "running",
-        mode: "payment_link_preparation",
-        data: {
-          input: {
-            command: "payment_link.prepare",
-            inputHash,
-            config: requestConfig,
-            operator: {
-              userId: operator.id,
-              email: operator.email,
-            },
-            invoiceId: refs.invoice.id,
-            invoiceObjectId: refs.invoiceObject.id,
-            quoteObjectId: refs.quoteObject?.id ?? null,
-            sourcePaymentId: refs.sourcePayment?.payment?.id ?? null,
-            sourcePaymentObjectId: refs.sourcePayment?.paymentObject?.id ?? null,
-            paymentObjectId: paymentObject.id,
-            paymentId: payment.id,
-            paymentInstructionId,
-          },
-          output: {},
-        },
-        startedAt: now,
-        updatedAt: now,
-      })
-      .returning({ id: workerRuns.id });
+    const workerRun = run;
 
     const [workflowRun] = await tx
       .insert(workflowRuns)
@@ -6773,20 +6676,6 @@ export async function prepareRevenuePaymentLink(input: {
         updatedAt: now,
       })
       .returning({ id: workflowRuns.id });
-
-    const [reservation] = await tx
-      .insert(budgetReservations)
-      .values({
-        tenantId: context.worker.tenantId,
-        accountId: context.budgetAccountId,
-        taskId: task.id,
-        units: paymentLinkPrepareUnits,
-        state: "used",
-        expiresAt: new Date(now.getTime() + 15 * 60 * 1000),
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning({ id: budgetReservations.id });
 
     const [inference] = await tx
       .insert(inferences)
@@ -6830,34 +6719,6 @@ export async function prepareRevenuePaymentLink(input: {
         createdAt: now,
       })
       .returning({ id: inferences.id });
-
-    const [usage] = await tx
-      .insert(usageEvents)
-      .values({
-        tenantId: context.worker.tenantId,
-        accountId: context.budgetAccountId,
-        reservationId: reservation.id,
-        inferenceId: inference.id,
-        taskId: task.id,
-        capabilityId,
-        actorType: "worker",
-        actorId: context.worker.id,
-        units: paymentLinkPrepareUnits,
-        costUsd: "0.000000",
-        data: {
-          command: "payment_link.prepare",
-          workerRunId: workerRun.id,
-          workflowRunId: workflowRun.id,
-          paymentObjectId: paymentObject.id,
-          paymentId: payment.id,
-          paymentInstructionId,
-          externalExecution: "blocked",
-          providerPaymentLinkCreation: "blocked",
-          moneyMovement: "blocked",
-        },
-        createdAt: now,
-      })
-      .returning({ id: usageEvents.id });
 
     const [event] = await tx
       .insert(events)
@@ -7007,8 +6868,8 @@ export async function prepareRevenuePaymentLink(input: {
           invoiceId: refs.invoice.id,
           invoiceObjectId: refs.invoiceObject.id,
           inferenceId: inference.id,
-          usageEventId: usage.id,
-          reservationId: reservation.id,
+          usageEventId,
+          reservationId,
           adapterRunId: adapterRun.id,
           adapterActionId: adapterAction.id,
           blockers: refs.blockers,
@@ -7206,7 +7067,7 @@ export async function prepareRevenuePaymentLink(input: {
           providerPaymentLinkCreation: "approval_required_but_currently_blocked",
           externalExecution: "blocked",
           moneyMovement: "blocked",
-          capabilityGrantId: grant.id,
+          capabilityGrantId: coreCapabilityGrantId || null,
         },
         data: {
           command: "payment_link.prepare",
@@ -7523,6 +7384,9 @@ export async function prepareRevenuePaymentLink(input: {
       paymentObjectId: paymentObject.id,
       paymentId: payment.id,
       paymentInstructionId,
+      reservationId,
+      inferenceId: inference.id,
+      usageEventId,
       invoiceId: refs.invoice.id,
       invoiceObjectId: refs.invoiceObject.id,
       quoteObjectId: refs.quoteObject?.id ?? null,
@@ -7579,27 +7443,17 @@ export async function prepareRevenuePaymentLink(input: {
       .update(workerRuns)
       .set({
         eventId: event.id,
-        state: "done",
+        taskId: task.id,
+        capabilityId,
         data: {
-          input: {
-            command: "payment_link.prepare",
-            inputHash,
-            config: requestConfig,
-            operator: {
-              userId: operator.id,
-              email: operator.email,
-            },
-            invoiceId: refs.invoice.id,
-            invoiceObjectId: refs.invoiceObject.id,
-            quoteObjectId: refs.quoteObject?.id ?? null,
-            paymentObjectId: paymentObject.id,
-            paymentId: payment.id,
-            paymentInstructionId,
-            workflowRunId: workflowRun.id,
-          },
-          output,
+          ...objectValue(workerRun.data),
+          businessEventId: event.id,
+          businessAuditEventId: audit.id,
           taskId: task.id,
           eventId: event.id,
+          reservationId,
+          inferenceId: inference.id,
+          usageEventId,
           paymentObjectId: paymentObject.id,
           paymentId: payment.id,
           paymentInstructionId,
@@ -7618,8 +7472,10 @@ export async function prepareRevenuePaymentLink(input: {
           workflowStepIds,
           paymentReviewViewId: paymentReviewView.id,
           auditEventId: audit.id,
+          pendingCompletion: {
+            output,
+          },
         },
-        endedAt: now,
         updatedAt: now,
       })
       .where(eq(workerRuns.id, workerRun.id));
@@ -7650,9 +7506,13 @@ export async function prepareRevenuePaymentLink(input: {
 
     return {
       created: true as const,
+      needsCompletion: true,
       workerRunId: workerRun.id,
       taskId: task.id,
       eventId: event.id,
+      reservationId,
+      inferenceId: inference.id,
+      usageEventId,
       paymentObjectId: paymentObject.id,
       paymentId: payment.id,
       paymentInstructionId,
@@ -7674,19 +7534,88 @@ export async function prepareRevenuePaymentLink(input: {
       output,
     };
   });
+  const completion = result.needsCompletion
+    ? await completeCoreWorkerRun({
+        operatorEmail: input.operatorEmail,
+        tenantSlug: context.worker.tenantSlug,
+        idempotencyKey: input.idempotencyKey,
+        worker: {
+          id: context.worker.id,
+          role: revenueWorkerRole,
+        },
+        workerRunId: result.workerRunId,
+        state: "done",
+        reason: "Revenue Worker prepared a payment-link packet with provider creation and money movement blocked.",
+        output: result.output,
+        costUsd: 0,
+        evidence: {
+          command: "payment_link.prepare",
+          eventId: result.eventId,
+          auditEventId: result.auditEventId,
+          evidenceId: result.evidenceId,
+          draftEvidenceId: result.draftEvidenceId,
+          inferenceId: result.inferenceId,
+          adapterRunId: result.adapterRunId,
+          adapterActionId: result.adapterActionId,
+          adapterReceiptEvidenceId: result.adapterReceiptEvidenceId,
+          approvalRequestId: result.approvalRequestId,
+          paymentReviewViewId: result.paymentReviewViewId,
+          workflowRunId: result.workflowRunId,
+          paymentObjectId: result.paymentObjectId,
+          paymentId: result.paymentId,
+          paymentInstructionId: result.paymentInstructionId,
+          invoiceId: result.invoiceId,
+          invoiceObjectId: result.invoiceObjectId,
+          providerPaymentLinkCreation: "blocked",
+          moneyMovement: "blocked",
+          externalExecution: "blocked",
+          externalSend: false,
+        },
+        db,
+      })
+    : null;
+  const completionBudget = objectValue(completion?.budget);
+  const settledReservationId = stringValue(completionBudget.reservationId) || result.reservationId;
+  const settledUsageEventId = stringValue(completionBudget.usageEventId) || result.usageEventId;
+  const settledOutput = {
+    ...result.output,
+    reservationId: settledReservationId,
+    usageEventId: settledUsageEventId,
+  } satisfies JsonObject;
   const snapshot = await getRevenueWorkerSnapshot(db, {
     tenantSlug: input.tenantSlug,
     workerId: context.worker.id,
     role: revenueWorkerRole,
   });
 
-  if (!result.created) {
-    return replayedRevenuePaymentLinkResult(result.run, snapshot);
-  }
-
   return {
     idempotencyKey: input.idempotencyKey,
-    ...result,
+    created: result.created,
+    workerRunId: result.workerRunId,
+    taskId: result.taskId,
+    eventId: result.eventId,
+    reservationId: settledReservationId,
+    inferenceId: result.inferenceId,
+    usageEventId: settledUsageEventId,
+    paymentObjectId: result.paymentObjectId,
+    paymentId: result.paymentId,
+    paymentInstructionId: result.paymentInstructionId,
+    invoiceObjectId: result.invoiceObjectId,
+    invoiceId: result.invoiceId,
+    quoteObjectId: result.quoteObjectId,
+    approvalRequestId: result.approvalRequestId,
+    adapterRunId: result.adapterRunId,
+    adapterActionId: result.adapterActionId,
+    adapterReceiptEvidenceId: result.adapterReceiptEvidenceId,
+    evidenceId: result.evidenceId,
+    draftEvidenceId: result.draftEvidenceId,
+    packetId: result.packetId,
+    documentId: result.documentId,
+    workflowRunId: result.workflowRunId,
+    workflowStepIds: result.workflowStepIds,
+    paymentReviewViewId: result.paymentReviewViewId,
+    auditEventId: result.auditEventId,
+    output: settledOutput,
     snapshot,
   };
 }
@@ -7813,6 +7742,14 @@ export async function continueRevenueWorker(input: {
         "worker_continuation_approval_not_found",
         "No worker approval request matches this id.",
         404,
+      );
+    }
+
+    if (!revenueContinuationApprovalKinds.has(approval.kind)) {
+      throw new RevenueWorkerUnavailableError(
+        "worker_continuation_unsupported_approval_kind",
+        "Revenue Worker continuation supports quote approval continuations. Use a dedicated command for this approval kind.",
+        409,
       );
     }
 

@@ -213,8 +213,8 @@ cursor proof, and returns stable `config.intake` selectors.
 `command: "response.draft"`,
 `command: "quote.prepare"`, and
 `command: "payment_link.prepare"` can consume those selectors or invoice refs as
-explicit persisted substeps, writing worker run, inference, usage, event,
-evidence, approval, generated-view, adapter receipt, and audit proof while
+explicit persisted substeps, writing Core worker-run lifecycle proof, inference,
+usage, event, evidence, approval, generated-view, adapter receipt, and audit proof while
 external send, provider payment-link creation, and money movement remain
 blocked. One full `command: "run"` then accepts the
 same selectors, or exact Core object/event/evidence row references when an

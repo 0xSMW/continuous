@@ -185,8 +185,10 @@
 | Hardened split Revenue actions | `lead.read`, `lead.classify`, `response.draft`, `run`, and `quote.prepare` now use Core worker-run budget gates before work, and empty run/classify/draft/quote configs fail before any synthetic lead defaults or worker-run records are written |
 | Hardened workflow approvals and local reads | `/workflow command=approval.decide` now requires the same top-level idempotency key discipline as other workflow mutations, local `worker.view` reads fail closed in production unless explicitly trusted, and deploy token scopes now include the registered Finance `payment_draft.prepare` command |
 | Registered Revenue quote preparation | `POST /worker` and `continuous.worker.command` now expose `command=quote.prepare` as a first-class Revenue command using the shared `worker`, `idempotencyKey`, and `config` envelope; it writes quote-preparation evidence/approval/view proof through the Core worker-run lifecycle and keeps external sends blocked |
-| Registered Revenue payment-link preparation | `POST /worker` and `continuous.worker.command` now expose `command=payment_link.prepare` as a first-class Revenue command using invoice refs under `config`; it writes a blocked payment packet, payment instruction for verified bank accounts, stable payment review view, adapter receipt, workflow/budget/evidence/audit proof, and keeps live provider link creation and money movement blocked |
-| Normalized payment-link API shape | `payment_link.prepare` accepts `config.invoiceId`, `config.invoiceObjectId`, or keyed `config.sourceRefs` through the canonical `/worker` envelope, with a stable `payment.approval.review` view key and per-run details stored in view data |
+| Registered Revenue payment-link preparation | `POST /worker` and `continuous.worker.command` now expose `command=payment_link.prepare` as a first-class Revenue command using invoice refs under `config`; it writes a blocked payment packet, payment instruction for verified bank accounts, per-approval payment review view, adapter receipt, workflow/evidence/audit proof, and keeps live provider link creation and money movement blocked |
+| Normalized payment-link API shape | `payment_link.prepare` accepts `config.invoiceId`, `config.invoiceObjectId`, or keyed `config.sourceRefs` through the canonical `/worker` envelope, with per-approval `payment.approval.review.<approvalId>` view keys and `payment.approval.review` as the view family |
+| Moved payment-link prep onto Core lifecycle | Revenue `payment_link.prepare` now starts and completes through Core `worker.run.start` and `worker.run.complete`, reusing the Core worker-run row for idempotency, capability proof, budget reservation, usage settlement, and terminal state while keeping Revenue-specific payment, approval, workflow, adapter, evidence, and audit records as business proof |
+| Failed closed unsupported Revenue continuations | Revenue `command=continue` now accepts quote approval continuations only; `payment_link_approval` is blocked until it has a dedicated provider-link approval branch instead of flowing through quote/customer-message artifacts |
 | Enforced non-root customer-data deploys | The GitHub deploy workflow now rejects `require_production_readiness=true` when `DEPLOY_USER=root`, then verifies the remote SSH session has a non-zero UID before repository sync, so strict/customer-data deploys cannot silently use the bootstrap root path |
 | Fixed non-root rotation readiness writes | Deploy-time token rotation now updates a delegated `/etc/continuous/production-readiness.env` file in place instead of trying to chmod the system directory, so non-root deploys can keep token-rotation evidence current |
 | Added runner-built release images | Normal GitHub DigitalOcean deploys now require a successful CI run for the exact commit, build app, migrate, and scheduler images on the runner, upload a checksum-verified release archive to the droplet, load those images, and start Compose with `--no-build` |
@@ -435,9 +437,9 @@ storage upload path.
 Revenue `payment_link.prepare` is now a registered `/worker` command, not a
 follow-up placeholder or worker-specific route. It prepares a payment primitive,
 payment instruction when a bank account exists, owner approval, generated
-payment review view, workflow/budget/audit proof, and a dry-run adapter receipt
-from invoice refs under `config`, while live provider payment-link creation and
-money movement remain blocked.
+payment review view, Core worker-run budget settlement, workflow/audit proof,
+and a dry-run adapter receipt from invoice refs under `config`, while live
+provider payment-link creation and money movement remain blocked.
 
 `db:migrate` now takes a Postgres advisory lock before reading migration
 history or applying files. CI can run integration suites against the same test

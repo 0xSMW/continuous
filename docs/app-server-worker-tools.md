@@ -49,7 +49,8 @@ same worker run, approval, evidence, budget, event, adapter dry-run, generated
 view, and workflow records as `/worker`.
 The Revenue payment-link command can be executed through
 `continuous.worker.command` or `worker:tool`, but it only prepares an internal
-packet; live provider payment-link creation and money movement remain blocked.
+packet through the Core worker-run lifecycle; live provider payment-link
+creation and money movement remain blocked.
 Deploy smoke also exercises Core worker lifecycle commands plus Offer and
 Pricing `margin.review.prepare` and the `price_policy` view through
 `POST /app-server`, proving Core primitives and post-Revenue workers can use the

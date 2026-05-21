@@ -6856,6 +6856,8 @@ maybeDescribe("Revenue Worker integration eval", () => {
 
     expect(paymentLink.command).toBe("payment_link.prepare");
     expect(paymentLinkResult.created).toBe(true);
+    expect(stringValue(paymentLinkResult.reservationId)).toBeTruthy();
+    expect(stringValue(paymentLinkResult.usageEventId)).toBeTruthy();
     expect(paymentLinkOutput.command).toBe("payment_link.prepare");
     expect(paymentLinkOutput.invoiceId).toBe("44444444-4444-4444-8444-000000000006");
     expect(paymentLinkOutput.externalExecution).toBe("blocked");
@@ -6890,12 +6892,17 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(stringValue(paymentLinkReplayResult.workerRunId)).toBe(
       stringValue(paymentLinkResult.workerRunId),
     );
+    expect(paymentLinkReplayResult.reservationId).toBe(paymentLinkResult.reservationId);
+    expect(paymentLinkReplayResult.usageEventId).toBe(paymentLinkResult.usageEventId);
 
     const [paymentLinkRun] = await db
       .select()
       .from(workerRuns)
       .where(eq(workerRuns.id, stringValue(paymentLinkResult.workerRunId)))
       .limit(1);
+    const paymentLinkRunData = objectValue(paymentLinkRun?.data);
+    const paymentLinkRunCompletion = objectValue(paymentLinkRunData.completion);
+    const paymentLinkRunBudget = objectValue(paymentLinkRunCompletion.budget);
     const [paymentLinkObject] = await db
       .select()
       .from(objects)
@@ -6932,8 +6939,13 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .where(eq(evidence.id, stringValue(paymentLinkResult.adapterReceiptEvidenceId)))
       .limit(1);
 
+    expect(paymentLinkRun?.source).toBe("continuous.core.worker_runs");
+    expect(paymentLinkRun?.state).toBe("done");
     expect(paymentLinkRun?.mode).toBe("payment_link_preparation");
-    expect(objectValue(objectValue(paymentLinkRun?.data).input).command).toBe("payment_link.prepare");
+    expect(objectValue(paymentLinkRunData.input).command).toBe("payment_link.prepare");
+    expect(paymentLinkRunBudget.state).toBe("used");
+    expect(paymentLinkRunBudget.reservationId).toBe(paymentLinkResult.reservationId);
+    expect(paymentLinkRunBudget.usageEventId).toBe(paymentLinkResult.usageEventId);
     expect(paymentLinkObject?.type).toBe("payment");
     expect(paymentLinkObject?.state).toBe("approval_required");
     expect(paymentLinkPayment?.state).toBe("approval_required");
@@ -6971,6 +6983,29 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(paymentReadinessProof.paymentReviewViewId).toBe(paymentLinkResult.paymentReviewViewId);
     expect(paymentReadinessProof.adapterReceiptEvidenceId).toBe(paymentLinkResult.adapterReceiptEvidenceId);
     expect(paymentReadinessChecks.find((check) => check.key === "payment_review_view")?.state).toBe("ready");
+
+    await decideApproval({
+      approvalId: stringValue(paymentLinkResult.approvalRequestId),
+      idempotencyKey: `ci-worker-payment-link-approval-decision-${runId}`,
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      action: "approved",
+      note: "Payment-link continuation needs its own branch.",
+      subject: "worker",
+      db,
+    });
+    await expect(
+      continueRevenueWorker({
+        approvalId: stringValue(paymentLinkResult.approvalRequestId),
+        idempotencyKey: `ci-worker-payment-link-continue-${runId}`,
+        tenantSlug: "continuous-demo",
+        operatorEmail: "owner@continuoushq.com",
+        db,
+      }),
+    ).rejects.toMatchObject({
+      code: "worker_continuation_unsupported_approval_kind",
+      status: 409,
+    });
 
     const run = await runRevenueWorker({
       idempotencyKey: `ci-worker-run-from-lead-read-${runId}`,
@@ -7151,6 +7186,8 @@ maybeDescribe("Revenue Worker integration eval", () => {
       tenantSlug: "continuous-demo",
     });
     expect(paymentLinkResult.created).toBe(true);
+    expect(stringValue(paymentLinkResult.reservationId)).toBeTruthy();
+    expect(stringValue(paymentLinkResult.usageEventId)).toBeTruthy();
     expect(paymentLinkOutput.command).toBe("payment_link.prepare");
     expect(paymentLinkOutput.externalExecution).toBe("blocked");
     expect(paymentLinkOutput.providerPaymentLinkCreation).toBe("blocked");
@@ -7190,6 +7227,9 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .from(workerRuns)
       .where(eq(workerRuns.id, stringValue(paymentLinkResult.workerRunId)))
       .limit(1);
+    const paymentLinkRunData = objectValue(paymentLinkRun?.data);
+    const paymentLinkRunCompletion = objectValue(paymentLinkRunData.completion);
+    const paymentLinkRunBudget = objectValue(paymentLinkRunCompletion.budget);
     const [approval] = await db
       .select()
       .from(approvalRequests)
@@ -7218,8 +7258,13 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(quoteRunBudget.reservationId).toBe(quoteResult.reservationId);
     expect(quoteRunBudget.usageEventId).toBe(quoteResult.usageEventId);
     expect(quoteEvent?.type).toBe("worker.revenue_operations.quote_prepare.completed");
+    expect(paymentLinkRun?.source).toBe("continuous.core.worker_runs");
+    expect(paymentLinkRun?.state).toBe("done");
     expect(paymentLinkRun?.mode).toBe("payment_link_preparation");
-    expect(objectValue(objectValue(paymentLinkRun?.data).input).command).toBe("payment_link.prepare");
+    expect(objectValue(paymentLinkRunData.input).command).toBe("payment_link.prepare");
+    expect(paymentLinkRunBudget.state).toBe("used");
+    expect(paymentLinkRunBudget.reservationId).toBe(paymentLinkResult.reservationId);
+    expect(paymentLinkRunBudget.usageEventId).toBe(paymentLinkResult.usageEventId);
     expect(approval?.state).toBe("pending");
     expect(approval?.kind).toBe("quote_approval");
   }, 120_000);

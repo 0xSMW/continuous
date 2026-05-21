@@ -1034,7 +1034,11 @@ export async function completeCoreWorkerRun(input: CompleteCoreWorkerRunInput) {
 
         await tx
           .update(budgetReservations)
-          .set({ state: "used", updatedAt: now })
+          .set({
+            state: "used",
+            taskId: selected.run.taskId ?? reservation.taskId,
+            updatedAt: now,
+          })
           .where(eq(budgetReservations.id, reservation.id));
         budgetSettlement = {
           state: "used",
@@ -1046,7 +1050,11 @@ export async function completeCoreWorkerRun(input: CompleteCoreWorkerRunInput) {
       } else {
         await tx
           .update(budgetReservations)
-          .set({ state: "released", updatedAt: now })
+          .set({
+            state: "released",
+            taskId: selected.run.taskId ?? reservation.taskId,
+            updatedAt: now,
+          })
           .where(eq(budgetReservations.id, reservation.id));
         budgetSettlement = {
           state: "released",

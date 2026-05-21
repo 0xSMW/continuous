@@ -2031,17 +2031,26 @@ jobs:
               -d "$PAYMENT_LINK_PAYLOAD"
           )"
 
-          echo "$PAYMENT_LINK_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,workerRunId:.data.result.workerRunId,eventId:.data.result.eventId,workflowRunId:.data.result.workflowRunId,paymentObjectId:.data.result.paymentObjectId,paymentId:.data.result.paymentId,paymentInstructionId:.data.result.paymentInstructionId,approvalRequestId:.data.result.approvalRequestId,paymentReviewViewId:.data.result.paymentReviewViewId,externalExecution:.data.result.output.externalExecution,providerPaymentLinkCreation:.data.result.output.providerPaymentLinkCreation,moneyMovement:.data.result.output.moneyMovement}}'
+          echo "$PAYMENT_LINK_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,workerRunId:.data.result.workerRunId,eventId:.data.result.eventId,workflowRunId:.data.result.workflowRunId,reservationId:.data.result.reservationId,usageEventId:.data.result.usageEventId,paymentObjectId:.data.result.paymentObjectId,paymentId:.data.result.paymentId,paymentInstructionId:.data.result.paymentInstructionId,approvalRequestId:.data.result.approvalRequestId,paymentReviewViewId:.data.result.paymentReviewViewId,externalExecution:.data.result.output.externalExecution,providerPaymentLinkCreation:.data.result.output.providerPaymentLinkCreation,moneyMovement:.data.result.output.moneyMovement}}'
           echo "$PAYMENT_LINK_RESPONSE" | /usr/bin/jq -e \
-            '.error == null and .data.command == "payment_link.prepare" and .data.result.created == true and (.data.result.workerRunId | length > 0) and (.data.result.eventId | length > 0) and (.data.result.workflowRunId | length > 0) and (.data.result.paymentObjectId | length > 0) and (.data.result.paymentId | length > 0) and (.data.result.paymentInstructionId | length > 0) and (.data.result.approvalRequestId | length > 0) and (.data.result.paymentReviewViewId | length > 0) and .data.result.output.command == "payment_link.prepare" and .data.result.output.externalExecution == "blocked" and .data.result.output.externalMutation == false and .data.result.output.providerPaymentLinkCreation == "blocked" and .data.result.output.moneyMovement == "blocked"' \
+            '.error == null and .data.command == "payment_link.prepare" and .data.result.created == true and (.data.result.workerRunId | length > 0) and (.data.result.eventId | length > 0) and (.data.result.workflowRunId | length > 0) and (.data.result.reservationId | length > 0) and (.data.result.usageEventId | length > 0) and (.data.result.paymentObjectId | length > 0) and (.data.result.paymentId | length > 0) and (.data.result.paymentInstructionId | length > 0) and (.data.result.approvalRequestId | length > 0) and (.data.result.paymentReviewViewId | length > 0) and .data.result.output.command == "payment_link.prepare" and .data.result.output.externalExecution == "blocked" and .data.result.output.externalMutation == false and .data.result.output.providerPaymentLinkCreation == "blocked" and .data.result.output.moneyMovement == "blocked"' \
             >/dev/null
 
           PAYMENT_LINK_WORKER_RUN_ID="$(echo "$PAYMENT_LINK_RESPONSE" | /usr/bin/jq -r '.data.result.workerRunId')"
           PAYMENT_LINK_EVENT_ID="$(echo "$PAYMENT_LINK_RESPONSE" | /usr/bin/jq -r '.data.result.eventId')"
           PAYMENT_LINK_WORKFLOW_RUN_ID="$(echo "$PAYMENT_LINK_RESPONSE" | /usr/bin/jq -r '.data.result.workflowRunId')"
           PAYMENT_LINK_APPROVAL_ID="$(echo "$PAYMENT_LINK_RESPONSE" | /usr/bin/jq -r '.data.result.approvalRequestId')"
+          PAYMENT_LINK_RESERVATION_ID="$(echo "$PAYMENT_LINK_RESPONSE" | /usr/bin/jq -r '.data.result.reservationId')"
+          PAYMENT_LINK_USAGE_ID="$(echo "$PAYMENT_LINK_RESPONSE" | /usr/bin/jq -r '.data.result.usageEventId')"
+          PAYMENT_LINK_WORKER_RUN_ROW="$(
+            psql_db -Atc "select coalesce(source,'') || '|' || coalesce(state::text,'') || '|' || coalesce(mode,'') || '|' || coalesce(data->'input'->>'command','') || '|' || coalesce(data->'output'->>'command','') || '|' || coalesce(data->'output'->>'providerPaymentLinkCreation','') || '|' || coalesce(data->'output'->>'moneyMovement','') || '|' || coalesce(data->'completion'->'budget'->>'state','') || '|' || coalesce(data->'completion'->'budget'->>'reservationId','') || '|' || coalesce(data->'completion'->'budget'->>'usageEventId','') from worker_runs where id = '$PAYMENT_LINK_WORKER_RUN_ID'::uuid;"
+          )"
+          if [ "$PAYMENT_LINK_WORKER_RUN_ROW" != "continuous.core.worker_runs|done|payment_link_preparation|payment_link.prepare|payment_link.prepare|blocked|blocked|used|$PAYMENT_LINK_RESERVATION_ID|$PAYMENT_LINK_USAGE_ID" ]; then
+            echo "Unexpected Core-backed payment_link.prepare worker run row: $PAYMENT_LINK_WORKER_RUN_ROW" >&2
+            exit 1
+          fi
           psql_db -At <<SQL
-          select 'payment_link_worker_run' as kind, state, mode, data->'input'->>'command', data->'output'->>'providerPaymentLinkCreation', data->'output'->>'moneyMovement'
+          select 'payment_link_worker_run' as kind, source, state, mode, data->'input'->>'command', data->'output'->>'providerPaymentLinkCreation', data->'output'->>'moneyMovement', data->'completion'->'budget'->>'state'
           from worker_runs where id = '$PAYMENT_LINK_WORKER_RUN_ID'::uuid;
           select 'payment_link_event' as kind, type, source, data->>'command'
           from events where id = '$PAYMENT_LINK_EVENT_ID'::uuid;
