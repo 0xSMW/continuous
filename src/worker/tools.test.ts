@@ -285,8 +285,19 @@ describe("worker tool contract", () => {
     ).rejects.toThrow("worker.role is required.");
 
     const apiFamilyRole = ["api", "domain-worker"].join("/");
+    const routeNouns = ["api", "app_server", "approval", "core", "worker", "workers", "workflow"];
 
-    for (const role of ["domain-worker", "domain_worker", apiFamilyRole, "worker/domain"]) {
+    for (const role of [
+      "domain-worker",
+      "domain_worker",
+      "legacy-worker",
+      "legacy_worker",
+      apiFamilyRole,
+      "api/legacy-worker",
+      "worker/domain",
+      "worker/revenue_operations",
+      ...routeNouns,
+    ]) {
       await expect(
         executeWorkerTool("worker.command", {
           command: "run",

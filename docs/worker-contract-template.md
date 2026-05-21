@@ -35,9 +35,12 @@ metadata only; they never become route aliases.
 ```
 
 `worker.role` is required; the control plane must not default to the first
-implemented worker. Define every supported command with required `config`
-fields, validation errors, idempotent replay behavior, output fields, and
-external-execution status.
+implemented worker. Role values are lower_snake_case capability roles, not
+route nouns; reserved control-plane route words such as `api`, `worker`,
+`workers`, `core`, `workflow`, `approval`, and `app_server` are invalid worker
+roles. Define every supported command with required `config` fields, validation
+errors, idempotent replay behavior, output fields, and external-execution
+status.
 
 Only `command`, `worker`, `idempotencyKey`, and `config` are accepted as
 top-level command fields. Worker selection belongs under `worker`; operation

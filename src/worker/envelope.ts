@@ -3,6 +3,16 @@ export const workerViewEnvelopeFields = ["view", "worker", "config"] as const;
 export const workerTargetEnvelopeFields = ["role", "id", "tenantSlug"] as const;
 export const workerRolePattern = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/;
 export const workerOperationPattern = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*(?:\.[a-z][a-z0-9]*(?:_[a-z0-9]+)*)*$/;
+const reservedWorkerRoleSegments = new Set([
+  "api",
+  "app_server",
+  "approval",
+  "core",
+  "worker",
+  "workers",
+  "workflow",
+]);
+const reservedWorkerOperationSegments = new Set(["api", "app_server", "worker", "workers"]);
 export const workerRoleDescription =
   "worker.role must be a lower_snake_case role identifier such as revenue_operations; do not use route names, family-worker names, or URL fragments.";
 export const workerOperationDescription =
@@ -11,17 +21,20 @@ export const workerOperationDescription =
 export function isWorkerRoleIdentifier(value: string) {
   const role = value.trim();
 
-  return workerRolePattern.test(role) && !role.endsWith("_worker");
+  return (
+    workerRolePattern.test(role) &&
+    !role.endsWith("_worker") &&
+    !reservedWorkerRoleSegments.has(role)
+  );
 }
 
 export function isWorkerOperationIdentifier(value: string) {
   const operation = value.trim();
-  const reservedRouteSegments = new Set(["api", "app_server", "worker", "workers"]);
 
   return (
     workerOperationPattern.test(operation) &&
     !operation.includes("_worker") &&
-    operation.split(".").every((segment) => !reservedRouteSegments.has(segment))
+    operation.split(".").every((segment) => !reservedWorkerOperationSegments.has(segment))
   );
 }
 

@@ -2,7 +2,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { isWorkerOperationIdentifier } from "./envelope";
+import { isWorkerOperationIdentifier, isWorkerRoleIdentifier } from "./envelope";
 import {
   plannedWorkerCommands,
   plannedWorkerContracts,
@@ -239,6 +239,36 @@ describe("future worker contracts", () => {
 
     for (const operation of routeShapedOperations) {
       expect(isWorkerOperationIdentifier(operation)).toBe(false);
+    }
+  });
+
+  it("rejects route-shaped and reserved worker role names before registry lookup", () => {
+    const canonicalRoles = [
+      "revenue_operations",
+      "dispatch_operations",
+      "owner_chief_of_staff",
+      "vertical_packages",
+    ];
+    const routeShapedRoles = [
+      "api",
+      "app_server",
+      "approval",
+      "core",
+      "worker",
+      "workers",
+      "workflow",
+      "legacy-worker",
+      "legacy_worker",
+      ["api", "legacy-worker"].join("/"),
+      ["worker", "revenue_operations"].join("/"),
+    ];
+
+    for (const role of canonicalRoles) {
+      expect(isWorkerRoleIdentifier(role)).toBe(true);
+    }
+
+    for (const role of routeShapedRoles) {
+      expect(isWorkerRoleIdentifier(role)).toBe(false);
     }
   });
 
