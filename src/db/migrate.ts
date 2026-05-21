@@ -13,6 +13,8 @@ type Journal = {
   }>;
 };
 
+const migrationLockKey: [number, number] = [20260521, 1];
+
 async function readJournal() {
   const journalPath = path.join(process.cwd(), "drizzle", "meta", "_journal.json");
   const raw = await readFile(journalPath, "utf8");
@@ -34,8 +36,12 @@ async function migrate() {
   const journal = await readJournal();
   const client = new pg.Client({ connectionString: env.DATABASE_URL });
   await client.connect();
+  let locked = false;
 
   try {
+    await client.query("select pg_advisory_lock($1, $2)", migrationLockKey);
+    locked = true;
+
     await client.query("create schema if not exists drizzle");
     await client.query(`
       create table if not exists drizzle.__drizzle_migrations (
@@ -126,7 +132,13 @@ async function migrate() {
 
     console.log("Database migrations are current.");
   } finally {
-    await client.end();
+    try {
+      if (locked) {
+        await client.query("select pg_advisory_unlock($1, $2)", migrationLockKey);
+      }
+    } finally {
+      await client.end();
+    }
   }
 }
 

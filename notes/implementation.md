@@ -415,3 +415,8 @@ payment instruction when a bank account exists, owner approval, generated
 payment review view, workflow/budget/audit proof, and a dry-run adapter receipt
 from invoice refs under `config`, while live provider payment-link creation and
 money movement remain blocked.
+
+`db:migrate` now takes a Postgres advisory lock before reading migration
+history or applying files. CI can run integration suites against the same test
+database in parallel, so the migration runner owns cross-process serialization
+instead of requiring every worker test file to coordinate separately.
