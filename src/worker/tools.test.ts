@@ -1919,6 +1919,21 @@ describe("worker tool contract", () => {
     ).rejects.toThrow("config.action is required for approval.decide.");
   });
 
+  it("applies the same registry config schemas through app-server views", async () => {
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.view", {
+        view: "obligations",
+        worker: {
+          role: "compliance_operations",
+          tenantSlug: "continuous-demo",
+        },
+        config: {
+          limit: 0,
+        },
+      }),
+    ).rejects.toThrow("config.limit must be greater than or equal to 1.");
+  });
+
   it("exposes app-server worker discovery and registry command tools", async () => {
     expect(appServerWorkerTools.map((tool) => tool.name)).toEqual([
       "continuous.worker.schema",

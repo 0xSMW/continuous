@@ -242,6 +242,9 @@ external-execution status before a command is invoked.
 The app-server worker tools use the same read and command envelopes as the
 worker registry:
 
+`continuous.worker.command` and `worker.command` are tool names, `/worker` is
+the HTTP route, and operation inputs belong under the `config` payload field.
+
 ```sh
 export WORKER_OPERATOR_EMAIL=owner@continuoushq.com
 bun run app-server:worker-tools continuous.worker.view --payload='{"view":"snapshot","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{}}'

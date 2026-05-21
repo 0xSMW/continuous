@@ -838,9 +838,7 @@ describe("app-server worker tools", () => {
       threadId: "thread-1",
       turnId: "turn-malformed",
     });
-    const malformedArgumentsPayload = JSON.parse(
-      malformedArgumentsResponse.contentItems[0]?.text ?? "{}",
-    ) as {
+    const malformedArgumentsPayload = JSON.parse(dynamicToolText(malformedArgumentsResponse)) as {
       ok?: boolean;
       error?: string;
     };

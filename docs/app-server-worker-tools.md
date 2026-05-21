@@ -142,6 +142,10 @@ operation fields under `arguments.config`, and never send `operatorEmail`,
 bearer tokens, transport context, tenant scope, or worker-role scope in the
 payload.
 
+`continuous.worker.command`, `continuous.worker.view`, `worker.command`, and
+`worker.view` are tool names; `/worker` is the HTTP route; `command`, `view`,
+`worker`, `idempotencyKey`, and `config` are payload fields.
+
 ```http
 POST /app-server
 content-type: application/json
