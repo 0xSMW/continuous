@@ -145,10 +145,19 @@ handlers are registered.
 | Key | Meaning |
 |---|---|
 | `manifest` | App-server tool manifest, tool names, schemas, and boundary metadata |
+| `apiShape` | Machine-readable canonical worker API shape: `/worker`, command/view envelope fields, worker selector fields, app-server tool names, and `config` paths |
 | `registry` | Machine-readable worker registry used by app-server, `/worker`, and `worker:tool` |
 | `lifecycle` | Machine-readable first-worker lifecycle plan for app-server build, run, inspect, and expansion flows |
 | `plannedWorkers` | Alias for `registry.plannedContracts` for older consumers |
 | `workerToolSchema` | Full worker tool schema, including `$defs` plus the same `registry` object |
+
+`apiShape` is the source of truth for API naming and payload placement. It says
+worker commands use only `command`, `worker`, `idempotencyKey`, and `config`;
+worker reads use only `view`, `worker`, and `config`; `worker` is only the
+`role`/`id`/`tenantSlug` selector; and operation-owned fields live under
+`config` or `arguments.config` for app-server calls. Future workers should
+consume that shape directly instead of deriving routes or top-level fields from
+worker family labels.
 
 The lifecycle plan is not a new execution surface. It is schema metadata that
 keeps agents from inventing `/api/*-worker`, `/worker/<role>`, or

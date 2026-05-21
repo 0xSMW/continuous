@@ -84,7 +84,11 @@ Then open `http://localhost:3000`.
   The route validates roles, commands, idempotency, tenant requirements, and
   external-execution posture through the worker command registry. Worker
   contract metadata also carries `apiRoute: "/worker"` so new roles inherit the
-  route from the registry instead of creating a role-specific URL.
+  route from the registry instead of creating a role-specific URL. Worker schema
+  discovery exposes `apiShape`, a machine-readable contract for the canonical
+  route, command/view envelope fields, worker selector fields, app-server tool
+  names, and `config` paths so new clients do not infer API shape from the first
+  Revenue role.
 - Dispatch schedule proposals use the same shape:
   `POST /worker` with `worker.role: "dispatch_operations"`,
   `command: "schedule.propose"`, handoff ids in `config.sourceRefs`, and

@@ -22,6 +22,7 @@ import {
   isWorkerOperationIdentifier,
   validateWorkerConfigEnvelope,
   validateWorkerTargetEnvelope,
+  workerCommandEnvelopeFields,
   workerCommandEnvelopeDescription,
   workerCommandEnvelopeFieldSet,
   workerEnvelopeFieldError,
@@ -29,6 +30,8 @@ import {
   workerOperationPattern,
   workerRoleDescription,
   workerRolePattern,
+  workerTargetEnvelopeFields,
+  workerViewEnvelopeFields,
   workerViewEnvelopeDescription,
   workerViewEnvelopeFieldSet,
 } from "./envelope";
@@ -112,6 +115,49 @@ export const workerTools = [
   },
 ] as const;
 
+export const workerCanonicalApiShape = {
+  schemaVersion: "continuous.worker_api_shape.v1",
+  httpRoute: "/worker",
+  appServerRoute: "/app-server",
+  localToolSurface: "worker:tool",
+  commandEnvelope: {
+    transport: "http_or_tool_payload",
+    topLevelFields: Array.from(workerCommandEnvelopeFields),
+    operationPath: "command",
+    selectorPath: "worker",
+    idempotencyPath: "idempotencyKey",
+    configPath: "config",
+    configRule: "Every command-owned input belongs under config.",
+  },
+  viewEnvelope: {
+    transport: "http_or_tool_payload",
+    topLevelFields: Array.from(workerViewEnvelopeFields),
+    operationPath: "view",
+    selectorPath: "worker",
+    configPath: "config",
+    configRule: "Every read filter belongs under config.",
+  },
+  workerSelector: {
+    path: "worker",
+    fields: Array.from(workerTargetEnvelopeFields),
+    roleRule:
+      "worker.role is a lower_snake_case capability role selector, not a route alias or worker-family URL segment.",
+  },
+  appServerEnvelope: {
+    toolPath: "tool",
+    argumentsPath: "arguments",
+    commandTool: "continuous.worker.command",
+    viewTool: "continuous.worker.view",
+    schemaTool: "continuous.worker.schema",
+    commandConfigPath: "arguments.config",
+    viewConfigPath: "arguments.config",
+  },
+  expansionRule:
+    "New worker families add registry commands, views, config schemas, and handlers while preserving the same routes and envelope fields.",
+  nonCanonicalFamilies:
+    "Worker-family routes, nested worker-role paths, query-shaped reads, and worker-family-specific tool names are non-canonical.",
+} satisfies JsonObject;
+
 const registeredCommands = registeredWorkerCommands();
 const registeredViews = registeredWorkerViews();
 const followUpCommands = workerFollowUpCommands(registeredCommands);
@@ -132,6 +178,7 @@ function contractSummary(contract: (typeof workerContracts)[number]) {
 
 export const workerToolSchema = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
+  apiShape: workerCanonicalApiShape,
   registry: {
     commands: registeredCommands,
     views: registeredViews,

@@ -91,9 +91,20 @@ describe("app-server worker tools", () => {
       appServerWorkerToolManifest.tools.find((tool) => tool.name === "continuous.worker.command")
         ?.inputSchema.required,
     ).toEqual(["command", "worker", "idempotencyKey", "config"]);
+    if (!("apiShape" in schema) || !schema.apiShape) {
+      throw new Error("Expected API shape result.");
+    }
     if (!("registry" in schema) || !schema.registry) {
       throw new Error("Expected schema result.");
     }
+    if (!("workerToolSchema" in schema) || !schema.workerToolSchema) {
+      throw new Error("Expected worker tool schema result.");
+    }
+    const apiShape = objectValue(schema.apiShape);
+    const commandEnvelope = objectValue(apiShape.commandEnvelope);
+    const viewEnvelope = objectValue(apiShape.viewEnvelope);
+    const workerSelector = objectValue(apiShape.workerSelector);
+    const appServerEnvelope = objectValue(apiShape.appServerEnvelope);
     const registry = schema.registry;
     const lifecycle = schema.lifecycle;
     const expansionKeys = registry.expansion.map((entry) => entry.key);
@@ -118,6 +129,51 @@ describe("app-server worker tools", () => {
         ? registeredSystemsViews
         : registry.followUpViews.filter((view) => view.role === "systems_operations");
 
+    expect(apiShape).toEqual(
+      expect.objectContaining({
+        schemaVersion: "continuous.worker_api_shape.v1",
+        httpRoute: "/worker",
+        appServerRoute: "/app-server",
+        localToolSurface: "worker:tool",
+      }),
+    );
+    expect(appServerWorkerToolManifest.apiShape).toEqual(apiShape);
+    expect(objectValue(schema.workerToolSchema).apiShape).toEqual(apiShape);
+    expect(commandEnvelope).toEqual(
+      expect.objectContaining({
+        topLevelFields: ["command", "worker", "idempotencyKey", "config"],
+        operationPath: "command",
+        selectorPath: "worker",
+        idempotencyPath: "idempotencyKey",
+        configPath: "config",
+      }),
+    );
+    expect(viewEnvelope).toEqual(
+      expect.objectContaining({
+        topLevelFields: ["view", "worker", "config"],
+        operationPath: "view",
+        selectorPath: "worker",
+        configPath: "config",
+      }),
+    );
+    expect(workerSelector).toEqual(
+      expect.objectContaining({
+        path: "worker",
+        fields: ["role", "id", "tenantSlug"],
+      }),
+    );
+    expect(appServerEnvelope).toEqual(
+      expect.objectContaining({
+        toolPath: "tool",
+        argumentsPath: "arguments",
+        commandTool: "continuous.worker.command",
+        viewTool: "continuous.worker.view",
+        schemaTool: "continuous.worker.schema",
+        commandConfigPath: "arguments.config",
+        viewConfigPath: "arguments.config",
+      }),
+    );
+    expect(JSON.stringify(apiShape)).not.toMatch(/\/api(?:\/|$)|revenue[-_]worker|\/worker\/[a-z0-9_-]/i);
     expect(registry.contracts.map((contract) => contract.role)).toEqual(contractRoles);
     expect(registry.contracts.every((contract) => contract.apiRoute === "/worker")).toBe(true);
     expect(registry.commands.every((command) => command.apiRoute === "/worker")).toBe(true);

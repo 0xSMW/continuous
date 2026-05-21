@@ -5,6 +5,7 @@ import {
   assertTrustedLocalWorkerMutation,
   assertTrustedLocalWorkerRead,
   requiredLocalWorkerOperatorEmail,
+  workerCanonicalApiShape,
   workerTargetInputSchema,
   workerToolSchema,
 } from "./tools";
@@ -136,6 +137,7 @@ export const appServerWorkerToolManifest = {
   protocol: "codex.app-server.dynamic_tools",
   mode: "registry_backed_worker_control",
   owner: "continuous",
+  apiShape: workerCanonicalApiShape,
   boundary: {
     sideEffects: "registered_worker_commands_only",
     externalExecution: "blocked",
@@ -510,6 +512,7 @@ export async function executeAppServerWorkerTool(
 
     return {
       manifest: appServerWorkerToolManifest,
+      apiShape: workerCanonicalApiShape,
       registry: workerToolSchema.registry,
       lifecycle: appServerWorkerLifecycle,
       plannedWorkers: workerToolSchema.registry.plannedContracts,
