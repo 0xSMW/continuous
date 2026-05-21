@@ -954,6 +954,9 @@ jobs:
               (.data.registry.views | any(.role == "customer_experience_operations" and .name == "signals" and .apiRoute == "/worker")) and
               (.data.registry.commands | any(.role == "growth_operations" and .name == "campaign.draft" and .apiRoute == "/worker" and .configSchema.required == ["sourceRefs","policy"])) and
               (.data.registry.views | any(.role == "growth_operations" and .name == "campaigns" and .apiRoute == "/worker")) and
+              (.data.registry.plannedCommands == .data.registry.followUpCommands) and
+              (.data.registry.followUpCommands | all(.apiRoute == "/worker" and .toolAlias == "worker.command")) and
+              (.data.registry.followUpCommands | any(.role == "growth_operations" and .name == "attribution.review")) and
               (.data.registry.plannedFutureWorkerCommands | any(.role == "asset_supply_operations" and .name == "reorder.plan" and .apiRoute == "/worker" and .externalExecution == "dry_run")) and
               (.data.registry.plannedFutureWorkerCommands | any(.role == "vertical_packages" and .name == "package.flow.prepare" and .apiRoute == "/worker" and .configSchema.required == ["packageKey","sourceRefs","policy"])) and
               (.data.registry.plannedFutureWorkerViews | any(.role == "vertical_packages" and .name == "package_readiness" and .apiRoute == "/worker" and .configSchema.required == ["packageKey"])) and

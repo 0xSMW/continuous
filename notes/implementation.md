@@ -532,3 +532,9 @@ pinning the registry to a brittle follow-up count. The smoke keeps asserting the
 generic `/worker` surface, shared `worker.command` tool alias, and named
 follow-up gates so new worker families can extend the registry without
 introducing worker-family routes.
+
+The app-server worker schema smoke now proves the same Growth follow-up
+metadata through `continuous.worker.schema` without adding `attribution.review`
+to executable command allow-lists. That command remains schema-visible but
+non-runtime until tracking, ROI, credential, receipt, and rollback gates are
+implemented.
