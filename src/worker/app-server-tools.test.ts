@@ -84,6 +84,7 @@ describe("app-server worker tools", () => {
       throw new Error("Expected schema result.");
     }
     const registry = schema.registry;
+    const lifecycle = schema.lifecycle;
     const expansionKeys = registry.expansion.map((entry) => entry.key);
     const runtimeRoles = registry.runtimeContracts.map((contract) => contract.role);
     const plannedRoles = registry.plannedContracts.map((contract) => contract.role);
@@ -110,6 +111,51 @@ describe("app-server worker tools", () => {
     expect(registry.commands.every((command) => command.apiRoute === "/worker")).toBe(true);
     expect(registry.views.every((view) => view.apiRoute === "/worker")).toBe(true);
     expect(registry.expansion.every((entry) => entry.apiRoute === "/worker")).toBe(true);
+    expect(lifecycle.schemaVersion).toBe("continuous.worker_lifecycle.v1");
+    expect(lifecycle.boundary).toEqual(
+      expect.objectContaining({
+        appServerRoute: "/app-server",
+        coreRoute: "/core",
+        workerRoute: "/worker",
+        configPath: "arguments.config",
+        workerSelectorPath: "arguments.worker",
+      }),
+    );
+    expect(JSON.stringify(lifecycle)).not.toMatch(/\/api(?:\/|$)|revenue[-_]worker/i);
+    expect(lifecycle.firstWorker).toEqual(
+      expect.objectContaining({
+        role: "revenue_operations",
+        contractPath: "docs/revenue-operations-worker-v1-contract.md",
+      }),
+    );
+    expect(lifecycle.firstWorker.build.map((step) => [step.tool, step.command, step.configPath])).toEqual([
+      ["continuous.core.command", "worker.upsert", "arguments.config"],
+      ["continuous.core.command", "worker.transition", "arguments.config"],
+    ]);
+    expect(
+      lifecycle.firstWorker.run.every(
+        (step) =>
+          step.apiRoute === "/worker" &&
+          step.workerRole === "revenue_operations" &&
+          step.workerSelectorPath === "arguments.worker" &&
+          step.configPath === "arguments.config",
+      ),
+    ).toBe(true);
+    expect(lifecycle.firstWorker.run.map((step) => ("command" in step ? step.command : step.view))).toEqual([
+      "readiness",
+      "lead.read",
+      "lead.classify",
+      "response.draft",
+      "run",
+      "quote.prepare",
+      "payment_link.prepare",
+      "continue",
+    ]);
+    expect(lifecycle.expansion).toEqual(
+      expect.objectContaining({
+        promotionPath: "registry.plannedFutureWorkerCommands -> registry.commands",
+      }),
+    );
     expect(expansionKeys).toEqual(
       expect.arrayContaining([
         "revenue_operations",
@@ -1036,6 +1082,13 @@ describe("app-server worker tools", () => {
       tool?: string;
       data?: {
         manifest?: typeof appServerWorkerToolManifest;
+        lifecycle?: {
+          schemaVersion?: string;
+          boundary?: {
+            workerRoute?: string;
+            configPath?: string;
+          };
+        };
         registry?: {
           expansion?: Array<{
             key: string;
@@ -1054,6 +1107,13 @@ describe("app-server worker tools", () => {
       "continuous.worker.command",
       "continuous.worker.view",
     ]);
+    expect(schemaPayload.data?.lifecycle?.schemaVersion).toBe("continuous.worker_lifecycle.v1");
+    expect(schemaPayload.data?.lifecycle?.boundary).toEqual(
+      expect.objectContaining({
+        workerRoute: "/worker",
+        configPath: "arguments.config",
+      }),
+    );
     expect(schemaPayload.data?.registry?.expansion?.some((entry) => entry.wave === 12)).toBe(true);
     expect(schemaPayload.data?.registry?.expansion).toEqual(
       expect.arrayContaining([

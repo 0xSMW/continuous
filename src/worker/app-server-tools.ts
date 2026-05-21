@@ -146,6 +146,169 @@ export const appServerWorkerToolManifest = {
   tools: appServerWorkerTools,
 } as const;
 
+export const appServerWorkerLifecycle = {
+  schemaVersion: "continuous.worker_lifecycle.v1",
+  boundary: {
+    appServerRoute: "/app-server",
+    coreRoute: "/core",
+    workerRoute: "/worker",
+    workerSelectorPath: "arguments.worker",
+    coreSelectorPath: "arguments.core",
+    operationPath: "arguments.command or arguments.view",
+    configPath: "arguments.config",
+    operatorIdentity: "authenticated_transport_context",
+    namingRule:
+      "Use generic routes plus registered command or view names. Do not create worker-family routes, URL-shaped operation names, or worker-family-specific app-server tools.",
+  },
+  firstWorker: {
+    role: "revenue_operations",
+    name: "Revenue Operations Worker",
+    contractPath: "docs/revenue-operations-worker-v1-contract.md",
+    build: [
+      {
+        phase: "identity",
+        tool: "continuous.core.command",
+        command: "worker.upsert",
+        apiRoute: "/core",
+        coreSelectorPath: "arguments.core",
+        configPath: "arguments.config",
+        workerRoleScopePath: "arguments.config.role",
+        requiredConfig: ["role", "kind", "state", "name", "mission", "autonomyLevel", "policy"],
+      },
+      {
+        phase: "activation",
+        tool: "continuous.core.command",
+        command: "worker.transition",
+        apiRoute: "/core",
+        coreSelectorPath: "arguments.core",
+        configPath: "arguments.config",
+        workerRoleScopePath: "arguments.config.role",
+        requiredConfig: ["role", "workerId", "toState", "reason", "evidence"],
+      },
+    ],
+    run: [
+      {
+        phase: "readiness",
+        tool: "continuous.worker.view",
+        view: "readiness",
+        apiRoute: "/worker",
+        workerRole: "revenue_operations",
+        workerSelectorPath: "arguments.worker",
+        configPath: "arguments.config",
+      },
+      {
+        phase: "intake",
+        tool: "continuous.worker.command",
+        command: "lead.read",
+        apiRoute: "/worker",
+        workerRole: "revenue_operations",
+        workerSelectorPath: "arguments.worker",
+        configPath: "arguments.config",
+      },
+      {
+        phase: "classify",
+        tool: "continuous.worker.command",
+        command: "lead.classify",
+        apiRoute: "/worker",
+        workerRole: "revenue_operations",
+        workerSelectorPath: "arguments.worker",
+        configPath: "arguments.config",
+      },
+      {
+        phase: "draft",
+        tool: "continuous.worker.command",
+        command: "response.draft",
+        apiRoute: "/worker",
+        workerRole: "revenue_operations",
+        workerSelectorPath: "arguments.worker",
+        configPath: "arguments.config",
+      },
+      {
+        phase: "simulate",
+        tool: "continuous.worker.command",
+        command: "run",
+        apiRoute: "/worker",
+        workerRole: "revenue_operations",
+        workerSelectorPath: "arguments.worker",
+        configPath: "arguments.config",
+      },
+      {
+        phase: "quote",
+        tool: "continuous.worker.command",
+        command: "quote.prepare",
+        apiRoute: "/worker",
+        workerRole: "revenue_operations",
+        workerSelectorPath: "arguments.worker",
+        configPath: "arguments.config",
+      },
+      {
+        phase: "payment_link",
+        tool: "continuous.worker.command",
+        command: "payment_link.prepare",
+        apiRoute: "/worker",
+        workerRole: "revenue_operations",
+        workerSelectorPath: "arguments.worker",
+        configPath: "arguments.config",
+      },
+      {
+        phase: "approval_continuation",
+        tool: "continuous.worker.command",
+        command: "continue",
+        apiRoute: "/worker",
+        workerRole: "revenue_operations",
+        workerSelectorPath: "arguments.worker",
+        configPath: "arguments.config",
+      },
+    ],
+    inspect: [
+      {
+        phase: "worker_snapshot",
+        tool: "continuous.worker.view",
+        view: "snapshot",
+        apiRoute: "/worker",
+        workerRole: "revenue_operations",
+        workerSelectorPath: "arguments.worker",
+        configPath: "arguments.config",
+      },
+      {
+        phase: "readiness",
+        tool: "continuous.worker.view",
+        view: "readiness",
+        apiRoute: "/worker",
+        workerRole: "revenue_operations",
+        workerSelectorPath: "arguments.worker",
+        configPath: "arguments.config",
+      },
+      {
+        phase: "schema",
+        tool: "continuous.worker.schema",
+      },
+    ],
+    gates: [
+      "worker identity exists through Core worker.upsert",
+      "worker is active or training through Core worker.transition",
+      "readiness view is ready for dry-run operation",
+      "business commands execute through /worker with operation inputs under config",
+      "external execution remains blocked until credential, receipt, rollback, and reconciliation proof exists",
+    ],
+  },
+  expansion: {
+    rule:
+      "New worker families register contracts, commands, views, config schemas, and handoffs in the worker registry, then execute through /worker without adding family-specific routes.",
+    promotionPath: "registry.plannedFutureWorkerCommands -> registry.commands",
+    requiredMetadata: [
+      "role",
+      "name",
+      "apiRoute",
+      "toolAlias",
+      "configSchema",
+      "idempotency",
+      "externalExecution",
+      "requiresTenant",
+    ],
+  },
+} as const;
+
 function objectValue(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -339,6 +502,7 @@ export async function executeAppServerWorkerTool(
     return {
       manifest: appServerWorkerToolManifest,
       registry: workerToolSchema.registry,
+      lifecycle: appServerWorkerLifecycle,
       plannedWorkers: workerToolSchema.registry.plannedContracts,
       workerToolSchema,
     };

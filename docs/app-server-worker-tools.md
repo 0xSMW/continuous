@@ -37,6 +37,13 @@ contract-defined for runtime workers but not executable yet. Planned
 future-worker commands expose a separate non-executable `configSchema` so agents
 can inspect payload requirements for candidate and packaged workers before
 handlers exist.
+The same schema response includes `lifecycle`, a machine-readable first-worker
+build/run/inspect plan. It points worker identity and state changes at
+`continuous.core.command` with `worker.upsert` and `worker.transition`, then
+points business reads and commands at `continuous.worker.view` and
+`continuous.worker.command`. It exists to keep app-server agents on the generic
+`/core`, `/worker`, and `/app-server` surfaces while putting every operation
+input under `arguments.config`.
 `continuous.worker.view`, `continuous.worker.command`, `/worker`, and
 `worker:tool` all run through the same registry validation before dispatch.
 `continuous.workflow.view`, `continuous.workflow.command`, `/workflow`,
@@ -138,8 +145,26 @@ handlers are registered.
 |---|---|
 | `manifest` | App-server tool manifest, tool names, schemas, and boundary metadata |
 | `registry` | Machine-readable worker registry used by app-server, `/worker`, and `worker:tool` |
+| `lifecycle` | Machine-readable first-worker lifecycle plan for app-server build, run, inspect, and expansion flows |
 | `plannedWorkers` | Alias for `registry.plannedContracts` for older consumers |
 | `workerToolSchema` | Full worker tool schema, including `$defs` plus the same `registry` object |
+
+The lifecycle plan is not a new execution surface. It is schema metadata that
+keeps agents from inventing `/api/*-worker`, `/worker/<role>`, or
+worker-family-specific app-server tools. Its steps use only registered tools:
+
+| Lifecycle area | Tool | Operation location | Config location |
+|---|---|---|---|
+| Worker identity | `continuous.core.command` | `arguments.command=worker.upsert` | `arguments.config` |
+| Worker activation | `continuous.core.command` | `arguments.command=worker.transition` | `arguments.config` |
+| Business reads | `continuous.worker.view` | `arguments.view` | `arguments.config` |
+| Business commands | `continuous.worker.command` | `arguments.command` | `arguments.config` |
+| Schema inspection | `continuous.worker.schema` | Tool name only | None |
+
+First-worker run steps currently cover Revenue Operations readiness,
+`lead.read`, `lead.classify`, `response.draft`, `run`, `quote.prepare`,
+`payment_link.prepare`, and approval `continue`. Future workers should extend
+the registry and this lifecycle metadata, not the route tree.
 
 The `registry` buckets have distinct execution meaning:
 

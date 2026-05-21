@@ -695,3 +695,11 @@ firewall already exists, instead of only setting SSH, HTTP, and HTTPS ingress
 when creating a new firewall. This prevents existing DigitalOcean firewall
 drift from silently removing the narrow operator SSH rule required for
 readiness checks and host maintenance.
+
+The app-server worker schema now includes a machine-readable lifecycle plan for
+building, running, inspecting, and expanding the first worker. The plan points
+worker identity and state changes at generic Core commands and points business
+reads/commands at the generic `/worker` surface, with operation-specific input
+kept under `arguments.config`. This is schema metadata, not a new execution
+surface, and exists so agents do not infer `/api/*-worker`, `/worker/<role>`,
+or worker-family-specific tool names from prose.
