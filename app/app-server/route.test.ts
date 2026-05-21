@@ -477,7 +477,7 @@ describe("/app-server route", () => {
           "content-type": "application/json",
         },
         body: JSON.stringify({
-          tool: "continuous.revenue.worker.run",
+          tool: "continuous.worker.invalid",
           arguments: {},
           callId: "call-006",
           threadId: "thread-001",
