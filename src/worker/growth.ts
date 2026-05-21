@@ -1763,11 +1763,40 @@ export async function prepareGrowthCampaignDraft(input: {
   });
 
   const output = result.output;
-  const snapshot = await getGrowthWorkerSnapshot({
-    tenantSlug: context.worker.tenantSlug,
-    workerId: context.worker.id,
-    db,
-  });
+  const outputRecord = objectValue(output);
+  const outputSnapshot = objectValue(outputRecord.snapshot);
+  const snapshot =
+    result.status === "replay" && Object.keys(outputSnapshot).length > 0
+      ? (outputSnapshot as unknown as GrowthWorkerSnapshot)
+      : await getGrowthWorkerSnapshot({
+          tenantSlug: context.worker.tenantSlug,
+          workerId: context.worker.id,
+          db,
+        });
+  const responseOutput =
+    result.status === "created"
+      ? ({
+          ...output,
+          snapshot,
+        } as JsonObject)
+      : output;
+
+  if (result.status === "created") {
+    await db
+      .update(workerRuns)
+      .set({
+        updatedAt: new Date(),
+        data: {
+          input: {
+            command: "campaign.draft",
+            inputHash,
+            config,
+          },
+          output: responseOutput,
+        },
+      })
+      .where(eq(workerRuns.id, stringValue(output.workerRunId)));
+  }
 
   return {
     created: result.status === "created",
@@ -1793,7 +1822,7 @@ export async function prepareGrowthCampaignDraft(input: {
     externalSend: false,
     externalSpend: false,
     trackingMutation: "blocked",
-    output,
+    output: responseOutput,
     snapshot,
   };
 }

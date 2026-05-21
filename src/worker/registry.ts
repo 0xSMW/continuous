@@ -1000,7 +1000,7 @@ const growthCampaignDraftConfig: WorkerConfigSchema = {
         allowSpend: { type: "boolean" },
         allowTrackingMutation: { type: "boolean" },
       },
-      additionalProperties: true,
+      additionalProperties: false,
     },
     claims: {
       type: "array",

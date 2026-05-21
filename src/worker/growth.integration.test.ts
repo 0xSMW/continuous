@@ -281,6 +281,7 @@ maybeDescribe("Growth Worker integration", () => {
     expect(replay.workerRunId).toBe(result.workerRunId);
     expect(replay.campaignObjectId).toBe(result.campaignObjectId);
     expect(replay.campaignsViewId).toBe(result.campaignsViewId);
+    expect(objectValue(replay.snapshot)).toEqual(objectValue(result.snapshot));
 
     await expect(
       executeWorkerCommand({

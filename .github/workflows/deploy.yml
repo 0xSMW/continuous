@@ -885,7 +885,7 @@ jobs:
             (.registry.views | any(.role == "workforce_operations" and .name == "readiness")) and
             (.registry.views | any(.role == "systems_operations" and .name == "health")) and
             (.registry.views | any(.role == "systems_operations" and .name == "repairs")) and
-            (.registry.contracts | map(.role) == ["revenue_operations","owner_chief_of_staff","dispatch_operations","finance_operations","workforce_operations","compliance_operations","systems_operations","offer_pricing_operations","customer_experience_operations","growth_operations","asset_supply_operations","vertical_packages"]) and
+            (.registry.contracts | map(.role) == ["revenue_operations","owner_chief_of_staff","dispatch_operations","finance_operations","workforce_operations","compliance_operations","systems_operations","offer_pricing_operations","customer_experience_operations","asset_supply_operations","growth_operations","vertical_packages"]) and
             (.registry.contracts | all(.apiRoute == "/worker")) and
             (.registry.runtimeContracts | map(.role) == ["revenue_operations","owner_chief_of_staff","dispatch_operations","finance_operations","workforce_operations","compliance_operations","systems_operations","offer_pricing_operations","customer_experience_operations","growth_operations"]) and
             (.registry.plannedContracts | map(.role) == ["asset_supply_operations","vertical_packages"]) and

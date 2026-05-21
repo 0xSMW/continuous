@@ -39,7 +39,12 @@ const plannedContractRoles = [
   "asset_supply_operations",
   "vertical_packages",
 ];
-const contractRoles = [...runtimeContractRoles, ...plannedContractRoles];
+const contractRoles = [
+  ...runtimeContractRoles.filter((role) => role !== "growth_operations"),
+  "asset_supply_operations",
+  "growth_operations",
+  "vertical_packages",
+];
 
 beforeEach(() => {
   process.env.WORKER_OPERATOR_EMAIL = "owner@continuoushq.com";
