@@ -30,7 +30,9 @@ HOST=your-droplet-ip ./scripts/deploy.sh
 
 The deploy script creates `/opt/continuous/.env` on the droplet with a random
 Postgres credential and requires HTTPS `SITE_HOSTS`. The current production hosts
-are `continuoushq.com, getcontinuous.app`.
+are `continuoushq.com, getcontinuous.app`. The deploy workflow also runs
+`scripts/smoke-production-on-host.sh` to verify HTTPS health, closed `/worker`
+auth, and Postgres 17 host parity before the deeper production smoke suite.
 
 ## Backup and restore
 

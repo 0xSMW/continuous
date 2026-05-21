@@ -202,6 +202,7 @@
 | Removed runtime operator defaults | `WORKER_OPERATOR_EMAIL` no longer defaults in runtime config, catalog-backed credentials must carry their own `operatorEmail`, and the legacy bootstrap token path now fails closed unless deploy/local transport supplies an explicit operator |
 | Required production catalog auth | Production `/core`, `/worker`, `/workflow`, and `/approval` auth now fails closed without a route-scoped token catalog, public routes no longer accept `x-worker-run-token`, and managed credential upserts bind identity to the authenticated credential instead of accepting `config.operatorEmail` |
 | Hardened worker selector values | `/worker`, `worker.command`, and `continuous.worker.command` now reject malformed optional `worker.id` and `worker.tenantSlug` values instead of silently dropping wrong-type selectors |
+| Added release parity smoke | CI now runs against Postgres 17 and checks the live major version before lint/typecheck/test/build; deploy and rollback smokes reuse `scripts/smoke-production-on-host.sh` to prove production health, generic `/worker` auth, and host Postgres major parity before deeper worker smoke |
 | Hardened Core/workflow failure coverage | `/core external_action.record` now has route-level invalid-idempotency, adapter mismatch, and replay-conflict coverage plus integration coverage for changed-input replay and adapter/connection mismatch; `/workflow` now preserves structured route failures across overview, approvals, start, transition, step execution, and approval decisions |
 
 ### Current State

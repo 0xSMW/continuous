@@ -358,7 +358,7 @@ jobs:
         run: |
           set -euo pipefail
           ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" \
-            "APP_DIR='$DEPLOY_PATH' bash -s" <<'REMOTE'
+            "APP_DIR='$DEPLOY_PATH' SITE_HOSTS='$SITE_HOSTS' EXPECTED_POSTGRES_MAJOR='17' bash -s" <<'REMOTE'
           set -euo pipefail
           cd "$APP_DIR"
 
@@ -373,25 +373,12 @@ jobs:
             exit 1
           fi
 
+          SITE_HOST="${SITE_HOSTS%%,*}"
+          SITE_HOST="$(printf '%s' "$SITE_HOST" | tr -d '[:space:]')"
+          APP_DIR="$APP_DIR" SITE_HOST="$SITE_HOST" EXPECTED_POSTGRES_MAJOR="$EXPECTED_POSTGRES_MAJOR" \
+            ./scripts/smoke-production-on-host.sh
+
           if [ -n "${ROLLBACK_APP_TAG:-}" ]; then
-            HEALTH_RESPONSE="$(
-              curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
-                https://continuoushq.com/health
-            )"
-            echo "$HEALTH_RESPONSE" | /usr/bin/jq -c '{service,status,mode,checkedAt}'
-            echo "$HEALTH_RESPONSE" | /usr/bin/jq -e '.status == "ok" and .mode == "production"' >/dev/null
-            worker_status="$(
-              curl -sS --resolve continuoushq.com:443:127.0.0.1 \
-                -o /tmp/rollback-worker.out -w '%{http_code}' \
-                -X POST \
-                -H 'content-type: application/json' \
-                --data '{"view":"snapshot","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{}}' \
-                https://continuoushq.com/worker
-            )"
-            if [ "$worker_status" != "401" ]; then
-              echo "Expected /worker to require auth after rollback; got $worker_status." >&2
-              exit 1
-            fi
             echo "Rollback smoke passed for app tag $ROLLBACK_APP_TAG."
             exit 0
           fi

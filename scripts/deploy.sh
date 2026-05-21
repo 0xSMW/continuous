@@ -15,6 +15,7 @@ POSTGRES_DB="${POSTGRES_DB:-continuous}"
 POSTGRES_USER="${POSTGRES_USER:-continuous}"
 APP_IMAGE="${APP_IMAGE:-continuous-app}"
 APP_TAG="${APP_TAG:-sha-$(git rev-parse --short=12 HEAD 2>/dev/null || date -u +%Y%m%d%H%M%S)}"
+EXPECTED_POSTGRES_MAJOR="${EXPECTED_POSTGRES_MAJOR:-17}"
 REMOTE="$SSH_USER@$HOST"
 
 if [ -z "$HOST" ]; then
@@ -87,7 +88,7 @@ rsync -az --delete \
   ./ "$REMOTE:$APP_DIR/"
 
 ssh "$REMOTE" \
-  "APP_DIR=$(quote "$APP_DIR") SITE_HOSTS=$(quote "$SITE_HOSTS") SITE_HOST=$(quote "$SITE_HOST") ACME_EMAIL=$(quote "$ACME_EMAIL") APP_URL=$(quote "$APP_URL") WORKER_OPERATOR_EMAIL=$(quote "$WORKER_OPERATOR_EMAIL") POSTGRES_DB=$(quote "$POSTGRES_DB") POSTGRES_USER=$(quote "$POSTGRES_USER") APP_IMAGE=$(quote "$APP_IMAGE") APP_TAG=$(quote "$APP_TAG") bash -s" <<'REMOTE_SCRIPT'
+  "APP_DIR=$(quote "$APP_DIR") SITE_HOSTS=$(quote "$SITE_HOSTS") SITE_HOST=$(quote "$SITE_HOST") ACME_EMAIL=$(quote "$ACME_EMAIL") APP_URL=$(quote "$APP_URL") WORKER_OPERATOR_EMAIL=$(quote "$WORKER_OPERATOR_EMAIL") POSTGRES_DB=$(quote "$POSTGRES_DB") POSTGRES_USER=$(quote "$POSTGRES_USER") APP_IMAGE=$(quote "$APP_IMAGE") APP_TAG=$(quote "$APP_TAG") EXPECTED_POSTGRES_MAJOR=$(quote "$EXPECTED_POSTGRES_MAJOR") bash -s" <<'REMOTE_SCRIPT'
 set -euo pipefail
 
 cd "$APP_DIR"
@@ -215,5 +216,7 @@ docker compose --profile tools run --rm --build migrate bun run db:migrate </dev
 docker compose --profile tools run --rm --build migrate bun run db:seed </dev/null
 docker compose --profile scheduler up -d --build --remove-orphans app caddy worker-scheduler
 docker compose --profile scheduler ps --status running worker-scheduler | grep -q worker-scheduler
+APP_DIR="$APP_DIR" SITE_HOST="$SITE_HOST" EXPECTED_POSTGRES_MAJOR="$EXPECTED_POSTGRES_MAJOR" \
+  ./scripts/smoke-production-on-host.sh
 docker compose ps
 REMOTE_SCRIPT

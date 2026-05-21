@@ -47,11 +47,13 @@ WORKER_OPERATOR_EMAIL=owner@continuoushq.com HOST=45.55.53.92 ./scripts/deploy.s
 
 The deploy script waits for cloud-init, syncs the repo to `/opt/continuous`,
 creates a remote `.env` with a random Postgres credential, runs migrations, seeds
-bootstrap records, builds the app image, and starts the stack. After DNS is
-pointed, the default hosts are `continuoushq.com, getcontinuous.app` and the
-default app URL is `https://continuoushq.com`. `WORKER_OPERATOR_EMAIL` must be a
-seeded active operator; it becomes the explicit local/deploy transport identity
-for bootstrap smoke and generated catalog credentials.
+bootstrap records, builds the app image, starts the stack, and runs the reusable
+production host smoke for HTTPS health, unauthenticated `/worker`, and Postgres
+17 parity. After DNS is pointed, the default hosts are
+`continuoushq.com, getcontinuous.app` and the default app URL is
+`https://continuoushq.com`. `WORKER_OPERATOR_EMAIL` must be a seeded active
+operator; it becomes the explicit local/deploy transport identity for bootstrap
+smoke and generated catalog credentials.
 
 ## Domain State
 
@@ -377,9 +379,12 @@ the durable managed credential inventory after catalog auth succeeds.
 
 ## Production Readiness Gate
 
-Normal deploys run the production smoke suite plus the non-strict host
-observability check. Before the droplet is used for customer data, run the
-strict readiness gate from the operator shell:
+Normal deploys first run `scripts/smoke-production-on-host.sh` on the droplet,
+which verifies production `/health`, confirms unauthenticated `/worker` calls
+are rejected, and checks that the host database major version matches the
+expected Postgres 17 production baseline. They then run the deeper production
+smoke suite plus the non-strict host observability check. Before the droplet is
+used for customer data, run the strict readiness gate from the operator shell:
 
 ```sh
 HOST=45.55.53.92 ./scripts/check-production-readiness.sh

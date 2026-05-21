@@ -21,6 +21,7 @@ env:
   DATABASE_URL: postgresql://postgres@127.0.0.1:5432/continuous_test
   DIRECT_URL: postgresql://postgres@127.0.0.1:5432/continuous_test
   POSTGRES_URL: postgresql://postgres@127.0.0.1:5432/continuous_test
+  EXPECTED_POSTGRES_MAJOR: 17
 
 jobs:
   verify:
@@ -30,7 +31,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:17-alpine
         env:
           POSTGRES_USER: postgres
           POSTGRES_HOST_AUTH_METHOD: trust
@@ -59,6 +60,9 @@ jobs:
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      - name: Check Postgres parity
+        run: bun run db:version-check
 
       - name: Lint
         run: bun run lint
