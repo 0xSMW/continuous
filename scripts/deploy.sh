@@ -295,8 +295,6 @@ docker compose --profile tools run --rm --build migrate bun run db:migrate </dev
 docker compose --profile tools run --rm --build migrate bun run db:seed </dev/null
 docker compose --profile scheduler up -d --build --remove-orphans app caddy worker-scheduler
 docker compose --profile scheduler ps --status running worker-scheduler | grep -q worker-scheduler
-APP_DIR="$APP_DIR" SITE_HOST="$SITE_HOST" EXPECTED_POSTGRES_MAJOR="$EXPECTED_POSTGRES_MAJOR" \
-  ./scripts/smoke-production-on-host.sh
 CONTROL_PLANE_ATTESTATION_OUTPUT="$(
   APP_DIR="$APP_DIR" \
     SITE_HOST="$SITE_HOST" \
@@ -307,6 +305,8 @@ printf '%s\n' "$CONTROL_PLANE_ATTESTATION_OUTPUT"
 printf '%s\n' "$CONTROL_PLANE_ATTESTATION_OUTPUT" | /usr/bin/jq -e \
   '.control_plane_attestation_status == "ok" and (.credentialId | length > 0) and (.revocationAuditId | length > 0) and (.sessionReviewViewId | length > 0) and (.authSessionId | length > 0)' \
   >/dev/null
+APP_DIR="$APP_DIR" SITE_HOST="$SITE_HOST" EXPECTED_POSTGRES_MAJOR="$EXPECTED_POSTGRES_MAJOR" \
+  ./scripts/smoke-production-on-host.sh
 APP_DIR="$APP_DIR" SITE_HOST="$SITE_HOST" TENANT_SLUG="continuous-demo" \
   ./scripts/smoke-core-worker-lifecycle-on-host.sh
 APP_DIR="$APP_DIR" SITE_HOST="$SITE_HOST" TENANT_SLUG="continuous-demo" \
