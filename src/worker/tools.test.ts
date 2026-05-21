@@ -216,8 +216,8 @@ describe("worker tool contract", () => {
 
     expect(Object.keys(localView.inputSchema.properties)).toEqual(["view", "worker", "config"]);
     expect(Object.keys(appServerView.inputSchema.properties)).toEqual(["view", "worker", "config"]);
-    expect(localView.inputSchema.required).toEqual(["worker", "config"]);
-    expect(appServerView.inputSchema.required).toEqual(["worker", "config"]);
+    expect(localView.inputSchema.required).toEqual(["view", "worker", "config"]);
+    expect(appServerView.inputSchema.required).toEqual(["view", "worker", "config"]);
     expect(localView.inputSchema.additionalProperties).toBe(false);
     expect(appServerView.inputSchema.additionalProperties).toBe(false);
 
@@ -235,6 +235,16 @@ describe("worker tool contract", () => {
   });
 
   it("rejects local worker tool payloads with top-level operation fields", async () => {
+    await expect(
+      executeWorkerTool("worker.view", {
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        config: {},
+      }),
+    ).rejects.toThrow("worker.view requires view.");
+
     await expect(
       executeWorkerTool("worker.command", {
         command: "run",
@@ -803,6 +813,7 @@ describe("worker tool contract", () => {
   it("rejects unsupported worker roles before runtime work", async () => {
     await expect(
       executeWorkerTool("worker.view", {
+        view: "snapshot",
         worker: {
           role: "payroll_operations",
         },
@@ -912,6 +923,21 @@ describe("worker tool contract", () => {
         }),
       ]),
     );
+    expect(
+      workerContracts
+        .find((contract) => contract.role === "dispatch_operations")
+        ?.commands.find((command) => command.name === "schedule.propose")?.oneRequiredConfig,
+    ).toEqual(["jobId", "sourceRefs"]);
+    expect(
+      workerContracts
+        .find((contract) => contract.role === "finance_operations")
+        ?.commands.find((command) => command.name === "invoice.prepare")?.oneRequiredConfig,
+    ).toEqual(["jobId", "closeoutId", "sourceRefs"]);
+    expect(
+      workerContracts
+        .find((contract) => contract.role === "finance_operations")
+        ?.commands.find((command) => command.name === "payment_draft.prepare")?.oneRequiredConfig,
+    ).toEqual(["billId", "paymentId", "sourceRefs"]);
     expect(
       systemsCommandMetadata.find(
         (command) => command.role === "systems_operations" && command.name === "connector.health.scan",

@@ -2306,7 +2306,7 @@ export async function executeWorkerCommand(input: {
 }
 
 export async function executeWorkerView(input: {
-  view?: string;
+  view: string;
   target?: WorkerTargetInput;
   operatorEmail: string;
   config?: unknown;
@@ -2314,7 +2314,16 @@ export async function executeWorkerView(input: {
 }): Promise<WorkerViewResult> {
   const target = resolveWorkerTarget(input.target);
   const definition = workerDefinitions[target.role];
-  const viewName = optionalString(input.view) ?? "snapshot";
+  const viewName = optionalString(input.view);
+
+  if (!viewName) {
+    throw new PlatformUnavailableError(
+      "worker_view_missing",
+      "Worker view requires a non-empty view.",
+      400,
+    );
+  }
+
   const view = definition.views[viewName];
   const config = viewConfig(input.config);
 

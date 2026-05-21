@@ -1,11 +1,12 @@
 # Agent Build Path
 
-The installed Codex app-server CLI exposes protocol tooling, not a repo-owned
-daemon command. Continuous now defines repo-owned app-server worker tools:
-`continuous.worker.schema` for registry discovery and
+The installed Codex app-server CLI can run over stdio or WebSocket and can
+generate protocol bindings. Continuous defines repo-owned app-server worker
+tools: `continuous.worker.schema` for registry discovery and
 `continuous.worker.view` / `continuous.worker.command` for registry-backed read
-and command execution. Use the Next.js 16 MCP bridge for route/runtime
-visibility.
+and command execution. The local executor also accepts Codex dynamic tool-call
+payloads with `tool`, `arguments`, `callId`, `threadId`, and `turnId`. Use the
+Next.js 16 MCP bridge for route/runtime visibility.
 
 ```sh
 bun run app-server:help
@@ -34,7 +35,7 @@ Useful app surfaces for worker development:
 
 | Surface | Purpose |
 |---|---|
-| `/` | Runtime dashboard with public core state and redacted worker readiness |
+| `/` | Static public landing page; operational dashboard data stays behind authenticated control-plane routes |
 | `/health` | Redacted machine health check |
 | `/core` | Operator-gated, tenant-scoped persisted primitive summary |
 | `POST /core` | Canonical Core command surface with `command`, `core`, `config`, and `idempotencyKey` payload fields for tasks, task transitions, entity setup, approvals, capability grants, budget ledger operations, objects, object links, events, evidence, documents, packets, decisions, generated views, adapter intents, rule changes, customer signals, and payroll preview artifacts |
@@ -47,6 +48,7 @@ Useful app surfaces for worker development:
 | `bun run worker:tool` | Repo-owned JSON worker toolbox for agents and local automation |
 | `bun run app-server:worker-tools continuous.worker.view` | App-server read surface backed by the same worker view registry |
 | `bun run app-server:worker-tools continuous.worker.command` | App-server command surface backed by the same worker command registry |
+| `bun run app-server:worker-tools dynamic-call` | Codex dynamic tool-call adapter for the same app-server worker tools |
 
 `bun run worker:tool schema` exposes the registered worker commands and local
 generic tool surfaces. Agents should inspect that registry metadata before
@@ -59,6 +61,10 @@ Use the Next.js MCP bridge for Next.js diagnostics. Keep side-effecting worker
 execution on explicit operator commands, guarded `POST` routes, or the
 registry-backed app-server worker command. Worker reads through app-server stay
 on the same `view`, `worker`, and `config` envelope as `worker.view`. The
+dynamic-call adapter returns Codex-compatible `contentItems` and never accepts
+operator identity in the tool arguments; authenticated bridges pass operator
+identity, access, route-qualified command or view, tenant, and worker-role
+scope through transport context after control-plane auth. The
 Revenue Worker now records the
 configured operator, active capability grant, approval request, audit event, and
 evidence before any external action can be approved. The shared approval service
@@ -91,14 +97,15 @@ When the HTTP snapshot, approval, or run path is required, use a route-scoped
 token from `CONTROL_PLANE_TOKENS_JSON` or `CONTROL_PLANE_TOKEN_CATALOG_B64`.
 Keep `WORKER_RUN_TOKEN` only as a bootstrap secret for first deploys and host
 recovery.
-`WORKER_OPERATOR_EMAIL` must be set by the local app-server or operator
-transport and must match an active seeded user; worker tool payloads must not
-carry operator identity. Production also sets
-`CONTROL_PLANE_ALLOWED_TENANTS` and `CONTROL_PLANE_ALLOWED_WORKER_ROLES`, so
-operator routes must carry an allowed `tenantSlug` and `/worker` calls must
-carry an allowed `worker.role`. Deploys also write a hashed
-`CONTROL_PLANE_TOKEN_CATALOG_B64` entry so credentials can be scoped by route,
-read/write mode, and command. Keep worker-specific config in the JSON payload:
+Worker tool payloads must not carry operator identity. Remote app-server
+bridges pass the authenticated transport context instead: operator identity,
+access mode, route-qualified command or view, tenant scope, and worker-role
+scope. Production also sets `CONTROL_PLANE_ALLOWED_TENANTS` and
+`CONTROL_PLANE_ALLOWED_WORKER_ROLES`, so operator routes must carry an allowed
+`tenantSlug` and `/worker` calls must carry an allowed `worker.role`. Deploys
+also write a hashed `CONTROL_PLANE_TOKEN_CATALOG_B64` entry so credentials can
+be scoped by route, read/write mode, and command. Keep worker-specific config
+in the JSON payload:
 
 ```json
 {

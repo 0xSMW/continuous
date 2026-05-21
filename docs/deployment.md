@@ -95,10 +95,11 @@ secret in `WORKER_RUN_TOKEN`: production HTTP auth uses the hashed
 `CONTROL_PLANE_TOKEN_CATALOG_B64` entry with explicit route, command, tenant,
 worker-role, operator, and read/write scope. The raw token remains in `.env` so
 deploy smoke, scheduler, rotation, and host recovery can present it as a bearer
-credential; production routes refuse the legacy single-token path if the
-catalog is missing. Future tokens can be added with `CONTROL_PLANE_TOKENS_JSON`
-or the base64 catalog without changing `/core`, `/worker`, `/workflow`, or
-`/approval`.
+credential; it must not appear inside catalog entries. Production routes refuse
+raw catalog `token` fields and the legacy single-token path if the catalog is
+missing. Future tokens can be added with `CONTROL_PLANE_TOKENS_JSON` or the
+base64 catalog using only `tokenSha256` entries, without changing `/core`,
+`/worker`, `/workflow`, or `/approval`.
 Deploy syncs still use `rsync --delete` to remove stale source files, but they
 protect `backups/`, `logs/`, and `reports/recovery-drills/` so database dumps,
 Caddy/observability logs, and recovery evidence survive releases.

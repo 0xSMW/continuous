@@ -35,6 +35,19 @@ Every handoff must define:
 | `growth.campaign_to_owner_review` | Growth | Owner Chief-of-Staff | Campaign, content, channel, audience, or attribution packet is ready for publish review | `campaignObjectId`, `contentDraftObjectId`, `budgetReservationId`, `evidencePacketId`, `approvalRequestId` | `config.packet.approvalRequestId` plus `config.sourceRefs.campaignObjectId` | Claims have source refs, budget is reserved, audience/channel are explicit, and external publish is false | read-only review |
 | `systems.connection_to_packaged_worker` | Systems | Vertical packaged workers | Connector health, permission review, or data-quality repair unblocks a packaged worker flow | `connectionId`, `permissionGrantId`, `dataQualityIssueObjectId`, `evidenceId`, `rollbackPlanDocumentId` | `config.sourceRefs.connectionId` plus `config.sourceRefs.permissionGrantId` | Tenant scope, least-privilege grant, freshness, and rollback evidence pass before the packaged worker reads the connection | read-only unlock |
 
+## Consumer Map
+
+Executable handoffs must define the producer event, object states, rejection
+codes, and expected consumer output before a consuming worker writes records.
+
+| Handoff | Producer event / state | Consumer command | Reject when | Expected consumer output |
+|---|---|---|---|---|
+| `revenue.quote_to_dispatch` | `revenue.quote.prepared`, approval `approved`, quote/job objects not externally sent | `dispatch_operations.schedule.propose` | `handoff.approval_not_approved`, `handoff.quote_missing_policy`, `handoff.job_already_scheduled`, `handoff.external_send_already_true` | Appointment draft, conflict evidence, approval request, dry-run calendar receipt |
+| `dispatch.closeout_to_finance` | `dispatch.closeout.prepared`, closeout `review_ready`, no unresolved critical exception task | `finance_operations.invoice.prepare` | `handoff.closeout_missing_proof`, `handoff.billable_lines_missing`, `handoff.exception_open`, `handoff.customer_ref_missing` | Invoice draft, cash packet, accounting dry-run receipt, owner approval request |
+| `finance.invoice_to_owner_review` | `finance.invoice.prepared` or `finance.cash_forecast.generated`, money movement `blocked` | `owner_chief_of_staff.decision_queue.prepare` | `handoff.money_movement_not_blocked`, `handoff.cash_packet_missing`, `handoff.source_evidence_missing` | Owner decision proposal with cash/evidence refs and no external execution |
+| `workforce.payroll_to_compliance` | `workforce.payroll_input.prepared`, payroll preview `approved_blocked` or `preview` | `compliance_operations.filing.prepare` | `handoff.payroll_state_invalid`, `handoff.tax_trace_missing`, `handoff.payment_instruction_unblocked` | Filing draft review packet with tax trace and blocked submission posture |
+| `systems.sync_issue_to_worker` | `systems.sync.repair.planned`, repair action `dry_run`, rollback document present | Consuming worker command named in source refs | `handoff.connection_scope_mismatch`, `handoff.repair_not_dry_run`, `handoff.rollback_missing`, `handoff.issue_severity_missing` | Consumer task or blocked action plan referencing the repair evidence |
+
 ## Fixture Requirements
 
 Before a planned worker becomes executable, add at least one fixture for its

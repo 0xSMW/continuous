@@ -13,6 +13,10 @@ import {
 const acceptedCredential = ["accepted", "worker", "credential"].join(".");
 const operatorEmail = "owner@continuoushq.com";
 
+function tokenSha256(token = acceptedCredential) {
+  return createHash("sha256").update(token).digest("hex");
+}
+
 describe("authorizeWorkerRun", () => {
   it("keeps worker runs disabled by default", () => {
     expect(
@@ -284,7 +288,7 @@ describe("authorizeControlPlaneAccess", () => {
     const tokenCatalogJson = JSON.stringify([
       {
         id: "worker-runner",
-        token: acceptedCredential,
+        tokenSha256: tokenSha256(),
         operatorEmail,
         allowedTenants: ["continuous-demo"],
         allowedWorkerRoles: ["revenue_operations"],
@@ -321,7 +325,7 @@ describe("authorizeControlPlaneAccess", () => {
       JSON.stringify([
         {
           id: "hashed-worker-runner",
-          tokenSha256: createHash("sha256").update(acceptedCredential).digest("hex"),
+          tokenSha256: tokenSha256(),
           operatorEmail,
           allowedRoutes: ["worker"],
           allowedAccess: ["write"],
@@ -352,12 +356,43 @@ describe("authorizeControlPlaneAccess", () => {
     });
   });
 
+  it("rejects raw catalog tokens in production", () => {
+    const tokenCatalogJson = JSON.stringify([
+      {
+        id: "raw-worker-runner",
+        token: acceptedCredential,
+        operatorEmail,
+        allowedRoutes: ["worker"],
+        allowedAccess: ["write"],
+        allowedCommands: ["worker:lead.read"],
+      },
+    ]);
+
+    expect(
+      authorizeControlPlaneAccess({
+        enabled: true,
+        appEnv: "production",
+        operatorEmail,
+        authorization: `Bearer ${acceptedCredential}`,
+        tokenCatalogJson,
+        route: "worker",
+        access: "write",
+        command: "lead.read",
+      }),
+    ).toEqual({
+      ok: false,
+      status: 403,
+      code: "control_plane_token_catalog_invalid",
+      message: "Control-plane token catalog entry 1 must use tokenSha256 in production.",
+    });
+  });
+
   it("requires exact route-qualified catalog command scopes", () => {
     for (const allowedCommands of [["run"], ["worker:*"], ["*"]]) {
       const tokenCatalogJson = JSON.stringify([
         {
           id: "weak-worker-runner",
-          token: acceptedCredential,
+          tokenSha256: tokenSha256(),
           operatorEmail,
           allowedRoutes: ["worker"],
           allowedAccess: ["write"],
@@ -389,7 +424,7 @@ describe("authorizeControlPlaneAccess", () => {
     const tokenCatalogJson = JSON.stringify([
       {
         id: "worker-runner",
-        token: acceptedCredential,
+        tokenSha256: tokenSha256(),
         operatorEmail,
         allowedRoutes: ["worker"],
         allowedAccess: ["write"],
@@ -420,7 +455,7 @@ describe("authorizeControlPlaneAccess", () => {
     const tokenCatalogJson = JSON.stringify([
       {
         id: "worker-runner",
-        token: acceptedCredential,
+        tokenSha256: tokenSha256(),
         operatorEmail,
         allowedRoutes: ["worker"],
         allowedAccess: ["write"],
@@ -462,7 +497,7 @@ describe("authorizeControlPlaneAccess", () => {
       },
       {
         tokenCatalogB64: Buffer.from(
-          JSON.stringify([{ id: "missing-operator", token: acceptedCredential }]),
+          JSON.stringify([{ id: "missing-operator", tokenSha256: tokenSha256() }]),
         ).toString("base64"),
       },
     ];
@@ -492,7 +527,7 @@ describe("authorizeControlPlaneAccess", () => {
     const tokenCatalogJson = JSON.stringify([
       {
         id: "missing-operator",
-        token: acceptedCredential,
+        tokenSha256: tokenSha256(),
         allowedRoutes: ["worker"],
         allowedAccess: ["write"],
         allowedCommands: ["worker:run"],
@@ -522,7 +557,7 @@ describe("authorizeControlPlaneAccess", () => {
     const tokenCatalogJson = JSON.stringify([
       {
         id: "unscoped-runner",
-        token: acceptedCredential,
+        tokenSha256: tokenSha256(),
         operatorEmail,
       },
     ]);
@@ -550,7 +585,7 @@ describe("authorizeControlPlaneAccess", () => {
     const tokenCatalogJson = JSON.stringify([
       {
         id: "worker-runner",
-        token: acceptedCredential,
+        tokenSha256: tokenSha256(),
         operatorEmail,
         allowedRoutes: ["worker"],
         allowedAccess: ["write"],
@@ -582,7 +617,7 @@ describe("authorizeControlPlaneAccess", () => {
     const tokenCatalogJson = JSON.stringify([
       {
         id: "expired-worker-runner",
-        token: acceptedCredential,
+        tokenSha256: tokenSha256(),
         operatorEmail,
         allowedRoutes: ["worker"],
         allowedAccess: ["write"],
@@ -591,7 +626,7 @@ describe("authorizeControlPlaneAccess", () => {
       },
       {
         id: "active-worker-runner",
-        token: rotatedCredential,
+        tokenSha256: tokenSha256(rotatedCredential),
         operatorEmail,
         allowedRoutes: ["worker"],
         allowedAccess: ["write"],

@@ -10,9 +10,10 @@ discovery plus registry-backed read and command execution:
 | `continuous.worker.command` | Registry-backed command | Invokes an existing worker command with the same `command`, `worker`, `idempotencyKey`, and `config` envelope used by `/worker` |
 
 The generated Codex app-server protocol defines a dynamic tool as `name`,
-`description`, and `inputSchema`. The local manifest in
-`src/worker/app-server-tools.ts` follows that shape and delegates reads and
-commands to the shared worker registry.
+`description`, and `inputSchema`, and invokes dynamic tools with a payload
+containing `tool`, `arguments`, `callId`, `threadId`, and `turnId`. The local
+manifest and dynamic-call adapter in `src/worker/app-server-tools.ts` follow
+that shape and delegate reads and commands to the shared worker registry.
 `continuous.worker.schema` exposes each registered command's `configSchema`,
 canonical `apiRoute: "/worker"`, the full `contracts` catalog, current `runtimeContracts`, and
 `followUpCommands` that are contract-defined but not executable yet. Planned
@@ -64,8 +65,15 @@ money movement remain blocked or dry-run.
 export WORKER_OPERATOR_EMAIL=owner@continuoushq.com
 bun run app-server:worker-tools
 bun run app-server:worker-tools continuous.worker.schema
+bun run app-server:worker-tools dynamic-call --payload='{"tool":"continuous.worker.schema","arguments":{},"callId":"local-schema-001","threadId":"local-thread-001","turnId":"local-turn-001"}'
 bun run app-server:worker-tools continuous.worker.view --payload='{"view":"snapshot","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{}}'
 ```
+
+The local app-server executor may accept a trusted-local context through
+`--context` or `APP_SERVER_WORKER_TRANSPORT_CONTEXT_JSON`, but it rejects
+`source: "control_plane"` context. Control-plane context must be constructed by
+an authenticated bridge after it has verified route, access, command/view,
+tenant, and worker-role scope.
 
 ```sh
 bun run app-server:worker-tools continuous.worker.command --payload='{"command":"lead.read","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-app-server-lead-001","config":{"source":"website_form","records":[{"sourceEventId":"form-001","customerName":"Acme Roof Repair","customerIntent":"roof leak inspection","serviceArea":"roofing","urgency":"high"}]}}'
@@ -93,8 +101,10 @@ The app-server worker tools are intentionally narrow:
   command registry's `configSchema`.
 - Planned worker roles expose config schemas but remain non-executable until
   handlers are registered; promoted roles move into the registered command list.
-- Caller supplies `command`, `worker`, `idempotencyKey`, and `config`.
-- Operator identity must be supplied by the trusted local transport through
+- Caller supplies either `view`, `worker`, and `config` for reads, or
+  `command`, `worker`, `idempotencyKey`, and `config` for commands.
+- Operator identity and scope must be supplied by authenticated transport
+  context or, for local CLI use, by the trusted local transport through
   `WORKER_OPERATOR_EMAIL`; there is no fallback operator and identity is never
   accepted in the payload.
 - No external execution is available.
@@ -102,6 +112,14 @@ The app-server worker tools are intentionally narrow:
 - Local read and mutation tools are trusted-local by default; in
   `APP_ENV=production`, set `CONTINUOUS_TRUSTED_LOCAL_WORKER_TOOLS=true` only
   for an explicitly trusted operator shell or app-server bridge.
+
+Remote app-server bridges should authenticate against the control plane first,
+then call the repo dynamic-tool executor with transport context containing the
+authorized operator identity, access mode, route-qualified command or view,
+tenant, and worker-role scope. Do not pass bearer tokens or operator identity
+in the tool payload. Dynamic tool responses return Codex-compatible
+`contentItems` with a JSON text body and set `success=false` for registry or
+envelope errors instead of moving context into the payload.
 
 The generic local worker tool remains available for explicit operator-gated
 commands:

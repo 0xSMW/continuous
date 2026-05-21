@@ -40,7 +40,7 @@ export const workerTools = [
       properties: {
         view: {
           type: "string",
-          description: "Registered view name. Defaults to snapshot when omitted.",
+          description: "Registered view name.",
         },
         worker: { $ref: "#/$defs/workerTarget" },
         config: {
@@ -52,7 +52,7 @@ export const workerTools = [
           additionalProperties: true,
         },
       },
-      required: ["worker", "config"],
+      required: ["view", "worker", "config"],
       additionalProperties: false,
     },
   },
@@ -370,7 +370,11 @@ export async function executeWorkerTool(name: string, payload: JsonObject = {}) 
   const viewConfig = objectValue(payload.config);
 
   if (name === "worker.view") {
-    const view = stringValue(payload.view) ?? "snapshot";
+    const view = stringValue(payload.view);
+
+    if (!view) {
+      throw new Error("worker.view requires view.");
+    }
     assertTrustedLocalWorkerRead("worker.view");
     const operatorEmail = requiredLocalWorkerOperatorEmail("worker.view");
 

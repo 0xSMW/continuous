@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   appServerWorkerToolManifest,
+  executeAppServerWorkerDynamicToolCall,
   executeAppServerWorkerTool,
 } from "./app-server-tools";
 
@@ -365,6 +366,16 @@ describe("app-server worker tools", () => {
   it("requires a clean canonical view envelope before dispatch", async () => {
     await expect(
       executeAppServerWorkerTool("continuous.worker.view", {
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        config: {},
+      }),
+    ).rejects.toThrow("continuous.worker.view requires view.");
+
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.view", {
         view: "snapshot",
         config: {},
       }),
@@ -473,6 +484,357 @@ describe("app-server worker tools", () => {
       }),
     ).rejects.toThrow(
       "continuous.worker.view requires WORKER_OPERATOR_EMAIL from the trusted local transport environment.",
+    );
+  });
+
+  it("accepts operator identity from authenticated app-server transport context", async () => {
+    process.env.APP_ENV = "production";
+    delete process.env.CONTINUOUS_TRUSTED_LOCAL_WORKER_TOOLS;
+    delete process.env.WORKER_OPERATOR_EMAIL;
+
+    await expect(
+      executeAppServerWorkerTool(
+        "continuous.worker.command",
+        {
+          command: "missing.command",
+          worker: {
+            role: "revenue_operations",
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "app-server-authenticated-transport-command",
+          config: {},
+        },
+        {
+          source: "control_plane",
+          operatorEmail: "owner@continuoushq.com",
+          allowedAccess: ["write"],
+          allowedCommands: ["worker:missing.command"],
+          allowedTenants: ["continuous-demo"],
+          allowedWorkerRoles: ["revenue_operations"],
+        },
+      ),
+    ).rejects.toThrow("Worker command must be run");
+
+    await expect(
+      executeAppServerWorkerTool(
+        "continuous.worker.view",
+        {
+          view: "snapshot",
+          worker: {
+            role: "payroll_operations",
+            tenantSlug: "continuous-demo",
+          },
+          config: {},
+        },
+        {
+          source: "control_plane",
+          operatorEmail: "owner@continuoushq.com",
+          allowedAccess: ["read"],
+          allowedCommands: ["worker:view.snapshot"],
+          allowedTenants: ["continuous-demo"],
+          allowedWorkerRoles: ["payroll_operations"],
+        },
+      ),
+    ).rejects.toThrow("Worker role payroll_operations is not available yet.");
+  });
+
+  it("requires scoped app-server transport context for control-plane calls", async () => {
+    process.env.APP_ENV = "production";
+    delete process.env.CONTINUOUS_TRUSTED_LOCAL_WORKER_TOOLS;
+    delete process.env.WORKER_OPERATOR_EMAIL;
+
+    const commandPayload = {
+      command: "missing.command",
+      worker: {
+        role: "revenue_operations",
+        tenantSlug: "continuous-demo",
+      },
+      idempotencyKey: "app-server-scoped-transport-command",
+      config: {},
+    };
+
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.command", commandPayload, {
+        source: "control_plane",
+        operatorEmail: "owner@continuoushq.com",
+        allowedAccess: [],
+        allowedCommands: ["worker:missing.command"],
+        allowedTenants: ["continuous-demo"],
+        allowedWorkerRoles: ["revenue_operations"],
+      }),
+    ).rejects.toThrow("continuous.worker.command requires scoped authenticated transport context.");
+
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.command", commandPayload, {
+        source: "control_plane",
+        operatorEmail: "owner@continuoushq.com",
+        allowedAccess: ["read"],
+        allowedCommands: ["worker:missing.command"],
+        allowedTenants: ["continuous-demo"],
+        allowedWorkerRoles: ["revenue_operations"],
+      }),
+    ).rejects.toThrow("continuous.worker.command transport context is not allowed to write.");
+
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.command", commandPayload, {
+        source: "control_plane",
+        operatorEmail: "owner@continuoushq.com",
+        allowedAccess: ["write"],
+        allowedCommands: ["worker:run"],
+        allowedTenants: ["continuous-demo"],
+        allowedWorkerRoles: ["revenue_operations"],
+      }),
+    ).rejects.toThrow(
+      "continuous.worker.command transport context is not allowed for worker:missing.command.",
+    );
+
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.command", commandPayload, {
+        source: "control_plane",
+        operatorEmail: "owner@continuoushq.com",
+        allowedAccess: ["write"],
+        allowedCommands: ["worker:missing.command"],
+        allowedTenants: ["other-tenant"],
+        allowedWorkerRoles: ["revenue_operations"],
+      }),
+    ).rejects.toThrow("continuous.worker.command transport context is not allowed for this tenant.");
+
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.command", commandPayload, {
+        source: "control_plane",
+        operatorEmail: "owner@continuoushq.com",
+        allowedAccess: ["write"],
+        allowedCommands: ["worker:missing.command"],
+        allowedTenants: ["continuous-demo"],
+        allowedWorkerRoles: ["finance_operations"],
+      }),
+    ).rejects.toThrow(
+      "continuous.worker.command transport context is not allowed for this worker role.",
+    );
+
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.command", commandPayload, {
+        source: "control_plane",
+        operatorEmail: "owner@continuoushq.com",
+        allowedAccess: ["write", "write"],
+        allowedCommands: [" worker:missing.command ", "worker:missing.command"],
+        allowedTenants: [" continuous-demo "],
+        allowedWorkerRoles: [" revenue_operations "],
+      }),
+    ).rejects.toThrow("Worker command must be run");
+  });
+
+  it("requires scoped app-server transport context for view calls", async () => {
+    process.env.APP_ENV = "production";
+    delete process.env.CONTINUOUS_TRUSTED_LOCAL_WORKER_TOOLS;
+    delete process.env.WORKER_OPERATOR_EMAIL;
+
+    const viewPayload = {
+      view: "snapshot",
+      worker: {
+        role: "revenue_operations",
+        tenantSlug: "continuous-demo",
+      },
+      config: {},
+    };
+
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.view", viewPayload, {
+        source: "control_plane",
+        operatorEmail: "owner@continuoushq.com",
+        allowedAccess: ["write"],
+        allowedCommands: ["worker:view.snapshot"],
+        allowedTenants: ["continuous-demo"],
+        allowedWorkerRoles: ["revenue_operations"],
+      }),
+    ).rejects.toThrow("continuous.worker.view transport context is not allowed to read.");
+
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.view", viewPayload, {
+        source: "control_plane",
+        operatorEmail: "owner@continuoushq.com",
+        allowedAccess: ["read"],
+        allowedCommands: ["worker:view.approvals"],
+        allowedTenants: ["continuous-demo"],
+        allowedWorkerRoles: ["revenue_operations"],
+      }),
+    ).rejects.toThrow(
+      "continuous.worker.view transport context is not allowed for worker:view.snapshot.",
+    );
+
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.view", viewPayload, {
+        source: "control_plane",
+        operatorEmail: "owner@continuoushq.com",
+        allowedAccess: ["read"],
+        allowedCommands: ["worker:view.snapshot"],
+        allowedTenants: ["other-tenant"],
+        allowedWorkerRoles: ["revenue_operations"],
+      }),
+    ).rejects.toThrow("continuous.worker.view transport context is not allowed for this tenant.");
+
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.view", viewPayload, {
+        source: "control_plane",
+        operatorEmail: "owner@continuoushq.com",
+        allowedAccess: ["read"],
+        allowedCommands: ["worker:view.snapshot"],
+        allowedTenants: ["continuous-demo"],
+        allowedWorkerRoles: ["finance_operations"],
+      }),
+    ).rejects.toThrow(
+      "continuous.worker.view transport context is not allowed for this worker role.",
+    );
+  });
+
+  it("adapts Codex app-server dynamic tool calls to worker tool responses", async () => {
+    const schemaResponse = await executeAppServerWorkerDynamicToolCall({
+      tool: "continuous.worker.schema",
+      arguments: {},
+      callId: "dynamic-schema-call",
+      threadId: "thread-1",
+      turnId: "turn-1",
+    });
+    const schemaPayload = JSON.parse(schemaResponse.contentItems[0]?.text ?? "{}") as {
+      ok?: boolean;
+      tool?: string;
+      data?: {
+        manifest?: typeof appServerWorkerToolManifest;
+      };
+    };
+
+    expect(schemaResponse.success).toBe(true);
+    expect(schemaPayload.ok).toBe(true);
+    expect(schemaPayload.tool).toBe("continuous.worker.schema");
+    expect(schemaPayload.data?.manifest?.tools.map((tool) => tool.name)).toEqual([
+      "continuous.worker.schema",
+      "continuous.worker.command",
+      "continuous.worker.view",
+    ]);
+
+    const errorResponse = await executeAppServerWorkerDynamicToolCall({
+      tool: "continuous.worker.command",
+      arguments: {
+        command: "run",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        operatorEmail: "owner@continuoushq.com",
+        config: {},
+      },
+      callId: "dynamic-error-call",
+      threadId: "thread-1",
+      turnId: "turn-2",
+    });
+    const errorPayload = JSON.parse(errorResponse.contentItems[0]?.text ?? "{}") as {
+      ok?: boolean;
+      error?: string;
+    };
+
+    expect(errorResponse.success).toBe(false);
+    expect(errorPayload.ok).toBe(false);
+    expect(errorPayload.error).toContain("Unexpected fields: operatorEmail.");
+
+    const deniedAccessResponse = await executeAppServerWorkerDynamicToolCall(
+      {
+        tool: "continuous.worker.view",
+        arguments: {
+          view: "snapshot",
+          worker: {
+            role: "revenue_operations",
+            tenantSlug: "continuous-demo",
+          },
+          config: {},
+        },
+        callId: "dynamic-denied-access-call",
+        threadId: "thread-1",
+        turnId: "turn-3",
+      },
+      {
+        source: "control_plane",
+        operatorEmail: "owner@continuoushq.com",
+        allowedAccess: ["write"],
+        allowedCommands: ["worker:view.snapshot"],
+        allowedTenants: ["continuous-demo"],
+        allowedWorkerRoles: ["revenue_operations"],
+      },
+    );
+    const deniedAccessPayload = JSON.parse(deniedAccessResponse.contentItems[0]?.text ?? "{}") as {
+      ok?: boolean;
+      error?: string;
+    };
+
+    expect(deniedAccessResponse.success).toBe(false);
+    expect(deniedAccessPayload.ok).toBe(false);
+    expect(deniedAccessPayload.error).toContain("transport context is not allowed to read");
+
+    const deniedTenantResponse = await executeAppServerWorkerDynamicToolCall(
+      {
+        tool: "continuous.worker.view",
+        arguments: {
+          view: "snapshot",
+          worker: {
+            role: "revenue_operations",
+            tenantSlug: "continuous-demo",
+          },
+          config: {},
+        },
+        callId: "dynamic-denied-tenant-call",
+        threadId: "thread-1",
+        turnId: "turn-4",
+      },
+      {
+        source: "control_plane",
+        operatorEmail: "owner@continuoushq.com",
+        allowedAccess: ["read"],
+        allowedCommands: ["worker:view.snapshot"],
+        allowedTenants: ["other-tenant"],
+        allowedWorkerRoles: ["revenue_operations"],
+      },
+    );
+    const deniedTenantPayload = JSON.parse(deniedTenantResponse.contentItems[0]?.text ?? "{}") as {
+      ok?: boolean;
+      error?: string;
+    };
+
+    expect(deniedTenantResponse.success).toBe(false);
+    expect(deniedTenantPayload.ok).toBe(false);
+    expect(deniedTenantPayload.error).toContain("transport context is not allowed for this tenant");
+
+    const deniedRoleResponse = await executeAppServerWorkerDynamicToolCall(
+      {
+        tool: "continuous.worker.view",
+        arguments: {
+          view: "snapshot",
+          worker: {
+            role: "revenue_operations",
+            tenantSlug: "continuous-demo",
+          },
+          config: {},
+        },
+        callId: "dynamic-denied-role-call",
+        threadId: "thread-1",
+        turnId: "turn-5",
+      },
+      {
+        source: "control_plane",
+        operatorEmail: "owner@continuoushq.com",
+        allowedAccess: ["read"],
+        allowedCommands: ["worker:view.snapshot"],
+        allowedTenants: ["continuous-demo"],
+        allowedWorkerRoles: ["finance_operations"],
+      },
+    );
+    const deniedRolePayload = JSON.parse(deniedRoleResponse.contentItems[0]?.text ?? "{}") as {
+      ok?: boolean;
+      error?: string;
+    };
+
+    expect(deniedRoleResponse.success).toBe(false);
+    expect(deniedRolePayload.ok).toBe(false);
+    expect(deniedRolePayload.error).toContain(
+      "transport context is not allowed for this worker role",
     );
   });
 

@@ -47,7 +47,21 @@ packets.
 | Workforce and HR | Workforce Worker | First runtime slice | Person, employment, contractor engagement, position, credential, compensation, document | `hire.packet.prepare` and `payroll_input.prepare` produce restricted-document proof, workforce packets, approvals, readiness views, and payroll blocker visibility; contractor, credential, and schedule readiness remain follow-ups |
 | Finance and Admin | Finance Worker | Runtime started | Invoice, bill, payment, expense, receipt, cash forecast, reconciliation item | Expense coding fixture, live accounting/payment readiness, dual-control approval |
 | Risk, Legal, Compliance, and Quality | Compliance Worker | Contract/planned | Rule pack, obligation, filing requirement, notice, license, policy, evidence binder | Source-backed rule claims, human submission approval, exportable evidence binder |
-| Data, Systems, and Automation | Systems Worker | Contract/planned | Adapter, connection, sync job, webhook, permission grant, data-quality issue | Sync repair dry-run, least-privilege permission review, rollback evidence |
+| Data, Systems, and Automation | Systems Worker | Runtime started | Adapter, connection, sync job, webhook, permission grant, data-quality issue | `connector.health.scan`, `sync.repair.plan`, `data_quality.remediate`, `permission.review`, and `automation.plan` run or block on the generic `/worker` envelope; live repair, permission mutation, and automation enablement need approval receipts and rollback evidence |
+
+## Next Worker Decision Map
+
+After Systems, each new family must start with one narrow command/view pair,
+a Core spine, and one handoff fixture. These rows are the current expansion
+decisions; changing the order should update this table before code.
+
+| Wave | Candidate worker | First command/view | Core spine | Incoming handoff | Acceptance checks | First blocker |
+|---:|---|---|---|---|---|---|
+| 8 | Offer and Pricing Worker | `margin.review.prepare`, `view: "price_policy"` | Offer, price book, quote line, margin rule, discount policy | `revenue.quote_to_pricing` | Quote lines have source evidence, margin policy exists, external send remains blocked | Pricing/margin policy fixture and discount approval packet |
+| 9 | Customer Experience Worker | `recovery.draft`, `view: "signals"` | Customer, conversation, promise, satisfaction signal, complaint, review | `customer.signal_to_experience` | Signal type/source/severity are present, customer ref is tenant-scoped, outbound recovery is blocked | Approved send gate and complaint evidence packet |
+| 10 | Asset and Supply Worker | `reorder.plan`, `view: "stockouts"` | Vendor, inventory item, purchase order, asset, facility, maintenance event | `dispatch.asset_need_to_supply` | Need is tied to job/work order, purchase action is unapproved, cash impact is visible | Dry-run purchase/maintenance receipt and rollback plan |
+| 11 | Growth Worker | `campaign.draft`, `view: "campaigns"` | Campaign, channel, audience, content draft, attribution event, budget reservation | `growth.campaign_to_owner_review` | Claims have source refs, budget is reserved, audience/channel are explicit | External publish approval and ROI ledger fixture |
+| 12 | Vertical packaged workers | `package.flow.prepare`, `view: "package_readiness"` | Composed family objects plus connection readiness refs | `systems.connection_to_packaged_worker` | Required connector freshness, least-privilege grant, and rollback evidence pass | Package-specific handoff fixture and launch smoke |
 
 ## ICP Packaged Workers
 

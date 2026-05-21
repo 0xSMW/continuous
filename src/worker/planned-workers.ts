@@ -447,7 +447,8 @@ export const workerContracts: PlannedWorkerContractMetadata[] = [
         sideEffects: "dry_run",
         externalExecution: "dry_run",
         requiresTenant: true,
-        requiredConfig: ["jobId", "constraints"],
+        requiredConfig: ["constraints"],
+        oneRequiredConfig: ["jobId", "sourceRefs"],
       },
       {
         role: "dispatch_operations",
@@ -547,7 +548,7 @@ export const workerContracts: PlannedWorkerContractMetadata[] = [
         externalExecution: "dry_run",
         requiresTenant: true,
         requiredConfig: [],
-        oneRequiredConfig: ["jobId", "closeoutId"],
+        oneRequiredConfig: ["jobId", "closeoutId", "sourceRefs"],
       },
       {
         role: "finance_operations",
@@ -593,7 +594,7 @@ export const workerContracts: PlannedWorkerContractMetadata[] = [
         externalExecution: "blocked",
         requiresTenant: true,
         requiredConfig: [],
-        oneRequiredConfig: ["billId", "paymentId"],
+        oneRequiredConfig: ["billId", "paymentId", "sourceRefs"],
       },
       {
         role: "finance_operations",

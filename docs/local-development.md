@@ -118,9 +118,9 @@ operator-gated JSON. Decisions use `POST /approval` with `command`,
 The repo also includes `.mcp.json` for the Next.js MCP bridge. With `bun run dev`
 running, compatible coding agents can inspect routes, runtime errors, metadata,
 and logs through `next-devtools-mcp`. The installed Codex app-server CLI exposes
-protocol tooling and repo-owned worker controls; inspect it with
-`bun run app-server:help` and `bun run app-server:worker-tools` when worker
-build tooling needs it.
+stdio/WebSocket serving, protocol generation, and repo-owned worker controls;
+inspect it with `bun run app-server:help` and `bun run app-server:worker-tools`
+when worker build tooling needs it.
 
 ## Revenue Operations Worker
 
@@ -163,13 +163,23 @@ curl -X POST http://localhost:3000/worker \
   }'
 ```
 
-HTTP runs are bound to the authenticated control-plane credential's
-`operatorEmail`. Trusted-local `worker.command` and app-server bridge calls use
+HTTP worker calls are bound to authenticated control-plane credentials, and the
+operator identity stays outside the request payload. Trusted-local
+`worker.command` calls and local app-server CLI calls use
 `WORKER_OPERATOR_EMAIL`, which must be set by the local operator shell or bridge
-and must match a seeded user such as `owner@continuoushq.com`. A successful run
-records an approval request and audit trail while keeping external send and
-money movement blocked. Use `worker.command` with `command=lead.read` to persist
-source lead records before `worker.command` with `command=run`;
+and must match a seeded user such as `owner@continuoushq.com`.
+Production app-server bridges should pass authenticated transport context from
+control-plane auth instead of using payload identity; that context includes the
+operator identity plus access, route-qualified command or view, tenant, and
+worker-role scope. The local app-server CLI rejects `source: "control_plane"`
+context so that scope cannot be forged from shell JSON. Codex dynamic tool-call
+payloads use `tool` plus
+`arguments`; the arguments stay the same strict `command`/`view`, `worker`,
+`idempotencyKey`, and `config` envelope. A
+successful run records an approval request and audit trail while keeping
+external send and money movement blocked. Use `worker.command` with
+`command=lead.read` to persist source lead records before `worker.command` with
+`command=run`;
 `config.leadPacket` is only the direct fallback for controlled local tests. If
 `CONTROL_PLANE_ALLOWED_TENANTS` is set, every operator route must include an
 allowed `tenantSlug`; if `CONTROL_PLANE_ALLOWED_WORKER_ROLES` is set, `/worker`
@@ -313,6 +323,7 @@ idempotency, and config in the request payload.
 
 ## Notes
 
-The app is intentionally server-rendered and database-backed. If Postgres is
-down, the UI still renders a degraded health state instead of hiding the
-failure.
+The public root page is intentionally static and does not query operational
+tables. Database-backed operator views and APIs live behind control-plane auth;
+if Postgres is down, `/health` returns a redacted degraded status instead of
+leaking table counts or record details.

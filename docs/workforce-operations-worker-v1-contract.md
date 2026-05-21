@@ -36,15 +36,26 @@ All commands use `POST /worker`; no workforce-specific route is added.
 
 ## Registry Entries
 
+Current executable entries are registered in the runtime worker registry. Planned
+entries remain visible through worker schema follow-up metadata until their
+handlers are implemented.
+
+### Executable
+
 | Command or view | Tool surface | Required config | Idempotency | Side effects | External execution |
 |---|---|---|---|---|---|
 | `view: "snapshot"` payload | `worker.view` | `worker.role`, `config` | None | Read-only | Blocked |
 | `hire.packet.prepare` | `worker.command` | `config.personId`, `config.positionId`, `config.workLocationId` | Required | Packet, document checklist, approval request | Blocked |
+| `payroll_input.prepare` | `worker.command` | `config.employmentId`, `config.period` | Required | Payroll input packet plus Core `payroll.preview.record` and `payroll.preview.packet.prepare` handoff | Dry-run |
+| `approval.decide` | `worker.command` | `config.approvalId`, `config.action`, optional `config.note` | None | Approval/task/workflow evidence only | Blocked |
+
+### Planned Follow-Up
+
+| Command or view | Tool surface | Required config | Idempotency | Side effects | External execution |
+|---|---|---|---|---|---|
 | `contractor.packet.prepare` | `worker.command` | `config.personId`, `config.engagementId` | Required | Classification packet and blocker task | Blocked |
 | `credential.review` | `worker.command` | `config.personId` or `config.credentialId` | Required | Credential renewal task and evidence | Blocked |
 | `schedule_readiness.prepare` | `worker.command` | `config.personId`, `config.period` | Required | Readiness packet and exception tasks | Blocked |
-| `payroll_input.prepare` | `worker.command` | `config.employmentId`, `config.period` | Required | Payroll input packet plus Core `payroll.preview.record` and `payroll.preview.packet.prepare` handoff | Dry-run |
-| `approval.decide` | `worker.command` | `config.approvalId`, `config.action`, optional `config.note` | None | Approval/task/workflow evidence only | Blocked |
 
 ## Core Object Map
 

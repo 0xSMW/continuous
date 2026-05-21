@@ -182,6 +182,7 @@ function parseTokenCatalog(input: {
 }
 
 function normalizeTokenCatalog(input: {
+  appEnv?: string | null;
   tokenCatalogJson?: string | null;
   tokenCatalogB64?: string | null;
   allowedTenants?: string | null;
@@ -196,6 +197,12 @@ function normalizeTokenCatalog(input: {
     const token = stringValue(definition.token);
     const tokenSha256 = stringValue(definition.tokenSha256);
     const operatorEmail = stringValue(definition.operatorEmail);
+
+    if (input.appEnv === "production" && token) {
+      throw new Error(
+        `Control-plane token catalog entry ${index + 1} must use tokenSha256 in production.`,
+      );
+    }
 
     if (!token && !tokenSha256) {
       throw new Error(`Control-plane token catalog entry ${index + 1} is missing token or tokenSha256.`);

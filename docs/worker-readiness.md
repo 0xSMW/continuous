@@ -41,6 +41,24 @@ Status values:
 | Compliance | planned | planned | partial | partial | planned | planned | partial | planned | planned | planned | planned | `docs/compliance-operations-worker-v1-contract.md`; `src/worker/planned-workers.ts`; seeded obligation/rule workflow records in `src/db/seed.ts`; handoff contract in `docs/worker-handoffs.md`; contract coverage in `src/worker/worker-contracts.test.ts` | Needs Workforce classification and rule-source handoff fixture | Implement obligation/notice intake fixture and rule-source evidence checks |
 | Systems | partial | partial | partial | partial | partial | partial | partial | partial | partial | partial | partial | `docs/systems-operations-worker-v1-contract.md`; `src/worker/planned-workers.ts`; Core connection health primitives in `src/core/primitives.ts`; deploy smoke in `.github/workflows/deploy.yml` for `connection.upsert` and `connection.health.record`; contract coverage in `src/worker/worker-contracts.test.ts` | First runtime slice is defined on the generic `/worker` envelope with dry-run repair planning and blocked permission/automation execution; live connector mutation, permission changes, automation enablement, and external repair execution remain blocked | Broaden Systems proof into scoped live credential checks, approval receipts, rollback evidence, and launch smoke without adding systems-specific routes |
 
+## Command-Level Launch Gates
+
+These rows keep external execution gates explicit before any worker moves from
+internal/dry-run proof to real-world action.
+
+| Worker command | Current posture | Required live gate | First proof to add |
+|---|---|---|---|
+| `revenue_operations.lead.read` | Internal read/persist; direct records and buffered sources are proven | Env-backed Gmail or CRM credential ref, scoped connection health, redacted polling receipt, scheduler `lastLeadRead` evidence | Production-safe connection fixture plus scheduler polling smoke |
+| `revenue_operations.continue` | Approval continuation records blocked external-send proof | Approved send policy, credential scope, delivery receipt, retry/reconcile path, rollback/escalation packet | First controlled customer-send receipt with no token leakage |
+| `dispatch_operations.schedule.propose` | Calendar write is dry-run | Calendar credential grant, conflict receipt, owner approval, rollback/cancel path | Dry-run-to-approved calendar fixture |
+| `dispatch_operations.customer_update.draft` | Customer send is blocked | Approved send policy, customer channel credential, delivery receipt, retry/reconcile path | Customer-update send gate smoke |
+| `finance_operations.invoice.prepare` | Accounting adapter remains dry-run | Accounting credential grant, draft receipt, owner approval, undo/void posture | Accounting draft receipt fixture |
+| `finance_operations.payment_draft.prepare` | Money movement is blocked | Dual-control approval, bank/payment credential grant, ACH/payment receipt, reversal/escalation plan | Dual-control payment dry-run-to-approved proof |
+| `workforce_operations.payroll_input.prepare` | Payroll submission and money movement are dry-run/blocked | Payroll provider credential grant, deterministic payroll preview, tax/funding blockers, dual-control approval | Payroll preview readiness smoke |
+| `compliance_operations.filing.prepare` | Planned only | Source-linked rule pack, filing draft validation, human submission approval, receipt/rejection capture | Rule-source and filing-draft fixture |
+| `systems_operations.sync.repair.plan` | Repair is dry-run | Scoped connector credential, approved repair action, rollback document, reconciliation evidence | Connector repair approval receipt |
+| `systems_operations.permission.review` | Permission mutation is blocked | Least-privilege diff, approval receipt, credential rotation/revoke proof | Permission change dry-run plus rollback proof |
+
 ## Promotion Rules
 
 1. A worker may not move from `planned` to `live` until Contract, Registry,
