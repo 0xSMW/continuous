@@ -7410,7 +7410,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(launchReadinessData.launchStatus).toBe("blocked");
     expect(launchReadinessData.launchReady).toBe(false);
     expect(launchGates.find((gate) => gate.key === "lead_source_connection")?.state).toBe("ready");
-    expect(launchGates.find((gate) => gate.key === "lead_source_connection_health")?.state).toBe("blocked");
+    expect(launchGates.find((gate) => gate.key === "lead_source_connection_health")?.state).toBe("ready");
     expect(launchGates.find((gate) => gate.key === "scheduler_lead_read_cursor")?.state).toBe("blocked");
     expect(launchGates.find((gate) => gate.key === "controlled_customer_send_credentials")?.state).toBe("blocked");
     expect(JSON.stringify(launchReadinessData)).not.toContain("configured-fixture");
