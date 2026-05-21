@@ -307,7 +307,7 @@ and local toolbox aliases resolve to the same handlers and validation rules.
 | `quote.prepare` | `worker.command` | One of `config.intake`, `config.leadPacket`, or `config.lead` | Required | Core worker-run lifecycle, budget/usage, inference, source evidence, dry-run adapter receipt, approval request, generated quote review view, audit | Blocked |
 | `payment_link.prepare` | `worker.command` | `config.invoiceId`, `config.invoiceObjectId`, or keyed `config.sourceRefs`; optional `config.quoteObjectId`, `config.bankAccountId`, `config.policy` | Required | Core worker-run lifecycle, budget/usage, payment object, payment row, payment instruction when a bank account exists, payment-link packet, approval request, generated payment review view, dry-run adapter receipt, workflow, audit | Blocked |
 | `run` | `worker.command` | One of `config.intake`, `config.leadPacket`, or `config.lead` | Required | Core worker-run lifecycle, budget/usage, workflow, approval, dry-run adapter receipt | Blocked |
-| `continue` | `worker.command` | `config.approvalId`; optional `config.execution` for approved controlled-send receipt recording | Required | Core worker-run lifecycle, budget/usage, and quote approval continuation proof only: approved execution packet, optional controlled-send receipt, revised approval packet, or rejected stop packet, workflow step, task outcome, audit/evidence; payment-link approvals fail closed until their provider-link continuation branch exists | Approved only |
+| `continue` | `worker.command` | `config.approvalId`; optional `config.execution` for approved controlled-send receipt recording on quote/customer-message continuations only | Required | Core worker-run lifecycle, budget/usage, quote approval continuation proof, and dedicated payment-link approval continuation proof: approved blocked packet, revised approval packet, or rejected stop packet, workflow step, task outcome, audit/evidence; live provider payment-link creation and money movement remain blocked | Quote controlled sends only; payment-link provider execution blocked |
 | `approval.decide` | `worker.command` | `config.approvalId`, `config.action`, optional `config.note` | Required | Approval/task/workflow evidence only | Blocked |
 | `adapters.reconcile` | `worker.command` | Tenant-scoped `worker.tenantSlug`, optional integer `config.limit` | None | Adapter reconciliation audit/evidence plus retry/review system tasks | Blocked |
 | `adapters.retry` | `worker.command` | Tenant-scoped `worker.tenantSlug`, optional integer `config.limit` | None | Executes due dry-run retry rows, closes retry tasks, and writes blocked receipt evidence with live-credential readiness and rollback proof | Blocked |
@@ -447,7 +447,7 @@ response whose `result.output` contains a blocked payment-link packet:
 
 | Record | Required behavior |
 |---|---|
-| `worker_runs` | Core `worker.run.start` / `worker.run.complete` owns lifecycle, idempotency, budget settlement, and input/output for `lead.read`, `lead.classify`, `response.draft`, `run`, `quote.prepare`, `payment_link.prepare`, and quote approval `continue` |
+| `worker_runs` | Core `worker.run.start` / `worker.run.complete` owns lifecycle, idempotency, budget settlement, and input/output for `lead.read`, `lead.classify`, `response.draft`, `run`, `quote.prepare`, `payment_link.prepare`, and quote/payment-link approval `continue` |
 | `workflow_runs` | Owns the lead-to-cash state machine for the prepared worker action |
 | `workflow_steps` | Records intake resolved, packet prepared, adapter dry-run recorded, approval requested, approval decision transitions, worker continuations, and adapter reconciliation transitions |
 | `budget_reservations` | Core worker-run completion reserves and marks deterministic simulation units as used for the migrated Revenue commands |
@@ -474,8 +474,8 @@ execution blocked.
 `worker_runs` continuation run, writes the business workflow proof, then
 completes the Core run for budget settlement and replay repair. The business
 workflow still records `workflow_steps.kind=worker_continuation`. V1 supports
-`approved`, `revision_requested`, and `rejected` quote approvals.
-Approved continuation prepares a no-send execution packet, stores
+`approved`, `revision_requested`, and `rejected` quote and payment-link approvals.
+Quote approved continuation prepares a no-send execution packet, stores
 evidence/document packet records, moves the workflow to `execution_blocked`,
 leaves the task in `waiting`, and keeps adapter execution blocked when
 `config.execution` is absent. Approved continuation with `config.execution`
@@ -483,21 +483,28 @@ records a controlled customer-message receipt, hashes the managed credential
 reference instead of storing it, persists only a safe summary of
 `config.execution`, requires write scope plus rollback/escalation proof, moves
 the workflow to `execution_recorded`, and rejects replay when the same
-idempotency key is reused with changed or unhashed execution config. Revision
-continuation prepares a revised no-send quote packet, stores the revised packet
+idempotency key is reused with changed or unhashed execution config. Payment-link
+approved continuation prepares a provider-link-specific blocked packet, moves the
+workflow to `execution_blocked`, leaves the task in `waiting`, and keeps provider
+payment-link creation, external mutation, and money movement blocked.
+`config.execution` is rejected for payment-link continuations until scoped
+provider credential and rollback proof exists. Revision continuation prepares a
+revised no-send quote or payment-link packet, stores the revised packet
 evidence/document packet, creates a fresh pending `quote_revision_approval`,
 moves the workflow back to `approval_requested`, updates the task back to
-`approval_required`, and keeps adapter execution blocked. Rejected continuation
-stores a closed no-send stop packet, appends a terminal worker continuation
-step, keeps the task blocked, and closes the workflow in `rejected`.
+`approval_required`, and keeps adapter execution blocked. Payment-link revisions
+create a fresh `payment_link_approval` with revision metadata instead of a new
+approval kind. Rejected continuation stores a closed no-send stop packet,
+appends a terminal worker continuation step, keeps the task
+blocked, and closes the workflow in `rejected`.
 
 ## Approval Actions
 
 | Action | Approval state | Task state | Workflow state | External behavior |
 |---|---|---|---|---|
-| `approved` | `approved` | `waiting` without `config.execution`; `done` after controlled receipt recording | `approved`; after `command=continue`, `execution_blocked` without execution config or `execution_recorded` with controlled receipt config | `command=continue` prepares an approved no-send execution packet by default; with `config.execution`, it records an approved controlled-send receipt with scoped credential, receipt, rollback, and replay-conflict proof |
-| `revision_requested` | `revision_requested`; after `command=continue`, a new `quote_revision_approval` is `pending` | `approval_required` after the revised packet is prepared | `approval_requested` after the revised packet is prepared | `command=continue` prepares a revised no-send packet and requests owner approval again |
-| `rejected` | `rejected` | `blocked`; after `command=continue`, still `blocked` with a rejected stop packet | `rejected`; after `command=continue`, remains `rejected` with a terminal continuation step | `command=continue` stores a closed no-send rejected packet and stops the prepared action |
+| `approved` | `approved` | `waiting` without quote `config.execution` or payment-link provider execution; `done` after controlled quote/customer-message receipt recording | `approved`; after `command=continue`, `execution_blocked` without execution config or `execution_recorded` with controlled receipt config | `command=continue` prepares an approved no-send execution packet by default; quote continuations may record an approved controlled-send receipt with scoped credential, receipt, rollback, and replay-conflict proof; payment-link continuations keep provider creation and money movement blocked |
+| `revision_requested` | `revision_requested`; after `command=continue`, a new `quote_revision_approval` or revised `payment_link_approval` is `pending` | `approval_required` after the revised packet is prepared | `approval_requested` after the revised packet is prepared | `command=continue` prepares a revised blocked packet and requests owner approval again |
+| `rejected` | `rejected` | `blocked`; after `command=continue`, still `blocked` with a rejected stop packet | `rejected`; after `command=continue`, remains `rejected` with a terminal continuation step | `command=continue` stores a closed rejected packet and stops the prepared action without external send, provider-link creation, or money movement |
 
 ## Non-Goals
 

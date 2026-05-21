@@ -2060,6 +2060,68 @@ jobs:
           from approval_requests where id = '$PAYMENT_LINK_APPROVAL_ID'::uuid;
           SQL
 
+          PAYMENT_LINK_APPROVAL_DECISION_PAYLOAD="$(
+            /usr/bin/jq -nc --arg approvalId "$PAYMENT_LINK_APPROVAL_ID" --arg key "deploy-payment-link-approval-decision-$PAYMENT_LINK_APPROVAL_ID" '{
+              command: "approval.decide",
+              worker: {role: "revenue_operations", tenantSlug: "continuous-demo"},
+              idempotencyKey: $key,
+              config: {
+                approvalId: $approvalId,
+                action: "approved",
+                note: "Deploy smoke payment-link approval continuation; provider creation and money movement stay blocked."
+              }
+            }'
+          )"
+          PAYMENT_LINK_APPROVAL_DECISION_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/worker \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$PAYMENT_LINK_APPROVAL_DECISION_PAYLOAD"
+          )"
+
+          echo "$PAYMENT_LINK_APPROVAL_DECISION_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{workflowRunState:.data.result.workflowRunState,workflowStepId:.data.result.workflowStepId,taskState:.data.result.taskState}}'
+          echo "$PAYMENT_LINK_APPROVAL_DECISION_RESPONSE" | /usr/bin/jq -e \
+            '.error == null and .data.command == "approval.decide" and .data.result.workflowRunState == "approved" and (.data.result.workflowStepId | length > 0)' \
+            >/dev/null
+
+          PAYMENT_LINK_CONTINUE_KEY="deploy-payment-link-continue-$RUN_ID"
+          PAYMENT_LINK_CONTINUE_PAYLOAD="$(
+            /usr/bin/jq -nc --arg approvalId "$PAYMENT_LINK_APPROVAL_ID" --arg key "$PAYMENT_LINK_CONTINUE_KEY" '{
+              command: "continue",
+              worker: {role: "revenue_operations", tenantSlug: "continuous-demo"},
+              idempotencyKey: $key,
+              config: {
+                approvalId: $approvalId
+              }
+            }'
+          )"
+          PAYMENT_LINK_CONTINUE_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/worker \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$PAYMENT_LINK_CONTINUE_PAYLOAD"
+          )"
+
+          echo "$PAYMENT_LINK_CONTINUE_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,workerRunId:.data.result.workerRunId,workflowRunId:.data.result.workflowRunId,workflowStepId:.data.result.workflowStepId,status:.data.result.output.status,providerPaymentLinkCreation:.data.result.output.providerPaymentLinkCreation,moneyMovement:.data.result.output.moneyMovement,externalExecution:.data.result.output.externalExecution,externalMutation:.data.result.output.externalMutation,externalSend:.data.result.output.externalSend,nextAction:.data.result.output.nextAction}}'
+          echo "$PAYMENT_LINK_CONTINUE_RESPONSE" | /usr/bin/jq -e \
+            '.error == null and .data.command == "continue" and .data.result.created == true and (.data.result.workerRunId | length > 0) and (.data.result.workflowStepId | length > 0) and .data.result.output.status == "approved_payment_link_execution_blocked" and .data.result.output.externalExecution == "blocked" and .data.result.output.externalMutation == false and .data.result.output.externalSend == false and .data.result.output.providerPaymentLinkCreation == "blocked" and .data.result.output.moneyMovement == "blocked" and .data.result.output.nextAction == "enable_scoped_payment_provider_execution"' \
+            >/dev/null
+
+          PAYMENT_LINK_CONTINUE_WORKER_RUN_ID="$(echo "$PAYMENT_LINK_CONTINUE_RESPONSE" | /usr/bin/jq -r '.data.result.workerRunId')"
+          PAYMENT_LINK_CONTINUE_STEP_ID="$(echo "$PAYMENT_LINK_CONTINUE_RESPONSE" | /usr/bin/jq -r '.data.result.workflowStepId')"
+          psql_db -At <<SQL
+          select 'payment_link_continuation_workflow' as kind, state, data->'lastWorkerContinuation'->>'status', data->'lastWorkerContinuation'->>'providerPaymentLinkCreation', data->'lastWorkerContinuation'->>'moneyMovement'
+          from workflow_runs where id = '$PAYMENT_LINK_WORKFLOW_RUN_ID'::uuid;
+          select 'payment_link_continuation_step' as kind, kind, from_state, to_state, output->>'status', output->>'providerPaymentLinkCreation', output->>'moneyMovement'
+          from workflow_steps where id = '$PAYMENT_LINK_CONTINUE_STEP_ID'::uuid;
+          select 'payment_link_continuation_worker_run' as kind, source, state, mode, data->'input'->>'command', data->'output'->>'status', data->'output'->>'externalExecution', data->'output'->>'externalMutation', data->'output'->>'externalSend'
+          from worker_runs where id = '$PAYMENT_LINK_CONTINUE_WORKER_RUN_ID'::uuid;
+          select 'payment_link_count' as kind, count(*)::text
+          from payments where external_id = 'revenue-payment-link:' || '$PAYMENT_LINK_KEY';
+          SQL
+
           LEAD_OBJECT_KEY="deploy-lead-object-$RUN_ID"
           LEAD_OBJECT_PAYLOAD="$(
             /usr/bin/jq -nc --arg key "$LEAD_OBJECT_KEY" --arg sourceEventId "$LEAD_SOURCE_EVENT_ID" '{

@@ -32,9 +32,9 @@ work from one worker family to the next.
 | Lead source intake | `lead.read` persists website-form, authenticated-inbox, and CRM-style source records as Core object/event/evidence rows and returns stable selectors for `run` |
 | Lead-to-cash simulation | Run creates task, worker run, workflow run/steps, budget reservation, inference, usage, adapter dry-run, approval, audit, evidence, object version |
 | Workflow worker command drain | Queued `worker_command` steps invoke registered `/worker` commands from workflow data through a dedicated command-runner boundary outside workflow row locks, inherit the workflow tenant, reject cross-tenant targets, and record command output on the step/run/task ledger after reacquiring the step lease |
-| Approval execution | Approval decision uses shared approval service, advances the allowed workflow state, and approved continuation can record controlled-send receipts from `config.execution` without changing the `/worker` envelope |
+| Approval execution | Approval decision uses shared approval service, advances the allowed workflow state, quote approved continuation can record controlled-send receipts from `config.execution`, and payment-link continuation records blocked provider-link approval proof without changing the `/worker` envelope |
 | Adapter hardening | Reconciliation writes audit/evidence records and retry/review system tasks; due dry-run retries execute with blocked receipts, live-credential readiness checks, and rollback plans; production provider execution remains gated |
-| Payment-link preparation | `payment_link.prepare` writes a blocked payment packet, payment instruction when possible, owner approval, generated review view, dry-run adapter receipt, workflow, Core budget settlement, and audit proof from persisted invoice refs |
+| Payment-link preparation | `payment_link.prepare` writes a blocked payment packet, payment instruction when possible, owner approval, generated review view, dry-run adapter receipt, workflow, Core budget settlement, audit proof, and a dedicated approval continuation path from persisted invoice refs |
 | Readiness view | `POST /worker` with `view: "readiness"` reports the worker, capability, budget, workflow, dry-run receipt, quote-review view, payment-review view when payment-link proof is latest, and generic launch gates |
 | Eval harness | CI-enforced lead-to-quote cases prove classification, approval, budget, adapter receipt, and idempotency replay |
 | First controlled send | Approved external message sends through adapter with receipt and rollback/escalation evidence |
@@ -49,7 +49,7 @@ credentials and rollback playbooks before customer-data use.
 | Gate | Required evidence |
 |---|---|
 | Source coverage | Production `lead.read` runs from at least one live inbox or CRM connection created through `/core connection.upsert`, with `/core connection.health.record` proof and scheduler cursor evidence |
-| Quote and payment decision | `lead.classify`, `response.draft`, `quote.prepare`, `payment_link.prepare`, `run`, shared approval, and `continue` all write worker run, workflow, approval, audit, evidence, budget, generated-view, and adapter records from persisted Core refs |
+| Quote and payment decision | `lead.classify`, `response.draft`, `quote.prepare`, `payment_link.prepare`, `run`, shared approval, quote continuation, and payment-link continuation all write worker run, workflow, approval, audit, evidence, budget, generated-view, and adapter records from persisted Core refs |
 | Controlled send | An approved customer message send uses a scoped managed credential, stores an adapter receipt, records rollback/escalation evidence, and rejects replay with changed input |
 | Cash handoff | Approved quote or closeout records can hand Dispatch/Ops and Finance enough Core refs to prepare schedule, invoice, AR follow-up, and payment-draft packets without private payloads |
 | Eval and deploy | CI evals plus production smoke prove no send, live provider payment-link creation, filing, payroll submission, or money movement happens without the matching approval, credential, receipt, and rollback gate |

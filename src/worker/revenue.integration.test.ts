@@ -7019,6 +7019,14 @@ maybeDescribe("Revenue Worker integration eval", () => {
     );
     expect(paymentLinkReplayResult.reservationId).toBe(paymentLinkResult.reservationId);
     expect(paymentLinkReplayResult.usageEventId).toBe(paymentLinkResult.usageEventId);
+    expect(paymentLinkReplayResult.paymentObjectId).toBe(paymentLinkResult.paymentObjectId);
+    expect(paymentLinkReplayResult.paymentId).toBe(paymentLinkResult.paymentId);
+    expect(paymentLinkReplayResult.paymentInstructionId).toBe(paymentLinkResult.paymentInstructionId);
+    expect(paymentLinkReplayResult.approvalRequestId).toBe(paymentLinkResult.approvalRequestId);
+    expect(paymentLinkReplayResult.paymentReviewViewId).toBe(paymentLinkResult.paymentReviewViewId);
+    expect(paymentLinkReplayResult.packetId).toBe(paymentLinkResult.packetId);
+    expect(paymentLinkReplayResult.documentId).toBe(paymentLinkResult.documentId);
+    expect(paymentLinkReplayResult.auditEventId).toBe(paymentLinkResult.auditEventId);
 
     const [paymentLinkRun] = await db
       .select()
@@ -7168,6 +7176,13 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(repairedPaymentLinkResult.workerRunId).toBe(paymentLinkResult.workerRunId);
     expect(repairedPaymentLinkResult.usageEventId).toBeTruthy();
     expect(repairedPaymentLinkResult.usageEventId).not.toBe(paymentLinkResult.usageEventId);
+    expect(repairedPaymentLinkResult.paymentObjectId).toBe(paymentLinkResult.paymentObjectId);
+    expect(repairedPaymentLinkResult.paymentId).toBe(paymentLinkResult.paymentId);
+    expect(repairedPaymentLinkResult.paymentInstructionId).toBe(paymentLinkResult.paymentInstructionId);
+    expect(repairedPaymentLinkResult.approvalRequestId).toBe(paymentLinkResult.approvalRequestId);
+    expect(repairedPaymentLinkResult.paymentReviewViewId).toBe(paymentLinkResult.paymentReviewViewId);
+    expect(repairedPaymentLinkResult.packetId).toBe(paymentLinkResult.packetId);
+    expect(repairedPaymentLinkResult.documentId).toBe(paymentLinkResult.documentId);
     expect(paymentRowsAfterRepair.value).toBe(paymentRowsBeforeRepair.value);
     expect(repairedReservation?.state).toBe("used");
     expect(repairedReservation?.taskId).toBe(paymentLinkRun?.taskId);
@@ -7199,22 +7214,190 @@ maybeDescribe("Revenue Worker integration eval", () => {
       operatorEmail: "owner@continuoushq.com",
       tenantSlug: "continuous-demo",
       action: "approved",
-      note: "Payment-link continuation needs its own branch.",
+      note: "Approve payment link while provider creation stays blocked.",
       subject: "worker",
       db,
     });
+
     await expect(
       continueRevenueWorker({
         approvalId: stringValue(paymentLinkResult.approvalRequestId),
-        idempotencyKey: `ci-worker-payment-link-continue-${runId}`,
+        idempotencyKey: `ci-worker-payment-link-provider-execution-${runId}`,
         tenantSlug: "continuous-demo",
         operatorEmail: "owner@continuoushq.com",
+        config: {
+          approvalId: stringValue(paymentLinkResult.approvalRequestId),
+          execution: {
+            connectionId: "11111111-1111-4111-8111-111111111111",
+            credentialRef: "managed:payment-provider",
+            requiredScopes: ["payment_link.create"],
+            receipt: { providerPaymentLinkId: `plink:${runId}` },
+            rollback: {
+              strategy: "void_payment_link",
+              escalationOwner: "owner@continuoushq.com",
+            },
+          },
+        },
         db,
       }),
     ).rejects.toMatchObject({
-      code: "worker_continuation_unsupported_approval_kind",
+      code: "worker_payment_link_execution_not_supported",
       status: 409,
     });
+
+    const paymentContinuation = await continueRevenueWorker({
+      approvalId: stringValue(paymentLinkResult.approvalRequestId),
+      idempotencyKey: `ci-worker-payment-link-continue-${runId}`,
+      tenantSlug: "continuous-demo",
+      operatorEmail: "owner@continuoushq.com",
+      db,
+    });
+    const paymentContinuationOutput = objectValue(paymentContinuation.output);
+    const approvedPaymentLinkPacket = objectValue(paymentContinuationOutput.approvedPaymentLinkPacket);
+
+    expect(paymentContinuation.created).toBe(true);
+    expect(paymentContinuation.reservationId).toBeTruthy();
+    expect(paymentContinuation.usageEventId).toBeTruthy();
+    expect(paymentContinuation.originalWorkerRunId).toBe(paymentLinkResult.workerRunId);
+    expect(paymentContinuation.workflowRunId).toBe(paymentLinkResult.workflowRunId);
+    expect(paymentContinuationOutput.command).toBe("continue");
+    expect(paymentContinuationOutput.status).toBe("approved_payment_link_execution_blocked");
+    expect(paymentContinuationOutput.approvalRequestId).toBe(paymentLinkResult.approvalRequestId);
+    expect(paymentContinuationOutput.originalApprovalRequestId).toBe(paymentLinkResult.approvalRequestId);
+    expect(paymentContinuationOutput.paymentObjectId).toBe(paymentLinkResult.paymentObjectId);
+    expect(paymentContinuationOutput.paymentId).toBe(paymentLinkResult.paymentId);
+    expect(paymentContinuationOutput.paymentInstructionId).toBe(paymentLinkResult.paymentInstructionId);
+    expect(paymentContinuationOutput.invoiceId).toBe(paymentLinkResult.invoiceId);
+    expect(paymentContinuationOutput.invoiceObjectId).toBe(paymentLinkResult.invoiceObjectId);
+    expect(paymentContinuationOutput.quoteObjectId).toBe(paymentLinkResult.quoteObjectId);
+    expect(paymentContinuationOutput.amountCents).toBe(paymentLinkOutput.amountCents);
+    expect(paymentContinuationOutput.currency).toBe(paymentLinkOutput.currency);
+    expect(paymentContinuationOutput.customerName).toBe(paymentLinkOutput.customerName);
+    expect(paymentContinuationOutput.dueAt).toBe(paymentLinkOutput.dueAt);
+    expect(paymentContinuationOutput.nextAction).toBe("enable_scoped_payment_provider_execution");
+    expect(paymentContinuationOutput.externalExecution).toBe("blocked");
+    expect(paymentContinuationOutput.externalMutation).toBe(false);
+    expect(paymentContinuationOutput.externalSend).toBe(false);
+    expect(paymentContinuationOutput.providerPaymentLinkCreation).toBe("blocked");
+    expect(paymentContinuationOutput.moneyMovement).toBe("blocked");
+    expect(paymentContinuationOutput.requiresApproval).toBe(false);
+    expect(paymentContinuationOutput.approvedPaymentLinkEvidenceId).toBeTruthy();
+    expect(paymentContinuationOutput.approvedPaymentLinkDocumentId).toBeTruthy();
+    expect(paymentContinuationOutput.approvedPaymentLinkEvidencePacketId).toBeTruthy();
+    expect(approvedPaymentLinkPacket.status).toBe("approved_payment_link_execution_blocked");
+    expect(approvedPaymentLinkPacket.preparedAction).toBe("provider_payment_link.create");
+    expect(approvedPaymentLinkPacket.providerPaymentLinkCreation).toBe("blocked");
+    expect(approvedPaymentLinkPacket.moneyMovement).toBe("blocked");
+    expect(approvedPaymentLinkPacket.externalMutation).toBe(false);
+
+    const [paymentContinuationWorkflow] = await db
+      .select()
+      .from(workflowRuns)
+      .where(eq(workflowRuns.id, stringValue(paymentLinkResult.workflowRunId)))
+      .limit(1);
+    const paymentContinuationWorkflowData = objectValue(paymentContinuationWorkflow?.data);
+    const approvedPaymentLinkContinuation = objectValue(
+      paymentContinuationWorkflowData.approvedPaymentLinkContinuation,
+    );
+
+    expect(paymentContinuationWorkflow?.state).toBe("execution_blocked");
+    expect(approvedPaymentLinkContinuation.workerRunId).toBe(paymentContinuation.workerRunId);
+    expect(approvedPaymentLinkContinuation.action).toBe("approved");
+    expect(paymentContinuationWorkflowData.workflowStepIds).toContain(paymentContinuation.workflowStepId);
+
+    const [paymentContinuationStep] = await db
+      .select()
+      .from(workflowSteps)
+      .where(eq(workflowSteps.id, stringValue(paymentContinuation.workflowStepId)))
+      .limit(1);
+    const paymentContinuationStepOutput = objectValue(paymentContinuationStep?.output);
+
+    expect(paymentContinuationStep?.kind).toBe("worker_continuation");
+    expect(paymentContinuationStep?.fromState).toBe("approved");
+    expect(paymentContinuationStep?.toState).toBe("execution_blocked");
+    expect(paymentContinuationStepOutput.nextAction).toBe("enable_scoped_payment_provider_execution");
+    expect(paymentContinuationStepOutput.providerPaymentLinkCreation).toBe("blocked");
+    expect(paymentContinuationStepOutput.moneyMovement).toBe("blocked");
+
+    const [continuedPaymentObject] = await db
+      .select()
+      .from(objects)
+      .where(eq(objects.id, stringValue(paymentLinkResult.paymentObjectId)))
+      .limit(1);
+    const [continuedPayment] = await db
+      .select()
+      .from(payments)
+      .where(eq(payments.id, stringValue(paymentLinkResult.paymentId)))
+      .limit(1);
+    const [continuedPaymentInstruction] = await db
+      .select()
+      .from(paymentInstructions)
+      .where(eq(paymentInstructions.id, stringValue(paymentLinkResult.paymentInstructionId)))
+      .limit(1);
+    const [continuedPaymentTask] = await db
+      .select()
+      .from(tasks)
+      .where(eq(tasks.id, stringValue(paymentContinuation.taskId)))
+      .limit(1);
+    const [approvedPaymentLinkEvidence] = await db
+      .select()
+      .from(evidence)
+      .where(eq(evidence.id, String(paymentContinuationOutput.approvedPaymentLinkEvidenceId ?? "")))
+      .limit(1);
+    const [approvedPaymentLinkDocument] = await db
+      .select()
+      .from(documents)
+      .where(eq(documents.id, String(paymentContinuationOutput.approvedPaymentLinkDocumentId ?? "")))
+      .limit(1);
+    const [approvedPaymentLinkEvidencePacket] = await db
+      .select()
+      .from(evidencePackets)
+      .where(eq(evidencePackets.id, String(paymentContinuationOutput.approvedPaymentLinkEvidencePacketId ?? "")))
+      .limit(1);
+    const [paymentContinuationRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(eq(workerRuns.id, stringValue(paymentContinuation.workerRunId)))
+      .limit(1);
+    const paymentContinuationRunData = objectValue(paymentContinuationRun?.data);
+    const paymentContinuationRunInput = objectValue(paymentContinuationRunData.input);
+    const paymentContinuationRunRequest = objectValue(paymentContinuationRunInput.request);
+    const paymentContinuationRunCompletion = objectValue(paymentContinuationRunData.completion);
+    const paymentContinuationRunBudget = objectValue(paymentContinuationRunCompletion.budget);
+
+    expect(continuedPaymentObject?.state).toBe("execution_blocked");
+    expect(continuedPayment?.state).toBe("execution_blocked");
+    expect(continuedPaymentInstruction?.state).toBe("execution_blocked");
+    expect(continuedPaymentTask?.state).toBe("waiting");
+    expect(approvedPaymentLinkEvidence?.kind).toBe("draft");
+    expect(approvedPaymentLinkDocument?.kind).toBe("revenue_payment_link_approved_packet");
+    expect(approvedPaymentLinkDocument?.state).toBe("blocked");
+    expect(approvedPaymentLinkEvidencePacket?.kind).toBe("revenue_payment_link_approved_packet");
+    expect(approvedPaymentLinkEvidencePacket?.state).toBe("blocked");
+    expect(paymentContinuationRun?.source).toBe("continuous.core.worker_runs");
+    expect(paymentContinuationRun?.state).toBe("done");
+    expect(paymentContinuationRun?.mode).toBe("continuation");
+    expect(paymentContinuationRunInput.command).toBe("continue");
+    expect(paymentContinuationRunRequest.approvalKind).toBe("payment_link_approval");
+    expect(paymentContinuationRunBudget.state).toBe("used");
+    expect(paymentContinuationRunBudget.reservationId).toBe(paymentContinuation.reservationId);
+    expect(paymentContinuationRunBudget.usageEventId).toBe(paymentContinuation.usageEventId);
+
+    const paymentContinuationReplay = await continueRevenueWorker({
+      approvalId: stringValue(paymentLinkResult.approvalRequestId),
+      idempotencyKey: `ci-worker-payment-link-continue-${runId}`,
+      tenantSlug: "continuous-demo",
+      operatorEmail: "owner@continuoushq.com",
+      db,
+    });
+
+    expect(paymentContinuationReplay.created).toBe(false);
+    expect(paymentContinuationReplay.workerRunId).toBe(paymentContinuation.workerRunId);
+    expect(paymentContinuationReplay.reservationId).toBe(paymentContinuation.reservationId);
+    expect(paymentContinuationReplay.usageEventId).toBe(paymentContinuation.usageEventId);
+    expect(objectValue(paymentContinuationReplay.output).status).toBe(
+      "approved_payment_link_execution_blocked",
+    );
 
     const run = await runRevenueWorker({
       idempotencyKey: `ci-worker-run-from-lead-read-${runId}`,
@@ -7254,6 +7437,182 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(readRunBudget.state).toBe("used");
     expect(readRunBudget.reservationId).toBe(readResult.reservationId);
     expect(readRunBudget.usageEventId).toBe(readResult.usageEventId);
+  }, 120_000);
+
+  it("continues payment-link revision and rejection outcomes with payment-specific packets", async () => {
+    const runId = randomUUID();
+    const preparePaymentLink = async (label: string) => {
+      const idempotencyKey = `ci-payment-link-${label}-${runId}`;
+      const envelope = await executeWorkerCommand({
+        command: "payment_link.prepare",
+        target: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        operatorEmail: "owner@continuoushq.com",
+        idempotencyKey,
+        config: {
+          invoiceObjectId: "33333333-3333-4333-8333-000000000006",
+          sourceRefs: {
+            quoteObjectId: "33333333-3333-4333-8333-000000000004",
+          },
+          policy: {
+            requireOwnerApproval: true,
+            providerPaymentLinkCreation: "blocked",
+            moneyMovement: "blocked",
+          },
+        },
+      });
+
+      return objectValue(envelope.result);
+    };
+
+    const revisionPrepareResult = await preparePaymentLink("revision");
+
+    await decideApproval({
+      approvalId: stringValue(revisionPrepareResult.approvalRequestId),
+      idempotencyKey: `ci-payment-link-revision-decision-${runId}`,
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      action: "revision_requested",
+      note: "Revise the payment-link packet before approval.",
+      subject: "worker",
+      db,
+    });
+
+    const revisionContinuation = await continueRevenueWorker({
+      approvalId: stringValue(revisionPrepareResult.approvalRequestId),
+      idempotencyKey: `ci-payment-link-revision-continue-${runId}`,
+      tenantSlug: "continuous-demo",
+      operatorEmail: "owner@continuoushq.com",
+      db,
+    });
+    const revisionOutput = objectValue(revisionContinuation.output);
+    const revisedPaymentLinkPacket = objectValue(revisionOutput.revisedPaymentLinkPacket);
+
+    expect(revisionContinuation.created).toBe(true);
+    expect(revisionOutput.status).toBe("revised_payment_link_packet_ready_for_owner_approval");
+    expect(revisionOutput.nextAction).toBe("owner_approval");
+    expect(revisionOutput.externalExecution).toBe("blocked");
+    expect(revisionOutput.externalMutation).toBe(false);
+    expect(revisionOutput.providerPaymentLinkCreation).toBe("blocked");
+    expect(revisionOutput.moneyMovement).toBe("blocked");
+    expect(revisionOutput.revisionApprovalRequestId).toBeTruthy();
+    expect(revisionOutput.revisedPaymentLinkEvidenceId).toBeTruthy();
+    expect(revisionOutput.revisedPaymentLinkDocumentId).toBeTruthy();
+    expect(revisionOutput.revisedPaymentLinkEvidencePacketId).toBeTruthy();
+    expect(revisedPaymentLinkPacket.status).toBe("revised_payment_link_packet_ready_for_owner_approval");
+    expect(revisedPaymentLinkPacket.providerPaymentLinkCreation).toBe("blocked");
+    expect(revisedPaymentLinkPacket.moneyMovement).toBe("blocked");
+
+    const [revisionWorkflow] = await db
+      .select()
+      .from(workflowRuns)
+      .where(eq(workflowRuns.id, stringValue(revisionContinuation.workflowRunId)))
+      .limit(1);
+    const revisionWorkflowData = objectValue(revisionWorkflow?.data);
+    const [revisionApproval] = await db
+      .select()
+      .from(approvalRequests)
+      .where(eq(approvalRequests.id, String(revisionOutput.revisionApprovalRequestId ?? "")))
+      .limit(1);
+    const [revisionTask] = await db
+      .select()
+      .from(tasks)
+      .where(eq(tasks.id, stringValue(revisionContinuation.taskId)))
+      .limit(1);
+    const [revisedDocument] = await db
+      .select()
+      .from(documents)
+      .where(eq(documents.id, String(revisionOutput.revisedPaymentLinkDocumentId ?? "")))
+      .limit(1);
+
+    expect(revisionWorkflow?.state).toBe("approval_requested");
+    expect(revisionWorkflowData.approvalRequestId).toBe(revisionOutput.revisionApprovalRequestId);
+    expect(revisionApproval?.kind).toBe("payment_link_approval");
+    expect(revisionApproval?.state).toBe("pending");
+    expect(revisionApproval?.workerRunId).toBe(revisionContinuation.workerRunId);
+    expect(revisionTask?.state).toBe("approval_required");
+    expect(revisedDocument?.kind).toBe("revenue_payment_link_revision_packet");
+    expect(revisedDocument?.state).toBe("prepared");
+
+    const revisionReplay = await continueRevenueWorker({
+      approvalId: stringValue(revisionPrepareResult.approvalRequestId),
+      idempotencyKey: `ci-payment-link-revision-continue-${runId}`,
+      tenantSlug: "continuous-demo",
+      operatorEmail: "owner@continuoushq.com",
+      db,
+    });
+
+    expect(revisionReplay.created).toBe(false);
+    expect(revisionReplay.workerRunId).toBe(revisionContinuation.workerRunId);
+    expect(objectValue(revisionReplay.output).status).toBe(
+      "revised_payment_link_packet_ready_for_owner_approval",
+    );
+
+    const rejectedPrepareResult = await preparePaymentLink("rejected");
+
+    await decideApproval({
+      approvalId: stringValue(rejectedPrepareResult.approvalRequestId),
+      idempotencyKey: `ci-payment-link-rejected-decision-${runId}`,
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      action: "rejected",
+      note: "Do not create this provider payment link.",
+      subject: "worker",
+      db,
+    });
+
+    const rejectedContinuation = await continueRevenueWorker({
+      approvalId: stringValue(rejectedPrepareResult.approvalRequestId),
+      idempotencyKey: `ci-payment-link-rejected-continue-${runId}`,
+      tenantSlug: "continuous-demo",
+      operatorEmail: "owner@continuoushq.com",
+      db,
+    });
+    const rejectedOutput = objectValue(rejectedContinuation.output);
+    const rejectedPaymentLinkPacket = objectValue(rejectedOutput.rejectedPaymentLinkPacket);
+
+    expect(rejectedContinuation.created).toBe(true);
+    expect(rejectedOutput.status).toBe("payment_link_rejected_closed");
+    expect(rejectedOutput.nextAction).toBe("stop_provider_payment_link_preparation");
+    expect(rejectedOutput.externalExecution).toBe("blocked");
+    expect(rejectedOutput.externalMutation).toBe(false);
+    expect(rejectedOutput.providerPaymentLinkCreation).toBe("blocked");
+    expect(rejectedOutput.moneyMovement).toBe("blocked");
+    expect(rejectedOutput.rejectedPaymentLinkEvidenceId).toBeTruthy();
+    expect(rejectedOutput.rejectedPaymentLinkDocumentId).toBeTruthy();
+    expect(rejectedOutput.rejectedPaymentLinkEvidencePacketId).toBeTruthy();
+    expect(rejectedPaymentLinkPacket.status).toBe("payment_link_rejected_closed");
+    expect(rejectedPaymentLinkPacket.stoppedAction).toBe("provider_payment_link.create");
+
+    const [rejectedWorkflow] = await db
+      .select()
+      .from(workflowRuns)
+      .where(eq(workflowRuns.id, stringValue(rejectedContinuation.workflowRunId)))
+      .limit(1);
+    const [rejectedTask] = await db
+      .select()
+      .from(tasks)
+      .where(eq(tasks.id, stringValue(rejectedContinuation.taskId)))
+      .limit(1);
+    const [rejectedDocument] = await db
+      .select()
+      .from(documents)
+      .where(eq(documents.id, String(rejectedOutput.rejectedPaymentLinkDocumentId ?? "")))
+      .limit(1);
+    const [rejectedPayment] = await db
+      .select()
+      .from(payments)
+      .where(eq(payments.id, stringValue(rejectedPrepareResult.paymentId)))
+      .limit(1);
+
+    expect(rejectedWorkflow?.state).toBe("rejected");
+    expect(rejectedWorkflow?.completedAt).toBeTruthy();
+    expect(rejectedTask?.state).toBe("blocked");
+    expect(rejectedDocument?.kind).toBe("revenue_payment_link_rejected_packet");
+    expect(rejectedDocument?.state).toBe("closed");
+    expect(rejectedPayment?.state).toBe("blocked");
   }, 120_000);
 
   it("executes Revenue commands through the app-server worker command surface", async () => {

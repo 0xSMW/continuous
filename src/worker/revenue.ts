@@ -61,7 +61,11 @@ const leadClassifyUnits = 2000;
 const responseDraftUnits = 4000;
 const paymentLinkPrepareUnits = 3000;
 const revenueContinuationUnits = 1000;
-const revenueContinuationApprovalKinds = new Set(["quote_approval", "quote_revision_approval"]);
+const revenueContinuationApprovalKinds = new Set([
+  "quote_approval",
+  "quote_revision_approval",
+  "payment_link_approval",
+]);
 type RevenueRunCommand = "run" | "quote.prepare";
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -2228,6 +2232,204 @@ function rejectedPacketFromOriginal(params: {
     externalSend: false,
     requiresApproval: false,
     nextAction: "stop_prepared_action",
+  } satisfies JsonObject;
+}
+
+function paymentLinkBasePacket(originalOutput: JsonObject) {
+  const previousPacket = objectValue(
+    originalOutput.revisedPaymentLinkPacket ?? originalOutput.approvedPaymentLinkPacket,
+  );
+
+  return Object.keys(previousPacket).length > 0 ? previousPacket : originalOutput;
+}
+
+function paymentLinkPacketDetails(originalOutput: JsonObject) {
+  const basePacket = paymentLinkBasePacket(originalOutput);
+  const approval = objectValue(basePacket.approval);
+  const revision = objectValue(basePacket.revision);
+  const rejection = objectValue(basePacket.rejection);
+
+  return {
+    basePacket,
+    paymentObjectId: uuidValue(basePacket.paymentObjectId ?? originalOutput.paymentObjectId),
+    paymentId: uuidValue(basePacket.paymentId ?? originalOutput.paymentId),
+    paymentInstructionId: uuidValue(basePacket.paymentInstructionId ?? originalOutput.paymentInstructionId),
+    invoiceId: uuidValue(basePacket.invoiceId ?? originalOutput.invoiceId),
+    invoiceObjectId: uuidValue(basePacket.invoiceObjectId ?? originalOutput.invoiceObjectId),
+    quoteObjectId: uuidValue(basePacket.quoteObjectId ?? originalOutput.quoteObjectId),
+    amountCents: numberValue(basePacket.amountCents ?? originalOutput.amountCents),
+    currency: stringValue(basePacket.currency ?? originalOutput.currency, "USD"),
+    customerName: stringValue(basePacket.customerName ?? originalOutput.customerName, "Customer"),
+    dueAt: stringValue(basePacket.dueAt ?? originalOutput.dueAt) || null,
+    blockers: stringList(basePacket.blockers ?? originalOutput.blockers),
+    revisionHistory: Array.isArray(basePacket.revisionHistory) ? basePacket.revisionHistory : [],
+    previousStatus: stringValue(
+      basePacket.status ??
+        approval.status ??
+        revision.status ??
+        rejection.status ??
+        originalOutput.status,
+      "payment_link_prepared_for_owner_approval",
+    ),
+  };
+}
+
+function approvedPaymentLinkPacketFromOriginal(params: {
+  originalOutput: JsonObject;
+  approvalNote: string;
+  now: Date;
+  approvalRequestId: string;
+  originalWorkerRunId: string;
+  workerRunId: string;
+  workflowRunId: string;
+}) {
+  const details = paymentLinkPacketDetails(params.originalOutput);
+  const approvedAt = params.now.toISOString();
+
+  return {
+    schemaVersion: "worker.revenue_operations.payment_link_approved_packet.v1",
+    status: "approved_payment_link_execution_blocked",
+    approval: {
+      approvalRequestId: params.approvalRequestId,
+      note: params.approvalNote,
+      approvedAt,
+    },
+    originalWorkerRunId: params.originalWorkerRunId,
+    workerRunId: params.workerRunId,
+    workflowRunId: params.workflowRunId,
+    paymentObjectId: details.paymentObjectId,
+    paymentId: details.paymentId,
+    paymentInstructionId: details.paymentInstructionId,
+    invoiceId: details.invoiceId,
+    invoiceObjectId: details.invoiceObjectId,
+    quoteObjectId: details.quoteObjectId,
+    amountCents: details.amountCents,
+    currency: details.currency,
+    customerName: details.customerName,
+    dueAt: details.dueAt,
+    blockers: details.blockers,
+    previousStatus: details.previousStatus,
+    preparedAction: "provider_payment_link.create",
+    adapterMode: "dry_run",
+    guardrails: [
+      "owner_approval_recorded",
+      "provider_payment_link_creation_blocked",
+      "money_movement_blocked",
+      "scoped_payment_provider_credentials_required",
+      "rollback_plan_required",
+    ],
+    externalExecution: "blocked",
+    externalMutation: false,
+    externalSend: false,
+    providerPaymentLinkCreation: "blocked",
+    moneyMovement: "blocked",
+    continuousExecuted: false,
+    requiresApproval: false,
+    nextAction: "enable_scoped_payment_provider_execution",
+  } satisfies JsonObject;
+}
+
+function revisedPaymentLinkPacketFromOriginal(params: {
+  originalOutput: JsonObject;
+  revisionNote: string;
+  now: Date;
+  approvalRequestId: string;
+  originalWorkerRunId: string;
+  workerRunId: string;
+  workflowRunId: string;
+}) {
+  const details = paymentLinkPacketDetails(params.originalOutput);
+  const generatedAt = params.now.toISOString();
+  const revisionNumber = details.revisionHistory.length + 1;
+  const revision = {
+    number: revisionNumber,
+    action: "revision_requested",
+    note: params.revisionNote,
+    originalApprovalRequestId: params.approvalRequestId,
+    originalWorkerRunId: params.originalWorkerRunId,
+    workerRunId: params.workerRunId,
+    workflowRunId: params.workflowRunId,
+    generatedAt,
+  };
+
+  return {
+    schemaVersion: "worker.revenue_operations.payment_link_revised_packet.v1",
+    status: "revised_payment_link_packet_ready_for_owner_approval",
+    revision,
+    revisionHistory: [...details.revisionHistory, revision],
+    paymentObjectId: details.paymentObjectId,
+    paymentId: details.paymentId,
+    paymentInstructionId: details.paymentInstructionId,
+    invoiceId: details.invoiceId,
+    invoiceObjectId: details.invoiceObjectId,
+    quoteObjectId: details.quoteObjectId,
+    amountCents: details.amountCents,
+    currency: details.currency,
+    customerName: details.customerName,
+    dueAt: details.dueAt,
+    blockers: details.blockers,
+    previousStatus: details.previousStatus,
+    revisionNote: params.revisionNote,
+    guardrails: [
+      "owner_approval_required",
+      "provider_payment_link_creation_blocked",
+      "money_movement_blocked",
+      "external_execution_blocked",
+    ],
+    externalExecution: "blocked",
+    externalMutation: false,
+    externalSend: false,
+    providerPaymentLinkCreation: "blocked",
+    moneyMovement: "blocked",
+    requiresApproval: true,
+    nextAction: "owner_approval",
+  } satisfies JsonObject;
+}
+
+function rejectedPaymentLinkPacketFromOriginal(params: {
+  originalOutput: JsonObject;
+  rejectionNote: string;
+  now: Date;
+  approvalRequestId: string;
+  originalWorkerRunId: string;
+  workerRunId: string;
+  workflowRunId: string;
+}) {
+  const details = paymentLinkPacketDetails(params.originalOutput);
+  const rejectedAt = params.now.toISOString();
+
+  return {
+    schemaVersion: "worker.revenue_operations.payment_link_rejected_packet.v1",
+    status: "payment_link_rejected_closed",
+    rejection: {
+      approvalRequestId: params.approvalRequestId,
+      note: params.rejectionNote,
+      rejectedAt,
+    },
+    originalWorkerRunId: params.originalWorkerRunId,
+    workerRunId: params.workerRunId,
+    workflowRunId: params.workflowRunId,
+    paymentObjectId: details.paymentObjectId,
+    paymentId: details.paymentId,
+    paymentInstructionId: details.paymentInstructionId,
+    invoiceId: details.invoiceId,
+    invoiceObjectId: details.invoiceObjectId,
+    quoteObjectId: details.quoteObjectId,
+    amountCents: details.amountCents,
+    currency: details.currency,
+    customerName: details.customerName,
+    dueAt: details.dueAt,
+    blockers: details.blockers,
+    previousStatus: details.previousStatus,
+    stoppedAction: "provider_payment_link.create",
+    guardrails: ["provider_payment_link_creation_blocked", "money_movement_blocked", "prepared_action_stopped"],
+    externalExecution: "blocked",
+    externalMutation: false,
+    externalSend: false,
+    providerPaymentLinkCreation: "blocked",
+    moneyMovement: "blocked",
+    requiresApproval: false,
+    nextAction: "stop_provider_payment_link_preparation",
   } satisfies JsonObject;
 }
 
@@ -6455,6 +6657,7 @@ export async function prepareRevenuePaymentLink(input: {
 
     const now = new Date();
     const state = refs.amountCents > 0 && refs.bankAccount ? "approval_required" : "blocked";
+    const workflowState = state === "approval_required" ? "approval_requested" : "blocked";
     const paymentAmountCents = Math.max(0, Math.round(refs.amountCents));
     const reservationId = coreReservationId || null;
     const usageEventId = null;
@@ -6654,7 +6857,7 @@ export async function prepareRevenuePaymentLink(input: {
         definitionId: workflowDefinition.id,
         objectId: paymentObject.id,
         workerId: context.worker.id,
-        state,
+        state: workflowState,
         idempotencyKey: input.idempotencyKey,
         data: {
           command: "payment_link.prepare",
@@ -7420,7 +7623,7 @@ export async function prepareRevenuePaymentLink(input: {
     await tx
       .update(workflowRuns)
       .set({
-        state,
+        state: workflowState,
         data: {
           ...output,
           adapterReceiptEvidenceId: receiptEvidence.id,
@@ -7743,7 +7946,7 @@ export async function continueRevenueWorker(input: {
   if (!revenueContinuationApprovalKinds.has(startApproval.kind)) {
     throw new RevenueWorkerUnavailableError(
       "worker_continuation_unsupported_approval_kind",
-      "Revenue Worker continuation supports quote approval continuations. Use a dedicated command for this approval kind.",
+      "Revenue Worker continuation supports quote and payment-link approval continuations. Use a dedicated command for this approval kind.",
       409,
     );
   }
@@ -7752,6 +7955,17 @@ export async function continueRevenueWorker(input: {
     throw new RevenueWorkerUnavailableError(
       "worker_continuation_unsupported_state",
       "Revenue Worker continuation supports approved, revision_requested, and rejected approvals.",
+      409,
+    );
+  }
+
+  if (
+    requestedExecution &&
+    startApproval.kind === "payment_link_approval"
+  ) {
+    throw new RevenueWorkerUnavailableError(
+      "worker_payment_link_execution_not_supported",
+      "config.execution is reserved for controlled customer-message sends; payment-link provider creation remains blocked.",
       409,
     );
   }
@@ -7963,7 +8177,7 @@ export async function continueRevenueWorker(input: {
     if (!revenueContinuationApprovalKinds.has(approval.kind)) {
       throw new RevenueWorkerUnavailableError(
         "worker_continuation_unsupported_approval_kind",
-        "Revenue Worker continuation supports quote approval continuations. Use a dedicated command for this approval kind.",
+        "Revenue Worker continuation supports quote and payment-link approval continuations. Use a dedicated command for this approval kind.",
         409,
       );
     }
@@ -7972,6 +8186,17 @@ export async function continueRevenueWorker(input: {
       throw new RevenueWorkerUnavailableError(
         "worker_continuation_unsupported_state",
         "Revenue Worker continuation supports approved, revision_requested, and rejected approvals.",
+        409,
+      );
+    }
+
+    if (
+      requestedExecution &&
+      approval.kind === "payment_link_approval"
+    ) {
+      throw new RevenueWorkerUnavailableError(
+        "worker_payment_link_execution_not_supported",
+        "config.execution is reserved for controlled customer-message sends; payment-link provider creation remains blocked.",
         409,
       );
     }
@@ -8043,6 +8268,1699 @@ export async function continueRevenueWorker(input: {
         "config.execution can only be used when the approval state is approved.",
         409,
       );
+    }
+
+    if (approval.kind === "payment_link_approval") {
+      const workerRun = run;
+      const adapterRunId = uuidValue(approvalContinuation.adapterRunId ?? originalOutput.adapterRunId);
+      const adapterActionId = uuidValue(
+        approvalContinuation.adapterActionId ?? originalOutput.adapterActionId,
+      );
+      const adapterReceiptEvidenceId = uuidValue(
+        approvalContinuation.adapterReceiptEvidenceId ?? originalOutput.adapterReceiptEvidenceId,
+      );
+      const continuationInput = {
+        approvalRequestId: approval.id,
+        originalWorkerRunId: originalRun.id,
+        workflowRunId: workflow.run.id,
+        workflowState: workflow.run.state,
+        action: approval.state,
+        note: stringValue(approvalDecision.note),
+        originalOutput,
+        approvalContinuation,
+      };
+
+      if (approval.state === "approved") {
+        const approvalNote = stringValue(approvalDecision.note, "Approved by operator.");
+        const approvedPaymentLinkPacket = approvedPaymentLinkPacketFromOriginal({
+          originalOutput,
+          approvalNote,
+          now,
+          approvalRequestId: approval.id,
+          originalWorkerRunId: originalRun.id,
+          workerRunId: workerRun.id,
+          workflowRunId: workflow.run.id,
+        });
+        const approvedPaymentLinkHash = hashObject(approvedPaymentLinkPacket);
+        const paymentObjectId = uuidValue(approvedPaymentLinkPacket.paymentObjectId ?? approval.objectId);
+        const paymentId = uuidValue(approvedPaymentLinkPacket.paymentId);
+        const paymentInstructionId = uuidValue(approvedPaymentLinkPacket.paymentInstructionId);
+
+        const [event] = await tx
+          .insert(events)
+          .values({
+            tenantId: context.worker.tenantId,
+            type: "worker.revenue_operations.payment_link_approval.blocked",
+            source,
+            actorType: "worker",
+            actorId: context.worker.id,
+            actorRef: `worker:${context.worker.id}`,
+            objectId: approval.objectId,
+            taskId: approval.taskId,
+            capabilityId: approval.capabilityId,
+            connectionId: originalRun.connectionId ?? context.connectionId,
+            idempotencyKey: input.idempotencyKey,
+            data: {
+              approvalRequestId: approval.id,
+              originalWorkerRunId: originalRun.id,
+              workerRunId: workerRun.id,
+              workflowRunId: workflow.run.id,
+              action: "approved",
+              status: "approved_payment_link_execution_blocked",
+              note: approvalNote,
+              adapterRunId: adapterRunId || null,
+              adapterActionId: adapterActionId || null,
+              adapterReceiptEvidenceId: adapterReceiptEvidenceId || null,
+              approvedPaymentLinkPacket,
+              approvedPaymentLinkHash,
+              nextAction: "enable_scoped_payment_provider_execution",
+              externalExecution: "blocked",
+              externalMutation: false,
+              externalSend: false,
+              providerPaymentLinkCreation: "blocked",
+              moneyMovement: "blocked",
+              requiresApproval: false,
+            },
+            occurredAt: now,
+          })
+          .returning({ id: events.id });
+        const [audit] = await tx
+          .insert(auditEvents)
+          .values({
+            tenantId: context.worker.tenantId,
+            type: "worker.revenue_operations.continuation.completed",
+            source,
+            actorType: "worker",
+            actorId: context.worker.id,
+            actorRef: `worker:${context.worker.id}`,
+            targetType: "worker_run",
+            targetId: workerRun.id,
+            taskId: approval.taskId,
+            workerRunId: workerRun.id,
+            approvalRequestId: approval.id,
+            eventId: event.id,
+            objectId: approval.objectId,
+            capabilityId: approval.capabilityId,
+            risk: approval.risk,
+            idempotencyKey: `${input.idempotencyKey}:payment_link_execution_blocked`,
+            data: {
+              approvalRequestId: approval.id,
+              originalWorkerRunId: originalRun.id,
+              workflowRunId: workflow.run.id,
+              workflowState: workflow.run.state,
+              action: "approved",
+              status: "approved_payment_link_execution_blocked",
+              nextAction: "enable_scoped_payment_provider_execution",
+              adapterRunId: adapterRunId || null,
+              adapterActionId: adapterActionId || null,
+              adapterReceiptEvidenceId: adapterReceiptEvidenceId || null,
+              approvedPaymentLinkPacket,
+              approvedPaymentLinkHash,
+              externalExecution: "blocked",
+              externalMutation: false,
+              externalSend: false,
+              providerPaymentLinkCreation: "blocked",
+              moneyMovement: "blocked",
+              requiresApproval: false,
+            },
+          })
+          .returning({ id: auditEvents.id });
+        const [trace] = await tx
+          .insert(evidence)
+          .values({
+            tenantId: context.worker.tenantId,
+            kind: "trace",
+            name: "Revenue payment-link approved continuation",
+            objectId: approval.objectId,
+            taskId: approval.taskId,
+            eventId: event.id,
+            capabilityId: approval.capabilityId,
+            actorType: "worker",
+            actorId: context.worker.id,
+            hash: traceHash(input.idempotencyKey, "payment_link_approved_continuation"),
+            data: {
+              approvalRequestId: approval.id,
+              originalWorkerRunId: originalRun.id,
+              workerRunId: workerRun.id,
+              workflowRunId: workflow.run.id,
+              auditEventId: audit.id,
+              action: "approved",
+              note: approvalNote,
+              originalOutput,
+              approvalContinuation,
+              adapterRunId: adapterRunId || null,
+              adapterActionId: adapterActionId || null,
+              adapterReceiptEvidenceId: adapterReceiptEvidenceId || null,
+              approvedPaymentLinkPacket,
+              approvedPaymentLinkHash,
+              nextAction: "enable_scoped_payment_provider_execution",
+              externalExecution: "blocked",
+              externalMutation: false,
+              externalSend: false,
+              providerPaymentLinkCreation: "blocked",
+              moneyMovement: "blocked",
+              requiresApproval: false,
+            },
+          })
+          .returning({ id: evidence.id });
+        const [approvedPaymentLinkEvidence] = await tx
+          .insert(evidence)
+          .values({
+            tenantId: context.worker.tenantId,
+            kind: "draft",
+            name: "Revenue approved payment-link packet",
+            objectId: approval.objectId,
+            taskId: approval.taskId,
+            eventId: event.id,
+            capabilityId: approval.capabilityId,
+            actorType: "worker",
+            actorId: context.worker.id,
+            hash: approvedPaymentLinkHash,
+            data: {
+              approvalRequestId: approval.id,
+              originalWorkerRunId: originalRun.id,
+              workerRunId: workerRun.id,
+              workflowRunId: workflow.run.id,
+              traceEvidenceId: trace.id,
+              action: "approved",
+              note: approvalNote,
+              approvedPaymentLinkPacket,
+              approvedPaymentLinkHash,
+              externalExecution: "blocked",
+              externalMutation: false,
+              externalSend: false,
+              providerPaymentLinkCreation: "blocked",
+              moneyMovement: "blocked",
+              requiresApproval: false,
+            },
+          })
+          .returning({ id: evidence.id });
+        const [approvedPaymentLinkDocument] = await tx
+          .insert(documents)
+          .values({
+            tenantId: context.worker.tenantId,
+            objectId: approval.objectId,
+            workflowRunId: workflow.run.id,
+            kind: "revenue_payment_link_approved_packet",
+            name: "Revenue approved payment-link packet",
+            state: "blocked",
+            sensitivity: approval.risk,
+            hash: approvedPaymentLinkHash,
+            data: {
+              approvalRequestId: approval.id,
+              originalWorkerRunId: originalRun.id,
+              workerRunId: workerRun.id,
+              workflowRunId: workflow.run.id,
+              eventId: event.id,
+              traceEvidenceId: trace.id,
+              approvedPaymentLinkEvidenceId: approvedPaymentLinkEvidence.id,
+              approvedPaymentLinkPacket,
+              approvedPaymentLinkHash,
+              externalExecution: "blocked",
+              externalMutation: false,
+              externalSend: false,
+              providerPaymentLinkCreation: "blocked",
+              moneyMovement: "blocked",
+              requiresApproval: false,
+            },
+            createdAt: now,
+            updatedAt: now,
+          })
+          .returning({ id: documents.id });
+        const [approvedPaymentLinkEvidencePacket] = await tx
+          .insert(evidencePackets)
+          .values({
+            tenantId: context.worker.tenantId,
+            documentId: approvedPaymentLinkDocument.id,
+            objectId: approval.objectId,
+            taskId: approval.taskId,
+            workflowRunId: workflow.run.id,
+            eventId: event.id,
+            capabilityId: approval.capabilityId,
+            kind: "revenue_payment_link_approved_packet",
+            name: "Revenue approved payment-link packet",
+            state: "blocked",
+            sensitivity: approval.risk,
+            evidenceIds: { ids: [trace.id, approvedPaymentLinkEvidence.id] },
+            documentIds: { ids: [approvedPaymentLinkDocument.id] },
+            data: {
+              approvalRequestId: approval.id,
+              originalWorkerRunId: originalRun.id,
+              workerRunId: workerRun.id,
+              workflowRunId: workflow.run.id,
+              eventId: event.id,
+              approvedPaymentLinkPacket,
+              approvedPaymentLinkHash,
+              externalExecution: "blocked",
+              externalMutation: false,
+              externalSend: false,
+              providerPaymentLinkCreation: "blocked",
+              moneyMovement: "blocked",
+              requiresApproval: false,
+            },
+            hash: approvedPaymentLinkHash,
+            createdAt: now,
+            updatedAt: now,
+          })
+          .returning({ id: evidencePackets.id });
+        const continuationLinks = {
+          approvedPaymentLinkEvidenceId: approvedPaymentLinkEvidence.id,
+          approvedPaymentLinkDocumentId: approvedPaymentLinkDocument.id,
+          approvedPaymentLinkEvidencePacketId: approvedPaymentLinkEvidencePacket.id,
+        };
+
+        const [workflowStep] = await tx
+          .insert(workflowSteps)
+          .values({
+            tenantId: context.worker.tenantId,
+            definitionId: workflow.definition.id,
+            workflowRunId: workflow.run.id,
+            eventId: event.id,
+            approvalRequestId: approval.id,
+            taskId: approval.taskId,
+            objectId: approval.objectId,
+            workerId: context.worker.id,
+            capabilityId: approval.capabilityId,
+            kind: "worker_continuation",
+            name: `${workflow.definition.key}:payment_link_execution_blocked`,
+            state: "done",
+            priority: approval.priority,
+            risk: approval.risk,
+            fromState: workflow.run.state,
+            toState: "execution_blocked",
+            attempt: 1,
+            maxAttempts: 1,
+            leaseOwner: `worker:${context.worker.id}`,
+            leasedUntil: now,
+            idempotencyKey: `${input.idempotencyKey}:payment_link_execution_blocked`,
+            input: continuationInput,
+            output: {
+              approvalRequestId: approval.id,
+              originalApprovalRequestId: approval.id,
+              workerRunId: workerRun.id,
+              originalWorkerRunId: originalRun.id,
+              auditEventId: audit.id,
+              evidenceId: trace.id,
+              adapterRunId: adapterRunId || null,
+              adapterActionId: adapterActionId || null,
+              adapterReceiptEvidenceId: adapterReceiptEvidenceId || null,
+              ...continuationLinks,
+              approvedPaymentLinkPacket,
+              nextAction: "enable_scoped_payment_provider_execution",
+              externalExecution: "blocked",
+              externalMutation: false,
+              externalSend: false,
+              providerPaymentLinkCreation: "blocked",
+              moneyMovement: "blocked",
+              requiresApproval: false,
+            },
+            startedAt: now,
+            completedAt: now,
+            updatedAt: now,
+          })
+          .returning({ id: workflowSteps.id });
+
+        const output = {
+          command: "continue",
+          status: "approved_payment_link_execution_blocked",
+          approvalRequestId: approval.id,
+          originalApprovalRequestId: approval.id,
+          originalWorkerRunId: originalRun.id,
+          workerRunId: workerRun.id,
+          workflowRunId: workflow.run.id,
+          workflowStepId: workflowStep.id,
+          eventId: event.id,
+          auditEventId: audit.id,
+          evidenceId: trace.id,
+          reservationId: coreReservationId || null,
+          usageEventId: null,
+          paymentObjectId: paymentObjectId || null,
+          paymentId: paymentId || null,
+          paymentInstructionId: paymentInstructionId || null,
+          invoiceId: uuidValue(approvedPaymentLinkPacket.invoiceId) || null,
+          invoiceObjectId: uuidValue(approvedPaymentLinkPacket.invoiceObjectId) || null,
+          quoteObjectId: uuidValue(approvedPaymentLinkPacket.quoteObjectId) || null,
+          amountCents: numberValue(approvedPaymentLinkPacket.amountCents),
+          currency: stringValue(approvedPaymentLinkPacket.currency, "USD"),
+          customerName: stringValue(approvedPaymentLinkPacket.customerName, "Customer"),
+          dueAt: stringValue(approvedPaymentLinkPacket.dueAt) || null,
+          adapterRunId: adapterRunId || null,
+          adapterActionId: adapterActionId || null,
+          adapterReceiptEvidenceId: adapterReceiptEvidenceId || null,
+          ...continuationLinks,
+          approvedPaymentLinkPacket,
+          approvedPaymentLinkHash,
+          nextAction: "enable_scoped_payment_provider_execution",
+          externalExecution: "blocked",
+          externalMutation: false,
+          externalSend: false,
+          providerPaymentLinkCreation: "blocked",
+          moneyMovement: "blocked",
+          requiresApproval: false,
+        };
+        const workflowData = objectValue(workflow.run.data);
+        const approvedPaymentLinkContinuation = {
+          ...output,
+          note: approvalNote,
+          action: "approved",
+          continuedAt: now.toISOString(),
+        };
+
+        await tx
+          .update(workflowRuns)
+          .set({
+            state: "execution_blocked",
+            data: {
+              ...workflowData,
+              approvedPaymentLinkContinuation,
+              lastWorkerContinuation: approvedPaymentLinkContinuation,
+              workflowStepIds: appendString(workflowData.workflowStepIds, workflowStep.id),
+            },
+            blockers: {
+              ...objectValue(workflow.run.blockers),
+              open: [
+                "provider_payment_link_creation_blocked",
+                "money_movement_blocked",
+                "scoped_payment_provider_credentials_required",
+              ],
+            },
+            completedAt: null,
+            updatedAt: now,
+          })
+          .where(eq(workflowRuns.id, workflow.run.id));
+
+        if (approval.taskId) {
+          const [task] = await tx
+            .select({ outcome: tasks.outcome })
+            .from(tasks)
+            .where(and(eq(tasks.tenantId, context.worker.tenantId), eq(tasks.id, approval.taskId)))
+            .limit(1);
+
+          await tx
+            .update(tasks)
+            .set({
+              state: "waiting",
+              outcome: {
+                ...objectValue(task?.outcome),
+                status: "approved_payment_link_execution_blocked",
+                approvalRequestId: approval.id,
+                approvedPaymentLinkContinuation,
+                ...continuationLinks,
+                approvedPaymentLinkPacket,
+                externalExecution: "blocked",
+                externalMutation: false,
+                externalSend: false,
+                providerPaymentLinkCreation: "blocked",
+                moneyMovement: "blocked",
+              },
+              updatedAt: now,
+            })
+            .where(eq(tasks.id, approval.taskId));
+        }
+
+        if (paymentObjectId) {
+          const [paymentObject] = await tx
+            .select({ data: objects.data })
+            .from(objects)
+            .where(and(eq(objects.tenantId, context.worker.tenantId), eq(objects.id, paymentObjectId)))
+            .limit(1);
+
+          await tx
+            .update(objects)
+            .set({
+              state: "execution_blocked",
+              data: {
+                ...objectValue(paymentObject?.data),
+                approvedPaymentLinkContinuation,
+                ...continuationLinks,
+                approvedPaymentLinkPacket,
+                externalExecution: "blocked",
+                externalMutation: false,
+                externalSend: false,
+                providerPaymentLinkCreation: "blocked",
+                moneyMovement: "blocked",
+              },
+              updatedAt: now,
+            })
+            .where(eq(objects.id, paymentObjectId));
+        }
+
+        if (paymentId) {
+          const [payment] = await tx
+            .select({ data: payments.data })
+            .from(payments)
+            .where(and(eq(payments.tenantId, context.worker.tenantId), eq(payments.id, paymentId)))
+            .limit(1);
+
+          await tx
+            .update(payments)
+            .set({
+              state: "execution_blocked",
+              data: {
+                ...objectValue(payment?.data),
+                approvedPaymentLinkContinuation,
+                ...continuationLinks,
+                approvedPaymentLinkPacket,
+                externalExecution: "blocked",
+                externalMutation: false,
+                externalSend: false,
+                providerPaymentLinkCreation: "blocked",
+                moneyMovement: "blocked",
+              },
+              updatedAt: now,
+            })
+            .where(eq(payments.id, paymentId));
+        }
+
+        if (paymentInstructionId) {
+          const [paymentInstruction] = await tx
+            .select({ data: paymentInstructions.data })
+            .from(paymentInstructions)
+            .where(
+              and(
+                eq(paymentInstructions.tenantId, context.worker.tenantId),
+                eq(paymentInstructions.id, paymentInstructionId),
+              ),
+            )
+            .limit(1);
+
+          await tx
+            .update(paymentInstructions)
+            .set({
+              state: "execution_blocked",
+              data: {
+                ...objectValue(paymentInstruction?.data),
+                approvedPaymentLinkContinuation,
+                ...continuationLinks,
+                approvedPaymentLinkPacket,
+                externalExecution: "blocked",
+                externalMutation: false,
+                externalSend: false,
+                providerPaymentLinkCreation: "blocked",
+                moneyMovement: "blocked",
+              },
+              updatedAt: now,
+            })
+            .where(eq(paymentInstructions.id, paymentInstructionId));
+        }
+
+        await tx
+          .update(workerRuns)
+          .set({
+            data: {
+              ...objectValue(originalRun.data),
+              output: {
+                ...originalOutput,
+                approvedPaymentLinkContinuation,
+                ...continuationLinks,
+                approvedPaymentLinkPacket,
+                externalExecution: "blocked",
+                externalMutation: false,
+                externalSend: false,
+                providerPaymentLinkCreation: "blocked",
+                moneyMovement: "blocked",
+              },
+              lastWorkerContinuation: approvedPaymentLinkContinuation,
+            },
+            updatedAt: now,
+          })
+          .where(eq(workerRuns.id, originalRun.id));
+
+        if (adapterActionId) {
+          const [adapterAction] = await tx
+            .select({
+              response: adapterActions.response,
+              receipt: adapterActions.receipt,
+            })
+            .from(adapterActions)
+            .where(and(eq(adapterActions.tenantId, context.worker.tenantId), eq(adapterActions.id, adapterActionId)))
+            .limit(1);
+
+          if (adapterAction) {
+            await tx
+              .update(adapterActions)
+              .set({
+                response: {
+                  ...adapterAction.response,
+                  approvedPaymentLinkContinuation,
+                  approvedPaymentLinkPacket,
+                  externalExecution: "blocked",
+                  externalMutation: false,
+                  externalSend: false,
+                  providerPaymentLinkCreation: "blocked",
+                  moneyMovement: "blocked",
+                },
+                receipt: {
+                  ...adapterAction.receipt,
+                  approvedPaymentLinkContinuation,
+                  externalMutation: false,
+                  externalSend: false,
+                  providerPaymentLinkCreation: "blocked",
+                  moneyMovement: "blocked",
+                },
+              })
+              .where(eq(adapterActions.id, adapterActionId));
+          }
+        }
+
+        if (adapterRunId) {
+          const [adapterRun] = await tx
+            .select({
+              data: adapterRuns.data,
+              receipt: adapterRuns.receipt,
+            })
+            .from(adapterRuns)
+            .where(and(eq(adapterRuns.tenantId, context.worker.tenantId), eq(adapterRuns.id, adapterRunId)))
+            .limit(1);
+
+          if (adapterRun) {
+            await tx
+              .update(adapterRuns)
+              .set({
+                data: {
+                  ...adapterRun.data,
+                  approvedPaymentLinkContinuation,
+                  externalExecution: "blocked",
+                  externalMutation: false,
+                  externalSend: false,
+                  providerPaymentLinkCreation: "blocked",
+                  moneyMovement: "blocked",
+                },
+                receipt: {
+                  ...adapterRun.receipt,
+                  approvedPaymentLinkContinuation,
+                  externalMutation: false,
+                  externalSend: false,
+                  providerPaymentLinkCreation: "blocked",
+                  moneyMovement: "blocked",
+                },
+              })
+              .where(eq(adapterRuns.id, adapterRunId));
+          }
+        }
+
+        await tx
+          .update(workerRuns)
+          .set({
+            eventId: event.id,
+            updatedAt: now,
+            data: {
+              ...objectValue(workerRun.data),
+              businessEventId: event.id,
+              businessAuditEventId: audit.id,
+              taskId: approval.taskId,
+              originalWorkerRunId: originalRun.id,
+              eventId: event.id,
+              approvalRequestId: approval.id,
+              auditEventId: audit.id,
+              evidenceId: trace.id,
+              workflowRunId: workflow.run.id,
+              workflowStepId: workflowStep.id,
+              reservationId: coreReservationId || null,
+              usageEventId: null,
+              pendingCompletion: {
+                output,
+              },
+            },
+          })
+          .where(eq(workerRuns.id, workerRun.id));
+
+        return {
+          created: true as const,
+          needsCompletion: true,
+          workerRunId: workerRun.id,
+          originalWorkerRunId: originalRun.id,
+          eventId: event.id,
+          taskId: approval.taskId,
+          reservationId: coreReservationId || null,
+          usageEventId: null,
+          approvalRequestId: approval.id,
+          auditEventId: audit.id,
+          evidenceId: trace.id,
+          workflowRunId: workflow.run.id,
+          workflowStepId: workflowStep.id,
+          output,
+        };
+      }
+
+      if (approval.state === "rejected") {
+        const rejectionNote = stringValue(approvalDecision.note, "Rejected by operator.");
+        const rejectedPaymentLinkPacket = rejectedPaymentLinkPacketFromOriginal({
+          originalOutput,
+          rejectionNote,
+          now,
+          approvalRequestId: approval.id,
+          originalWorkerRunId: originalRun.id,
+          workerRunId: workerRun.id,
+          workflowRunId: workflow.run.id,
+        });
+        const rejectedPaymentLinkHash = hashObject(rejectedPaymentLinkPacket);
+        const paymentObjectId = uuidValue(rejectedPaymentLinkPacket.paymentObjectId ?? approval.objectId);
+        const paymentId = uuidValue(rejectedPaymentLinkPacket.paymentId);
+        const paymentInstructionId = uuidValue(rejectedPaymentLinkPacket.paymentInstructionId);
+
+        const [event] = await tx
+          .insert(events)
+          .values({
+            tenantId: context.worker.tenantId,
+            type: "worker.revenue_operations.payment_link_rejection.closed",
+            source,
+            actorType: "worker",
+            actorId: context.worker.id,
+            actorRef: `worker:${context.worker.id}`,
+            objectId: approval.objectId,
+            taskId: approval.taskId,
+            capabilityId: approval.capabilityId,
+            connectionId: originalRun.connectionId ?? context.connectionId,
+            idempotencyKey: input.idempotencyKey,
+            data: {
+              approvalRequestId: approval.id,
+              originalWorkerRunId: originalRun.id,
+              workerRunId: workerRun.id,
+              workflowRunId: workflow.run.id,
+              action: "rejected",
+              status: "payment_link_rejected_closed",
+              note: rejectionNote,
+              adapterRunId: adapterRunId || null,
+              adapterActionId: adapterActionId || null,
+              adapterReceiptEvidenceId: adapterReceiptEvidenceId || null,
+              rejectedPaymentLinkPacket,
+              rejectedPaymentLinkHash,
+              nextAction: "stop_provider_payment_link_preparation",
+              externalExecution: "blocked",
+              externalMutation: false,
+              externalSend: false,
+              providerPaymentLinkCreation: "blocked",
+              moneyMovement: "blocked",
+              requiresApproval: false,
+            },
+            occurredAt: now,
+          })
+          .returning({ id: events.id });
+        const [audit] = await tx
+          .insert(auditEvents)
+          .values({
+            tenantId: context.worker.tenantId,
+            type: "worker.revenue_operations.continuation.completed",
+            source,
+            actorType: "worker",
+            actorId: context.worker.id,
+            actorRef: `worker:${context.worker.id}`,
+            targetType: "worker_run",
+            targetId: workerRun.id,
+            taskId: approval.taskId,
+            workerRunId: workerRun.id,
+            approvalRequestId: approval.id,
+            eventId: event.id,
+            objectId: approval.objectId,
+            capabilityId: approval.capabilityId,
+            risk: approval.risk,
+            idempotencyKey: `${input.idempotencyKey}:payment_link_rejected_closed`,
+            data: {
+              approvalRequestId: approval.id,
+              originalWorkerRunId: originalRun.id,
+              workflowRunId: workflow.run.id,
+              workflowState: workflow.run.state,
+              action: "rejected",
+              status: "payment_link_rejected_closed",
+              nextAction: "stop_provider_payment_link_preparation",
+              rejectedPaymentLinkPacket,
+              rejectedPaymentLinkHash,
+              externalExecution: "blocked",
+              externalMutation: false,
+              externalSend: false,
+              providerPaymentLinkCreation: "blocked",
+              moneyMovement: "blocked",
+              requiresApproval: false,
+            },
+          })
+          .returning({ id: auditEvents.id });
+        const [trace] = await tx
+          .insert(evidence)
+          .values({
+            tenantId: context.worker.tenantId,
+            kind: "trace",
+            name: "Revenue payment-link rejection continuation",
+            objectId: approval.objectId,
+            taskId: approval.taskId,
+            eventId: event.id,
+            capabilityId: approval.capabilityId,
+            actorType: "worker",
+            actorId: context.worker.id,
+            hash: traceHash(input.idempotencyKey, "payment_link_rejection_continuation"),
+            data: {
+              approvalRequestId: approval.id,
+              originalWorkerRunId: originalRun.id,
+              workerRunId: workerRun.id,
+              workflowRunId: workflow.run.id,
+              auditEventId: audit.id,
+              action: "rejected",
+              note: rejectionNote,
+              originalOutput,
+              approvalContinuation,
+              rejectedPaymentLinkPacket,
+              rejectedPaymentLinkHash,
+              nextAction: "stop_provider_payment_link_preparation",
+              externalExecution: "blocked",
+              externalMutation: false,
+              externalSend: false,
+              providerPaymentLinkCreation: "blocked",
+              moneyMovement: "blocked",
+              requiresApproval: false,
+            },
+          })
+          .returning({ id: evidence.id });
+        const [rejectedPaymentLinkEvidence] = await tx
+          .insert(evidence)
+          .values({
+            tenantId: context.worker.tenantId,
+            kind: "draft",
+            name: "Revenue rejected payment-link packet",
+            objectId: approval.objectId,
+            taskId: approval.taskId,
+            eventId: event.id,
+            capabilityId: approval.capabilityId,
+            actorType: "worker",
+            actorId: context.worker.id,
+            hash: rejectedPaymentLinkHash,
+            data: {
+              approvalRequestId: approval.id,
+              originalWorkerRunId: originalRun.id,
+              workerRunId: workerRun.id,
+              workflowRunId: workflow.run.id,
+              traceEvidenceId: trace.id,
+              action: "rejected",
+              note: rejectionNote,
+              rejectedPaymentLinkPacket,
+              rejectedPaymentLinkHash,
+              externalExecution: "blocked",
+              externalMutation: false,
+              externalSend: false,
+              providerPaymentLinkCreation: "blocked",
+              moneyMovement: "blocked",
+              requiresApproval: false,
+            },
+          })
+          .returning({ id: evidence.id });
+        const [rejectedPaymentLinkDocument] = await tx
+          .insert(documents)
+          .values({
+            tenantId: context.worker.tenantId,
+            objectId: approval.objectId,
+            workflowRunId: workflow.run.id,
+            kind: "revenue_payment_link_rejected_packet",
+            name: "Revenue rejected payment-link packet",
+            state: "closed",
+            sensitivity: approval.risk,
+            hash: rejectedPaymentLinkHash,
+            data: {
+              approvalRequestId: approval.id,
+              originalWorkerRunId: originalRun.id,
+              workerRunId: workerRun.id,
+              workflowRunId: workflow.run.id,
+              eventId: event.id,
+              traceEvidenceId: trace.id,
+              rejectedPaymentLinkEvidenceId: rejectedPaymentLinkEvidence.id,
+              rejectedPaymentLinkPacket,
+              rejectedPaymentLinkHash,
+              externalExecution: "blocked",
+              externalMutation: false,
+              externalSend: false,
+              providerPaymentLinkCreation: "blocked",
+              moneyMovement: "blocked",
+              requiresApproval: false,
+            },
+            createdAt: now,
+            updatedAt: now,
+          })
+          .returning({ id: documents.id });
+        const [rejectedPaymentLinkEvidencePacket] = await tx
+          .insert(evidencePackets)
+          .values({
+            tenantId: context.worker.tenantId,
+            documentId: rejectedPaymentLinkDocument.id,
+            objectId: approval.objectId,
+            taskId: approval.taskId,
+            workflowRunId: workflow.run.id,
+            eventId: event.id,
+            capabilityId: approval.capabilityId,
+            kind: "revenue_payment_link_rejected_packet",
+            name: "Revenue rejected payment-link packet",
+            state: "closed",
+            sensitivity: approval.risk,
+            evidenceIds: { ids: [trace.id, rejectedPaymentLinkEvidence.id] },
+            documentIds: { ids: [rejectedPaymentLinkDocument.id] },
+            data: {
+              approvalRequestId: approval.id,
+              originalWorkerRunId: originalRun.id,
+              workerRunId: workerRun.id,
+              workflowRunId: workflow.run.id,
+              eventId: event.id,
+              rejectedPaymentLinkPacket,
+              rejectedPaymentLinkHash,
+              externalExecution: "blocked",
+              externalMutation: false,
+              externalSend: false,
+              providerPaymentLinkCreation: "blocked",
+              moneyMovement: "blocked",
+              requiresApproval: false,
+            },
+            hash: rejectedPaymentLinkHash,
+            createdAt: now,
+            updatedAt: now,
+          })
+          .returning({ id: evidencePackets.id });
+        const continuationLinks = {
+          rejectedPaymentLinkEvidenceId: rejectedPaymentLinkEvidence.id,
+          rejectedPaymentLinkDocumentId: rejectedPaymentLinkDocument.id,
+          rejectedPaymentLinkEvidencePacketId: rejectedPaymentLinkEvidencePacket.id,
+        };
+
+        const [workflowStep] = await tx
+          .insert(workflowSteps)
+          .values({
+            tenantId: context.worker.tenantId,
+            definitionId: workflow.definition.id,
+            workflowRunId: workflow.run.id,
+            eventId: event.id,
+            approvalRequestId: approval.id,
+            taskId: approval.taskId,
+            objectId: approval.objectId,
+            workerId: context.worker.id,
+            capabilityId: approval.capabilityId,
+            kind: "worker_continuation",
+            name: `${workflow.definition.key}:payment_link_rejected_closed`,
+            state: "done",
+            priority: approval.priority,
+            risk: approval.risk,
+            fromState: workflow.run.state,
+            toState: "rejected",
+            attempt: 1,
+            maxAttempts: 1,
+            leaseOwner: `worker:${context.worker.id}`,
+            leasedUntil: now,
+            idempotencyKey: `${input.idempotencyKey}:payment_link_rejected_closed`,
+            input: continuationInput,
+            output: {
+              approvalRequestId: approval.id,
+              originalApprovalRequestId: approval.id,
+              workerRunId: workerRun.id,
+              originalWorkerRunId: originalRun.id,
+              auditEventId: audit.id,
+              evidenceId: trace.id,
+              adapterRunId: adapterRunId || null,
+              adapterActionId: adapterActionId || null,
+              adapterReceiptEvidenceId: adapterReceiptEvidenceId || null,
+              ...continuationLinks,
+              rejectedPaymentLinkPacket,
+              nextAction: "stop_provider_payment_link_preparation",
+              externalExecution: "blocked",
+              externalMutation: false,
+              externalSend: false,
+              providerPaymentLinkCreation: "blocked",
+              moneyMovement: "blocked",
+              requiresApproval: false,
+            },
+            startedAt: now,
+            completedAt: now,
+            updatedAt: now,
+          })
+          .returning({ id: workflowSteps.id });
+
+        const output = {
+          command: "continue",
+          status: "payment_link_rejected_closed",
+          approvalRequestId: approval.id,
+          originalApprovalRequestId: approval.id,
+          originalWorkerRunId: originalRun.id,
+          workerRunId: workerRun.id,
+          workflowRunId: workflow.run.id,
+          workflowStepId: workflowStep.id,
+          eventId: event.id,
+          auditEventId: audit.id,
+          evidenceId: trace.id,
+          reservationId: coreReservationId || null,
+          usageEventId: null,
+          paymentObjectId: paymentObjectId || null,
+          paymentId: paymentId || null,
+          paymentInstructionId: paymentInstructionId || null,
+          invoiceId: uuidValue(rejectedPaymentLinkPacket.invoiceId) || null,
+          invoiceObjectId: uuidValue(rejectedPaymentLinkPacket.invoiceObjectId) || null,
+          quoteObjectId: uuidValue(rejectedPaymentLinkPacket.quoteObjectId) || null,
+          amountCents: numberValue(rejectedPaymentLinkPacket.amountCents),
+          currency: stringValue(rejectedPaymentLinkPacket.currency, "USD"),
+          customerName: stringValue(rejectedPaymentLinkPacket.customerName, "Customer"),
+          dueAt: stringValue(rejectedPaymentLinkPacket.dueAt) || null,
+          adapterRunId: adapterRunId || null,
+          adapterActionId: adapterActionId || null,
+          adapterReceiptEvidenceId: adapterReceiptEvidenceId || null,
+          ...continuationLinks,
+          rejectedPaymentLinkPacket,
+          rejectedPaymentLinkHash,
+          nextAction: "stop_provider_payment_link_preparation",
+          externalExecution: "blocked",
+          externalMutation: false,
+          externalSend: false,
+          providerPaymentLinkCreation: "blocked",
+          moneyMovement: "blocked",
+          requiresApproval: false,
+        };
+        const workflowData = objectValue(workflow.run.data);
+        const rejectionContinuation = {
+          ...output,
+          note: rejectionNote,
+          action: "rejected",
+          continuedAt: now.toISOString(),
+        };
+
+        await tx
+          .update(workflowRuns)
+          .set({
+            state: "rejected",
+            data: {
+              ...workflowData,
+              paymentLinkRejectionContinuation: rejectionContinuation,
+              lastWorkerContinuation: rejectionContinuation,
+              workflowStepIds: appendString(workflowData.workflowStepIds, workflowStep.id),
+            },
+            blockers: {
+              ...objectValue(workflow.run.blockers),
+              open: [],
+            },
+            completedAt: workflow.run.completedAt ?? now,
+            updatedAt: now,
+          })
+          .where(eq(workflowRuns.id, workflow.run.id));
+
+        if (approval.taskId) {
+          const [task] = await tx
+            .select({ outcome: tasks.outcome })
+            .from(tasks)
+            .where(and(eq(tasks.tenantId, context.worker.tenantId), eq(tasks.id, approval.taskId)))
+            .limit(1);
+
+          await tx
+            .update(tasks)
+            .set({
+              state: "blocked",
+              outcome: {
+                ...objectValue(task?.outcome),
+                status: "payment_link_rejected_closed",
+                approvalRequestId: approval.id,
+                rejectionContinuation,
+                ...continuationLinks,
+                rejectedPaymentLinkPacket,
+                externalExecution: "blocked",
+                externalMutation: false,
+                externalSend: false,
+                providerPaymentLinkCreation: "blocked",
+                moneyMovement: "blocked",
+              },
+              updatedAt: now,
+            })
+            .where(eq(tasks.id, approval.taskId));
+        }
+
+        if (paymentObjectId) {
+          await tx.update(objects).set({ state: "blocked", updatedAt: now }).where(eq(objects.id, paymentObjectId));
+        }
+
+        if (paymentId) {
+          await tx.update(payments).set({ state: "blocked", updatedAt: now }).where(eq(payments.id, paymentId));
+        }
+
+        if (paymentInstructionId) {
+          await tx
+            .update(paymentInstructions)
+            .set({ state: "blocked", updatedAt: now })
+            .where(eq(paymentInstructions.id, paymentInstructionId));
+        }
+
+        await tx
+          .update(workerRuns)
+          .set({
+            data: {
+              ...objectValue(originalRun.data),
+              output: {
+                ...originalOutput,
+                paymentLinkRejectionContinuation: rejectionContinuation,
+                ...continuationLinks,
+                rejectedPaymentLinkPacket,
+                externalExecution: "blocked",
+                externalMutation: false,
+                externalSend: false,
+                providerPaymentLinkCreation: "blocked",
+                moneyMovement: "blocked",
+              },
+              lastWorkerContinuation: rejectionContinuation,
+            },
+            updatedAt: now,
+          })
+          .where(eq(workerRuns.id, originalRun.id));
+
+        await tx
+          .update(workerRuns)
+          .set({
+            eventId: event.id,
+            updatedAt: now,
+            data: {
+              ...objectValue(workerRun.data),
+              businessEventId: event.id,
+              businessAuditEventId: audit.id,
+              taskId: approval.taskId,
+              originalWorkerRunId: originalRun.id,
+              eventId: event.id,
+              approvalRequestId: approval.id,
+              auditEventId: audit.id,
+              evidenceId: trace.id,
+              workflowRunId: workflow.run.id,
+              workflowStepId: workflowStep.id,
+              reservationId: coreReservationId || null,
+              usageEventId: null,
+              pendingCompletion: {
+                output,
+              },
+            },
+          })
+          .where(eq(workerRuns.id, workerRun.id));
+
+        return {
+          created: true as const,
+          needsCompletion: true,
+          workerRunId: workerRun.id,
+          originalWorkerRunId: originalRun.id,
+          eventId: event.id,
+          taskId: approval.taskId,
+          reservationId: coreReservationId || null,
+          usageEventId: null,
+          approvalRequestId: approval.id,
+          auditEventId: audit.id,
+          evidenceId: trace.id,
+          workflowRunId: workflow.run.id,
+          workflowStepId: workflowStep.id,
+          output,
+        };
+      }
+
+      const revisionNote = stringValue(approvalDecision.note, "Revision requested by operator.");
+      const revisedPaymentLinkPacket = revisedPaymentLinkPacketFromOriginal({
+        originalOutput,
+        revisionNote,
+        now,
+        approvalRequestId: approval.id,
+        originalWorkerRunId: originalRun.id,
+        workerRunId: workerRun.id,
+        workflowRunId: workflow.run.id,
+      });
+      const revisedPaymentLinkHash = hashObject(revisedPaymentLinkPacket);
+      const paymentObjectId = uuidValue(revisedPaymentLinkPacket.paymentObjectId ?? approval.objectId);
+      const paymentId = uuidValue(revisedPaymentLinkPacket.paymentId);
+      const paymentInstructionId = uuidValue(revisedPaymentLinkPacket.paymentInstructionId);
+
+      const [event] = await tx
+        .insert(events)
+        .values({
+          tenantId: context.worker.tenantId,
+          type: "worker.revenue_operations.payment_link_revision.prepared",
+          source,
+          actorType: "worker",
+          actorId: context.worker.id,
+          actorRef: `worker:${context.worker.id}`,
+          objectId: approval.objectId,
+          taskId: approval.taskId,
+          capabilityId: approval.capabilityId,
+          connectionId: originalRun.connectionId ?? context.connectionId,
+          idempotencyKey: input.idempotencyKey,
+          data: {
+            approvalRequestId: approval.id,
+            originalWorkerRunId: originalRun.id,
+            workerRunId: workerRun.id,
+            workflowRunId: workflow.run.id,
+            action: "revision_requested",
+            status: "revised_payment_link_packet_ready_for_owner_approval",
+            note: revisionNote,
+            revisedPaymentLinkPacket,
+            revisedPaymentLinkHash,
+            nextAction: "owner_approval",
+            externalExecution: "blocked",
+            externalMutation: false,
+            externalSend: false,
+            providerPaymentLinkCreation: "blocked",
+            moneyMovement: "blocked",
+            requiresApproval: true,
+          },
+          occurredAt: now,
+        })
+        .returning({ id: events.id });
+      const [audit] = await tx
+        .insert(auditEvents)
+        .values({
+          tenantId: context.worker.tenantId,
+          type: "worker.revenue_operations.continuation.completed",
+          source,
+          actorType: "worker",
+          actorId: context.worker.id,
+          actorRef: `worker:${context.worker.id}`,
+          targetType: "worker_run",
+          targetId: workerRun.id,
+          taskId: approval.taskId,
+          workerRunId: workerRun.id,
+          approvalRequestId: approval.id,
+          eventId: event.id,
+          objectId: approval.objectId,
+          capabilityId: approval.capabilityId,
+          risk: approval.risk,
+          idempotencyKey: `${input.idempotencyKey}:payment_link_revision_continuation`,
+          data: {
+            approvalRequestId: approval.id,
+            originalWorkerRunId: originalRun.id,
+            workflowRunId: workflow.run.id,
+            workflowState: workflow.run.state,
+            action: "revision_requested",
+            status: "revised_payment_link_packet_ready_for_owner_approval",
+            nextAction: "owner_approval",
+            revisedPaymentLinkPacket,
+            revisedPaymentLinkHash,
+            externalExecution: "blocked",
+            externalMutation: false,
+            externalSend: false,
+            providerPaymentLinkCreation: "blocked",
+            moneyMovement: "blocked",
+            requiresApproval: true,
+          },
+        })
+        .returning({ id: auditEvents.id });
+      const [trace] = await tx
+        .insert(evidence)
+        .values({
+          tenantId: context.worker.tenantId,
+          kind: "trace",
+          name: "Revenue payment-link revision continuation",
+          objectId: approval.objectId,
+          taskId: approval.taskId,
+          eventId: event.id,
+          capabilityId: approval.capabilityId,
+          actorType: "worker",
+          actorId: context.worker.id,
+          hash: traceHash(input.idempotencyKey, "payment_link_revision_continuation"),
+          data: {
+            approvalRequestId: approval.id,
+            originalWorkerRunId: originalRun.id,
+            workerRunId: workerRun.id,
+            workflowRunId: workflow.run.id,
+            auditEventId: audit.id,
+            action: "revision_requested",
+            note: revisionNote,
+            originalOutput,
+            approvalContinuation,
+            revisedPaymentLinkPacket,
+            revisedPaymentLinkHash,
+            nextAction: "owner_approval",
+            externalExecution: "blocked",
+            externalMutation: false,
+            externalSend: false,
+            providerPaymentLinkCreation: "blocked",
+            moneyMovement: "blocked",
+            requiresApproval: true,
+          },
+        })
+        .returning({ id: evidence.id });
+      const [revisedPaymentLinkEvidence] = await tx
+        .insert(evidence)
+        .values({
+          tenantId: context.worker.tenantId,
+          kind: "draft",
+          name: "Revenue revised payment-link packet",
+          objectId: approval.objectId,
+          taskId: approval.taskId,
+          eventId: event.id,
+          capabilityId: approval.capabilityId,
+          actorType: "worker",
+          actorId: context.worker.id,
+          hash: revisedPaymentLinkHash,
+          data: {
+            approvalRequestId: approval.id,
+            originalWorkerRunId: originalRun.id,
+            workerRunId: workerRun.id,
+            workflowRunId: workflow.run.id,
+            traceEvidenceId: trace.id,
+            action: "revision_requested",
+            note: revisionNote,
+            revisedPaymentLinkPacket,
+            revisedPaymentLinkHash,
+            externalExecution: "blocked",
+            externalMutation: false,
+            externalSend: false,
+            providerPaymentLinkCreation: "blocked",
+            moneyMovement: "blocked",
+            requiresApproval: true,
+          },
+        })
+        .returning({ id: evidence.id });
+      const [revisedPaymentLinkDocument] = await tx
+        .insert(documents)
+        .values({
+          tenantId: context.worker.tenantId,
+          objectId: approval.objectId,
+          workflowRunId: workflow.run.id,
+          kind: "revenue_payment_link_revision_packet",
+          name: "Revenue payment-link revision packet",
+          state: "prepared",
+          sensitivity: approval.risk,
+          hash: revisedPaymentLinkHash,
+          data: {
+            approvalRequestId: approval.id,
+            originalWorkerRunId: originalRun.id,
+            workerRunId: workerRun.id,
+            workflowRunId: workflow.run.id,
+            eventId: event.id,
+            traceEvidenceId: trace.id,
+            revisedPaymentLinkEvidenceId: revisedPaymentLinkEvidence.id,
+            revisedPaymentLinkPacket,
+            revisedPaymentLinkHash,
+            externalExecution: "blocked",
+            externalMutation: false,
+            externalSend: false,
+            providerPaymentLinkCreation: "blocked",
+            moneyMovement: "blocked",
+            requiresApproval: true,
+          },
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning({ id: documents.id });
+      const [revisedPaymentLinkEvidencePacket] = await tx
+        .insert(evidencePackets)
+        .values({
+          tenantId: context.worker.tenantId,
+          documentId: revisedPaymentLinkDocument.id,
+          objectId: approval.objectId,
+          taskId: approval.taskId,
+          workflowRunId: workflow.run.id,
+          eventId: event.id,
+          capabilityId: approval.capabilityId,
+          kind: "revenue_payment_link_revision_packet",
+          name: "Revenue payment-link revision packet",
+          state: "prepared",
+          sensitivity: approval.risk,
+          evidenceIds: { ids: [trace.id, revisedPaymentLinkEvidence.id] },
+          documentIds: { ids: [revisedPaymentLinkDocument.id] },
+          data: {
+            approvalRequestId: approval.id,
+            originalWorkerRunId: originalRun.id,
+            workerRunId: workerRun.id,
+            workflowRunId: workflow.run.id,
+            eventId: event.id,
+            revisedPaymentLinkPacket,
+            revisedPaymentLinkHash,
+            externalExecution: "blocked",
+            externalMutation: false,
+            externalSend: false,
+            providerPaymentLinkCreation: "blocked",
+            moneyMovement: "blocked",
+            requiresApproval: true,
+          },
+          hash: revisedPaymentLinkHash,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning({ id: evidencePackets.id });
+      const [revisionApproval] = await tx
+        .insert(approvalRequests)
+        .values({
+          tenantId: context.worker.tenantId,
+          taskId: approval.taskId,
+          workerRunId: workerRun.id,
+          workflowRunId: workflow.run.id,
+          eventId: event.id,
+          objectId: approval.objectId,
+          capabilityId: approval.capabilityId,
+          requesterType: "worker",
+          requesterId: context.worker.id,
+          requesterRef: `worker:${context.worker.id}`,
+          reviewerUserId: approval.reviewerUserId ?? operator.id,
+          kind: "payment_link_approval",
+          state: "pending",
+          priority: approval.priority,
+          risk: approval.risk,
+          title: "Review revised payment-link packet",
+          summary: "Revenue Worker prepared a revised payment-link packet for owner approval; provider creation and money movement remain blocked.",
+          requestedAction: {
+            action: "review_payment_link_packet",
+            originalApprovalRequestId: approval.id,
+            originalWorkerRunId: originalRun.id,
+            revisedPaymentLinkEvidenceId: revisedPaymentLinkEvidence.id,
+            revisedPaymentLinkDocumentId: revisedPaymentLinkDocument.id,
+            revisedPaymentLinkEvidencePacketId: revisedPaymentLinkEvidencePacket.id,
+            paymentObjectId,
+            paymentId,
+            paymentInstructionId,
+            adapterRunId: adapterRunId || null,
+            adapterActionId: adapterActionId || null,
+            adapterReceiptEvidenceId: adapterReceiptEvidenceId || null,
+            revisedPaymentLinkPacket,
+            externalExecution: "blocked",
+            externalMutation: false,
+            externalSend: false,
+            providerPaymentLinkCreation: "blocked",
+            moneyMovement: "blocked",
+            currentMode: "dry_run",
+          },
+          evidence: {
+            eventId: event.id,
+            traceEvidenceId: trace.id,
+            revisedPaymentLinkEvidenceId: revisedPaymentLinkEvidence.id,
+            revisedPaymentLinkDocumentId: revisedPaymentLinkDocument.id,
+            revisedPaymentLinkEvidencePacketId: revisedPaymentLinkEvidencePacket.id,
+            originalApprovalRequestId: approval.id,
+            originalWorkerRunId: originalRun.id,
+            workflowRunId: workflow.run.id,
+            adapterRunId: adapterRunId || null,
+            adapterActionId: adapterActionId || null,
+            adapterReceiptEvidenceId: adapterReceiptEvidenceId || null,
+          },
+          policy: {
+            ...objectValue(approval.policy),
+            providerPaymentLinkCreation: "approval_required_but_currently_blocked",
+            moneyMovement: "blocked",
+            revisionOfApprovalRequestId: approval.id,
+          },
+          data: {
+            originalApprovalRequestId: approval.id,
+            originalWorkerRunId: originalRun.id,
+            workerRunId: workerRun.id,
+            workflowRunId: workflow.run.id,
+            eventId: event.id,
+            auditEventId: audit.id,
+            traceEvidenceId: trace.id,
+            revisedPaymentLinkEvidenceId: revisedPaymentLinkEvidence.id,
+            revisedPaymentLinkDocumentId: revisedPaymentLinkDocument.id,
+            revisedPaymentLinkEvidencePacketId: revisedPaymentLinkEvidencePacket.id,
+            adapterRunId: adapterRunId || null,
+            adapterActionId: adapterActionId || null,
+            adapterReceiptEvidenceId: adapterReceiptEvidenceId || null,
+            revisionNote,
+            revisedPaymentLinkPacket,
+            revisedPaymentLinkHash,
+            externalExecution: "blocked",
+            externalMutation: false,
+            externalSend: false,
+            providerPaymentLinkCreation: "blocked",
+            moneyMovement: "blocked",
+          },
+        })
+        .returning({ id: approvalRequests.id });
+      const [revisionApprovalAudit] = await tx
+        .insert(auditEvents)
+        .values({
+          tenantId: context.worker.tenantId,
+          type: "approval.requested",
+          source,
+          actorType: "worker",
+          actorId: context.worker.id,
+          actorRef: `worker:${context.worker.id}`,
+          targetType: "approval_request",
+          targetId: revisionApproval.id,
+          taskId: approval.taskId,
+          workerRunId: workerRun.id,
+          approvalRequestId: revisionApproval.id,
+          eventId: event.id,
+          objectId: approval.objectId,
+          capabilityId: approval.capabilityId,
+          risk: approval.risk,
+          idempotencyKey: `${input.idempotencyKey}:payment_link_approval_requested`,
+          data: {
+            originalApprovalRequestId: approval.id,
+            originalWorkerRunId: originalRun.id,
+            reviewerUserId: approval.reviewerUserId ?? operator.id,
+            operatorUserId: operator.id,
+            workflowRunId: workflow.run.id,
+            traceEvidenceId: trace.id,
+            revisedPaymentLinkEvidenceId: revisedPaymentLinkEvidence.id,
+            revisedPaymentLinkDocumentId: revisedPaymentLinkDocument.id,
+            revisedPaymentLinkEvidencePacketId: revisedPaymentLinkEvidencePacket.id,
+            revisedPaymentLinkHash,
+            externalExecution: "blocked",
+            externalMutation: false,
+            externalSend: false,
+            providerPaymentLinkCreation: "blocked",
+            moneyMovement: "blocked",
+          },
+        })
+        .returning({ id: auditEvents.id });
+      const [workflowStep] = await tx
+        .insert(workflowSteps)
+        .values({
+          tenantId: context.worker.tenantId,
+          definitionId: workflow.definition.id,
+          workflowRunId: workflow.run.id,
+          eventId: event.id,
+          approvalRequestId: revisionApproval.id,
+          taskId: approval.taskId,
+          objectId: approval.objectId,
+          workerId: context.worker.id,
+          capabilityId: approval.capabilityId,
+          kind: "worker_continuation",
+          name: `${workflow.definition.key}:payment_link_revision_prepared`,
+          state: "done",
+          priority: approval.priority,
+          risk: approval.risk,
+          fromState: workflow.run.state,
+          toState: "approval_requested",
+          attempt: 1,
+          maxAttempts: 1,
+          leaseOwner: `worker:${context.worker.id}`,
+          leasedUntil: now,
+          idempotencyKey: `${input.idempotencyKey}:payment_link_approval_requested`,
+          input: continuationInput,
+          output: {
+            approvalRequestId: revisionApproval.id,
+            originalApprovalRequestId: approval.id,
+            revisionApprovalRequestId: revisionApproval.id,
+            revisionApprovalAuditEventId: revisionApprovalAudit.id,
+            workerRunId: workerRun.id,
+            originalWorkerRunId: originalRun.id,
+            auditEventId: audit.id,
+            evidenceId: trace.id,
+            revisedPaymentLinkEvidenceId: revisedPaymentLinkEvidence.id,
+            revisedPaymentLinkDocumentId: revisedPaymentLinkDocument.id,
+            revisedPaymentLinkEvidencePacketId: revisedPaymentLinkEvidencePacket.id,
+            revisedPaymentLinkPacket,
+            nextAction: "owner_approval",
+            externalExecution: "blocked",
+            externalMutation: false,
+            externalSend: false,
+            providerPaymentLinkCreation: "blocked",
+            moneyMovement: "blocked",
+            requiresApproval: true,
+          },
+          startedAt: now,
+          completedAt: now,
+          updatedAt: now,
+        })
+        .returning({ id: workflowSteps.id });
+
+      const output = {
+        command: "continue",
+        status: "revised_payment_link_packet_ready_for_owner_approval",
+        approvalRequestId: revisionApproval.id,
+        originalApprovalRequestId: approval.id,
+        revisionApprovalRequestId: revisionApproval.id,
+        revisionApprovalAuditEventId: revisionApprovalAudit.id,
+        originalWorkerRunId: originalRun.id,
+        workerRunId: workerRun.id,
+        workflowRunId: workflow.run.id,
+        workflowStepId: workflowStep.id,
+        eventId: event.id,
+        auditEventId: audit.id,
+        evidenceId: trace.id,
+        reservationId: coreReservationId || null,
+        usageEventId: null,
+        paymentObjectId: paymentObjectId || null,
+        paymentId: paymentId || null,
+        paymentInstructionId: paymentInstructionId || null,
+        invoiceId: uuidValue(revisedPaymentLinkPacket.invoiceId) || null,
+        invoiceObjectId: uuidValue(revisedPaymentLinkPacket.invoiceObjectId) || null,
+        quoteObjectId: uuidValue(revisedPaymentLinkPacket.quoteObjectId) || null,
+        amountCents: numberValue(revisedPaymentLinkPacket.amountCents),
+        currency: stringValue(revisedPaymentLinkPacket.currency, "USD"),
+        customerName: stringValue(revisedPaymentLinkPacket.customerName, "Customer"),
+        dueAt: stringValue(revisedPaymentLinkPacket.dueAt) || null,
+        revisedPaymentLinkEvidenceId: revisedPaymentLinkEvidence.id,
+        revisedPaymentLinkDocumentId: revisedPaymentLinkDocument.id,
+        revisedPaymentLinkEvidencePacketId: revisedPaymentLinkEvidencePacket.id,
+        revisedPaymentLinkPacket,
+        revisedPaymentLinkHash,
+        nextAction: "owner_approval",
+        externalExecution: "blocked",
+        externalMutation: false,
+        externalSend: false,
+        providerPaymentLinkCreation: "blocked",
+        moneyMovement: "blocked",
+        requiresApproval: true,
+      };
+      const workflowData = objectValue(workflow.run.data);
+      const revisionContinuation = {
+        ...output,
+        note: revisionNote,
+        action: "revision_requested",
+        continuedAt: now.toISOString(),
+      };
+
+      await tx
+        .update(workflowRuns)
+        .set({
+          state: "approval_requested",
+          data: {
+            ...workflowData,
+            approvalRequestId: revisionApproval.id,
+            originalApprovalRequestId: approval.id,
+            revisionApprovalRequestId: revisionApproval.id,
+            revisionApprovalAuditEventId: revisionApprovalAudit.id,
+            revisedPaymentLinkEvidenceId: revisedPaymentLinkEvidence.id,
+            revisedPaymentLinkDocumentId: revisedPaymentLinkDocument.id,
+            revisedPaymentLinkEvidencePacketId: revisedPaymentLinkEvidencePacket.id,
+            revisedPaymentLinkPacket,
+            revisedPaymentLinkHash,
+            paymentLinkRevisionContinuation: revisionContinuation,
+            lastWorkerContinuation: revisionContinuation,
+            workflowStepIds: appendString(workflowData.workflowStepIds, workflowStep.id),
+          },
+          blockers: {
+            ...objectValue(workflow.run.blockers),
+            open: [
+              "owner_approval_required",
+              "provider_payment_link_creation_blocked",
+              "money_movement_blocked",
+            ],
+          },
+          completedAt: null,
+          updatedAt: now,
+        })
+        .where(eq(workflowRuns.id, workflow.run.id));
+
+      if (approval.taskId) {
+        const [task] = await tx
+          .select({ outcome: tasks.outcome })
+          .from(tasks)
+          .where(and(eq(tasks.tenantId, context.worker.tenantId), eq(tasks.id, approval.taskId)))
+          .limit(1);
+
+        await tx
+          .update(tasks)
+          .set({
+            state: "approval_required",
+            outcome: {
+              ...objectValue(task?.outcome),
+              status: "revised_payment_link_packet_ready_for_owner_approval",
+              approvalRequestId: revisionApproval.id,
+              originalApprovalRequestId: approval.id,
+              revisionApprovalRequestId: revisionApproval.id,
+              revisionApprovalAuditEventId: revisionApprovalAudit.id,
+              revisedPaymentLinkEvidenceId: revisedPaymentLinkEvidence.id,
+              revisedPaymentLinkDocumentId: revisedPaymentLinkDocument.id,
+              revisedPaymentLinkEvidencePacketId: revisedPaymentLinkEvidencePacket.id,
+              revisedPaymentLinkPacket,
+              paymentLinkRevisionContinuation: revisionContinuation,
+              externalExecution: "blocked",
+              externalMutation: false,
+              externalSend: false,
+              providerPaymentLinkCreation: "blocked",
+              moneyMovement: "blocked",
+            },
+            updatedAt: now,
+          })
+          .where(eq(tasks.id, approval.taskId));
+      }
+
+      if (paymentObjectId) {
+        await tx
+          .update(objects)
+          .set({ state: "approval_required", updatedAt: now })
+          .where(eq(objects.id, paymentObjectId));
+      }
+
+      if (paymentId) {
+        await tx
+          .update(payments)
+          .set({ state: "approval_required", updatedAt: now })
+          .where(eq(payments.id, paymentId));
+      }
+
+      if (paymentInstructionId) {
+        await tx
+          .update(paymentInstructions)
+          .set({ state: "approval_required", updatedAt: now })
+          .where(eq(paymentInstructions.id, paymentInstructionId));
+      }
+
+      await tx
+        .update(workerRuns)
+        .set({
+          data: {
+            ...objectValue(originalRun.data),
+            output: {
+              ...originalOutput,
+              paymentLinkRevisionContinuation: revisionContinuation,
+              revisionApprovalRequestId: revisionApproval.id,
+              revisedPaymentLinkEvidenceId: revisedPaymentLinkEvidence.id,
+              revisedPaymentLinkDocumentId: revisedPaymentLinkDocument.id,
+              revisedPaymentLinkEvidencePacketId: revisedPaymentLinkEvidencePacket.id,
+              revisedPaymentLinkPacket,
+              externalExecution: "blocked",
+              externalMutation: false,
+              externalSend: false,
+              providerPaymentLinkCreation: "blocked",
+              moneyMovement: "blocked",
+            },
+            lastWorkerContinuation: revisionContinuation,
+          },
+          updatedAt: now,
+        })
+        .where(eq(workerRuns.id, originalRun.id));
+
+      await tx
+        .update(workerRuns)
+        .set({
+          eventId: event.id,
+          updatedAt: now,
+          data: {
+            ...objectValue(workerRun.data),
+            businessEventId: event.id,
+            businessAuditEventId: audit.id,
+            taskId: approval.taskId,
+            originalWorkerRunId: originalRun.id,
+            eventId: event.id,
+            approvalRequestId: revisionApproval.id,
+            auditEventId: audit.id,
+            evidenceId: trace.id,
+            workflowRunId: workflow.run.id,
+            workflowStepId: workflowStep.id,
+            reservationId: coreReservationId || null,
+            usageEventId: null,
+            pendingCompletion: {
+              output,
+            },
+          },
+        })
+        .where(eq(workerRuns.id, workerRun.id));
+
+      return {
+        created: true as const,
+        needsCompletion: true,
+        workerRunId: workerRun.id,
+        originalWorkerRunId: originalRun.id,
+        eventId: event.id,
+        taskId: approval.taskId,
+        reservationId: coreReservationId || null,
+        usageEventId: null,
+        approvalRequestId: revisionApproval.id,
+        auditEventId: audit.id,
+        evidenceId: trace.id,
+        workflowRunId: workflow.run.id,
+        workflowStepId: workflowStep.id,
+        output,
+      };
     }
 
     if (approval.state === "approved") {
