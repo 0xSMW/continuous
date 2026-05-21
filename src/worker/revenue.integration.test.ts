@@ -6310,6 +6310,28 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(quoteOutput.externalExecution).toBe("blocked");
     expect(quoteOutput.externalSend).toBe(false);
 
+    const readiness = await executeAppServerWorkerTool("continuous.worker.view", {
+      view: "readiness",
+      worker: {
+        role: "revenue_operations",
+        tenantSlug: "continuous-demo",
+      },
+      config: {},
+    });
+    const readinessEnvelope = objectValue(readiness);
+    const readinessPayload = objectValue(readinessEnvelope.readiness);
+    const readinessWorker = objectValue(readinessEnvelope.worker);
+    const readinessProof = objectValue(readinessPayload.proof);
+
+    expect(readinessEnvelope.error).toBeNull();
+    expect(readinessEnvelope.view).toBe("readiness");
+    expect(readinessWorker.role).toBe("revenue_operations");
+    expect(readinessPayload.status).toBe("ready");
+    expect(readinessPayload.dryRunReady).toBe(true);
+    expect(readinessProof.latestWorkerRunId).toBe(quoteResult.workerRunId);
+    expect(readinessProof.quoteApprovalViewId).toBe(quoteResult.quoteApprovalViewId);
+    expect(readinessProof.adapterReceiptEvidenceId).toBe(quoteResult.adapterReceiptEvidenceId);
+
     const [readRun] = await db
       .select()
       .from(workerRuns)

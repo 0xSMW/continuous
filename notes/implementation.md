@@ -345,3 +345,8 @@ including entity setup, external action proof, and control-plane credential
 attestation commands. Deployment docs now reflect the live firewall posture:
 HTTP/HTTPS stay open, while SSH is opened only temporarily by the deploy
 workflow.
+
+Revenue Operations now exposes a generic `/worker` `view: "readiness"` read
+surface. It reports worker registration, capability, budget, workflow, latest
+dry-run proof, quote-review view refs, and live credential gates without adding
+Revenue-specific URLs or app-server tool names.

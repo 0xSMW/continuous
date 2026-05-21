@@ -33,6 +33,7 @@ work from one worker family to the next.
 | Lead-to-cash simulation | Run creates task, worker run, workflow run/steps, budget reservation, inference, usage, adapter dry-run, approval, audit, evidence, object version |
 | Approval execution | Approval decision uses shared approval service, advances the allowed workflow state, and approved continuation can record controlled-send receipts from `config.execution` without changing the `/worker` envelope |
 | Adapter hardening | Reconciliation writes audit/evidence records and retry/review system tasks; due dry-run retries execute with blocked receipts, live-credential readiness checks, and rollback plans; production provider execution remains gated |
+| Readiness view | `POST /worker` with `view: "readiness"` reports the worker, capability, budget, workflow, dry-run receipt, quote-review view, and live credential gates |
 | Eval harness | CI-enforced lead-to-quote cases prove classification, approval, budget, adapter receipt, and idempotency replay |
 | First controlled send | Approved external message sends through adapter with receipt and rollback/escalation evidence |
 
@@ -50,6 +51,7 @@ credentials and rollback playbooks before customer-data use.
 | Controlled send | An approved customer message send uses a scoped managed credential, stores an adapter receipt, records rollback/escalation evidence, and rejects replay with changed input |
 | Cash handoff | Approved quote or closeout records can hand Dispatch/Ops and Finance enough Core refs to prepare schedule, invoice, AR follow-up, and payment-draft packets without private payloads |
 | Eval and deploy | CI evals plus production smoke prove no send, payment link, filing, payroll submission, or money movement happens without the matching approval and receipt gate |
+| Readiness report | The generic `/worker` readiness view returns ready dry-run checks and explicit live credential blockers before customer-data use |
 
 ## Phase 2: Owner Chief-of-Staff Worker
 

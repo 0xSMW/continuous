@@ -368,6 +368,16 @@ export const workerContracts: PlannedWorkerContractMetadata[] = [
       },
       {
         role: "revenue_operations",
+        name: "readiness",
+        toolAlias: "worker.view",
+        description: "Read Revenue dry-run proof checks, latest launch refs, and live credential gates.",
+        idempotency: "none",
+        sideEffects: "none",
+        externalExecution: "blocked",
+        requiresTenant: true,
+      },
+      {
+        role: "revenue_operations",
         name: "quote_review",
         toolAlias: "worker.view",
         description: "Planned quote approval packet detail view for generated review surfaces.",

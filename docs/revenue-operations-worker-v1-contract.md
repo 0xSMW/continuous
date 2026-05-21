@@ -28,6 +28,21 @@ The `worker` object is a strict selector; it accepts only `role`, `id`, and
 `tenantSlug`, so operation fields cannot move there as a second ad hoc payload
 shape.
 
+Read views use the same route with `view`, `worker`, and `config` as the only
+top-level fields. `view: "readiness"` reports dry-run launch checks, latest
+proof refs, and live credential gates without adding a Revenue-specific URL.
+
+```json
+{
+  "view": "readiness",
+  "worker": {
+    "role": "revenue_operations",
+    "tenantSlug": "continuous-demo"
+  },
+  "config": {}
+}
+```
+
 Read inbound lead source records before running the worker:
 
 ```json
@@ -251,6 +266,7 @@ and local toolbox aliases resolve to the same handlers and validation rules.
 |---|---|---|---|---|---|
 | `view: "snapshot"` payload | `worker.view` | `worker.role`, `config` | None | Read-only | Blocked |
 | `view: "approvals"` payload | `worker.view` | `worker.role`, optional `config.state` | None | Read-only | Blocked |
+| `view: "readiness"` payload | `worker.view` | `worker.role`, empty `config` | None | Read-only Revenue dry-run proof, launch blockers, live credential gates, and latest proof refs | Blocked |
 | `lead.read` | `worker.command` | `config.source`, direct `config.records[]` / `config.record`, or `config.reader` referencing an active connection | Required | Core lead object/event/evidence, worker run, budget/usage, connection cursor proof, audit | Blocked |
 | `lead.classify` | `worker.command` | One of `config.intake`, `config.leadPacket`, or `config.lead` | Required | Classification worker run, budget/usage, inference, trace evidence, audit | Blocked |
 | `response.draft` | `worker.command` | One of `config.intake`, `config.leadPacket`, or `config.lead` | Required | Draft worker run, budget/usage, inference, draft evidence, audit | Blocked |
@@ -349,6 +365,17 @@ command response whose `result.output` contains worker-derived data:
 | `workflowRunId` | Lead-to-cash workflow run tied to the worker run |
 | `workflowStepIds` | Durable workflow steps for intake, packet, adapter dry-run, and approval request |
 | `inputHash` | Canonical hash binding idempotency key to the normalized input payload |
+
+`POST /worker` with `view: "readiness"` returns a read-only readiness object:
+
+| Output | Required behavior |
+|---|---|
+| `status` | `ready` only when worker registration, capability grants, budget, workflow definition, latest dry-run proof, and quote approval view checks all pass |
+| `dryRunReady` | `true` when the persisted dry-run gates pass; live external execution can still be blocked |
+| `checks[]` | Named checks with `ready` or `blocked` state plus evidence details |
+| `blockers[]` | The subset of failed dry-run checks |
+| `liveCredentialGates[]` | Explicit blockers for production sender, receipt/rollback, and cash/payment handoff credentials until those gates are provisioned |
+| `proof` | Latest worker run, workflow definition, quote review view, and adapter receipt evidence ids |
 
 ## Preconditions
 

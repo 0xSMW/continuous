@@ -13,7 +13,7 @@ recording without storing live credential material or moving money.
 |---|---|
 | Worker identity | `Revenue Operations Worker`, autonomy level 2, owner-managed |
 | Core loop | One operator run creates workflow run/steps, worker run, source snapshot evidence, budget, inference, usage, event, adapter run/action, approval packet, task update, and object version records |
-| Operator read view | `POST /worker` with payload `view: "snapshot"`, `worker.role: "revenue_operations"`, and read filters under `config`, bearer-token required |
+| Operator read views | `POST /worker` with payload `view: "snapshot"` or `view: "readiness"`, `worker.role: "revenue_operations"`, and read filters under `config`, bearer-token required; readiness reports dry-run proof, blockers, live credential gates, and latest proof refs |
 | Approval controls | `POST /worker` with payload `view: "approvals"` for reads and `command: "approval.decide"` for decisions, bearer-token required |
 | Source read command | `POST /worker` with payload `command: "lead.read"`, `idempotencyKey`, `config.source`, optional `config.reader`, and direct `config.records[]` or an active connection reference; persists website-form, inbox, CRM, buffered connection, or read-only API-polled source records as Core lead object/event/evidence rows, updates connection cursor proof when connection-backed, and returns `config.intake` selectors |
 | Split classify/draft commands | `POST /worker` with payload `command: "lead.classify"` or `command: "response.draft"`; both accept `config.intake` selectors or direct fallback `config.leadPacket`, write worker run/event/evidence/audit/budget records, and keep external sends blocked |
@@ -52,6 +52,7 @@ smoke test.
 | Adapter safety | Dry-run mode, receipt evidence, attempt metadata, reconciliation worker output, due retry execution, retry/review system tasks, workflow retry/review/post-retry states, live-credential readiness checks, rollback plans, and audit/evidence records are persisted; scoped live execution is still blocked |
 | Eval | Golden lead/quote cases cover direct packets, Core row intake refs, source-selector intake, normal urgency, expected classification, approval, budget, adapter receipt, and idempotency outputs in CI |
 | Launch | Production smoke proves no external mutation without approval and receipt capture |
+| Readiness | `view: "readiness"` returns ready dry-run checks for the latest persisted quote-preparation proof, while live credential gates remain explicit blockers until production connectors and sender credentials are provisioned |
 
 ## Next Capabilities
 

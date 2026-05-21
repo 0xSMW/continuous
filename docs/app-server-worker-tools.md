@@ -28,6 +28,10 @@ Revenue `lead.read`, `run`, `lead.classify`, `response.draft`, and
 `payment_draft.prepare` commands, proving the app-server boundary writes the
 same worker run, approval, evidence, budget, event, adapter dry-run, generated
 view, and workflow records as `/worker`.
+Revenue `readiness` is exposed through `continuous.worker.view` with the same
+`view`, `worker`, and `config` payload as `/worker`; it returns dry-run launch
+checks, latest quote-review proof refs, and live credential blockers without a
+Revenue-specific app-server tool.
 Dispatch `customer_update.draft`,
 `closeout.prepare`, and `exception.route` are also schema-discoverable through
 the same registry-backed command list and keep customer-send, QA, Finance
@@ -77,6 +81,7 @@ bun run app-server:proxy
 bun run app-server:worker-tools continuous.worker.schema
 bun run app-server:worker-tools dynamic-call --payload='{"tool":"continuous.worker.schema","arguments":{},"callId":"local-schema-001","threadId":"local-thread-001","turnId":"local-turn-001"}'
 bun run app-server:worker-tools continuous.worker.view --payload='{"view":"snapshot","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{}}'
+bun run app-server:worker-tools continuous.worker.view --payload='{"view":"readiness","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{}}'
 ```
 
 The local app-server executor may accept a trusted-local context through
@@ -184,12 +189,13 @@ authorization: Bearer <control-plane-token>
 
 The route authorizes against the `app_server` control-plane route with exact
 bridge command scope, such as `app_server:worker.command.lead.read`,
-`app_server:worker.view.snapshot`, or `app_server:worker.schema`. For commands
+`app_server:worker.view.snapshot`, `app_server:worker.view.readiness`, or
+`app_server:worker.schema`. For commands
 and views it also requires tenant and worker-role scope plus a durable managed
 control-plane credential. After those checks pass, the route constructs
 `source: "control_plane"` transport context itself and passes worker-registry
-scope such as `worker:lead.read` or `worker:view.snapshot` into the dynamic-tool
-executor.
+scope such as `worker:lead.read`, `worker:view.snapshot`, or
+`worker:view.readiness` into the dynamic-tool executor.
 
 The generic local worker tool remains available for explicit operator-gated
 commands:
