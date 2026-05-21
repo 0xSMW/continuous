@@ -356,3 +356,14 @@ catalog candidate. Its first slice is `worker.role=offer_pricing_operations`,
 `command=margin.review.prepare`, and `view: "price_policy"` on `/worker`,
 consuming `revenue.quote_to_pricing` Core refs while price publish, quote
 mutation, and customer sends stay blocked.
+
+Offer and Pricing generated-view naming is pinned to the registered
+`price_policy` view. Margin review and change-order review remain sections
+inside that view until they are promoted as explicit registry entries, avoiding
+dotted public view names that drift from `/worker` metadata.
+
+The Offer and Pricing planned metadata now accepts the full
+`revenue.quote_to_pricing` source-ref packet, including quote, lead, customer,
+evidence, approval, and workflow refs. Planned worker views also expose
+`configSchema`, so `price_policy` callers can discover `config.quoteObjectId`
+and `config.priceBookId` from `continuous.worker.schema`.

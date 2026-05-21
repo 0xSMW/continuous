@@ -44,6 +44,7 @@ export type PlannedWorkerViewMetadata = {
   sideEffects: "none";
   externalExecution: "blocked";
   requiresTenant: boolean;
+  configSchema?: PlannedWorkerConfigSchema;
 };
 
 export type PlannedWorkerCommandRegistryEntry = Omit<PlannedWorkerCommandMetadata, "configSchema"> & {
@@ -57,6 +58,7 @@ export type PlannedWorkerViewRegistryEntry = PlannedWorkerViewMetadata & {
   apiRoute: WorkerApiRoute;
   contractPath: string;
   evidencePacket: string | null;
+  configSchema: PlannedWorkerConfigSchema;
 };
 
 export type PlannedWorkerContractMetadata = {
@@ -186,6 +188,16 @@ function plannedConfigSchema(command: PlannedWorkerCommandMetadata): PlannedWork
     ),
     additionalProperties: true,
   };
+}
+
+function plannedViewConfigSchema(view: PlannedWorkerViewMetadata): PlannedWorkerConfigSchema {
+  return (
+    view.configSchema ?? {
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    }
+  );
 }
 
 export const workerContracts: PlannedWorkerContractMetadata[] = [
@@ -1020,6 +1032,8 @@ export const workerContracts: PlannedWorkerContractMetadata[] = [
               required: ["quoteObjectId", "evidencePacketId"],
               properties: {
                 quoteObjectId: stringSchema("Revenue quote object id."),
+                leadObjectId: stringSchema("Revenue lead object id."),
+                customerObjectId: stringSchema("Revenue customer object id."),
                 evidencePacketId: stringSchema("Revenue quote evidence packet id."),
                 approvalRequestId: stringSchema("Optional Revenue quote approval id."),
                 workflowRunId: stringSchema("Optional Revenue workflow run id."),
@@ -1073,6 +1087,14 @@ export const workerContracts: PlannedWorkerContractMetadata[] = [
         sideEffects: "none",
         externalExecution: "blocked",
         requiresTenant: true,
+        configSchema: {
+          type: "object",
+          properties: {
+            quoteObjectId: stringSchema("Optional quote object id filter."),
+            priceBookId: stringSchema("Optional price book id filter."),
+          },
+          additionalProperties: false,
+        },
       },
     ],
   },
@@ -1671,6 +1693,7 @@ export function plannedWorkerViews(): PlannedWorkerViewRegistryEntry[] {
       apiRoute: contract.apiRoute,
       contractPath: contract.contractPath,
       evidencePacket: view.name === "snapshot" ? null : contract.evidencePacket,
+      configSchema: plannedViewConfigSchema(view),
     })),
   );
 }
@@ -1715,6 +1738,7 @@ export function workerFollowUpViews(
         apiRoute: contract.apiRoute,
         contractPath: contract.contractPath,
         evidencePacket: view.name === "snapshot" ? null : contract.evidencePacket,
+        configSchema: plannedViewConfigSchema(view),
       })),
   );
 }

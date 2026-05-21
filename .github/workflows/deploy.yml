@@ -739,8 +739,8 @@ jobs:
             (.registry.views | any(.role == "compliance_operations" and .name == "snapshot")) and
             (.registry.views | any(.role == "compliance_operations" and .name == "obligations")) and
             (.registry.views | any(.role == "compliance_operations" and .name == "packet")) and
-            (.registry.followUpCommands | any(.role == "offer_pricing_operations" and .name == "margin.review.prepare" and .apiRoute == "/worker" and .configSchema.required == ["sourceRefs","policy"])) and
-            (.registry.followUpViews | any(.role == "offer_pricing_operations" and .name == "price_policy" and .apiRoute == "/worker")) and
+            (.registry.followUpCommands | any(.role == "offer_pricing_operations" and .name == "margin.review.prepare" and .apiRoute == "/worker" and .configSchema.required == ["sourceRefs","policy"] and .configSchema.properties.sourceRefs.properties.leadObjectId.type == "string" and .configSchema.properties.sourceRefs.properties.customerObjectId.type == "string")) and
+            (.registry.followUpViews | any(.role == "offer_pricing_operations" and .name == "price_policy" and .apiRoute == "/worker" and .configSchema.properties.quoteObjectId.type == "string" and .configSchema.properties.priceBookId.type == "string" and .configSchema.additionalProperties == false)) and
             (.registry.followUpCommands | any(.role == "revenue_operations" and .name == "payment_link.prepare" and .configSchema.properties.sourceRefs.type == "object")) and
             (.registry.followUpCommands | any(.role == "compliance_operations" and .name == "notice.response.prepare")) and
             (.registry.followUpCommands | any(.role == "compliance_operations" and .name == "evidence_binder.export")) and
@@ -780,8 +780,8 @@ jobs:
               (.data.registry.commands | any(.role == "compliance_operations" and .name == "filing.prepare" and .externalExecution == "blocked")) and
               (.data.registry.views | any(.role == "compliance_operations" and .name == "obligations")) and
               (.data.registry.views | any(.role == "compliance_operations" and .name == "packet")) and
-              (.data.registry.followUpCommands | any(.role == "offer_pricing_operations" and .name == "margin.review.prepare" and .apiRoute == "/worker")) and
-              (.data.registry.followUpViews | any(.role == "offer_pricing_operations" and .name == "price_policy" and .apiRoute == "/worker")) and
+              (.data.registry.followUpCommands | any(.role == "offer_pricing_operations" and .name == "margin.review.prepare" and .apiRoute == "/worker" and .configSchema.properties.sourceRefs.properties.leadObjectId.type == "string" and .configSchema.properties.sourceRefs.properties.customerObjectId.type == "string")) and
+              (.data.registry.followUpViews | any(.role == "offer_pricing_operations" and .name == "price_policy" and .apiRoute == "/worker" and .configSchema.properties.quoteObjectId.type == "string" and .configSchema.properties.priceBookId.type == "string")) and
               (.data.registry.expansion | length) >= 12 and
               (.data.registry.expansion | all(.apiRoute == "/worker")) and
               (.data.registry.expansion | any(.key == "offer_pricing_operations" and .firstCommand == "margin.review.prepare" and .incomingHandoff == "revenue.quote_to_pricing")) and

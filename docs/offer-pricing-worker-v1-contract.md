@@ -32,6 +32,8 @@ inputs and read filters stay under `config`.
   "config": {
     "sourceRefs": {
       "quoteObjectId": "quote_object_uuid",
+      "leadObjectId": "lead_object_uuid",
+      "customerObjectId": "customer_object_uuid",
       "evidencePacketId": "quote_evidence_packet_uuid",
       "approvalRequestId": "quote_approval_uuid"
     },
@@ -114,11 +116,15 @@ and confidence instead of raw private vendor records.
 
 ## Generated Views
 
-| View | Subject | Actions | Empty/error states |
+The first registered view is `price_policy`. Margin review and change-order
+review are sections inside that view until they are promoted to explicit
+registry entries.
+
+| View section | Subject | Actions | Empty/error states |
 |---|---|---|---|
-| `pricing.margin.review` | `quote_line` | `approve_exception`, `request_revision`, `reject_discount` | `quote_lines_missing`, `margin_policy_missing`, `discount_policy_missing` |
-| `pricing.price_policy` | `price_book` | `approve_price_change`, `request_source`, `route_to_owner` | `price_book_missing`, `policy_stale`, `cost_source_missing` |
-| `pricing.change_order.review` | `change_order_policy` | `approve_change_order`, `request_customer_approval`, `reject_terms` | `scope_missing`, `customer_approval_missing`, `contract_term_risk` |
+| Margin review | `quote_line` | `approve_exception`, `request_revision`, `reject_discount` | `quote_lines_missing`, `margin_policy_missing`, `discount_policy_missing` |
+| Price book | `price_book` | `approve_price_change`, `request_source`, `route_to_owner` | `price_book_missing`, `policy_stale`, `cost_source_missing` |
+| Change order | `change_order_policy` | `approve_change_order`, `request_customer_approval`, `reject_terms` | `scope_missing`, `customer_approval_missing`, `contract_term_risk` |
 
 ## Evals
 

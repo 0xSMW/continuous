@@ -625,6 +625,12 @@ describe("future worker contracts", () => {
             properties: expect.objectContaining({
               sourceRefs: expect.objectContaining({
                 required: ["quoteObjectId", "evidencePacketId"],
+                properties: expect.objectContaining({
+                  quoteObjectId: expect.objectContaining({ type: "string" }),
+                  leadObjectId: expect.objectContaining({ type: "string" }),
+                  customerObjectId: expect.objectContaining({ type: "string" }),
+                  evidencePacketId: expect.objectContaining({ type: "string" }),
+                }),
               }),
               policy: expect.objectContaining({
                 required: ["marginRuleId", "discountPolicyId"],
@@ -650,6 +656,13 @@ describe("future worker contracts", () => {
           role: "offer_pricing_operations",
           name: "price_policy",
           apiRoute: workerApiRoute,
+          configSchema: expect.objectContaining({
+            properties: expect.objectContaining({
+              quoteObjectId: expect.objectContaining({ type: "string" }),
+              priceBookId: expect.objectContaining({ type: "string" }),
+            }),
+            additionalProperties: false,
+          }),
         }),
       ]),
     );

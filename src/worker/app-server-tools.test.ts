@@ -152,6 +152,13 @@ describe("app-server worker tools", () => {
           role: "offer_pricing_operations",
           name: "price_policy",
           apiRoute: "/worker",
+          configSchema: expect.objectContaining({
+            properties: expect.objectContaining({
+              quoteObjectId: expect.objectContaining({ type: "string" }),
+              priceBookId: expect.objectContaining({ type: "string" }),
+            }),
+            additionalProperties: false,
+          }),
         }),
       ]),
     );
