@@ -1074,6 +1074,7 @@ async function completeWorkflowStep(input: {
         rulePackId: stringValue(obligationInput.rulePackId),
         filingRequirementId: stringValue(obligationInput.filingRequirementId),
         workflowRunId: run.id,
+        taskId: linkedTaskId,
         facts: jsonObject(obligationInput.facts),
         data: {
           ...jsonObject(obligationInput.data),
