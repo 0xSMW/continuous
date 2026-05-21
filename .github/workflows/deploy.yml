@@ -1501,10 +1501,26 @@ jobs:
               -d "$FINANCE_INVOICE_PAYLOAD"
           )"
 
-          echo "$FINANCE_INVOICE_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,invoiceObjectId:.data.result.invoiceObjectId,invoiceId:.data.result.invoiceId,approvalRequestId:.data.result.approvalRequestId,packetId:.data.result.packetId,viewId:.data.result.financeInvoiceViewId,financeHandoff:.data.result.output.financeHandoff.name,externalExecution:.data.result.output.externalExecution,externalSend:.data.result.output.externalSend,moneyMovement:.data.result.output.moneyMovement}}'
+          echo "$FINANCE_INVOICE_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,workerRunId:.data.result.workerRunId,reservationId:.data.result.reservationId,usageEventId:.data.result.usageEventId,invoiceObjectId:.data.result.invoiceObjectId,invoiceId:.data.result.invoiceId,approvalRequestId:.data.result.approvalRequestId,packetId:.data.result.packetId,viewId:.data.result.financeInvoiceViewId,financeHandoff:.data.result.output.financeHandoff.name,externalExecution:.data.result.output.externalExecution,externalSend:.data.result.output.externalSend,moneyMovement:.data.result.output.moneyMovement}}'
           echo "$FINANCE_INVOICE_RESPONSE" | /usr/bin/jq -e \
-            '.error == null and .data.command == "invoice.prepare" and .data.worker.role == "finance_operations" and (.data.result.invoiceObjectId | length > 0) and (.data.result.invoiceId | length > 0) and (.data.result.approvalRequestId | length > 0) and (.data.result.packetId | length > 0) and (.data.result.financeInvoiceViewId | length > 0) and .data.result.output.financeHandoff.name == "finance.invoice_to_owner_review" and .data.result.output.externalExecution == "dry_run" and .data.result.output.externalSend == false and .data.result.output.moneyMovement == "blocked"' \
+            '.error == null and .data.command == "invoice.prepare" and .data.worker.role == "finance_operations" and (.data.result.workerRunId | length > 0) and (.data.result.reservationId | length > 0) and (.data.result.usageEventId | length > 0) and (.data.result.invoiceObjectId | length > 0) and (.data.result.invoiceId | length > 0) and (.data.result.approvalRequestId | length > 0) and (.data.result.packetId | length > 0) and (.data.result.financeInvoiceViewId | length > 0) and .data.result.output.command == "invoice.prepare" and .data.result.output.financeHandoff.name == "finance.invoice_to_owner_review" and .data.result.output.externalExecution == "dry_run" and .data.result.output.externalSend == false and .data.result.output.moneyMovement == "blocked"' \
             >/dev/null
+
+          FINANCE_INVOICE_WORKER_RUN_ID="$(echo "$FINANCE_INVOICE_RESPONSE" | /usr/bin/jq -r '.data.result.workerRunId')"
+          FINANCE_INVOICE_RESERVATION_ID="$(echo "$FINANCE_INVOICE_RESPONSE" | /usr/bin/jq -r '.data.result.reservationId')"
+          FINANCE_INVOICE_USAGE_ID="$(echo "$FINANCE_INVOICE_RESPONSE" | /usr/bin/jq -r '.data.result.usageEventId')"
+          FINANCE_INVOICE_RUN_ROW="$(
+            psql_db -Atc "select coalesce(source,'') || '|' || coalesce(state::text,'') || '|' || coalesce(mode,'') || '|' || coalesce(data->'input'->>'command','') || '|' || coalesce(data->'output'->>'command','') || '|' || coalesce(data->'output'->>'externalExecution','') || '|' || coalesce(data->'output'->>'moneyMovement','') || '|' || coalesce(data->'completion'->'budget'->>'state','') || '|' || coalesce(data->'completion'->'budget'->>'reservationId','') || '|' || coalesce(data->'completion'->'budget'->>'usageEventId','') from worker_runs where id = '$FINANCE_INVOICE_WORKER_RUN_ID'::uuid;"
+          )"
+          if [ "$FINANCE_INVOICE_RUN_ROW" != "continuous.core.worker_runs|done|simulation|invoice.prepare|invoice.prepare|dry_run|blocked|used|$FINANCE_INVOICE_RESERVATION_ID|$FINANCE_INVOICE_USAGE_ID" ]; then
+            echo "Finance invoice worker run did not use the Core lifecycle: $FINANCE_INVOICE_RUN_ROW" >&2
+            exit 1
+          fi
+          FINANCE_LEGACY_RUN_COUNT="$(psql_db -Atc "select count(*) from worker_runs where source = 'continuous.worker' and idempotency_key = '$FINANCE_INVOICE_KEY';")"
+          if [ "$FINANCE_LEGACY_RUN_COUNT" != "0" ]; then
+            echo "Finance invoice smoke created a legacy worker run: $FINANCE_LEGACY_RUN_COUNT" >&2
+            exit 1
+          fi
 
           FINANCE_INVOICE_ID="$(echo "$FINANCE_INVOICE_RESPONSE" | /usr/bin/jq -r '.data.result.invoiceId')"
           FINANCE_AR_FOLLOWUP_KEY="deploy-finance-ar-followup-smoke-$SMOKE_RUN_ID"

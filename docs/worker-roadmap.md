@@ -133,8 +133,9 @@ Runtime slices are registered on `POST /worker` with
 `command: "cash_forecast.generate"`, and `command: "payment_draft.prepare"`
 for `worker.role: "finance_operations"`.
 Invoice preparation consumes Dispatch closeout refs from `config.sourceRefs`,
+starts and completes through Core `worker.run.start` / `worker.run.complete`,
 creates an invoice draft, cash packet, approval request, and accounting dry-run
-receipt. AR follow-up consumes persisted invoice refs from `config.invoiceId`,
+receipt with Core budget settlement. AR follow-up consumes persisted invoice refs from `config.invoiceId`,
 creates a blocked draft, cash packet, approval request, and generated review
 view. Cash forecast consumes forecast windows, account refs, and cash-driver inputs from
 `config`, writes a cash forecast object, cash packet, approval request, and

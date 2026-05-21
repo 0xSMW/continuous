@@ -70,7 +70,8 @@ incoming handoff. Dispatch/Ops now has executable fixtures through `POST /worker
 payloads with `command: "schedule.propose"`, blocked
 `command: "customer_update.draft"`, blocked `command: "closeout.prepare"`, and
 blocked `command: "exception.route"`. Finance now consumes
-`dispatch.closeout_to_finance` through `command: "invoice.prepare"`, consumes
+`dispatch.closeout_to_finance` through `command: "invoice.prepare"` with Core
+worker-run source, terminal state, and budget settlement proof, consumes
 persisted invoice evidence through `command: "ar_followup.draft"`,
 and consumes forecast window/account refs through
 `command: "cash_forecast.generate"`, and prepares blocked payment drafts through

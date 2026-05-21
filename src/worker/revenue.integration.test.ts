@@ -11217,6 +11217,30 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .from(workerRuns)
       .where(eq(workerRuns.id, financeResult.workerRunId))
       .limit(1);
+    const financeRunData = objectValue(financeRun?.data);
+    const financeCompletionBudget = objectValue(objectValue(financeRunData.completion).budget);
+    const financeReservationId = stringValue(financeCompletionBudget.reservationId);
+    const financeUsageEventId = stringValue(financeCompletionBudget.usageEventId);
+    const [financeReservation] = await db
+      .select()
+      .from(budgetReservations)
+      .where(eq(budgetReservations.id, financeReservationId))
+      .limit(1);
+    const [financeUsage] = await db
+      .select()
+      .from(usageEvents)
+      .where(eq(usageEvents.id, financeUsageEventId))
+      .limit(1);
+    const [legacyFinanceRunCount] = await db
+      .select({ value: count() })
+      .from(workerRuns)
+      .where(
+        and(
+          eq(workerRuns.tenantId, tenantId),
+          eq(workerRuns.source, "continuous.worker"),
+          eq(workerRuns.idempotencyKey, `ci-finance-invoice-${runId}`),
+        ),
+      );
     const [financeInvoiceObject] = await db
       .select()
       .from(objects)
@@ -11270,8 +11294,19 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(financeOutput.totalCents).toBe(24900);
     expect(financeOutput.closeoutObjectId).toBe(closeoutResult.closeoutObjectId);
     expect(objectValue(financeOutput.financeHandoff).name).toBe("finance.invoice_to_owner_review");
-    expect(financeRun?.source).toBe("continuous.worker");
+    expect(financeRun?.source).toBe("continuous.core.worker_runs");
     expect(financeRun?.state).toBe("done");
+    expect(financeRun?.taskId).toBe(financeResult.taskId);
+    expect(financeReservation?.state).toBe("used");
+    expect(financeReservation?.taskId).toBe(financeResult.taskId);
+    expect(financeUsage?.units).toBe(3600);
+    expect(financeUsage?.taskId).toBe(financeResult.taskId);
+    expect(financeUsage?.actorId).toBe(financeRun?.workerId);
+    expect(Number(legacyFinanceRunCount?.value ?? 0)).toBe(0);
+    expect(financeResult.reservationId).toBe(financeReservationId);
+    expect(financeResult.usageEventId).toBe(financeUsageEventId);
+    expect(financeOutput.reservationId).toBe(financeReservationId);
+    expect(financeOutput.usageEventId).toBe(financeUsageEventId);
     expect(financeInvoiceObject?.type).toBe("invoice");
     expect(financeInvoiceObject?.state).toBe("approval_required");
     expect(financeInvoiceRow?.state).toBe("approval_required");
@@ -11316,6 +11351,8 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(financeReplayResult.created).toBe(false);
     expect(financeReplayResult.workerRunId).toBe(financeResult.workerRunId);
     expect(financeReplayResult.invoiceObjectId).toBe(financeResult.invoiceObjectId);
+    expect(financeReplayResult.reservationId).toBe(financeResult.reservationId);
+    expect(financeReplayResult.usageEventId).toBe(financeResult.usageEventId);
 
     const arFollowupResponse = await executeWorkerCommand({
       command: "ar_followup.draft",

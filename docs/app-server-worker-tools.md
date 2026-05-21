@@ -99,7 +99,8 @@ the same registry-backed command list and keep customer-send, QA, Finance
 handoff, exception reason, severity, and related Core refs under `config`.
 Finance `invoice.prepare` uses the same envelope with job, closeout, customer,
 and evidence selectors under `config.sourceRefs`, prepares an invoice draft,
-cash packet, owner approval request, and accounting dry-run receipt, and keeps
+cash packet, owner approval request, and accounting dry-run receipt, settles
+budget through Core `worker.run.start` / `worker.run.complete`, and keeps
 external sends and money movement blocked.
 Finance `ar_followup.draft` extends that same registry path from a persisted
 invoice id, keeps `tonePolicy`, channel, message context, and approval policy

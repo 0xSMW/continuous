@@ -128,7 +128,7 @@ payment links, refunds, settlements, or bank writes:
 | Command or view | Tool surface | Required config | Idempotency | Side effects | External execution |
 |---|---|---|---|---|---|
 | `view: "snapshot"` payload | `worker.view` | `worker.role`, `config` | None | Read-only | Blocked |
-| `invoice.prepare` | `worker.command` | `config.jobId`, `config.closeoutId`, or `config.sourceRefs` | Required | Invoice draft, cash packet, approval request, accounting dry-run receipt | Dry-run |
+| `invoice.prepare` | `worker.command` | `config.jobId`, `config.closeoutId`, or `config.sourceRefs` | Required | Core worker-run lifecycle, invoice draft, cash packet, approval request, accounting dry-run receipt | Dry-run |
 | `ar_followup.draft` | `worker.command` | `config.invoiceId`, `config.tonePolicy` | Required | AR follow-up draft, cash packet, approval request, generated review view | Blocked |
 | `cash_forecast.generate` | `worker.command` | `config.window`, `config.accounts[]` | Required | Forecast object, cash packet, approval request, generated review view | Blocked |
 | `payment_draft.prepare` | `worker.command` | `config.billId`, `config.paymentId`, or `config.sourceRefs` | Required | Payment object, Payment instruction draft, cash packet, dual-control approval request, generated review view | Blocked |
