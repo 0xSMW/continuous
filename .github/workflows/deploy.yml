@@ -1808,7 +1808,7 @@ jobs:
           fi
 
           SCHEDULER_RUN_ROW="$(
-            psql_db -Atc "select state || '|' || coalesce(data->'output'->>'sourceEventId','') || '|' || coalesce(data->'output'->>'externalSend','') || '|' || coalesce(data->'output'->>'workflowRunId','') from worker_runs where id = '$SCHEDULER_WORKER_RUN_ID'::uuid;"
+            psql_db -Atc "select state::text || '|' || coalesce(data->'output'->>'sourceEventId','') || '|' || coalesce(data->'output'->>'externalSend','') || '|' || coalesce(data->'output'->>'workflowRunId','') from worker_runs where id = '$SCHEDULER_WORKER_RUN_ID'::uuid;"
           )"
           SCHEDULER_WORKFLOW_RUN_ID="${SCHEDULER_RUN_ROW##*|}"
           if [ "$SCHEDULER_RUN_ROW" != "done|$CONNECTION_LEAD_READ_SOURCE_EVENT_ID|false|$SCHEDULER_WORKFLOW_RUN_ID" ] || [ -z "$SCHEDULER_WORKFLOW_RUN_ID" ]; then
@@ -1817,7 +1817,7 @@ jobs:
           fi
 
           SCHEDULER_WORKFLOW_ROW="$(
-            psql_db -Atc "select state || '|' || coalesce(data->>'workerRunId','') || '|' || coalesce(data->>'approvalRequestId','') from workflow_runs where id = '$SCHEDULER_WORKFLOW_RUN_ID'::uuid;"
+            psql_db -Atc "select state::text || '|' || coalesce(data->>'workerRunId','') || '|' || coalesce(data->>'approvalRequestId','') from workflow_runs where id = '$SCHEDULER_WORKFLOW_RUN_ID'::uuid;"
           )"
           if ! printf '%s\n' "$SCHEDULER_WORKFLOW_ROW" | grep -q "^approval_requested|$SCHEDULER_WORKER_RUN_ID|"; then
             echo "Unexpected scheduler Revenue workflow row: $SCHEDULER_WORKFLOW_ROW" >&2
@@ -1879,7 +1879,7 @@ jobs:
           LEAD_CLASSIFY_AUDIT_ID="$(echo "$LEAD_CLASSIFY_RESPONSE" | /usr/bin/jq -r '.data.result.auditEventId')"
           LEAD_CLASSIFY_USAGE_ID="$(echo "$LEAD_CLASSIFY_RESPONSE" | /usr/bin/jq -r '.data.result.usageEventId')"
           LEAD_CLASSIFY_WORKER_RUN_ROW="$(
-            psql_db -Atc "select coalesce(source,'') || '|' || coalesce(state,'') || '|' || coalesce(mode,'') || '|' || coalesce(data->'input'->>'command','') || '|' || coalesce(data->'output'->>'externalExecution','') || '|' || coalesce(data->'completion'->'budget'->>'state','') || '|' || coalesce(data->'completion'->'budget'->>'usageEventId','') from worker_runs where id = '$LEAD_CLASSIFY_WORKER_RUN_ID'::uuid;"
+            psql_db -Atc "select coalesce(source,'') || '|' || coalesce(state::text,'') || '|' || coalesce(mode,'') || '|' || coalesce(data->'input'->>'command','') || '|' || coalesce(data->'output'->>'externalExecution','') || '|' || coalesce(data->'completion'->'budget'->>'state','') || '|' || coalesce(data->'completion'->'budget'->>'usageEventId','') from worker_runs where id = '$LEAD_CLASSIFY_WORKER_RUN_ID'::uuid;"
           )"
           if [ "$LEAD_CLASSIFY_WORKER_RUN_ROW" != "continuous.core.worker_runs|done|classification|lead.classify|blocked|used|$LEAD_CLASSIFY_USAGE_ID" ]; then
             echo "Unexpected Core-backed lead.classify worker run row: $LEAD_CLASSIFY_WORKER_RUN_ROW" >&2
@@ -1932,7 +1932,7 @@ jobs:
           RESPONSE_DRAFT_AUDIT_ID="$(echo "$RESPONSE_DRAFT_RESPONSE" | /usr/bin/jq -r '.data.result.auditEventId')"
           RESPONSE_DRAFT_USAGE_ID="$(echo "$RESPONSE_DRAFT_RESPONSE" | /usr/bin/jq -r '.data.result.usageEventId')"
           RESPONSE_DRAFT_WORKER_RUN_ROW="$(
-            psql_db -Atc "select coalesce(source,'') || '|' || coalesce(state,'') || '|' || coalesce(mode,'') || '|' || coalesce(data->'input'->>'command','') || '|' || coalesce(data->'output'->>'externalExecution','') || '|' || coalesce(data->'completion'->'budget'->>'state','') || '|' || coalesce(data->'completion'->'budget'->>'usageEventId','') from worker_runs where id = '$RESPONSE_DRAFT_WORKER_RUN_ID'::uuid;"
+            psql_db -Atc "select coalesce(source,'') || '|' || coalesce(state::text,'') || '|' || coalesce(mode,'') || '|' || coalesce(data->'input'->>'command','') || '|' || coalesce(data->'output'->>'externalExecution','') || '|' || coalesce(data->'completion'->'budget'->>'state','') || '|' || coalesce(data->'completion'->'budget'->>'usageEventId','') from worker_runs where id = '$RESPONSE_DRAFT_WORKER_RUN_ID'::uuid;"
           )"
           if [ "$RESPONSE_DRAFT_WORKER_RUN_ROW" != "continuous.core.worker_runs|done|draft|response.draft|blocked|used|$RESPONSE_DRAFT_USAGE_ID" ]; then
             echo "Unexpected Core-backed response.draft worker run row: $RESPONSE_DRAFT_WORKER_RUN_ROW" >&2
@@ -2208,7 +2208,7 @@ jobs:
           from workflow_steps where workflow_run_id = '$WORKFLOW_RUN_ID'::uuid;
           SQL
 
-          WORKFLOW_ROW="$(psql_db -Atc "select state || '|' || coalesce(data->>'workerRunId','') || '|' || coalesce(data->>'approvalRequestId','') from workflow_runs where id = '$WORKFLOW_RUN_ID'::uuid;")"
+          WORKFLOW_ROW="$(psql_db -Atc "select state::text || '|' || coalesce(data->>'workerRunId','') || '|' || coalesce(data->>'approvalRequestId','') from workflow_runs where id = '$WORKFLOW_RUN_ID'::uuid;")"
           if [ "$WORKFLOW_ROW" != "approval_requested|$WORKER_RUN_ID|$WORKER_APPROVAL_ID" ]; then
             echo "Unexpected revenue workflow row: $WORKFLOW_ROW" >&2
             exit 1
@@ -2256,13 +2256,13 @@ jobs:
           from worker_runs where id = '$WORKER_RUN_ID'::uuid;
           SQL
 
-          WORKFLOW_APPROVAL_ROW="$(psql_db -Atc "select state || '|' || coalesce(data->'lastApprovalDecision'->>'action','') || '|' || coalesce(data->'lastApprovalDecision'->'continuation'->>'externalExecution','') from workflow_runs where id = '$WORKFLOW_RUN_ID'::uuid;")"
+          WORKFLOW_APPROVAL_ROW="$(psql_db -Atc "select state::text || '|' || coalesce(data->'lastApprovalDecision'->>'action','') || '|' || coalesce(data->'lastApprovalDecision'->'continuation'->>'externalExecution','') from workflow_runs where id = '$WORKFLOW_RUN_ID'::uuid;")"
           if [ "$WORKFLOW_APPROVAL_ROW" != "approved|approved|blocked" ]; then
             echo "Unexpected revenue workflow approval row: $WORKFLOW_APPROVAL_ROW" >&2
             exit 1
           fi
 
-          WORKFLOW_APPROVAL_STEP_ROW="$(psql_db -Atc "select kind || '|' || coalesce(from_state,'') || '|' || to_state || '|' || coalesce(output->'continuation'->>'externalExecution','') from workflow_steps where id = '$WORKFLOW_APPROVAL_STEP_ID'::uuid;")"
+          WORKFLOW_APPROVAL_STEP_ROW="$(psql_db -Atc "select kind || '|' || coalesce(from_state::text,'') || '|' || to_state::text || '|' || coalesce(output->'continuation'->>'externalExecution','') from workflow_steps where id = '$WORKFLOW_APPROVAL_STEP_ID'::uuid;")"
           if [ "$WORKFLOW_APPROVAL_STEP_ROW" != "approval_decision|approval_requested|approved|blocked" ]; then
             echo "Unexpected revenue approval workflow step: $WORKFLOW_APPROVAL_STEP_ROW" >&2
             exit 1
