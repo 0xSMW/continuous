@@ -544,6 +544,8 @@ describe("future worker contracts", () => {
     expect(deployScript).toContain("Remote disk before deploy cleanup");
     expect(deployScript).toContain('timeout --preserve-status 120s "$@"');
     expect(deployScript).toContain("run_cleanup docker image prune -f");
+    expect(deployScript).toContain("prune_old_app_images");
+    expect(deployScript).toContain('run_cleanup docker image rm "$image_repo:$image_tag"');
     expect(deployScript).toContain("docker system df");
     expect(deployScript).toContain("run_cleanup docker builder prune -af");
     expect(deployScript).toContain('SITE_HOST="$SITE_HOST"');
@@ -577,6 +579,8 @@ describe("future worker contracts", () => {
     expect(deployWorkflow).toContain("Remote disk before image load cleanup");
     expect(deployWorkflow).toContain('timeout --preserve-status 120s "$@"');
     expect(deployWorkflow).toContain("run_cleanup docker image prune -f");
+    expect(deployWorkflow).toContain("prune_old_app_images");
+    expect(deployWorkflow).toContain('run_cleanup docker image rm "$image_repo:$image_tag"');
     expect(deployWorkflow).toContain("run_cleanup docker builder prune -af");
     expect(deployWorkflow).toContain('SITE_HOST="$SITE_HOST"');
   });
