@@ -22,7 +22,9 @@ describe("production readiness operations", () => {
     expect(createDroplet).toContain("doctl compute droplet backup-policies get");
     expect(createDroplet).toContain("BackupEnabled");
     expect(createDroplet).toContain("doctl compute droplet backups");
-    expect(deploymentDocs).toContain("managed droplet backups by default and verifies");
+    expect(deploymentDocs.replace(/\s+/g, " ")).toContain(
+      "managed droplet backups by default and verifies",
+    );
   });
 
   it("keeps non-root deploy access as a live readiness check", () => {
