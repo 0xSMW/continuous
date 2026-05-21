@@ -193,7 +193,7 @@ waves that compose the first seven workers instead of creating private APIs.
 
 | Wave | Worker family | First packaged outcome | Entry gate |
 |---|---|---|---|
-| 8 | Offer and Pricing Worker | Planned `margin.review.prepare` command and `price_policy` view for price book, quote-line, margin, discount, and change-order packets | Revenue quote evidence, margin rules, and approval policies are available as Core records |
+| 8 | Offer and Pricing Worker | Runtime `margin.review.prepare` command and `price_policy` view for price book, quote-line, margin, and discount packets; change-order packets remain follow-up | Revenue quote evidence, margin rules, and approval policies are available as Core records |
 | 9 | Customer Experience Worker | Complaint, testimonial, review, promise, and customer-update packets | Revenue/Dispatch customer messages and customer-signal records have source evidence and approval posture |
 | 10 | Asset and Supply Worker | Inventory, vendor, purchase, maintenance, and stockout packets | Dispatch closeout, Finance cash, and Systems sync refs prove asset/vendor state without purchase mutation |
 | 11 | Growth Worker | Campaign, channel, audience, content draft, and attribution packets | Customer signal, review, budget, and source-claim evidence can block external publish until approval |
@@ -204,11 +204,11 @@ under `worker`, keep operation inputs under `config`, reuse shared approval and
 evidence packets, and add at least one Core-record handoff fixture before any
 runtime handler is promoted.
 
-Offer and Pricing is now the next planned contract after Systems. Runtime
-promotion must start with `worker.role=offer_pricing_operations`,
-`command=margin.review.prepare`, `view: "price_policy"`, the
-`revenue.quote_to_pricing` handoff fixture, and a generated pricing review
-packet. Price publishing, customer sends, and quote mutation remain blocked.
+Offer and Pricing now has its first runtime slice after Systems:
+`worker.role=offer_pricing_operations`, `command=margin.review.prepare`,
+`view: "price_policy"`, the `revenue.quote_to_pricing` handoff fixture, and a
+generated pricing review packet. Price publishing, customer sends, quote
+mutation, and change-order execution remain blocked follow-up gates.
 
 ## Expansion Rule
 

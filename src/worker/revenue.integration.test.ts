@@ -256,6 +256,57 @@ maybeDescribe("Revenue Worker integration eval", () => {
       code: "control_plane_credential_fingerprint_required",
       message: "Managed control-plane credential inventory requires a token fingerprint.",
     });
+
+    const emptyScopeToken = `ci-managed-empty-scope-token-${randomUUID()}`;
+    const emptyScopeCredentialId = `ci-managed-empty-scope-${randomUUID()}`;
+    await upsertControlPlaneCredential({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-credential-upsert-empty-scope-${randomUUID()}`,
+      credentialId: emptyScopeCredentialId,
+      displayName: "CI managed operator with empty scopes",
+      tokenFingerprint: controlPlaneTokenFingerprint(emptyScopeToken) ?? undefined,
+      allowedTenants: [],
+      allowedWorkerRoles: [],
+      allowedRoutes: [],
+      allowedAccess: [],
+      allowedCommands: [],
+      evidence: {
+        source: "ci",
+      },
+      db,
+    });
+
+    const emptyScopeDenied = await authorizeManagedControlPlaneCredential({
+      request: new Request("http://localhost/worker", {
+        headers: {
+          authorization: `Bearer ${emptyScopeToken}`,
+        },
+      }),
+      auth: {
+        ok: true,
+        operatorEmail: "owner@continuoushq.com",
+        credentialId: emptyScopeCredentialId,
+        scope: {
+          tenantSlugs: ["continuous-demo"],
+          workerRoles: ["revenue_operations"],
+        },
+      },
+      tenantSlug: "continuous-demo",
+      workerRole: "revenue_operations",
+      route: "worker",
+      access: "write",
+      command: "run",
+      requireManagedCredential: true,
+      db,
+    });
+
+    expect(emptyScopeDenied).toEqual({
+      ok: false,
+      status: 403,
+      code: "control_plane_tenant_forbidden",
+      message: "This managed control-plane credential is not allowed to access the requested tenant.",
+    });
   });
 
   it("requires exact route-qualified commands in managed credential inventory", async () => {

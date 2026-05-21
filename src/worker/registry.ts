@@ -58,6 +58,12 @@ import {
   prepareComplianceFiling,
 } from "./compliance";
 import {
+  getOfferPricingPricePolicy,
+  getOfferPricingWorkerSnapshotSafe,
+  offerPricingWorkerRole,
+  prepareOfferPricingMarginReview,
+} from "./offer-pricing";
+import {
   getSystemsRepairs,
   getSystemsWorkerSnapshotSafe,
   planSystemsAutomation,
@@ -786,6 +792,47 @@ const complianceFilingPrepareConfig: WorkerConfigSchema = {
   },
   additionalProperties: true,
 };
+const offerPricingMarginReviewConfig: WorkerConfigSchema = {
+  type: "object",
+  required: ["sourceRefs", "policy"],
+  properties: {
+    sourceRefs: {
+      type: "object",
+      required: ["quoteObjectId", "evidencePacketId"],
+      properties: {
+        quoteObjectId: { type: "string" },
+        leadObjectId: { type: "string" },
+        customerObjectId: { type: "string" },
+        evidencePacketId: { type: "string" },
+        approvalRequestId: { type: "string" },
+        workflowRunId: { type: "string" },
+        priceBookId: { type: "string" },
+      },
+      additionalProperties: false,
+    },
+    policy: {
+      type: "object",
+      required: ["marginRuleId", "discountPolicyId"],
+      properties: {
+        marginRuleId: { type: "string" },
+        discountPolicyId: { type: "string" },
+        priceBookId: { type: "string" },
+        requireOwnerApproval: { type: "boolean" },
+      },
+      additionalProperties: false,
+    },
+    requestedChange: jsonObjectConfig,
+  },
+  additionalProperties: false,
+};
+const offerPricingPricePolicyViewConfig: WorkerConfigSchema = {
+  type: "object",
+  properties: {
+    quoteObjectId: { type: "string" },
+    priceBookId: { type: "string" },
+  },
+  additionalProperties: false,
+};
 const systemsConnectorHealthConfig: WorkerConfigSchema = {
   type: "object",
   required: ["checks"],
@@ -1427,9 +1474,151 @@ const financeDefinition: WorkerDefinition = {
   },
 };
 
+const offerPricingDefinition: WorkerDefinition = {
+  role: offerPricingWorkerRole,
+  commands: {
+    "margin.review.prepare": {
+      name: "margin.review.prepare",
+      description: "Prepare quote-line margin, discount, and price-policy review packets without external publish.",
+      idempotency: "required",
+      sideEffects: "internal",
+      externalExecution: "blocked",
+      requiresTenant: true,
+      configSchema: offerPricingMarginReviewConfig,
+      async handle(context) {
+        if (!context.idempotencyKey) {
+          throw new PlatformUnavailableError(
+            "invalid_idempotency_key",
+            "A string idempotency key is required.",
+            400,
+          );
+        }
+
+        return prepareOfferPricingMarginReview({
+          idempotencyKey: context.idempotencyKey,
+          tenantSlug: context.target.tenantSlug,
+          workerId: context.target.workerId,
+          operatorEmail: context.operatorEmail,
+          config: context.config,
+        });
+      },
+    },
+    "approval.decide": {
+      name: "approval.decide",
+      description: "Record pricing approval decisions without external execution.",
+      idempotency: "none",
+      sideEffects: "internal",
+      externalExecution: "blocked",
+      requiresTenant: true,
+      configSchema: {
+        type: "object",
+        required: ["approvalId", "action"],
+        properties: {
+          approvalId: { type: "string" },
+          action: {
+            type: "string",
+            enum: ["approved", "rejected", "revision_requested"],
+          },
+          note: { type: "string" },
+        },
+        additionalProperties: true,
+      },
+      async handle(context) {
+        const approvalId = optionalString(context.config.approvalId);
+        const action = normalizeApprovalDecision(context.config.action);
+
+        if (!approvalId || !action) {
+          throw new PlatformUnavailableError(
+            "invalid_worker_command_config",
+            "config.approvalId and config.action are required for approval.decide.",
+            400,
+          );
+        }
+
+        return decideApproval({
+          approvalId,
+          operatorEmail: context.operatorEmail,
+          tenantSlug: context.target.tenantSlug,
+          action,
+          note: optionalString(context.config.note),
+          subject: "worker",
+        });
+      },
+    },
+  },
+  views: {
+    snapshot: {
+      name: "snapshot",
+      description: "Read the Offer and Pricing Worker runtime snapshot.",
+      configSchema: emptyViewConfig,
+      async handle(context) {
+        const result = await getOfferPricingWorkerSnapshotSafe({
+          tenantSlug: context.target.tenantSlug,
+          workerId: context.target.workerId,
+          role: context.target.role,
+        });
+
+        return {
+          status: result.ok ? 200 : 500,
+          data: {
+            worker: responseTarget(context.target),
+            view: "snapshot",
+            snapshot: result.snapshot,
+          },
+          error: result.error,
+        };
+      },
+    },
+    price_policy: {
+      name: "price_policy",
+      description: "Read price book, margin rule, discount policy, and quote-line review state.",
+      configSchema: offerPricingPricePolicyViewConfig,
+      async handle(context) {
+        const pricePolicy = await getOfferPricingPricePolicy({
+          tenantSlug: context.target.tenantSlug,
+          workerId: context.target.workerId,
+          config: context.config,
+        });
+
+        return {
+          data: {
+            worker: responseTarget(context.target, context.target.tenantSlug),
+            view: "price_policy",
+            pricePolicy,
+          },
+          error: null,
+        };
+      },
+    },
+    approvals: {
+      name: "approvals",
+      description: "List pricing approval requests.",
+      configSchema: stateFilterConfig,
+      async handle(context) {
+        const approvals = await listApprovals({
+          operatorEmail: context.operatorEmail,
+          tenantSlug: context.target.tenantSlug,
+          state: optionalString(context.config.state),
+          subject: "worker",
+        });
+
+        return {
+          data: {
+            worker: responseTarget(context.target, approvals.operator.tenantSlug),
+            view: "approvals",
+            approvals,
+          },
+          error: null,
+        };
+      },
+    },
+  },
+};
+
 const workerDefinitions: Record<string, WorkerDefinition> = {
   [revenueDefinition.role]: revenueDefinition,
   [financeDefinition.role]: financeDefinition,
+  [offerPricingDefinition.role]: offerPricingDefinition,
   [workforceWorkerRole]: {
     role: workforceWorkerRole,
     commands: {

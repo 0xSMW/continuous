@@ -184,7 +184,7 @@ function scopedListAllows(items: string[], value?: string | null) {
   const cleaned = cleanString(value);
 
   if (items.length === 0) {
-    return true;
+    return false;
   }
 
   if (!cleaned) {
@@ -198,7 +198,7 @@ function patternListAllows(items: string[], value?: string | null) {
   const cleaned = cleanString(value);
 
   if (items.length === 0) {
-    return true;
+    return false;
   }
 
   if (!cleaned) {
@@ -223,7 +223,7 @@ function commandListAllows(items: string[], route: string, command?: string | nu
   const cleanedRoute = cleanString(route);
 
   if (items.length === 0) {
-    return true;
+    return false;
   }
 
   if (!cleanedCommand || !cleanedRoute) {

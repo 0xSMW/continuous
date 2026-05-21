@@ -351,19 +351,32 @@ surface. It reports worker registration, capability, budget, workflow, latest
 dry-run proof, quote-review view refs, and live credential gates without adding
 Revenue-specific URLs or app-server tool names.
 
-Offer and Pricing is now a planned contract-backed worker family, not just a
-catalog candidate. Its first slice is `worker.role=offer_pricing_operations`,
+Offer and Pricing is now a runtime worker family, not just a planned catalog
+candidate. Its first slice is `worker.role=offer_pricing_operations`,
 `command=margin.review.prepare`, and `view: "price_policy"` on `/worker`,
-consuming `revenue.quote_to_pricing` Core refs while price publish, quote
-mutation, and customer sends stay blocked.
+consuming `revenue.quote_to_pricing` Core refs and writing pricing review
+objects, packet/document/evidence, approval, workflow steps, generated view,
+budget, and audit proof while price publish, quote mutation, and customer sends
+stay blocked.
 
 Offer and Pricing generated-view naming is pinned to the registered
 `price_policy` view. Margin review and change-order review remain sections
 inside that view until they are promoted as explicit registry entries, avoiding
 dotted public view names that drift from `/worker` metadata.
 
-The Offer and Pricing planned metadata now accepts the full
+The Offer and Pricing metadata accepts the full
 `revenue.quote_to_pricing` source-ref packet, including quote, lead, customer,
-evidence, approval, and workflow refs. Planned worker views also expose
+evidence, approval, and workflow refs. Worker views also expose
 `configSchema`, so `price_policy` callers can discover `config.quoteObjectId`
 and `config.priceBookId` from `continuous.worker.schema`.
+
+Offer and Pricing now has a seeded worker, capability grants, budget account,
+pricing-margin workflow definition, quote-line fixture, margin rule, discount
+policy, source quote evidence packet, runtime handler, integration test, and
+deploy app-server smoke. The public view name is `price_policy`, and all
+operation-specific inputs stay under `config`.
+
+Managed control-plane credential inventory now fails closed when durable
+tenant, route, access, command, or worker-role scope lists are omitted or empty.
+This matches the deployment docs and prevents an empty managed credential row
+from authorizing broad access after catalog auth succeeds.

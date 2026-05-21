@@ -123,11 +123,12 @@ describe("app-server worker tools", () => {
       "workforce_operations",
       "compliance_operations",
       "systems_operations",
+      "offer_pricing_operations",
     ]);
-    expect(plannedRoles).toEqual(["offer_pricing_operations"]);
+    expect(plannedRoles).toEqual([]);
     expect(registry.plannedCommands).toEqual(registry.followUpCommands);
     expect(registry.plannedViews).toEqual(registry.followUpViews);
-    expect(registry.plannedFutureWorkerCommands).toEqual(
+    expect(registry.commands).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           role: "offer_pricing_operations",
@@ -141,7 +142,7 @@ describe("app-server worker tools", () => {
         }),
       ]),
     );
-    expect(registry.plannedFutureWorkerViews).toEqual(
+    expect(registry.views).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           role: "offer_pricing_operations",

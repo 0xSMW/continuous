@@ -969,9 +969,7 @@ describe("worker tool contract", () => {
             (view) => view.role === "systems_operations",
           );
 
-    expect(workerToolSchema.registry.plannedContracts.map((contract) => contract.role)).toEqual([
-      "offer_pricing_operations",
-    ]);
+    expect(workerToolSchema.registry.plannedContracts.map((contract) => contract.role)).toEqual([]);
     expect(workerToolSchema.registry.contracts.map((contract) => contract.role)).toEqual([
       "revenue_operations",
       "owner_chief_of_staff",
@@ -990,8 +988,9 @@ describe("worker tool contract", () => {
       "workforce_operations",
       "compliance_operations",
       "systems_operations",
+      "offer_pricing_operations",
     ]);
-    expect(workerToolSchema.registry.plannedFutureWorkerCommands).toEqual(
+    expect(workerToolSchema.registry.commands).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           role: "offer_pricing_operations",
@@ -1022,7 +1021,7 @@ describe("worker tool contract", () => {
         }),
       ]),
     );
-    expect(workerToolSchema.registry.plannedFutureWorkerViews).toEqual(
+    expect(workerToolSchema.registry.views).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           role: "offer_pricing_operations",
@@ -1043,6 +1042,16 @@ describe("worker tool contract", () => {
         }),
       ]),
     );
+    expect(
+      workerToolSchema.registry.plannedFutureWorkerCommands.some(
+        (command) => command.role === "offer_pricing_operations",
+      ),
+    ).toBe(false);
+    expect(
+      workerToolSchema.registry.plannedFutureWorkerViews.some(
+        (view) => view.role === "offer_pricing_operations",
+      ),
+    ).toBe(false);
     expect(
       workerToolSchema.registry.plannedFutureWorkerCommands.some(
         (command) => command.role === "systems_operations",
@@ -1296,7 +1305,7 @@ describe("worker tool contract", () => {
         firstCommand: "margin.review.prepare",
         firstView: "price_policy",
         incomingHandoff: "revenue.quote_to_pricing",
-        status: "planned_contract",
+        status: "runtime",
         contractPath: "docs/offer-pricing-worker-v1-contract.md",
         evidencePacket: "pricing_review_packet",
       }),

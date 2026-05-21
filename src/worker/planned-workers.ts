@@ -1072,7 +1072,7 @@ export const workerContracts: PlannedWorkerContractMetadata[] = [
         role: "offer_pricing_operations",
         name: "snapshot",
         toolAlias: "worker.view",
-        description: "Read the Offer and Pricing Worker planned runtime snapshot.",
+        description: "Read the Offer and Pricing Worker runtime snapshot.",
         idempotency: "none",
         sideEffects: "none",
         externalExecution: "blocked",
@@ -1108,6 +1108,7 @@ const runtimeWorkerRoles = new Set([
   "workforce_operations",
   "compliance_operations",
   "systems_operations",
+  "offer_pricing_operations",
 ]);
 
 export const runtimeWorkerContracts = workerContracts.filter((contract) =>
@@ -1377,7 +1378,7 @@ export const workerExpansionCatalog: WorkerExpansionCatalogEntry[] = [
     order: 8,
     key: "offer_pricing_operations",
     name: "Offer and Pricing Worker",
-    status: "planned_contract",
+    status: "runtime",
     kind: "worker_family",
     apiRoute: workerApiRoute,
     workerRole: "offer_pricing_operations",

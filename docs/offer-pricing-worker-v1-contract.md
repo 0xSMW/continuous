@@ -12,7 +12,7 @@ quotes, send customer messages, or alter money movement.
 | Worker role | `offer_pricing_operations` |
 | First outcome | Pricing review packet with margin verdict, discount approval request, quote-line policy refs, and generated price policy view |
 | Autonomy level | `2` |
-| Runtime status | Planned contract |
+| Runtime status | First runtime slice |
 | External execution | `blocked` |
 
 ## API Shape

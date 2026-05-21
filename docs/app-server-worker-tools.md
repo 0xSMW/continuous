@@ -28,6 +28,9 @@ Revenue `lead.read`, `run`, `lead.classify`, `response.draft`, and
 `payment_draft.prepare` commands, proving the app-server boundary writes the
 same worker run, approval, evidence, budget, event, adapter dry-run, generated
 view, and workflow records as `/worker`.
+Deploy smoke also exercises Offer and Pricing `margin.review.prepare` plus the
+`price_policy` view through `POST /app-server`, proving a post-Revenue worker
+can use the same dynamic-tool envelope without a worker-specific route.
 Revenue `readiness` is exposed through `continuous.worker.view` with the same
 `view`, `worker`, and `config` payload as `/worker`; it returns dry-run launch
 checks, latest quote-review proof refs, and live credential blockers without a
