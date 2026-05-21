@@ -2,7 +2,7 @@ import { and, eq } from "drizzle-orm";
 
 import { db as defaultDb } from "../db/client";
 import { tenants, users } from "../db/schema";
-import { RevenueWorkerUnavailableError } from "../worker/revenue";
+import { PlatformUnavailableError } from "./errors";
 
 type Database = typeof defaultDb;
 
@@ -43,7 +43,7 @@ export async function loadOperatorContext(input: {
     .limit(2);
 
   if (rows.length === 0) {
-    throw new RevenueWorkerUnavailableError(
+    throw new PlatformUnavailableError(
       "operator_not_found",
       "Operator access requires an active user for the configured email.",
       403,
@@ -51,7 +51,7 @@ export async function loadOperatorContext(input: {
   }
 
   if (rows.length > 1 && !input.tenantSlug) {
-    throw new RevenueWorkerUnavailableError(
+    throw new PlatformUnavailableError(
       "operator_tenant_ambiguous",
       "Multiple tenant memberships match this operator email. Provide a tenantSlug.",
       409,

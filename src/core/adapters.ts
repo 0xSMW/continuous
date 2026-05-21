@@ -1,9 +1,12 @@
+import { createHash } from "node:crypto";
+
 import { and, asc, eq, lte } from "drizzle-orm";
 
 import { db as defaultDb } from "../db/client";
 import {
   adapterActions,
   adapterRuns,
+  approvalRequests,
   auditEvents,
   connections,
   evidence,
@@ -27,6 +30,19 @@ type AdapterExecutionSafety = {
   liveCredentialCheck: JsonObject;
   rollbackPlan: JsonObject;
   executionGate: JsonObject;
+};
+export type ApprovedAdapterExecutionReceiptInput = {
+  db: DatabaseExecutor;
+  tenantId: string;
+  operation: string;
+  approvalId: string;
+  execution: JsonObject | null;
+  adapterRunId?: string | null;
+  adapterActionId?: string | null;
+  now: Date;
+  configPath?: string;
+  defaultChannel?: string;
+  requireRecipient?: boolean;
 };
 
 const source = "continuous.adapter_reconciliation";
@@ -89,9 +105,133 @@ function stringList(value: unknown) {
     : [];
 }
 
+function stringListOrSingle(value: unknown) {
+  const items = stringList(value);
+  const single = stringValue(value);
+
+  return items.length > 0 ? items : single ? [single] : [];
+}
+
+function firstStringValue(...values: unknown[]) {
+  for (const value of values) {
+    const output = stringValue(value);
+
+    if (output) {
+      return output;
+    }
+  }
+
+  return undefined;
+}
+
 function uuidValue(value: unknown) {
   const valueString = stringValue(value);
   return valueString && uuidPattern.test(valueString) ? valueString : undefined;
+}
+
+function stableJson(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(stableJson);
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, nested]) => [key, stableJson(nested)]),
+    );
+  }
+
+  return value;
+}
+
+function hashObject(value: JsonObject) {
+  return createHash("sha256").update(JSON.stringify(stableJson(value))).digest("hex");
+}
+
+function assertNoInlineCredentialMaterial(value: unknown, path = "config.execution") {
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => assertNoInlineCredentialMaterial(item, `${path}[${index}]`));
+    return;
+  }
+
+  if (!value || typeof value !== "object") {
+    return;
+  }
+
+  for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+    const normalized = key.toLowerCase().replace(/[^a-z0-9]+/g, "");
+    const isReference =
+      normalized.endsWith("ref") ||
+      normalized.endsWith("reference") ||
+      normalized.includes("credentialref") ||
+      normalized.includes("secretref") ||
+      normalized.includes("tokenref") ||
+      normalized.includes("vaultref");
+    const secretish =
+      normalized.includes("secret") ||
+      normalized.includes("password") ||
+      normalized.includes("token") ||
+      normalized.includes("apikey") ||
+      normalized.includes("authorization") ||
+      normalized.includes("bearer") ||
+      normalized.includes("privatekey");
+
+    if (secretish && !isReference && typeof nested === "string" && nested.trim()) {
+      throw new PlatformUnavailableError(
+        "core_execution_secret_material",
+        `${path}.${key} looks like inline credential material. Use a managed credential reference instead.`,
+        400,
+      );
+    }
+
+    assertNoInlineCredentialMaterial(nested, `${path}.${key}`);
+  }
+}
+
+function managedCredentialRef(value: unknown) {
+  const ref = stringValue(value);
+
+  if (!ref) {
+    return "";
+  }
+
+  const allowedPrefixes = ["env:", "vault:", "managed:", "secret:", "doppler:", "do:", "aws:", "gcp:", "azure:"];
+
+  return allowedPrefixes.some((prefix) => ref.toLowerCase().startsWith(prefix)) ? ref : "";
+}
+
+function credentialRefKind(ref: string) {
+  return ref.split(":", 1)[0] || "managed";
+}
+
+function credentialRefHash(ref: string) {
+  return hashObject({ credentialRef: ref });
+}
+
+function grantedWriteScopes(scopes: JsonObject) {
+  return Array.from(
+    new Set([
+      ...stringListOrSingle(scopes.write),
+      ...stringListOrSingle(scopes.writes),
+      ...stringListOrSingle(scopes.send),
+      ...stringListOrSingle(scopes.sends),
+      ...stringListOrSingle(scopes.execute),
+      ...stringListOrSingle(scopes.executes),
+      ...stringListOrSingle(scopes.actions),
+      ...stringListOrSingle(scopes.live),
+    ]),
+  );
+}
+
+function hasScope(granted: string[], required: string) {
+  return granted.includes("*") || granted.includes(required);
+}
+
+function isSendOperation(operation: string) {
+  const normalized = operation.toLowerCase();
+
+  return normalized.includes("send") || normalized.includes("message") || normalized.includes("email");
 }
 
 function appendString(value: unknown, item: string) {
@@ -276,6 +416,263 @@ async function adapterExecutionSafetyFor(
     rollbackPlan,
     executionGate,
   };
+}
+
+export async function approvedAdapterExecutionReceiptFor(input: ApprovedAdapterExecutionReceiptInput) {
+  const execution = input.execution;
+  const configPath = input.configPath ?? "config.execution";
+
+  if (!execution || Object.keys(execution).length === 0) {
+    return null;
+  }
+
+  assertNoInlineCredentialMaterial(execution, configPath);
+  const operation = firstStringValue(execution.operation, input.operation) ?? input.operation;
+
+  if (operation !== input.operation) {
+    throw new PlatformUnavailableError(
+      "core_execution_operation_mismatch",
+      `${configPath}.operation must be ${input.operation} for this approved execution path.`,
+      400,
+    );
+  }
+
+  const approvalId = uuidValue(input.approvalId);
+
+  if (!approvalId) {
+    throw new PlatformUnavailableError(
+      "core_execution_approval_required",
+      "Approved adapter execution requires a tenant-scoped approval id.",
+      400,
+    );
+  }
+
+  const [approval] = await input.db
+    .select({ id: approvalRequests.id, state: approvalRequests.state })
+    .from(approvalRequests)
+    .where(and(eq(approvalRequests.tenantId, input.tenantId), eq(approvalRequests.id, approvalId)))
+    .limit(1);
+
+  if (!approval) {
+    throw new PlatformUnavailableError(
+      "core_execution_approval_not_found",
+      "Approved adapter execution requires an approval request in this tenant.",
+      404,
+    );
+  }
+
+  if (approval.state !== "approved") {
+    throw new PlatformUnavailableError(
+      "core_execution_approval_not_ready",
+      "Approved adapter execution requires an approved approval request.",
+      409,
+    );
+  }
+
+  const connectionId = uuidValue(execution.connectionId);
+
+  if (!connectionId) {
+    throw new PlatformUnavailableError(
+      "core_execution_connection_required",
+      `${configPath}.connectionId is required for approved adapter execution.`,
+      400,
+    );
+  }
+
+  const [connection] = await input.db
+    .select({
+      id: connections.id,
+      state: connections.state,
+      externalAccountId: connections.externalAccountId,
+      scopes: connections.scopes,
+      config: connections.config,
+    })
+    .from(connections)
+    .where(and(eq(connections.tenantId, input.tenantId), eq(connections.id, connectionId)))
+    .limit(1);
+
+  if (!connection) {
+    throw new PlatformUnavailableError(
+      "core_execution_connection_not_found",
+      `${configPath}.connectionId does not match a connection in this tenant.`,
+      404,
+    );
+  }
+
+  if (connection.state !== "active") {
+    throw new PlatformUnavailableError(
+      "core_execution_connection_not_ready",
+      "Approved adapter execution requires an active connection.",
+      409,
+    );
+  }
+
+  const connectionConfig = objectValue(connection.config);
+  assertNoInlineCredentialMaterial(connectionConfig, "connection.config");
+  const writerConfig = objectValue(connectionConfig.writer ?? connectionConfig.sender ?? connectionConfig.execution);
+  const credentialRef = managedCredentialRef(
+    firstStringValue(
+      execution.credentialRef,
+      objectValue(execution.credential).ref,
+      objectValue(execution.credentials).ref,
+      connectionConfig.credentialRef,
+      connectionConfig.secretRef,
+      connectionConfig.tokenRef,
+      connectionConfig.vaultRef,
+      writerConfig.credentialRef,
+      writerConfig.secretRef,
+      writerConfig.tokenRef,
+      writerConfig.vaultRef,
+    ),
+  );
+
+  if (!credentialRef) {
+    throw new PlatformUnavailableError(
+      "core_execution_credential_required",
+      `Approved adapter execution requires a managed credential reference such as ${configPath}.credentialRef=managed:customer-message-sender.`,
+      409,
+    );
+  }
+
+  const requiredScopes = Array.from(
+    new Set(
+      [
+        ...stringListOrSingle(execution.requiredScopes),
+        ...stringListOrSingle(execution.scopes),
+        ...stringListOrSingle(execution.requiredLiveScopes),
+      ].filter(Boolean),
+    ),
+  );
+  const effectiveRequiredScopes = requiredScopes.length > 0 ? requiredScopes : [operation];
+  const writeScopes = grantedWriteScopes(objectValue(connection.scopes));
+  const missingScopes = effectiveRequiredScopes.filter((scope) => !hasScope(writeScopes, scope));
+
+  if (missingScopes.length > 0) {
+    throw new PlatformUnavailableError(
+      "core_execution_scope_missing",
+      `Approved adapter execution requires connection write scope(s): ${missingScopes.join(", ")}.`,
+      409,
+    );
+  }
+
+  const receipt = objectValue(execution.receipt ?? execution.deliveryReceipt ?? execution.providerReceipt);
+  const receiptId = firstStringValue(
+    receipt.receiptId,
+    receipt.id,
+    receipt.providerMessageId,
+    receipt.messageId,
+    execution.receiptId,
+    execution.providerMessageId,
+    execution.messageId,
+  );
+
+  if (!receiptId) {
+    throw new PlatformUnavailableError(
+      "core_execution_receipt_required",
+      `Approved adapter execution requires ${configPath}.receipt.receiptId or providerMessageId.`,
+      400,
+    );
+  }
+
+  const rollback = objectValue(execution.rollback ?? execution.rollbackPlan);
+  const rollbackStrategy = firstStringValue(rollback.strategy, rollback.mode);
+  const escalationOwner = firstStringValue(
+    rollback.escalationOwner,
+    rollback.owner,
+    rollback.ownerEmail,
+    execution.escalationOwner,
+  );
+
+  if (!rollbackStrategy || !escalationOwner) {
+    throw new PlatformUnavailableError(
+      "core_execution_rollback_required",
+      `Approved adapter execution requires ${configPath}.rollback.strategy and escalationOwner.`,
+      400,
+    );
+  }
+
+  const message = objectValue(execution.message);
+  const customer = objectValue(execution.customer);
+  const recipient = firstStringValue(
+    execution.recipient,
+    execution.to,
+    message.to,
+    message.recipient,
+    customer.email,
+    customer.ref,
+  );
+
+  if (input.requireRecipient !== false && isSendOperation(operation) && !recipient) {
+    throw new PlatformUnavailableError(
+      "core_execution_recipient_required",
+      `Approved adapter execution requires ${configPath}.recipient for ${operation}.`,
+      400,
+    );
+  }
+
+  const receiptProviderMessageId = firstStringValue(receipt.providerMessageId, receipt.messageId);
+  const channel = firstStringValue(execution.channel, message.channel, input.defaultChannel);
+  const receiptStatus = firstStringValue(receipt.status) ?? "recorded";
+  const receiptSentAt = firstStringValue(receipt.sentAt, receipt.deliveredAt, receipt.createdAt);
+  const rollbackSteps = stringListOrSingle(rollback.steps);
+  const rollbackEvidenceRequired = Array.from(
+    new Set([
+      ...stringListOrSingle(rollback.evidenceRequired),
+      "adapter_receipt",
+      "rollback_plan",
+      "escalation_owner",
+    ]),
+  );
+  const externalSend = isSendOperation(operation);
+
+  return {
+    schemaVersion: "core.approved_adapter_execution_receipt.v1",
+    executionBoundary: "core.adapter_execution",
+    status: "recorded",
+    mode: "receipt_recorded",
+    operation,
+    approvalId,
+    ...(channel ? { channel } : {}),
+    ...(recipient ? { recipient } : {}),
+    connectionId: connection.id,
+    externalAccountId: connection.externalAccountId ?? null,
+    adapterRunId: input.adapterRunId || null,
+    adapterActionId: input.adapterActionId || null,
+    requiredScopes: effectiveRequiredScopes,
+    grantedScopes: writeScopes,
+    credential: {
+      kind: credentialRefKind(credentialRef),
+      hash: credentialRefHash(credentialRef),
+    },
+    receipt: {
+      receiptId,
+      ...(receiptProviderMessageId ? { providerMessageId: receiptProviderMessageId } : {}),
+      ...(receiptSentAt ? { sentAt: receiptSentAt } : {}),
+      status: receiptStatus,
+    },
+    rollback: {
+      state: "ready",
+      strategy: rollbackStrategy,
+      escalationOwner,
+      ...(rollbackSteps.length > 0 ? { steps: rollbackSteps } : {}),
+      required: true,
+      evidenceRequired: rollbackEvidenceRequired,
+    },
+    executionGate: {
+      state: "recorded",
+      checkedAt: input.now.toISOString(),
+      operation,
+      connectionId: connection.id,
+      externalExecution: "recorded",
+      externalMutation: true,
+      externalSend,
+    },
+    externalExecution: "recorded",
+    externalMutation: true,
+    externalSend,
+    continuousExecuted: false,
+    recordedAt: input.now.toISOString(),
+  } satisfies JsonObject;
 }
 
 function decisionFor(row: {

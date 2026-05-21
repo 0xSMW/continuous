@@ -22,7 +22,7 @@ on:
       require_production_readiness:
         description: "Run the strict customer-data readiness gate after deploy smoke"
         required: false
-        default: "false"
+        default: "true"
 
 permissions:
   contents: read

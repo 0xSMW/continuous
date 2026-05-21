@@ -42,7 +42,8 @@ type AdapterAuthMode = "none" | "oauth" | "oauth2" | "api_key" | "basic" | "bear
 type AdapterConnectionState = "draft" | "active" | "paused" | "error" | "archived";
 type ConnectionHealthStatus = "ready" | "needs_configuration" | "paused" | "error" | "archived";
 type ConnectionHealthCheckStatus = "pass" | "warn" | "fail" | "not_applicable";
-type ExternalActionTargetType = "payment_instruction" | "payment" | "filing_draft";
+type AdapterActionState = "queued" | "running" | "done" | "failed" | "canceled";
+type ExternalActionTargetType = "payment_instruction" | "payment" | "filing_draft" | "adapter_action";
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -57,6 +58,13 @@ const evidenceKinds = new Set<EvidenceKind>([
   "note",
 ]);
 const riskLevels = new Set<RiskLevel>(["low", "medium", "high", "critical"]);
+const adapterActionStates = new Set<AdapterActionState>([
+  "queued",
+  "running",
+  "done",
+  "failed",
+  "canceled",
+]);
 
 const objectSource = "continuous.core.objects";
 const eventSource = "continuous.core.events";
@@ -404,6 +412,11 @@ export type CoreExternalActionRecordInput = {
   db?: Database;
 };
 
+export type CoreExternalActionRecordForOperatorInput = Omit<
+  CoreExternalActionRecordInput,
+  "operatorEmail" | "tenantSlug" | "db"
+>;
+
 function cleanString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
@@ -628,14 +641,27 @@ function parseExternalActionTargetType(value: unknown) {
   if (
     targetType === "payment_instruction" ||
     targetType === "payment" ||
-    targetType === "filing_draft"
+    targetType === "filing_draft" ||
+    targetType === "adapter_action"
   ) {
     return targetType as ExternalActionTargetType;
   }
 
   throw new PlatformUnavailableError(
     "core_external_action_target_invalid",
-    "config.targetType must be payment_instruction, payment, or filing_draft.",
+    "config.targetType must be payment_instruction, payment, filing_draft, or adapter_action.",
+    400,
+  );
+}
+
+function parseAdapterActionState(value: string) {
+  if (adapterActionStates.has(value as AdapterActionState)) {
+    return value as AdapterActionState;
+  }
+
+  throw new PlatformUnavailableError(
+    "core_external_action_adapter_state_invalid",
+    "config.state must be queued, running, done, failed, or canceled for adapter_action targets.",
     400,
   );
 }
@@ -1356,6 +1382,9 @@ async function loadAdapterAction(tx: QueryClient, tenantId: string, adapterActio
       taskId: adapterActions.taskId,
       eventId: adapterActions.eventId,
       capabilityId: adapterActions.capabilityId,
+      state: adapterActions.state,
+      response: adapterActions.response,
+      receipt: adapterActions.receipt,
     })
     .from(adapterActions)
     .where(and(eq(adapterActions.tenantId, tenantId), eq(adapterActions.id, adapterActionId)))
@@ -1539,6 +1568,25 @@ async function loadExternalActionTarget(
     }
   }
 
+  if (targetType === "adapter_action") {
+    const action = await loadAdapterAction(tx, tenantId, targetId);
+
+    return {
+      id: action.id,
+      objectId: null,
+      state: action.state,
+      data: {
+        adapterRunId: action.adapterRunId,
+        connectionId: action.connectionId,
+        taskId: action.taskId,
+        eventId: action.eventId,
+        capabilityId: action.capabilityId,
+        response: action.response,
+        receipt: action.receipt,
+      },
+    };
+  }
+
   throw new PlatformUnavailableError(
     "core_external_action_target_not_found",
     "config.targetId does not match a tenant-scoped target for config.targetType.",
@@ -1580,7 +1628,7 @@ async function updateExternalActionTarget(input: {
         updatedAt: input.now,
       })
       .where(and(eq(payments.tenantId, input.tenantId), eq(payments.id, input.targetId)));
-  } else {
+  } else if (input.targetType === "filing_draft") {
     await input.tx
       .update(filingDrafts)
       .set({
@@ -1589,6 +1637,25 @@ async function updateExternalActionTarget(input: {
         updatedAt: input.now,
       })
       .where(and(eq(filingDrafts.tenantId, input.tenantId), eq(filingDrafts.id, input.targetId)));
+  } else {
+    const response = jsonObject(input.currentData.response);
+    const receipt = jsonObject(input.currentData.receipt);
+
+    await input.tx
+      .update(adapterActions)
+      .set({
+        state: parseAdapterActionState(input.state),
+        response: {
+          ...response,
+          lastExternalAction: input.actionRecord,
+        },
+        receipt: {
+          ...receipt,
+          lastExternalAction: input.actionRecord,
+        },
+        updatedAt: input.now,
+      })
+      .where(and(eq(adapterActions.tenantId, input.tenantId), eq(adapterActions.id, input.targetId)));
   }
 
   if (!input.objectId) {
@@ -3607,12 +3674,27 @@ export async function recordAdapterIntent(input: CoreAdapterIntentRecordInput) {
 
 export async function recordExternalAction(input: CoreExternalActionRecordInput) {
   const db = input.db ?? defaultDb;
+  const operator = await loadOperatorContext({
+    db,
+    operatorEmail: input.operatorEmail,
+    tenantSlug: input.tenantSlug,
+  });
+
+  return db.transaction(async (tx) => recordExternalActionForOperator(tx, operator, input));
+}
+
+export async function recordExternalActionForOperator(
+  tx: Transaction,
+  operator: OperatorContext,
+  input: CoreExternalActionRecordForOperatorInput,
+) {
   const targetType = parseExternalActionTargetType(input.targetType);
   const targetId = requiredUuid(input.targetId, "config.targetId");
   const kind = requiredStringMax(input.kind, "config.kind", 120);
   const state = requiredStringMax(input.state, "config.state", 80);
   const requestedConnectionId = optionalUuid(input.connectionId, "config.connectionId");
-  const adapterActionId = optionalUuid(input.adapterActionId, "config.adapterActionId");
+  const requestedAdapterActionId = optionalUuid(input.adapterActionId, "config.adapterActionId");
+  const adapterActionId = targetType === "adapter_action" ? targetId : requestedAdapterActionId;
   const taskId = optionalUuid(input.taskId, "config.taskId");
   const sourceEventId = optionalUuid(input.eventId, "config.eventId");
   const capabilityId = optionalUuid(input.capabilityId, "config.capabilityId");
@@ -3622,11 +3704,6 @@ export async function recordExternalAction(input: CoreExternalActionRecordInput)
   const receipt = jsonObject(input.receipt);
   const response = jsonObject(input.response);
   const data = jsonObject(input.data);
-  const operator = await loadOperatorContext({
-    db,
-    operatorEmail: input.operatorEmail,
-    tenantSlug: input.tenantSlug,
-  });
 
   if (amountCents !== undefined && amountCents < 0) {
     throw new PlatformUnavailableError(
@@ -3654,197 +3731,203 @@ export async function recordExternalAction(input: CoreExternalActionRecordInput)
     data,
   });
 
-  return db.transaction(async (tx) => {
-    await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtext(${operator.tenantId}), hashtext(${`${externalActionSource}:${input.idempotencyKey}`}))`,
-    );
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtext(${operator.tenantId}), hashtext(${`${externalActionSource}:${input.idempotencyKey}`}))`,
+  );
 
-    const [existingAudit] = await tx
-      .select({
-        auditEventId: auditEvents.id,
-        targetType: auditEvents.targetType,
-        targetId: auditEvents.targetId,
-        eventId: auditEvents.eventId,
-        data: auditEvents.data,
-      })
-      .from(auditEvents)
-      .where(
-        and(
-          eq(auditEvents.tenantId, operator.tenantId),
-          eq(auditEvents.source, externalActionSource),
-          eq(auditEvents.idempotencyKey, `${input.idempotencyKey}:external_action_recorded`),
-        ),
-      )
-      .limit(1);
+  const [existingAudit] = await tx
+    .select({
+      auditEventId: auditEvents.id,
+      targetType: auditEvents.targetType,
+      targetId: auditEvents.targetId,
+      eventId: auditEvents.eventId,
+      data: auditEvents.data,
+    })
+    .from(auditEvents)
+    .where(
+      and(
+        eq(auditEvents.tenantId, operator.tenantId),
+        eq(auditEvents.source, externalActionSource),
+        eq(auditEvents.idempotencyKey, `${input.idempotencyKey}:external_action_recorded`),
+      ),
+    )
+    .limit(1);
 
-    if (existingAudit) {
-      assertCoreIdempotencyReplay({
-        command: "external_action.record",
-        fingerprint: idempotency,
-        storedData: existingAudit.data,
-      });
-
-      return {
-        created: false,
-        targetType: cleanString(existingAudit.targetType) ?? targetType,
-        targetId: existingAudit.targetId ?? targetId,
-        state: cleanString(existingAudit.data.state) ?? state,
-        eventId: existingAudit.eventId,
-        auditEventId: existingAudit.auditEventId,
-        evidenceId: await evidenceForAudit(tx, operator.tenantId, existingAudit.auditEventId),
-        connectionId: cleanString(existingAudit.data.connectionId) ?? null,
-        adapterActionId: cleanString(existingAudit.data.adapterActionId) ?? null,
-        externalExecution: "blocked",
-        executionMode: "record_only",
-      };
-    }
-
-    const adapterAction = adapterActionId
-      ? await loadAdapterAction(tx, operator.tenantId, adapterActionId)
-      : null;
-    const connectionId = requestedConnectionId ?? adapterAction?.connectionId ?? undefined;
-    const resolvedTaskId = taskId ?? adapterAction?.taskId ?? undefined;
-    const resolvedSourceEventId = sourceEventId ?? adapterAction?.eventId ?? undefined;
-    const resolvedCapabilityId = capabilityId ?? adapterAction?.capabilityId ?? undefined;
-
-    if (requestedConnectionId && adapterAction && requestedConnectionId !== adapterAction.connectionId) {
-      throw new PlatformUnavailableError(
-        "core_external_action_adapter_mismatch",
-        "config.connectionId must match config.adapterActionId when both are provided.",
-        400,
-      );
-    }
-
-    await Promise.all([
-      assertConnection(tx, operator.tenantId, connectionId),
-      assertTask(tx, operator.tenantId, resolvedTaskId),
-      assertEvent(tx, operator.tenantId, resolvedSourceEventId),
-      assertCapability(tx, resolvedCapabilityId),
-    ]);
-
-    const target = await loadExternalActionTarget(tx, operator.tenantId, targetType, targetId);
-    const objectId = target.objectId ?? undefined;
-    const targetData = jsonObject(target.data);
-
-    const now = new Date();
-    const actionRecord = {
-      targetType,
-      targetId,
-      kind,
-      state,
-      previousState: target.state,
-      amountCents: amountCents ?? null,
-      currency: currency ?? null,
-      connectionId: connectionId ?? null,
-      adapterActionId: adapterActionId ?? null,
-      taskId: resolvedTaskId ?? null,
-      sourceEventId: resolvedSourceEventId ?? null,
-      capabilityId: resolvedCapabilityId ?? null,
-      receipt,
-      response,
-      data,
-      occurredAt: occurredAt.toISOString(),
-      recordedAt: now.toISOString(),
-      recordedByUserId: operator.userId,
-      externalExecution: "blocked",
-      executionMode: "record_only",
-      continuousExecuted: false,
-    };
-    const [event] = await tx
-      .insert(events)
-      .values({
-        tenantId: operator.tenantId,
-        type: "external_action.recorded",
-        source: externalActionSource,
-        actorType: "user",
-        actorId: operator.userId,
-        actorRef: operator.actorRef,
-        objectId,
-        taskId: resolvedTaskId,
-        capabilityId: resolvedCapabilityId,
-        connectionId,
-        idempotencyKey: `${input.idempotencyKey}:external_action_recorded`,
-        data: actionRecord,
-        occurredAt,
-      })
-      .returning({ id: events.id });
-    const [audit] = await tx
-      .insert(auditEvents)
-      .values({
-        tenantId: operator.tenantId,
-        type: "external_action.recorded",
-        source: externalActionSource,
-        actorType: "user",
-        actorId: operator.userId,
-        actorRef: operator.actorRef,
-        targetType,
-        targetId,
-        taskId: resolvedTaskId,
-        eventId: event.id,
-        objectId,
-        capabilityId: resolvedCapabilityId,
-        risk: "high",
-        idempotencyKey: `${input.idempotencyKey}:external_action_recorded`,
-        data: {
-          ...actionRecord,
-          recordedEventId: event.id,
-          idempotency,
-        },
-      })
-      .returning({ id: auditEvents.id });
-    const [proof] = await tx
-      .insert(evidence)
-      .values({
-        tenantId: operator.tenantId,
-        kind: "receipt",
-        name: `External action recorded: ${kind}`,
-        objectId,
-        taskId: resolvedTaskId,
-        eventId: event.id,
-        capabilityId: resolvedCapabilityId,
-        actorType: "user",
-        actorId: operator.userId,
-        hash: `${externalActionSource}:${targetType}:${targetId}:${input.idempotencyKey}`,
-        data: {
-          ...actionRecord,
-          auditEventId: audit.id,
-          recordedEventId: event.id,
-          idempotency,
-        },
-      })
-      .returning({ id: evidence.id });
-
-    await updateExternalActionTarget({
-      tx,
-      tenantId: operator.tenantId,
-      targetType,
-      targetId,
-      objectId,
-      state,
-      currentData: targetData,
-      actionRecord: {
-        ...actionRecord,
-        recordedEventId: event.id,
-        auditEventId: audit.id,
-        evidenceId: proof.id,
-      },
-      now,
+  if (existingAudit) {
+    assertCoreIdempotencyReplay({
+      command: "external_action.record",
+      fingerprint: idempotency,
+      storedData: existingAudit.data,
     });
 
     return {
-      created: true,
-      targetType,
-      targetId,
-      state,
-      eventId: event.id,
-      auditEventId: audit.id,
-      evidenceId: proof.id,
-      connectionId: connectionId ?? null,
-      adapterActionId: adapterActionId ?? null,
+      created: false,
+      targetType: cleanString(existingAudit.targetType) ?? targetType,
+      targetId: existingAudit.targetId ?? targetId,
+      state: cleanString(existingAudit.data.state) ?? state,
+      eventId: existingAudit.eventId,
+      auditEventId: existingAudit.auditEventId,
+      evidenceId: await evidenceForAudit(tx, operator.tenantId, existingAudit.auditEventId),
+      connectionId: cleanString(existingAudit.data.connectionId) ?? null,
+      adapterActionId: cleanString(existingAudit.data.adapterActionId) ?? null,
       externalExecution: "blocked",
       executionMode: "record_only",
     };
+  }
+
+  if (targetType === "adapter_action" && requestedAdapterActionId && requestedAdapterActionId !== targetId) {
+    throw new PlatformUnavailableError(
+      "core_external_action_adapter_mismatch",
+      "config.adapterActionId must match config.targetId when config.targetType is adapter_action.",
+      400,
+    );
+  }
+
+  const adapterAction = adapterActionId
+    ? await loadAdapterAction(tx, operator.tenantId, adapterActionId)
+    : null;
+  const connectionId = requestedConnectionId ?? adapterAction?.connectionId ?? undefined;
+  const resolvedTaskId = taskId ?? adapterAction?.taskId ?? undefined;
+  const resolvedSourceEventId = sourceEventId ?? adapterAction?.eventId ?? undefined;
+  const resolvedCapabilityId = capabilityId ?? adapterAction?.capabilityId ?? undefined;
+
+  if (requestedConnectionId && adapterAction && requestedConnectionId !== adapterAction.connectionId) {
+    throw new PlatformUnavailableError(
+      "core_external_action_adapter_mismatch",
+      "config.connectionId must match config.adapterActionId when both are provided.",
+      400,
+    );
+  }
+
+  await Promise.all([
+    assertConnection(tx, operator.tenantId, connectionId),
+    assertTask(tx, operator.tenantId, resolvedTaskId),
+    assertEvent(tx, operator.tenantId, resolvedSourceEventId),
+    assertCapability(tx, resolvedCapabilityId),
+  ]);
+
+  const target = await loadExternalActionTarget(tx, operator.tenantId, targetType, targetId);
+  const objectId = target.objectId ?? undefined;
+  const targetData = jsonObject(target.data);
+
+  const now = new Date();
+  const actionRecord = {
+    targetType,
+    targetId,
+    kind,
+    state,
+    previousState: target.state,
+    amountCents: amountCents ?? null,
+    currency: currency ?? null,
+    connectionId: connectionId ?? null,
+    adapterActionId: adapterActionId ?? null,
+    taskId: resolvedTaskId ?? null,
+    sourceEventId: resolvedSourceEventId ?? null,
+    capabilityId: resolvedCapabilityId ?? null,
+    receipt,
+    response,
+    data,
+    occurredAt: occurredAt.toISOString(),
+    recordedAt: now.toISOString(),
+    recordedByUserId: operator.userId,
+    externalExecution: "blocked",
+    executionMode: "record_only",
+    continuousExecuted: false,
+  };
+  const [event] = await tx
+    .insert(events)
+    .values({
+      tenantId: operator.tenantId,
+      type: "external_action.recorded",
+      source: externalActionSource,
+      actorType: "user",
+      actorId: operator.userId,
+      actorRef: operator.actorRef,
+      objectId,
+      taskId: resolvedTaskId,
+      capabilityId: resolvedCapabilityId,
+      connectionId,
+      idempotencyKey: `${input.idempotencyKey}:external_action_recorded`,
+      data: actionRecord,
+      occurredAt,
+    })
+    .returning({ id: events.id });
+  const [audit] = await tx
+    .insert(auditEvents)
+    .values({
+      tenantId: operator.tenantId,
+      type: "external_action.recorded",
+      source: externalActionSource,
+      actorType: "user",
+      actorId: operator.userId,
+      actorRef: operator.actorRef,
+      targetType,
+      targetId,
+      taskId: resolvedTaskId,
+      eventId: event.id,
+      objectId,
+      capabilityId: resolvedCapabilityId,
+      risk: "high",
+      idempotencyKey: `${input.idempotencyKey}:external_action_recorded`,
+      data: {
+        ...actionRecord,
+        recordedEventId: event.id,
+        idempotency,
+      },
+    })
+    .returning({ id: auditEvents.id });
+  const [proof] = await tx
+    .insert(evidence)
+    .values({
+      tenantId: operator.tenantId,
+      kind: "receipt",
+      name: `External action recorded: ${kind}`,
+      objectId,
+      taskId: resolvedTaskId,
+      eventId: event.id,
+      capabilityId: resolvedCapabilityId,
+      actorType: "user",
+      actorId: operator.userId,
+      hash: `${externalActionSource}:${targetType}:${targetId}:${input.idempotencyKey}`,
+      data: {
+        ...actionRecord,
+        auditEventId: audit.id,
+        recordedEventId: event.id,
+        idempotency,
+      },
+    })
+    .returning({ id: evidence.id });
+
+  await updateExternalActionTarget({
+    tx,
+    tenantId: operator.tenantId,
+    targetType,
+    targetId,
+    objectId,
+    state,
+    currentData: targetData,
+    actionRecord: {
+      ...actionRecord,
+      recordedEventId: event.id,
+      auditEventId: audit.id,
+      evidenceId: proof.id,
+    },
+    now,
   });
+
+  return {
+    created: true,
+    targetType,
+    targetId,
+    state,
+    eventId: event.id,
+    auditEventId: audit.id,
+    evidenceId: proof.id,
+    connectionId: connectionId ?? null,
+    adapterActionId: adapterActionId ?? null,
+    externalExecution: "blocked",
+    executionMode: "record_only",
+  };
 }
 
 export async function recordRuleChangeForOperator(

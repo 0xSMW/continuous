@@ -43,6 +43,8 @@ import {
   workers,
   type JsonObject,
 } from "../db/schema";
+import { approvedAdapterExecutionReceiptFor } from "../core/adapters";
+import { recordExternalActionForOperator } from "../core/primitives";
 import { completeCoreWorkerRun, startCoreWorkerRun } from "../core/worker-runs";
 import { pollLeadSourceConnection, type LeadSourcePollResult } from "./lead-source-connectors";
 
@@ -1441,13 +1443,6 @@ function stringTokenList(...values: unknown[]) {
   );
 }
 
-function stringListOrSingle(value: unknown) {
-  const items = stringList(value);
-  const single = stringValue(value);
-
-  return items.length > 0 ? items : single ? [single] : [];
-}
-
 function controlledExecutionConfig(config: JsonObject) {
   if (Object.prototype.hasOwnProperty.call(config, "controlledSend")) {
     throw new RevenueWorkerUnavailableError(
@@ -1497,293 +1492,27 @@ function storedContinuationConfig(params: {
   return stored;
 }
 
-function assertNoInlineCredentialMaterial(value: unknown, path = "config.execution") {
-  if (Array.isArray(value)) {
-    value.forEach((item, index) => assertNoInlineCredentialMaterial(item, `${path}[${index}]`));
-    return;
-  }
-
-  if (!value || typeof value !== "object") {
-    return;
-  }
-
-  for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
-    const normalized = key.toLowerCase().replace(/[^a-z0-9]+/g, "");
-    const isReference =
-      normalized.endsWith("ref") ||
-      normalized.endsWith("reference") ||
-      normalized.includes("credentialref") ||
-      normalized.includes("secretref") ||
-      normalized.includes("tokenref") ||
-      normalized.includes("vaultref");
-    const secretish =
-      normalized.includes("secret") ||
-      normalized.includes("password") ||
-      normalized.includes("token") ||
-      normalized.includes("apikey") ||
-      normalized.includes("authorization") ||
-      normalized.includes("bearer") ||
-      normalized.includes("privatekey");
-
-    if (secretish && !isReference && typeof nested === "string" && nested.trim()) {
-      throw new RevenueWorkerUnavailableError(
-        "worker_controlled_send_secret_material",
-        `${path}.${key} looks like inline credential material. Use a managed credential reference such as managed:customer-message-sender.`,
-        400,
-      );
-    }
-
-    assertNoInlineCredentialMaterial(nested, `${path}.${key}`);
-  }
-}
-
-function managedCredentialRef(value: unknown) {
-  const ref = stringValue(value);
-
-  if (!ref) {
-    return "";
-  }
-
-  const allowedPrefixes = ["env:", "vault:", "managed:", "secret:", "doppler:", "do:", "aws:", "gcp:", "azure:"];
-
-  return allowedPrefixes.some((prefix) => ref.toLowerCase().startsWith(prefix)) ? ref : "";
-}
-
-function credentialRefKind(ref: string) {
-  return ref.split(":", 1)[0] || "managed";
-}
-
-function credentialRefHash(ref: string) {
-  return hashObject({ credentialRef: ref });
-}
-
-function grantedWriteScopes(scopes: JsonObject) {
-  return Array.from(
-    new Set([
-      ...stringListOrSingle(scopes.write),
-      ...stringListOrSingle(scopes.writes),
-      ...stringListOrSingle(scopes.send),
-      ...stringListOrSingle(scopes.sends),
-      ...stringListOrSingle(scopes.execute),
-      ...stringListOrSingle(scopes.executes),
-      ...stringListOrSingle(scopes.actions),
-      ...stringListOrSingle(scopes.live),
-    ]),
-  );
-}
-
-function hasScope(granted: string[], required: string) {
-  return granted.includes("*") || granted.includes(required);
-}
-
-async function controlledSendReceiptFor(input: {
+async function customerMessageExecutionReceiptFor(input: {
   tx: Transaction;
   tenantId: string;
   execution: JsonObject | null;
+  approvalId: string;
   adapterRunId: string;
   adapterActionId: string;
   now: Date;
 }) {
-  const execution = input.execution;
-
-  if (!execution) {
-    return null;
-  }
-
-  assertNoInlineCredentialMaterial(execution);
-  const connectionId = uuidValue(execution.connectionId);
-
-  if (!connectionId) {
-    throw new RevenueWorkerUnavailableError(
-      "worker_controlled_send_connection_required",
-      "config.execution.connectionId is required for controlled send receipt recording.",
-      400,
-    );
-  }
-
-  const [connection] = await input.tx
-    .select({
-      id: connections.id,
-      state: connections.state,
-      externalAccountId: connections.externalAccountId,
-      scopes: connections.scopes,
-      config: connections.config,
-    })
-    .from(connections)
-    .where(and(eq(connections.tenantId, input.tenantId), eq(connections.id, connectionId)))
-    .limit(1);
-
-  if (!connection) {
-    throw new RevenueWorkerUnavailableError(
-      "worker_controlled_send_connection_not_found",
-      "config.execution.connectionId does not match a connection in this tenant.",
-      404,
-    );
-  }
-
-  if (connection.state !== "active") {
-    throw new RevenueWorkerUnavailableError(
-      "worker_controlled_send_connection_not_ready",
-      "Controlled send receipt recording requires an active connection.",
-      409,
-    );
-  }
-
-  const connectionConfig = objectValue(connection.config);
-  assertNoInlineCredentialMaterial(connectionConfig, "connection.config");
-  const writerConfig = objectValue(connectionConfig.writer ?? connectionConfig.sender ?? connectionConfig.execution);
-  const credentialRef = managedCredentialRef(
-    firstStringValue(
-      execution.credentialRef,
-      objectValue(execution.credential).ref,
-      objectValue(execution.credentials).ref,
-      connectionConfig.credentialRef,
-      connectionConfig.secretRef,
-      connectionConfig.tokenRef,
-      connectionConfig.vaultRef,
-      writerConfig.credentialRef,
-      writerConfig.secretRef,
-      writerConfig.tokenRef,
-      writerConfig.vaultRef,
-    ),
-  );
-
-  if (!credentialRef) {
-    throw new RevenueWorkerUnavailableError(
-      "worker_controlled_send_credential_required",
-      "Controlled send receipt recording requires a managed credential reference such as config.execution.credentialRef=managed:customer-message-sender.",
-      409,
-    );
-  }
-
-  const requiredScopes = Array.from(
-    new Set(
-      [
-        ...stringListOrSingle(execution.requiredScopes),
-        ...stringListOrSingle(execution.scopes),
-        ...stringListOrSingle(execution.requiredLiveScopes),
-      ].filter(Boolean),
-    ),
-  );
-  const effectiveRequiredScopes = requiredScopes.length > 0 ? requiredScopes : ["customer_message.send"];
-  const writeScopes = grantedWriteScopes(objectValue(connection.scopes));
-  const missingScopes = effectiveRequiredScopes.filter((scope) => !hasScope(writeScopes, scope));
-
-  if (missingScopes.length > 0) {
-    throw new RevenueWorkerUnavailableError(
-      "worker_controlled_send_scope_missing",
-      `Controlled send receipt recording requires connection write scope(s): ${missingScopes.join(", ")}.`,
-      409,
-    );
-  }
-
-  const receipt = objectValue(execution.receipt ?? execution.deliveryReceipt ?? execution.providerReceipt);
-  const receiptId = firstStringValue(
-    receipt.receiptId,
-    receipt.id,
-    receipt.providerMessageId,
-    receipt.messageId,
-    execution.receiptId,
-    execution.providerMessageId,
-    execution.messageId,
-  );
-
-  if (!receiptId) {
-    throw new RevenueWorkerUnavailableError(
-      "worker_controlled_send_receipt_required",
-      "Controlled send receipt recording requires config.execution.receipt.receiptId or providerMessageId.",
-      400,
-    );
-  }
-
-  const rollback = objectValue(execution.rollback ?? execution.rollbackPlan);
-  const rollbackStrategy = firstStringValue(rollback.strategy, rollback.mode);
-  const escalationOwner = firstStringValue(
-    rollback.escalationOwner,
-    rollback.owner,
-    rollback.ownerEmail,
-    execution.escalationOwner,
-  );
-
-  if (!rollbackStrategy || !escalationOwner) {
-    throw new RevenueWorkerUnavailableError(
-      "worker_controlled_send_rollback_required",
-      "Controlled send receipt recording requires config.execution.rollback.strategy and escalationOwner.",
-      400,
-    );
-  }
-
-  const message = objectValue(execution.message);
-  const customer = objectValue(execution.customer);
-  const recipient = firstStringValue(
-    execution.recipient,
-    execution.to,
-    message.to,
-    message.recipient,
-    customer.email,
-    customer.ref,
-  );
-
-  if (!recipient) {
-    throw new RevenueWorkerUnavailableError(
-      "worker_controlled_send_recipient_required",
-      "Controlled send receipt recording requires config.execution.recipient.",
-      400,
-    );
-  }
-
-  const channel = firstStringValue(execution.channel, message.channel, "email");
-  const operation = firstStringValue(execution.operation, "customer_message.send");
-  const receiptProviderMessageId = firstStringValue(receipt.providerMessageId, receipt.messageId);
-  const receiptStatus = firstStringValue(receipt.status, "recorded");
-  const receiptSentAt = firstStringValue(receipt.sentAt, receipt.deliveredAt, receipt.createdAt);
-  const rollbackSteps = stringListOrSingle(rollback.steps);
-  const rollbackEvidenceRequired = Array.from(
-    new Set([
-      ...stringListOrSingle(rollback.evidenceRequired),
-      "adapter_receipt",
-      "rollback_plan",
-      "escalation_owner",
-    ]),
-  );
-
-  return {
-    schemaVersion: "worker.controlled_send_receipt.v1",
-    status: "recorded",
-    mode: "receipt_recorded",
-    operation,
-    channel,
-    recipient,
-    connectionId: connection.id,
-    externalAccountId: connection.externalAccountId ?? null,
-    adapterRunId: input.adapterRunId || null,
-    adapterActionId: input.adapterActionId || null,
-    requiredScopes: effectiveRequiredScopes,
-    grantedScopes: writeScopes,
-    credential: {
-      kind: credentialRefKind(credentialRef),
-      hash: credentialRefHash(credentialRef),
-    },
-    receipt: {
-      receiptId,
-      ...(receiptProviderMessageId ? { providerMessageId: receiptProviderMessageId } : {}),
-      ...(receiptSentAt ? { sentAt: receiptSentAt } : {}),
-      status: receiptStatus,
-    },
-    rollback: {
-      state: "ready",
-      strategy: rollbackStrategy,
-      escalationOwner,
-      ...(rollbackSteps.length > 0 ? { steps: rollbackSteps } : {}),
-      required: true,
-      evidenceRequired: rollbackEvidenceRequired,
-    },
-    externalExecution: "recorded",
-    externalMutation: true,
-    externalSend: true,
-    continuousExecuted: false,
-    recordedAt: input.now.toISOString(),
-  } satisfies JsonObject;
+  return approvedAdapterExecutionReceiptFor({
+    db: input.tx,
+    tenantId: input.tenantId,
+    operation: "customer_message.send",
+    approvalId: input.approvalId,
+    execution: input.execution,
+    adapterRunId: input.adapterRunId,
+    adapterActionId: input.adapterActionId,
+    now: input.now,
+    configPath: "config.execution",
+    defaultChannel: "email",
+  });
 }
 
 function tokensMatch(left: string, right: string) {
@@ -8024,10 +7753,11 @@ export async function continueRevenueWorker(input: {
     );
 
     await db.transaction(async (tx) => {
-      await controlledSendReceiptFor({
+      await customerMessageExecutionReceiptFor({
         tx,
         tenantId: context.worker.tenantId,
         execution: requestedExecution,
+        approvalId,
         adapterRunId: preflightAdapterRunId,
         adapterActionId: preflightAdapterActionId,
         now,
@@ -9984,16 +9714,91 @@ export async function continueRevenueWorker(input: {
       const adapterReceiptEvidenceId = uuidValue(
         approvalContinuation.adapterReceiptEvidenceId ?? originalOutput.adapterReceiptEvidenceId,
       );
-      const controlledSendReceipt = await controlledSendReceiptFor({
+      const controlledSendReceipt = await customerMessageExecutionReceiptFor({
         tx,
         tenantId: context.worker.tenantId,
         execution: requestedExecution,
+        approvalId: approval.id,
         adapterRunId,
         adapterActionId,
         now,
       });
       const executionRecorded = Boolean(controlledSendReceipt);
       const controlledConnectionId = uuidValue(objectValue(controlledSendReceipt).connectionId);
+
+      if (executionRecorded && !adapterActionId) {
+        throw new RevenueWorkerUnavailableError(
+          "worker_controlled_send_adapter_action_required",
+          "Controlled customer-message execution requires a tenant-scoped adapter action target.",
+          409,
+        );
+      }
+
+      const controlledReceiptObject = objectValue(controlledSendReceipt);
+      const controlledReceipt = objectValue(controlledReceiptObject.receipt);
+      const externalActionRecord = executionRecorded
+        ? await recordExternalActionForOperator(
+            tx,
+            {
+              tenantId: context.worker.tenantId,
+              tenantSlug: context.worker.tenantSlug,
+              userId: operator.id,
+              email: operator.email,
+              name: operator.name,
+              actorRef: operator.actorRef,
+            },
+            {
+              idempotencyKey: `${input.idempotencyKey}:customer_message_send`,
+              targetType: "adapter_action",
+              targetId: adapterActionId,
+              kind: "customer_message.send",
+              state: "done",
+              connectionId: controlledConnectionId || undefined,
+              adapterActionId,
+              taskId: approval.taskId ?? undefined,
+              capabilityId: approval.capabilityId ?? undefined,
+              occurredAt:
+                firstStringValue(
+                  controlledReceipt.sentAt,
+                  controlledReceipt.deliveredAt,
+                  controlledReceiptObject.recordedAt,
+                ) ?? now.toISOString(),
+              receipt: {
+                ...controlledReceipt,
+                operation: controlledReceiptObject.operation,
+                channel: controlledReceiptObject.channel,
+                recipient: controlledReceiptObject.recipient,
+                credential: controlledReceiptObject.credential,
+                requiredScopes: controlledReceiptObject.requiredScopes,
+                grantedScopes: controlledReceiptObject.grantedScopes,
+                rollback: controlledReceiptObject.rollback,
+                externalExecution: controlledReceiptObject.externalExecution,
+                externalMutation: controlledReceiptObject.externalMutation,
+                externalSend: controlledReceiptObject.externalSend,
+                continuousExecuted: controlledReceiptObject.continuousExecuted,
+              },
+              response: {
+                status: "recorded",
+                executionBoundary: controlledReceiptObject.executionBoundary ?? "core.adapter_execution",
+                externalExecution: controlledReceiptObject.externalExecution,
+                externalMutation: controlledReceiptObject.externalMutation,
+                externalSend: controlledReceiptObject.externalSend,
+              },
+              data: {
+                schemaVersion: "worker.revenue_operations.customer_message_send_external_action.v1",
+                approvalRequestId: approval.id,
+                approvalKind: approval.kind,
+                approvalState: approval.state,
+                originalWorkerRunId: originalRun.id,
+                workerRunId: workerRun.id,
+                workflowRunId: workflow.run.id,
+                adapterRunId: adapterRunId || null,
+                adapterActionId,
+                controlledSendReceipt,
+              },
+            },
+          )
+        : null;
       const executionStatus = executionRecorded
         ? "approved_execution_recorded"
         : "approved_execution_blocked";
@@ -10059,6 +9864,7 @@ export async function continueRevenueWorker(input: {
             approvedExecutionPacket,
             approvedExecutionHash,
             controlledSendReceipt,
+            externalActionRecord,
             nextAction,
             externalExecution,
             externalSend,
@@ -10100,6 +9906,7 @@ export async function continueRevenueWorker(input: {
             approvedExecutionPacket,
             approvedExecutionHash,
             controlledSendReceipt,
+            externalActionRecord,
             externalExecution,
             externalSend,
             requiresApproval: false,
@@ -10135,6 +9942,7 @@ export async function continueRevenueWorker(input: {
             approvedExecutionPacket,
             approvedExecutionHash,
             controlledSendReceipt,
+            externalActionRecord,
             nextAction,
             externalExecution,
             externalSend,
@@ -10166,6 +9974,7 @@ export async function continueRevenueWorker(input: {
             approvedExecutionPacket,
             approvedExecutionHash,
             controlledSendReceipt,
+            externalActionRecord,
             externalExecution,
             externalSend,
             requiresApproval: false,
@@ -10194,6 +10003,7 @@ export async function continueRevenueWorker(input: {
             approvedExecutionPacket,
             approvedExecutionHash,
             controlledSendReceipt,
+            externalActionRecord,
             externalExecution,
             externalSend,
             requiresApproval: false,
@@ -10227,6 +10037,7 @@ export async function continueRevenueWorker(input: {
             approvedExecutionPacket,
             approvedExecutionHash,
             controlledSendReceipt,
+            externalActionRecord,
             externalExecution,
             externalSend,
             requiresApproval: false,
@@ -10280,6 +10091,7 @@ export async function continueRevenueWorker(input: {
             ...continuationLinks,
             approvedExecutionPacket,
             controlledSendReceipt,
+            externalActionRecord,
             nextAction,
             externalExecution,
             externalSend,
@@ -10312,6 +10124,7 @@ export async function continueRevenueWorker(input: {
         approvedExecutionPacket,
         approvedExecutionHash,
         controlledSendReceipt,
+        externalActionRecord,
         nextAction,
         externalExecution,
         externalSend,
@@ -10363,6 +10176,7 @@ export async function continueRevenueWorker(input: {
               ...continuationLinks,
               approvedExecutionPacket,
               controlledSendReceipt,
+              externalActionRecord,
               externalExecution,
               externalSend,
             },
@@ -10382,6 +10196,7 @@ export async function continueRevenueWorker(input: {
               ...continuationLinks,
               approvedExecutionPacket,
               controlledSendReceipt,
+              externalActionRecord,
               externalExecution,
               externalSend,
             },
@@ -10419,6 +10234,7 @@ export async function continueRevenueWorker(input: {
                 approvedExecutionContinuation,
                 approvedExecutionPacket,
                 controlledSendReceipt,
+                externalActionRecord,
                 externalExecution,
                 externalSend,
               },
@@ -10426,6 +10242,7 @@ export async function continueRevenueWorker(input: {
                 ...adapterAction.receipt,
                 approvedExecutionContinuation,
                 controlledSendReceipt,
+                externalActionRecord,
                 externalMutation: executionRecorded,
                 externalSend,
               },
@@ -10462,6 +10279,7 @@ export async function continueRevenueWorker(input: {
                 ...adapterRun.data,
                 approvedExecutionContinuation,
                 controlledSendReceipt,
+                externalActionRecord,
                 externalExecution,
                 externalSend,
               },
@@ -10469,6 +10287,7 @@ export async function continueRevenueWorker(input: {
                 ...adapterRun.receipt,
                 approvedExecutionContinuation,
                 controlledSendReceipt,
+                externalActionRecord,
                 externalMutation: executionRecorded,
                 externalSend,
               },

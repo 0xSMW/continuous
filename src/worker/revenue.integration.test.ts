@@ -4358,7 +4358,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(repairedContinuationReservation?.taskId).toBe(approvedContinuationRun?.taskId);
   }, 120_000);
 
-  it("records approved controlled-send receipts through config.execution on the generic worker command", async () => {
+  it("records approved customer_message.send receipts through the Core execution boundary on the generic worker command", async () => {
     const runId = randomUUID();
     const [seedConnection] = await db.select({ tenantId: connections.tenantId }).from(connections).limit(1);
 
@@ -4489,7 +4489,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
         },
         db,
       }),
-    ).rejects.toMatchObject({ code: "worker_controlled_send_connection_required" });
+    ).rejects.toMatchObject({ code: "core_execution_connection_required" });
 
     await expect(
       continueRevenueWorker({
@@ -4506,7 +4506,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
         },
         db,
       }),
-    ).rejects.toMatchObject({ code: "worker_controlled_send_credential_required" });
+    ).rejects.toMatchObject({ code: "core_execution_credential_required" });
 
     await expect(
       continueRevenueWorker({
@@ -4523,7 +4523,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
         },
         db,
       }),
-    ).rejects.toMatchObject({ code: "worker_controlled_send_scope_missing" });
+    ).rejects.toMatchObject({ code: "core_execution_scope_missing" });
 
     await expect(
       continueRevenueWorker({
@@ -4540,7 +4540,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
         },
         db,
       }),
-    ).rejects.toMatchObject({ code: "worker_controlled_send_rollback_required" });
+    ).rejects.toMatchObject({ code: "core_execution_rollback_required" });
 
     await expect(
       continueRevenueWorker({
@@ -4569,6 +4569,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
     });
     const output = objectValue(controlledContinuation.output);
     const controlledReceipt = objectValue(output.controlledSendReceipt);
+    const externalActionRecord = objectValue(output.externalActionRecord);
     const credential = objectValue(controlledReceipt.credential);
     const receipt = objectValue(controlledReceipt.receipt);
     const rollback = objectValue(controlledReceipt.rollback);
@@ -4579,6 +4580,15 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(output.nextAction).toBe("reconcile_controlled_send_receipt");
     expect(output.externalExecution).toBe("recorded");
     expect(output.externalSend).toBe(true);
+    expect(externalActionRecord.targetType).toBe("adapter_action");
+    expect(externalActionRecord.targetId).toBe(first.adapterActionId);
+    expect(externalActionRecord.adapterActionId).toBe(first.adapterActionId);
+    expect(externalActionRecord.connectionId).toBe(sendConnection.id);
+    expect(externalActionRecord.state).toBe("done");
+    expect(externalActionRecord.executionMode).toBe("record_only");
+    expect(controlledReceipt.schemaVersion).toBe("core.approved_adapter_execution_receipt.v1");
+    expect(controlledReceipt.executionBoundary).toBe("core.adapter_execution");
+    expect(controlledReceipt.approvalId).toBe(first.approvalRequestId);
     expect(controlledReceipt.connectionId).toBe(sendConnection.id);
     expect(controlledReceipt.operation).toBe("customer_message.send");
     expect(controlledReceipt.recipient).toBe("buyer@example.com");
@@ -4621,6 +4631,16 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .from(workerRuns)
       .where(eq(workerRuns.id, controlledContinuation.workerRunId ?? ""))
       .limit(1);
+    const [externalActionEvent] = await db
+      .select()
+      .from(events)
+      .where(eq(events.id, stringValue(externalActionRecord.eventId)))
+      .limit(1);
+    const [externalActionEvidence] = await db
+      .select()
+      .from(evidence)
+      .where(eq(evidence.id, stringValue(externalActionRecord.evidenceId)))
+      .limit(1);
     const continuationRunData = objectValue(continuationRun?.data);
     const continuationRunInput = objectValue(continuationRunData.input);
     const continuationRunRequest = objectValue(continuationRunInput.request);
@@ -4636,9 +4656,19 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(adapterAction?.operation).toBe("customer_message.send");
     expect(adapterAction?.reconciliationState).toBe("matched");
     expect(objectValue(adapterAction?.receipt).externalSend).toBe(true);
+    expect(objectValue(objectValue(adapterAction?.receipt).lastExternalAction)).toMatchObject({
+      targetType: "adapter_action",
+      targetId: first.adapterActionId,
+      kind: "customer_message.send",
+      state: "done",
+      connectionId: sendConnection.id,
+    });
     expect(adapterRun?.connectionId).toBe(sendConnection.id);
     expect(adapterRun?.writeCount).toBe(1);
     expect(objectValue(adapterRun?.receipt).externalSend).toBe(true);
+    expect(externalActionEvent?.type).toBe("external_action.recorded");
+    expect(externalActionEvent?.source).toBe("continuous.core.external_actions");
+    expect(externalActionEvidence?.kind).toBe("receipt");
     expect(storedConfig.approvalId).toBe(first.approvalRequestId);
     expect(storedExecutionConfig.provided).toBe(true);
     expect(storedExecutionConfig.inputHash).toBeTruthy();

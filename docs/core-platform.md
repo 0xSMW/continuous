@@ -283,11 +283,11 @@ every referenced artifact is present, linked, tenant-scoped, and still blocked;
 otherwise the transaction rolls back before any applied proof is written.
 External execution, submission, and money movement remain blocked. Every
 `external_action.record` captures receipt/outcome facts for payment
-instructions, payments, and filing drafts after a human or adapter-controlled
-process produces a result; it updates the Core target state and writes receipt
-evidence without executing the external action itself. Every command is
-tenant-scoped, idempotent, audit-backed, and blocks external
-execution.
+instructions, payments, filing drafts, and approved adapter actions after a
+human or adapter-controlled process produces a result; it updates the Core
+target state and writes receipt evidence without executing the external action
+itself. Every command is tenant-scoped, idempotent, audit-backed, and blocks
+external execution.
 
 ## Non-Goals For The First Slice
 
