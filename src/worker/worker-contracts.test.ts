@@ -227,7 +227,7 @@ describe("future worker contracts", () => {
       "adapters.reconcile",
       "adapters.retry",
     ].map((name) => ({ role: "revenue_operations", name }));
-    const registeredViews = ["snapshot", "approvals"].map((name) => ({
+    const registeredViews = ["snapshot", "approvals", "readiness"].map((name) => ({
       role: "revenue_operations",
       name,
     }));
