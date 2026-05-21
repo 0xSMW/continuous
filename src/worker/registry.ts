@@ -469,6 +469,7 @@ const leadReadConfig: WorkerConfigSchema = {
     source: { type: "string" },
     sourceKind: { type: "string" },
     reader: jsonObjectConfig,
+    scheduler: jsonObjectConfig,
     record: jsonObjectConfig,
     records: { type: "array", minItems: 1, maxItems: 25, items: jsonObjectConfig },
     items: { type: "array", minItems: 1, maxItems: 25, items: jsonObjectConfig },
@@ -491,6 +492,7 @@ const workerRunConfig: WorkerConfigSchema = {
       additionalProperties: false,
     },
     expectedAction: { type: "string" },
+    externalSend: { type: "boolean" },
   },
   additionalProperties: false,
 };

@@ -293,9 +293,11 @@ and config in structured fields; operation inputs are valid only under `config`.
 Revenue command schemas also reject unknown top-level `config` fields. Put
 source/provider details inside the documented nested payloads, such as
 `config.records[]`, `config.leadPacket`, `config.intake`, `config.sourceRefs`,
-`config.policy`, `config.execution.receipt`, or `config.execution.rollback`;
-do not add route-shaped fields such as `apiRoute`, continuation-kind switches,
-or provider dumps next to the command payload.
+`config.policy`, `config.execution.receipt`, or `config.execution.rollback`.
+Named controls such as `config.scheduler` and blocked `config.externalSend`
+remain explicit schema fields. Do not add route-shaped fields such as
+`apiRoute`, continuation-kind switches, or provider dumps next to the command
+payload.
 
 ## Registry Entries
 
@@ -346,6 +348,7 @@ For `command: "lead.read"`, use:
 | `records[].urgency` | No | `low`, `normal`, `high`, `urgent`, `emergency`, or `same_day` |
 | `records[].missingFacts` | No | Missing facts carried forward to the approval packet |
 | `records[].payload` | No | Raw source payload retained in evidence with external execution blocked |
+| `scheduler` | Internal scheduler calls | Lease/source metadata for the production worker scheduler; it is accepted as structured config metadata, not as a URL, query parameter, or top-level worker envelope field |
 
 | Field | Required | Notes |
 |---|---:|---|

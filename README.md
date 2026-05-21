@@ -79,12 +79,13 @@ Then open `http://localhost:3000`.
   external send remains blocked. Internal workflow handlers can still use
   exact Core row ids; `config.leadPacket` remains a direct operator/test
   fallback. Revenue command schemas reject unknown top-level `config` fields, so
-  source, provider, policy, receipt, and rollback details live in documented
-  nested payloads rather than route-shaped fields. The route validates roles,
-  commands, idempotency, tenant requirements, and external-execution posture
-  through the worker command registry. Worker contract metadata also carries
-  `apiRoute: "/worker"` so new roles inherit the route from the registry instead
-  of creating a role-specific URL.
+  known controls such as scheduler provenance and blocked `externalSend` are
+  named explicitly, while source, provider, policy, receipt, and rollback
+  details live in documented nested payloads rather than route-shaped fields.
+  The route validates roles, commands, idempotency, tenant requirements, and
+  external-execution posture through the worker command registry. Worker
+  contract metadata also carries `apiRoute: "/worker"` so new roles inherit the
+  route from the registry instead of creating a role-specific URL.
 - Dispatch schedule proposals use the same shape:
   `POST /worker` with `worker.role: "dispatch_operations"`,
   `command: "schedule.propose"`, handoff ids in `config.sourceRefs`, and
