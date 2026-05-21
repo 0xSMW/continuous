@@ -437,8 +437,8 @@ jobs:
             export POSTGRES_PASSWORD="$db_password"
             export DATABASE_URL="postgresql://$POSTGRES_USER:$db_password@db:5432/$POSTGRES_DB"
           fi
-          docker compose --profile tools run --rm --no-build migrate bun run db:migrate </dev/null
-          docker compose --profile tools run --rm --no-build migrate bun run db:seed </dev/null
+          docker compose --profile tools run --rm migrate bun run db:migrate </dev/null
+          docker compose --profile tools run --rm migrate bun run db:seed </dev/null
           docker compose --profile scheduler up -d --no-build --remove-orphans app caddy worker-scheduler
           docker compose --profile scheduler ps --status running worker-scheduler | grep -q worker-scheduler
           docker compose ps
