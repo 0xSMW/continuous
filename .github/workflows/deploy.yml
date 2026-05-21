@@ -239,7 +239,7 @@ jobs:
           set -euo pipefail
           remote_dir="$DEPLOY_PATH/releases/$RELEASE_APP_TAG"
           ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$remote_dir'"
-          timeout --preserve-status 10m rsync -az --partial --timeout=60 --contimeout=30 --info=name,stats2 \
+          timeout --preserve-status 10m rsync -az --partial --timeout=60 --info=name,stats2 \
             -e "ssh -i ~/.ssh/deploy_key -o ConnectTimeout=30 -o ServerAliveInterval=15 -o ServerAliveCountMax=4" \
             "$RELEASE_IMAGE_ARCHIVE" \
             "$RELEASE_IMAGE_ARCHIVE.sha256" \
