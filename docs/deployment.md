@@ -758,15 +758,19 @@ Install the recurring timer after selecting an alert destination:
 
 ```sh
 HOST=45.55.53.92 \
+  READINESS_USER=continuous-deploy \
   ALERT_WEBHOOK_URL=... \
   REQUIRE_BACKUP_FRESH=true \
+  CHECK_SYSTEMD_FAILED=true \
   ./scripts/install-observability-timer.sh
 ```
 
 The timer stores private configuration in `/etc/continuous/observability.env`,
 runs every 15 minutes by default, appends output to
 `logs/observability/check.log`, and sends a compact JSON webhook only on
-failure when `ALERT_WEBHOOK_URL` is set.
+failure when `ALERT_WEBHOOK_URL` is set. `READINESS_USER` lets the non-root
+readiness gate verify the alerting and strict-check settings without exposing
+the webhook URL in logs.
 
 ## Database Backup And Restore
 
@@ -823,6 +827,7 @@ and the latest repo has been deployed to `/opt/continuous`:
 
 ```sh
 HOST=45.55.53.92 \
+  READINESS_USER=continuous-deploy \
   BACKUP_S3_ENDPOINT=https://nyc3.digitaloceanspaces.com \
   BACKUP_S3_BUCKET=continuous-db-backups \
   BACKUP_S3_REGION=nyc3 \
@@ -834,8 +839,12 @@ HOST=45.55.53.92 \
 
 The timer runs `scripts/backup-db-on-host.sh`, keeps local droplet dump
 retention through `RETENTION_DAYS`, and writes off-host copies plus a latest
-manifest. Check that the latest droplet dump and optional object-store manifest
-are fresh before a release or after changing recovery automation:
+manifest. `READINESS_USER` grants the non-root deploy/readiness account
+read-only access to the private timer environment file so strict readiness can
+verify configured keys and check the latest object-storage manifest without
+using a root SSH deploy. Check that the latest droplet dump and optional
+object-store manifest are fresh before a release or after changing recovery
+automation:
 
 ```sh
 HOST=45.55.53.92 MAX_AGE_HOURS=26 ./scripts/check-backup-age.sh

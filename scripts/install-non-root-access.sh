@@ -84,13 +84,29 @@ fi
 
 delegate_readiness_file() {
   readiness_dir="$(dirname "$READINESS_ENV_FILE")"
-  install -m 0755 -d "$readiness_dir"
+  deploy_group="$(id -gn "$DEPLOY_USER_NAME")"
+  install -m 0750 -o root -g "$deploy_group" -d "$readiness_dir"
   touch "$READINESS_ENV_FILE"
   chown "$DEPLOY_USER_NAME:$DEPLOY_USER_NAME" "$READINESS_ENV_FILE"
   chmod 0600 "$READINESS_ENV_FILE"
 }
 
 delegate_readiness_file
+
+delegate_private_env_file() {
+  path="$1"
+
+  if [ ! -f "$path" ]; then
+    return
+  fi
+
+  deploy_group="$(id -gn "$DEPLOY_USER_NAME")"
+  chown root:"$deploy_group" "$path"
+  chmod 0640 "$path"
+}
+
+delegate_private_env_file /etc/continuous/postgres-backup.env
+delegate_private_env_file /etc/continuous/observability.env
 
 runuser -u "$DEPLOY_USER_NAME" -- test -w "$APP_DIR"
 runuser -u "$DEPLOY_USER_NAME" -- docker compose version >/dev/null

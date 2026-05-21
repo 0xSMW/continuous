@@ -8,6 +8,7 @@ APP_DIR="${APP_DIR:-/opt/continuous}"
 REMOTE_BACKUP_DIR="${REMOTE_BACKUP_DIR:-$APP_DIR/backups/postgres}"
 RETENTION_DAYS="${RETENTION_DAYS:-14}"
 BACKUP_OBJECT_STORAGE_ENABLED="${BACKUP_OBJECT_STORAGE_ENABLED:-true}"
+READINESS_USER="${READINESS_USER:-${DEPLOY_USER_NAME:-}}"
 BACKUP_TIMER_ON_CALENDAR="${BACKUP_TIMER_ON_CALENDAR:-*-*-* 04:17:00 UTC}"
 BACKUP_TIMER_RANDOMIZED_DELAY="${BACKUP_TIMER_RANDOMIZED_DELAY:-20min}"
 REMOTE="$SSH_USER@$HOST"
@@ -65,7 +66,7 @@ umask 077
 
 scp "${SSH_ARGS[@]}" "$env_file" "$REMOTE:/tmp/continuous-postgres-backup.env" >/dev/null
 ssh "${SSH_ARGS[@]}" "$REMOTE" \
-  "APP_DIR=$(quote "$APP_DIR") BACKUP_TIMER_ON_CALENDAR=$(quote "$BACKUP_TIMER_ON_CALENDAR") BACKUP_TIMER_RANDOMIZED_DELAY=$(quote "$BACKUP_TIMER_RANDOMIZED_DELAY") bash -s" <<'REMOTE_SCRIPT'
+  "APP_DIR=$(quote "$APP_DIR") READINESS_USER=$(quote "$READINESS_USER") BACKUP_TIMER_ON_CALENDAR=$(quote "$BACKUP_TIMER_ON_CALENDAR") BACKUP_TIMER_RANDOMIZED_DELAY=$(quote "$BACKUP_TIMER_RANDOMIZED_DELAY") bash -s" <<'REMOTE_SCRIPT'
 set -euo pipefail
 
 if [ ! -x "$APP_DIR/scripts/backup-db-on-host.sh" ]; then
@@ -73,8 +74,19 @@ if [ ! -x "$APP_DIR/scripts/backup-db-on-host.sh" ]; then
   exit 1
 fi
 
-install -m 0700 -d /etc/continuous
-install -m 0600 /tmp/continuous-postgres-backup.env /etc/continuous/postgres-backup.env
+if [ -n "$READINESS_USER" ]; then
+  if ! id "$READINESS_USER" >/dev/null 2>&1; then
+    echo "READINESS_USER does not exist on the host: $READINESS_USER" >&2
+    exit 1
+  fi
+
+  readiness_group="$(id -gn "$READINESS_USER")"
+  install -m 0750 -o root -g "$readiness_group" -d /etc/continuous
+  install -m 0640 -o root -g "$readiness_group" /tmp/continuous-postgres-backup.env /etc/continuous/postgres-backup.env
+else
+  install -m 0700 -d /etc/continuous
+  install -m 0600 /tmp/continuous-postgres-backup.env /etc/continuous/postgres-backup.env
+fi
 rm -f /tmp/continuous-postgres-backup.env
 
 cat >/etc/systemd/system/continuous-postgres-backup.service <<SERVICE

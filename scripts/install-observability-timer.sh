@@ -5,6 +5,7 @@ HOST="${HOST:-}"
 SSH_USER="${SSH_USER:-root}"
 SSH_KEY="${SSH_KEY:-}"
 APP_DIR="${APP_DIR:-/opt/continuous}"
+READINESS_USER="${READINESS_USER:-${DEPLOY_USER_NAME:-}}"
 OBSERVABILITY_TIMER_INTERVAL="${OBSERVABILITY_TIMER_INTERVAL:-15min}"
 REMOTE="$SSH_USER@$HOST"
 SSH_ARGS=(-o BatchMode=yes -o ConnectTimeout=10)
@@ -47,7 +48,7 @@ umask 077
 
 scp "${SSH_ARGS[@]}" "$env_file" "$REMOTE:/tmp/continuous-observability.env" >/dev/null
 ssh "${SSH_ARGS[@]}" "$REMOTE" \
-  "APP_DIR=$(quote "$APP_DIR") OBSERVABILITY_TIMER_INTERVAL=$(quote "$OBSERVABILITY_TIMER_INTERVAL") bash -s" <<'REMOTE_SCRIPT'
+  "APP_DIR=$(quote "$APP_DIR") READINESS_USER=$(quote "$READINESS_USER") OBSERVABILITY_TIMER_INTERVAL=$(quote "$OBSERVABILITY_TIMER_INTERVAL") bash -s" <<'REMOTE_SCRIPT'
 set -euo pipefail
 
 if [ ! -x "$APP_DIR/scripts/check-observability-on-host.sh" ]; then
@@ -55,8 +56,19 @@ if [ ! -x "$APP_DIR/scripts/check-observability-on-host.sh" ]; then
   exit 1
 fi
 
-install -m 0700 -d /etc/continuous
-install -m 0600 /tmp/continuous-observability.env /etc/continuous/observability.env
+if [ -n "$READINESS_USER" ]; then
+  if ! id "$READINESS_USER" >/dev/null 2>&1; then
+    echo "READINESS_USER does not exist on the host: $READINESS_USER" >&2
+    exit 1
+  fi
+
+  readiness_group="$(id -gn "$READINESS_USER")"
+  install -m 0750 -o root -g "$readiness_group" -d /etc/continuous
+  install -m 0640 -o root -g "$readiness_group" /tmp/continuous-observability.env /etc/continuous/observability.env
+else
+  install -m 0700 -d /etc/continuous
+  install -m 0600 /tmp/continuous-observability.env /etc/continuous/observability.env
+fi
 rm -f /tmp/continuous-observability.env
 install -m 0755 -d "$APP_DIR/logs/observability"
 
