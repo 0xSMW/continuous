@@ -427,7 +427,20 @@ jobs:
           set_control_plane_token_catalog
           docker compose pull db caddy
           docker compose up -d db
-          docker compose exec -T db sh -c 'until pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"; do sleep 1; done' </dev/null
+          db_ready=false
+          for attempt in $(seq 1 60); do
+            if docker compose exec -T db sh -c 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"' </dev/null; then
+              db_ready=true
+              break
+            fi
+            sleep 2
+          done
+          if [ "$db_ready" != true ]; then
+            echo "Postgres did not become ready within 120 seconds." >&2
+            docker compose ps db >&2 || true
+            docker compose logs --tail=100 db >&2 || true
+            exit 1
+          fi
           db_password="$(grep '^POSTGRES_PASSWORD=' .env | cut -d= -f2-)"
           if ! grep -q '^DATABASE_URL=' .env || [[ "$db_password" =~ [^A-Za-z0-9_.~-] ]]; then
             db_password="$(openssl rand -hex 32)"
@@ -440,7 +453,20 @@ jobs:
           docker compose --profile tools run --rm migrate bun run db:migrate </dev/null
           docker compose --profile tools run --rm migrate bun run db:seed </dev/null
           docker compose --profile scheduler up -d --no-build --remove-orphans app caddy worker-scheduler
-          docker compose --profile scheduler ps --status running worker-scheduler | grep -q worker-scheduler
+          scheduler_ready=false
+          for attempt in $(seq 1 12); do
+            if docker compose exec -T worker-scheduler sh -c 'true' </dev/null; then
+              scheduler_ready=true
+              break
+            fi
+            sleep 5
+          done
+          if [ "$scheduler_ready" != true ]; then
+            echo "worker-scheduler did not become executable within 60 seconds." >&2
+            docker compose ps worker-scheduler >&2 || true
+            docker compose logs --tail=100 worker-scheduler >&2 || true
+            exit 1
+          fi
           docker compose ps
           REMOTE
 

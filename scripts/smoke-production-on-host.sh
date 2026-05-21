@@ -6,7 +6,12 @@ SITE_HOST="${SITE_HOST:-continuoushq.com}"
 EXPECTED_POSTGRES_MAJOR="${EXPECTED_POSTGRES_MAJOR:-17}"
 HEALTH_PATH="${HEALTH_PATH:-/health}"
 WORKER_PATH="${WORKER_PATH:-/worker}"
+APP_SERVER_PATH="${APP_SERVER_PATH:-/app-server}"
 RESOLVE_IP="${RESOLVE_IP:-127.0.0.1}"
+CURL_CONNECT_TIMEOUT="${CURL_CONNECT_TIMEOUT:-5}"
+CURL_MAX_TIME="${CURL_MAX_TIME:-20}"
+CURL_RETRIES="${CURL_RETRIES:-2}"
+CURL_RETRY_DELAY="${CURL_RETRY_DELAY:-1}"
 
 if [ -z "$SITE_HOST" ]; then
   echo "SITE_HOST is required." >&2
@@ -33,9 +38,20 @@ POSTGRES_DB="${POSTGRES_DB:-continuous}"
 resolve_arg="${SITE_HOST}:443:${RESOLVE_IP}"
 health_url="https://${SITE_HOST}${HEALTH_PATH}"
 worker_url="https://${SITE_HOST}${WORKER_PATH}"
+app_server_url="https://${SITE_HOST}${APP_SERVER_PATH}"
+curl_args=(
+  --connect-timeout "$CURL_CONNECT_TIMEOUT"
+  --max-time "$CURL_MAX_TIME"
+  --retry "$CURL_RETRIES"
+  --retry-delay "$CURL_RETRY_DELAY"
+  --retry-connrefused
+)
+worker_smoke_out="${TMPDIR:-/tmp}/continuous-worker-smoke.$$"
+app_server_smoke_out="${TMPDIR:-/tmp}/continuous-app-server-smoke.$$"
+trap 'rm -f "$worker_smoke_out" "$app_server_smoke_out"' EXIT
 
 HEALTH_RESPONSE="$(
-  curl -fsS --resolve "$resolve_arg" "$health_url"
+  curl -fsS "${curl_args[@]}" --resolve "$resolve_arg" "$health_url"
 )"
 printf '%s\n' "$HEALTH_RESPONSE" | /usr/bin/jq -c '{service,status,mode,checkedAt}'
 printf '%s\n' "$HEALTH_RESPONSE" | /usr/bin/jq -e \
@@ -43,8 +59,8 @@ printf '%s\n' "$HEALTH_RESPONSE" | /usr/bin/jq -e \
   >/dev/null
 
 worker_status="$(
-  curl -sS --resolve "$resolve_arg" \
-    -o /tmp/continuous-worker-smoke.out -w '%{http_code}' \
+  curl -sS "${curl_args[@]}" --resolve "$resolve_arg" \
+    -o "$worker_smoke_out" -w '%{http_code}' \
     -X POST \
     -H 'content-type: application/json' \
     --data '{"view":"snapshot","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{}}' \
@@ -53,7 +69,22 @@ worker_status="$(
 
 if [ "$worker_status" != "401" ]; then
   echo "Expected $WORKER_PATH to require auth; got $worker_status." >&2
-  cat /tmp/continuous-worker-smoke.out >&2 || true
+  cat "$worker_smoke_out" >&2 || true
+  exit 1
+fi
+
+app_server_status="$(
+  curl -sS "${curl_args[@]}" --resolve "$resolve_arg" \
+    -o "$app_server_smoke_out" -w '%{http_code}' \
+    -X POST \
+    -H 'content-type: application/json' \
+    --data '{"tool":"continuous.worker.schema","arguments":{},"callId":"production-smoke","threadId":"production-smoke","turnId":"production-smoke"}' \
+    "$app_server_url"
+)"
+
+if [ "$app_server_status" != "401" ]; then
+  echo "Expected $APP_SERVER_PATH to require auth; got $app_server_status." >&2
+  cat "$app_server_smoke_out" >&2 || true
   exit 1
 fi
 
@@ -72,4 +103,5 @@ fi
 
 printf 'production_smoke_status=ok\n'
 printf 'site_host=%s\n' "$SITE_HOST"
+printf 'app_server_path=%s\n' "$APP_SERVER_PATH"
 printf 'postgres_major=%s\n' "$actual_major"

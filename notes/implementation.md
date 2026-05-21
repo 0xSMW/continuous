@@ -174,6 +174,7 @@
 | Fixed non-root rotation readiness writes | Deploy-time token rotation now updates a delegated `/etc/continuous/production-readiness.env` file in place instead of trying to chmod the system directory, so non-root deploys can keep token-rotation evidence current |
 | Added runner-built release images | Normal GitHub DigitalOcean deploys now require a successful CI run for the exact commit, build app, migrate, and scheduler images on the runner, upload a checksum-verified release archive to the droplet, load those images, and start Compose with `--no-build` |
 | Added app-server bridge route scope | `POST /app-server` is now treated as a separate control-plane route/audience for Codex dynamic tool calls; it authenticates `app_server:*` bridge commands, then passes scoped worker-registry context into `continuous.worker.command` or `continuous.worker.view` without accepting operator identity in payloads |
+| Bounded deploy readiness smokes | Production deploy now times out Postgres and scheduler readiness checks with container logs, and host smoke probes `/health`, `/worker`, and `/app-server` with bounded curl calls so failures report quickly instead of waiting for the job cap |
 
 ### Tradeoffs
 
@@ -208,6 +209,7 @@
 | Hardened worker selector values | `/worker`, `worker.command`, and `continuous.worker.command` now reject malformed optional `worker.id` and `worker.tenantSlug` values instead of silently dropping wrong-type selectors |
 | Added release parity smoke | CI now runs against Postgres 17 and checks the live major version before lint/typecheck/test/build; deploy and rollback smokes reuse `scripts/smoke-production-on-host.sh` to prove production health, generic `/worker` auth, and host Postgres major parity before deeper worker smoke |
 | Release image boundary | The GitHub deploy workflow now uses runner-built image archives with checksum verification and an exact-SHA CI success gate. It is not yet a registry-pushed immutable digest flow; `scripts/deploy.sh` also still keeps a host-build bootstrap/break-glass path |
+| Deploy timeout boundary | The GitHub deploy workflow has bounded service readiness and smoke calls, but the strict customer-data gate remains opt-in until non-root deploy, observability, backup, recovery-drill, and credential evidence are all provisioned |
 | Hardened Core/workflow failure coverage | `/core external_action.record` now has route-level invalid-idempotency, adapter mismatch, and replay-conflict coverage plus integration coverage for changed-input replay and adapter/connection mismatch; `/workflow` now preserves structured route failures across overview, approvals, start, transition, step execution, and approval decisions |
 
 ### Current State
