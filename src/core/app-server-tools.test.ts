@@ -5,6 +5,8 @@ const mocks = vi.hoisted(() => ({
   transitionCoreTask: vi.fn(),
   completeCoreWorkerRun: vi.fn(),
   startCoreWorkerRun: vi.fn(),
+  transitionCoreWorker: vi.fn(),
+  upsertCoreWorker: vi.fn(),
   getCoreSummarySafe: vi.fn(),
   getHealth: vi.fn(),
 }));
@@ -25,6 +27,11 @@ vi.mock("./health", () => ({
 vi.mock("./worker-runs", () => ({
   completeCoreWorkerRun: mocks.completeCoreWorkerRun,
   startCoreWorkerRun: mocks.startCoreWorkerRun,
+}));
+
+vi.mock("./workers", () => ({
+  transitionCoreWorker: mocks.transitionCoreWorker,
+  upsertCoreWorker: mocks.upsertCoreWorker,
 }));
 
 import {
@@ -50,6 +57,14 @@ beforeEach(() => {
   mocks.completeCoreWorkerRun.mockResolvedValue({
     completed: true,
     workerRunId: "run-1",
+  });
+  mocks.upsertCoreWorker.mockResolvedValue({
+    recorded: true,
+    workerId: "worker-1",
+  });
+  mocks.transitionCoreWorker.mockResolvedValue({
+    transitioned: true,
+    workerId: "worker-1",
   });
   mocks.getCoreSummarySafe.mockResolvedValue({
     ok: true,
@@ -116,6 +131,10 @@ describe("app-server Core tools", () => {
           apiRoute: "/core",
         }),
         expect.objectContaining({
+          name: "worker.transition",
+          apiRoute: "/core",
+        }),
+        expect.objectContaining({
           name: "worker.run.start",
           apiRoute: "/core",
         }),
@@ -157,6 +176,7 @@ describe("app-server Core tools", () => {
         allowedAccess: ["write"],
         allowedCommands: ["core:task.create"],
         allowedTenants: ["continuous-demo"],
+        allowedWorkerRoles: ["*"],
       },
     );
 
@@ -179,6 +199,205 @@ describe("app-server Core tools", () => {
         priority: "high",
       }),
     );
+  });
+
+  it("dispatches Core worker identity lifecycle through the app-server command envelope", async () => {
+    const result = await executeAppServerCoreTool(
+      "continuous.core.command",
+      {
+        command: "worker.upsert",
+        core: {
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "core-app-server-worker-upsert-001",
+        config: {
+          role: "revenue_operations",
+          kind: "synthetic",
+          state: "training",
+          name: "Revenue Operations Worker",
+          mission: "Prepare quote-to-cash packets with blocked external execution.",
+          autonomyLevel: 1,
+          policy: {
+            externalExecution: "blocked",
+          },
+        },
+      },
+      {
+        operatorEmail: "owner@continuoushq.com",
+        source: "control_plane",
+        allowedAccess: ["write"],
+        allowedCommands: ["core:worker.upsert"],
+        allowedTenants: ["continuous-demo"],
+        allowedWorkerRoles: ["revenue_operations"],
+      },
+    );
+
+    expect(result).toEqual({
+      command: "worker.upsert",
+      core: {
+        tenantSlug: "continuous-demo",
+      },
+      result: {
+        recorded: true,
+        workerId: "worker-1",
+      },
+    });
+    expect(mocks.upsertCoreWorker).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operatorEmail: "owner@continuoushq.com",
+        idempotencyKey: "core-app-server-worker-upsert-001",
+        tenantSlug: "continuous-demo",
+        role: "revenue_operations",
+        kind: "synthetic",
+        state: "training",
+        name: "Revenue Operations Worker",
+        mission: "Prepare quote-to-cash packets with blocked external execution.",
+        autonomyLevel: 1,
+        policy: {
+          externalExecution: "blocked",
+        },
+      }),
+    );
+  });
+
+  it("dispatches Core worker transition lifecycle through the app-server command envelope", async () => {
+    const result = await executeAppServerCoreTool(
+      "continuous.core.command",
+      {
+        command: "worker.transition",
+        core: {
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "core-app-server-worker-transition-001",
+        config: {
+          role: "revenue_operations",
+          workerId: "22222222-2222-4222-8222-222222222222",
+          toState: "active",
+          reason: "Lifecycle smoke promoted the worker.",
+          evidence: {
+            source: "app_server_core_lifecycle_test",
+          },
+        },
+      },
+      {
+        operatorEmail: "owner@continuoushq.com",
+        source: "control_plane",
+        allowedAccess: ["write"],
+        allowedCommands: ["core:worker.transition"],
+        allowedTenants: ["continuous-demo"],
+        allowedWorkerRoles: ["revenue_operations"],
+      },
+    );
+
+    expect(result).toEqual({
+      command: "worker.transition",
+      core: {
+        tenantSlug: "continuous-demo",
+      },
+      result: {
+        transitioned: true,
+        workerId: "worker-1",
+      },
+    });
+    expect(mocks.transitionCoreWorker).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operatorEmail: "owner@continuoushq.com",
+        idempotencyKey: "core-app-server-worker-transition-001",
+        tenantSlug: "continuous-demo",
+        workerId: "22222222-2222-4222-8222-222222222222",
+        toState: "active",
+        reason: "Lifecycle smoke promoted the worker.",
+        evidence: {
+          source: "app_server_core_lifecycle_test",
+        },
+      }),
+    );
+  });
+
+  it("requires worker-role-scoped transport for Core worker lifecycle commands", async () => {
+    mocks.transitionCoreWorker.mockClear();
+
+    await expect(
+      executeAppServerCoreTool(
+        "continuous.core.command",
+        {
+          command: "worker.transition",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "core-app-server-worker-transition-missing-role-001",
+          config: {
+            workerId: "22222222-2222-4222-8222-222222222222",
+            toState: "active",
+            reason: "Missing role should fail before dispatch.",
+          },
+        },
+        {
+          operatorEmail: "owner@continuoushq.com",
+          source: "control_plane",
+          allowedAccess: ["write"],
+          allowedCommands: ["core:worker.transition"],
+          allowedTenants: ["continuous-demo"],
+          allowedWorkerRoles: ["revenue_operations"],
+        },
+      ),
+    ).rejects.toThrow("continuous.core.command requires worker.role for scoped worker lifecycle access.");
+
+    await expect(
+      executeAppServerCoreTool(
+        "continuous.core.command",
+        {
+          command: "worker.transition",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "core-app-server-worker-transition-forbidden-role-001",
+          config: {
+            role: "revenue_operations",
+            workerId: "22222222-2222-4222-8222-222222222222",
+            toState: "active",
+            reason: "Wrong role scope should fail before dispatch.",
+          },
+        },
+        {
+          operatorEmail: "owner@continuoushq.com",
+          source: "control_plane",
+          allowedAccess: ["write"],
+          allowedCommands: ["core:worker.transition"],
+          allowedTenants: ["continuous-demo"],
+          allowedWorkerRoles: ["finance_operations"],
+        },
+      ),
+    ).rejects.toThrow("continuous.core.command transport context is not allowed for this worker role.");
+
+    await expect(
+      executeAppServerCoreTool(
+        "continuous.core.command",
+        {
+          command: "worker.transition",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "core-app-server-worker-transition-unscoped-role-001",
+          config: {
+            role: "revenue_operations",
+            workerId: "22222222-2222-4222-8222-222222222222",
+            toState: "active",
+            reason: "Empty role scope should fail before dispatch.",
+          },
+        },
+        {
+          operatorEmail: "owner@continuoushq.com",
+          source: "control_plane",
+          allowedAccess: ["write"],
+          allowedCommands: ["core:worker.transition"],
+          allowedTenants: ["continuous-demo"],
+          allowedWorkerRoles: [],
+        },
+      ),
+    ).rejects.toThrow("continuous.core.command requires scoped worker-role transport context.");
+
+    expect(mocks.transitionCoreWorker).not.toHaveBeenCalled();
   });
 
   it("dispatches Core worker-run lifecycle commands through the app-server command envelope", async () => {
@@ -211,6 +430,7 @@ describe("app-server Core tools", () => {
         allowedAccess: ["write"],
         allowedCommands: ["core:worker.run.start"],
         allowedTenants: ["continuous-demo"],
+        allowedWorkerRoles: ["revenue_operations"],
       },
     );
 
@@ -270,6 +490,7 @@ describe("app-server Core tools", () => {
         allowedAccess: ["write"],
         allowedCommands: ["core:worker.run.complete"],
         allowedTenants: ["continuous-demo"],
+        allowedWorkerRoles: ["revenue_operations"],
       },
     );
 
@@ -318,6 +539,7 @@ describe("app-server Core tools", () => {
         allowedAccess: ["read"],
         allowedCommands: ["core:view.summary"],
         allowedTenants: ["continuous-demo"],
+        allowedWorkerRoles: ["*"],
       },
     );
 
@@ -373,6 +595,7 @@ describe("app-server Core tools", () => {
         allowedAccess: ["read"],
         allowedCommands: ["core:view.summary"],
         allowedTenants: ["continuous-demo"],
+        allowedWorkerRoles: ["*"],
       },
     );
 

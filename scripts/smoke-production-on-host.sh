@@ -111,11 +111,18 @@ printf '%s\n' "$APP_SERVER_CORE_SCHEMA_RESPONSE" | /usr/bin/jq -e '
     .ok == true and
     .tool == "continuous.core.schema" and
     (.data.registry.commands | any(.name == "task.create" and .apiRoute == "/core")) and
+    (.data.registry.commands | any(.name == "worker.upsert" and .apiRoute == "/core")) and
+    (.data.registry.commands | any(.name == "worker.transition" and .apiRoute == "/core")) and
     (.data.registry.commands | any(.name == "worker.run.start" and .apiRoute == "/core")) and
     (.data.registry.commands | any(.name == "worker.run.complete" and .apiRoute == "/core")) and
     (.data.registry.views | any(.name == "summary" and .apiRoute == "/core"))
   )
 ' >/dev/null
+
+if [ "${APP_SERVER_CORE_LIFECYCLE_SMOKE:-false}" = "true" ]; then
+  APP_DIR="$APP_DIR" SITE_HOST="$SITE_HOST" TENANT_SLUG="continuous-demo" \
+    ./scripts/smoke-app-server-core-lifecycle-on-host.sh
+fi
 
 version_num="$(
   docker compose exec -T db psql -At -v ON_ERROR_STOP=1 \

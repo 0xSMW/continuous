@@ -189,13 +189,13 @@ caps poll attempts per cycle and defaults to `5`. The scheduler does not execute
 external sends or money movement; it only drains queued internal work already
 covered by the command registry and workflow step ledger.
 
-Worker run accounting is a Core concern. New generic lifecycle calls use
-`POST /core` with `command: "worker.run.start"` and
-`command: "worker.run.complete"`, keeping worker role, capability, budget,
-reservation, settlement, evidence, and output details in `config`. The current
-Revenue deploy smoke still invokes the registered business command on
-`POST /worker` while the command internals are migrated onto that shared Core
-gate.
+Worker lifecycle and run accounting are Core concerns. Generic lifecycle calls
+use `POST /core` or `POST /app-server` with `continuous.core.command` for
+`worker.upsert`, `worker.transition`, `worker.run.start`, and
+`worker.run.complete`, keeping worker role, capability, budget, reservation,
+settlement, evidence, and output details in `config`. The deploy smoke now
+exercises those Core lifecycle commands through `POST /app-server`, and
+`worker.transition` carries worker-role scope before dynamic tool dispatch.
 
 For the HTTPS worker API path, call `POST /worker` with `command`, `worker`,
 `config`, and `idempotencyKey` fields as required by the command plus the bearer

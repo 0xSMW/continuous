@@ -31,12 +31,15 @@ can inspect payload requirements for candidate and packaged workers before
 handlers exist.
 `continuous.worker.view`, `continuous.worker.command`, `/worker`, and
 `worker:tool` all run through the same registry validation before dispatch.
-`continuous.core.command` owns reusable worker-run lifecycle control through
-`worker.run.start` and `worker.run.complete`, using the Core envelope with
-worker, capability, budget, evidence, and settlement data under `config`.
-Registered worker business commands stay on `/worker` and
-`continuous.worker.command`; they should adopt that Core lifecycle gate rather
-than adding worker-family-specific tool names or routes.
+`continuous.core.command` owns reusable worker lifecycle control through
+`worker.upsert`, `worker.transition`, `worker.run.start`, and
+`worker.run.complete`, using the Core envelope with worker identity, capability,
+budget, evidence, and settlement data under `config`.
+Lifecycle commands that act on a worker role require that role under `config`
+and a matching authenticated transport scope before dispatch. Registered worker
+business commands stay on `/worker` and `continuous.worker.command`; promoted
+commands adopt the Core lifecycle gate instead of adding worker-family-specific
+tool names or routes.
 The CI integration suite exercises `continuous.worker.command` on real
 Revenue `lead.read`, `run`, `lead.classify`, `response.draft`,
 `quote.prepare`, and `payment_link.prepare`. It also exercises Owner `brief.generate`, Dispatch
@@ -47,9 +50,11 @@ view, and workflow records as `/worker`.
 The Revenue payment-link command can be executed through
 `continuous.worker.command` or `worker:tool`, but it only prepares an internal
 packet; live provider payment-link creation and money movement remain blocked.
-Deploy smoke also exercises Offer and Pricing `margin.review.prepare` plus the
-`price_policy` view through `POST /app-server`, proving a post-Revenue worker
-can use the same dynamic-tool envelope without a worker-specific route.
+Deploy smoke also exercises Core worker lifecycle commands plus Offer and
+Pricing `margin.review.prepare` and the `price_policy` view through
+`POST /app-server`, proving Core primitives and post-Revenue workers can use the
+same dynamic-tool envelope without a worker-specific route and with worker-role
+scope enforced before lifecycle dispatch.
 Customer Experience `recovery.draft` and `signals` are runtime-registered the
 same way: customer, signal, evidence, channel, and no-send policy selectors
 live under `config`, while the app-server tool still sends only `command`,

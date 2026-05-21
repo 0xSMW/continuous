@@ -308,5 +308,7 @@ printf '%s\n' "$CONTROL_PLANE_ATTESTATION_OUTPUT" | /usr/bin/jq -e \
   >/dev/null
 APP_DIR="$APP_DIR" SITE_HOST="$SITE_HOST" TENANT_SLUG="continuous-demo" \
   ./scripts/smoke-core-worker-lifecycle-on-host.sh
+APP_DIR="$APP_DIR" SITE_HOST="$SITE_HOST" TENANT_SLUG="continuous-demo" \
+  ./scripts/smoke-app-server-core-lifecycle-on-host.sh
 docker compose ps
 REMOTE_SCRIPT

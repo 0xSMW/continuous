@@ -987,6 +987,7 @@ jobs:
               .tool == "continuous.core.schema" and
               (.data.registry.commands | any(.name == "task.create" and .apiRoute == "/core" and .tool == "continuous.core.command")) and
               (.data.registry.commands | any(.name == "worker.upsert" and .apiRoute == "/core")) and
+              (.data.registry.commands | any(.name == "worker.transition" and .apiRoute == "/core")) and
               (.data.registry.commands | any(.name == "worker.run.start" and .apiRoute == "/core")) and
               (.data.registry.commands | any(.name == "worker.run.complete" and .apiRoute == "/core")) and
               (.data.registry.commands | any(.name == "connection.health.record" and .apiRoute == "/core")) and
@@ -1055,6 +1056,9 @@ jobs:
               (.data.result.taskId | length > 0)
             )
           ' >/dev/null
+
+          APP_DIR="$APP_DIR" SITE_HOST="$SITE_HOST" TENANT_SLUG="continuous-demo" APP_SERVER_CORE_LIFECYCLE_SMOKE_RUN_ID="$SMOKE_RUN_ID" \
+            "$APP_DIR/scripts/smoke-app-server-core-lifecycle-on-host.sh"
 
           APP_SERVER_LEAD_READ_KEY="deploy-app-server-lead-read-smoke-$SMOKE_RUN_ID"
           APP_SERVER_LEAD_READ_SOURCE_EVENT="app-server-deploy-smoke:$SMOKE_RUN_ID"

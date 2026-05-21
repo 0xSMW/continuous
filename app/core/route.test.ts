@@ -2752,6 +2752,7 @@ describe("POST /core", () => {
     });
 
     const response = await postCore("worker.transition", "worker-transition-route-test-001", {
+      role: "compliance_operations",
       workerId: "22222222-2222-4222-8222-222222222222",
       toState: "training",
       reason: "Launch simulation checks",
@@ -2783,6 +2784,49 @@ describe("POST /core", () => {
         },
       }),
     );
+    expect(mocks.authorizeManagedControlPlaneCredential).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: "core",
+        access: "write",
+        command: "worker.transition",
+        tenantSlug: "continuous-demo",
+        workerRole: "compliance_operations",
+        requireManagedCredential: true,
+      }),
+    );
+  });
+
+  it("requires worker role scope for Core worker transitions", async () => {
+    vi.stubEnv(
+      "CONTROL_PLANE_TOKENS_JSON",
+      JSON.stringify([
+        {
+          id: "core-route-test",
+          token: "test-token",
+          operatorEmail: "operator@example.com",
+          allowedTenants: ["continuous-demo"],
+          allowedWorkerRoles: ["finance_operations"],
+          allowedRoutes: ["core"],
+          allowedAccess: ["write"],
+          allowedCommands: exactCoreRouteCommands,
+        },
+      ]),
+    );
+
+    const response = await postCore("worker.transition", "worker-transition-forbidden-role-001", {
+      role: "revenue_operations",
+      workerId: "22222222-2222-4222-8222-222222222222",
+      toState: "active",
+      reason: "Forbidden worker role should fail before dispatch.",
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(body.error).toEqual({
+      code: "control_plane_worker_role_forbidden",
+      message: "This operator token is not allowed to access the requested worker role.",
+    });
+    expect(mocks.transitionCoreWorker).not.toHaveBeenCalled();
   });
 
   it("dispatches worker.run.start through the Core worker-run lifecycle gate", async () => {

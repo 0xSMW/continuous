@@ -303,6 +303,7 @@ describe("/app-server route", () => {
       allowedAccess: ["write"],
       allowedCommands: ["core:task.create"],
       allowedTenants: ["continuous-demo"],
+      allowedWorkerRoles: ["*"],
     });
     expect(mocks.executeAppServerWorkerDynamicToolCall).not.toHaveBeenCalled();
   });
@@ -347,6 +348,7 @@ describe("/app-server route", () => {
       allowedAccess: ["read"],
       allowedCommands: ["core:view.summary"],
       allowedTenants: ["continuous-demo"],
+      allowedWorkerRoles: ["*"],
     });
   });
 
@@ -494,6 +496,134 @@ describe("/app-server route", () => {
       allowedAccess: ["write"],
       allowedCommands: ["core:task.create"],
       allowedTenants: ["continuous-demo"],
+      allowedWorkerRoles: ["*"],
+    });
+  });
+
+  it("role-scopes Core worker upsert app-server commands before dynamic tool dispatch", async () => {
+    mocks.env.CONTROL_PLANE_TOKENS_JSON = tokenCatalog(
+      ["app_server:core.command.worker.upsert"],
+      {
+        allowedWorkerRoles: ["revenue_operations"],
+      },
+    );
+
+    const { POST } = await import("./route");
+    const payload = {
+      tool: "continuous.core.command",
+      arguments: {
+        command: "worker.upsert",
+        core: {
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "app-server-core-worker-upsert-001",
+        config: {
+          role: "revenue_operations",
+          kind: "synthetic",
+          state: "training",
+          name: "Revenue Operations Worker",
+          mission: "Prepare quote-to-cash packets with blocked external execution.",
+          autonomyLevel: 1,
+          policy: {
+            externalExecution: "blocked",
+          },
+        },
+      },
+      callId: "call-core-worker-upsert-001",
+      threadId: "thread-001",
+      turnId: "turn-001",
+    };
+    const response = await POST(
+      new Request("http://localhost/app-server", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.authorizeManagedControlPlaneCredential).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: "app_server",
+        access: "write",
+        command: "core.command.worker.upsert",
+        tenantSlug: "continuous-demo",
+        workerRole: "revenue_operations",
+        requireManagedCredential: true,
+      }),
+    );
+    expect(mocks.executeAppServerCoreDynamicToolCall).toHaveBeenCalledWith(payload, {
+      operatorEmail: "operator@example.com",
+      source: "control_plane",
+      allowedAccess: ["write"],
+      allowedCommands: ["core:worker.upsert"],
+      allowedTenants: ["continuous-demo"],
+      allowedWorkerRoles: ["revenue_operations"],
+    });
+  });
+
+  it("role-scopes Core worker transition app-server commands before dynamic tool dispatch", async () => {
+    mocks.env.CONTROL_PLANE_TOKENS_JSON = tokenCatalog(
+      ["app_server:core.command.worker.transition"],
+      {
+        allowedWorkerRoles: ["revenue_operations"],
+      },
+    );
+
+    const { POST } = await import("./route");
+    const payload = {
+      tool: "continuous.core.command",
+      arguments: {
+        command: "worker.transition",
+        core: {
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "app-server-core-worker-transition-001",
+        config: {
+          worker: {
+            role: "revenue_operations",
+          },
+          workerId: "22222222-2222-4222-8222-222222222222",
+          toState: "active",
+          reason: "Lifecycle smoke promoted the worker.",
+        },
+      },
+      callId: "call-core-worker-transition-001",
+      threadId: "thread-001",
+      turnId: "turn-001",
+    };
+    const response = await POST(
+      new Request("http://localhost/app-server", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.authorizeManagedControlPlaneCredential).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: "app_server",
+        access: "write",
+        command: "core.command.worker.transition",
+        tenantSlug: "continuous-demo",
+        workerRole: "revenue_operations",
+        requireManagedCredential: true,
+      }),
+    );
+    expect(mocks.executeAppServerCoreDynamicToolCall).toHaveBeenCalledWith(payload, {
+      operatorEmail: "operator@example.com",
+      source: "control_plane",
+      allowedAccess: ["write"],
+      allowedCommands: ["core:worker.transition"],
+      allowedTenants: ["continuous-demo"],
+      allowedWorkerRoles: ["revenue_operations"],
     });
   });
 
@@ -556,6 +686,7 @@ describe("/app-server route", () => {
       allowedAccess: ["write"],
       allowedCommands: ["core:worker.run.start"],
       allowedTenants: ["continuous-demo"],
+      allowedWorkerRoles: ["revenue_operations"],
     });
   });
 
@@ -617,6 +748,7 @@ describe("/app-server route", () => {
       allowedAccess: ["write"],
       allowedCommands: ["core:worker.run.complete"],
       allowedTenants: ["continuous-demo"],
+      allowedWorkerRoles: ["revenue_operations"],
     });
   });
 
@@ -655,6 +787,53 @@ describe("/app-server route", () => {
             },
           },
           callId: "call-core-worker-run-forbidden-001",
+          threadId: "thread-001",
+          turnId: "turn-001",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "control_plane_worker_role_forbidden",
+      },
+    });
+    expect(mocks.executeAppServerCoreDynamicToolCall).not.toHaveBeenCalled();
+  });
+
+  it("rejects Core worker transition app-server commands outside worker-role scope", async () => {
+    mocks.env.CONTROL_PLANE_TOKENS_JSON = tokenCatalog(
+      ["app_server:core.command.worker.transition"],
+      {
+        allowedWorkerRoles: ["finance_operations"],
+      },
+    );
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/app-server", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          tool: "continuous.core.command",
+          arguments: {
+            command: "worker.transition",
+            core: {
+              tenantSlug: "continuous-demo",
+            },
+            idempotencyKey: "app-server-core-worker-transition-forbidden-001",
+            config: {
+              role: "revenue_operations",
+              workerId: "22222222-2222-4222-8222-222222222222",
+              toState: "active",
+              reason: "Forbidden worker role should fail before dispatch.",
+            },
+          },
+          callId: "call-core-worker-transition-forbidden-001",
           threadId: "thread-001",
           turnId: "turn-001",
         }),

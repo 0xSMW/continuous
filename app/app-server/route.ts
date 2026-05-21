@@ -582,6 +582,7 @@ function coreTransportContextFor(input: {
     allowedAccess: [input.target.access],
     allowedCommands: input.target.innerCommand ? [input.target.innerCommand] : [],
     allowedTenants: input.target.tenantSlug ? [input.target.tenantSlug] : ["*"],
+    allowedWorkerRoles: input.target.workerRole ? [input.target.workerRole] : ["*"],
   };
 }
 
@@ -604,7 +605,12 @@ function coreWorkerRoleFromCommandArgs(command: string, args: Record<string, unk
 }
 
 function coreCommandRequiresWorkerRoleScope(command: string) {
-  return command === "worker.upsert" || command === "worker.run.start" || command === "worker.run.complete";
+  return (
+    command === "worker.upsert" ||
+    command === "worker.transition" ||
+    command === "worker.run.start" ||
+    command === "worker.run.complete"
+  );
 }
 
 export async function GET() {

@@ -106,7 +106,7 @@
 | Added Core worker lifecycle controls | `POST /core` now supports `worker.upsert` and `worker.transition`, creating synthetic/human/robot/service worker records, worker Core object/version metadata, lifecycle events, trace evidence, audit proof, replay fingerprints, and guarded state transitions without adding worker-family URLs |
 | Added Core authority and budget controls | `POST /core` now supports `capability.grant`, `budget.reserve`, `budget.charge`, and `budget.release`, so worker authority and AI budget movement are platform-owned commands with audit and evidence |
 | Added Core worker-run lifecycle controls | `POST /core` and `continuous.core.command` now support `worker.run.start` and `worker.run.complete`, binding worker role scope before dispatch, proving active capability grants and worker-owned budget reservations, writing worker-run event/audit/evidence proof, and keeping external execution blocked |
-| Updated worker-run command scopes | Deploy, local, and host attestation token catalogs now include exact `core:worker.run.start`, `core:worker.run.complete`, `app_server:core.command.worker.run.start`, and `app_server:core.command.worker.run.complete` scopes so worker-run lifecycle access stays on the generic Core envelope |
+| Updated worker lifecycle command scopes | Deploy, local, and host attestation token catalogs now include exact `core:worker.upsert`, `core:worker.transition`, `core:worker.run.start`, `core:worker.run.complete`, `app_server:core.command.worker.upsert`, `app_server:core.command.worker.transition`, `app_server:core.command.worker.run.start`, and `app_server:core.command.worker.run.complete` scopes so worker lifecycle access stays on the generic Core envelope |
 | Documented worker-run boundary | Docs now distinguish registered worker business commands on `/worker` from the reusable Core `worker.run.start` and `worker.run.complete` ledger boundary, and production app-server schema smoke asserts both lifecycle commands are registered |
 | Hardened Core authority and budget replay | `approval.request`, `capability.grant`, `budget.reserve`, `budget.charge`, and `budget.release` now store replay fingerprints and reject idempotency-key reuse with changed command input |
 | Added durable evidence packets | `POST /core` now supports `packet.prepare` and `document.packet.prepare`, creating an `evidence_packets` record plus linked document, event, audit, and trace evidence for workflow review packets |
@@ -235,7 +235,7 @@
 | Deploy timeout boundary | The GitHub deploy workflow has bounded service readiness and smoke calls, but the strict customer-data gate remains opt-in until non-root deploy, observability, backup, recovery-drill, and credential evidence are all provisioned |
 | Hardened Core/workflow failure coverage | `/core external_action.record` now has route-level invalid-idempotency, adapter mismatch, and replay-conflict coverage plus integration coverage for changed-input replay and adapter/connection mismatch; `/workflow` now preserves structured route failures across overview, approvals, start, transition, step execution, and approval decisions |
 | Adopted Core lifecycle in one worker slice | Customer Experience `recovery.draft` now starts and completes through Core `worker.run.start` and `worker.run.complete`, reuses the Core `worker_runs` row for its business proof, and lets Core settle the budget reservation instead of writing a duplicate local run or usage event |
-| Captured next audit lanes | The next high-impact gaps are app-server lifecycle smoke coverage, consistent worker-transition role scope, Growth external-action gates, remaining readiness/roadmap status normalization, and production readiness hardening beyond backup freshness |
+| Captured next audit lanes | The next high-impact gaps are Growth external-action gates, remaining readiness/roadmap status normalization, and production readiness hardening beyond backup freshness |
 | Promoted Growth draft docs to runtime | Growth `campaign.draft` is now documented as a runtime `/worker` slice for `worker.role=growth_operations`; source refs and policy stay under `config`, while publish, send, ad-spend, and tracking mutation remain blocked until approval/proof gates exist |
 
 ### Current State
@@ -538,3 +538,17 @@ metadata through `continuous.worker.schema` without adding `attribution.review`
 to executable command allow-lists. That command remains schema-visible but
 non-runtime until tracking, ROI, credential, receipt, and rollback gates are
 implemented.
+
+App-server Core lifecycle access now treats `worker.transition` like
+`worker.upsert`, `worker.run.start`, and `worker.run.complete`: the worker role
+must live inside `config`, route auth narrows the dynamic Core transport to that
+role, and transport execution rejects missing or out-of-scope worker roles before
+dispatch. Production deploy smoke now proves all four lifecycle commands through
+`POST /app-server` and `continuous.core.command`.
+
+`scripts/smoke-app-server-core-lifecycle-on-host.sh` is the shared host proof for
+that path. It upserts and transitions the seeded `systems_operations` worker
+through the app-server Core command envelope, then starts and completes a run
+with its existing `permission.review` grant and active budget account so the
+smoke proves the real capability and budget gates without creating another
+role-matching worker.

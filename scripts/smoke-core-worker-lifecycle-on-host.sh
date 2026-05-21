@@ -101,6 +101,7 @@ TRANSITION_PAYLOAD="$(
       idempotencyKey: $key,
       config: {
         workerId: $workerId,
+        role: "systems_operations",
         toState: "active",
         reason: "Production smoke verified the Core worker lifecycle command path.",
         lifecycle: {

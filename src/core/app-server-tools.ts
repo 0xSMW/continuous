@@ -42,6 +42,7 @@ export type AppServerCoreTransportContext =
       allowedAccess: Array<"read" | "write">;
       allowedCommands: string[];
       allowedTenants: string[];
+      allowedWorkerRoles: string[];
     }
   | {
       operatorEmail: string;
@@ -514,7 +515,7 @@ function operatorEmailFromTransportContext(
   surface: string,
   access: "read" | "write",
   commandKey: string,
-  target: { tenantSlug?: string },
+  target: { tenantSlug?: string; workerRole?: string; requireWorkerRole?: boolean },
   context?: AppServerCoreTransportContext,
 ) {
   if (context) {
@@ -528,6 +529,7 @@ function operatorEmailFromTransportContext(
       const allowedAccess = stringList(context.allowedAccess);
       const allowedCommands = stringList(context.allowedCommands);
       const allowedTenants = stringList(context.allowedTenants);
+      const allowedWorkerRoles = stringList(context.allowedWorkerRoles);
 
       if (allowedAccess.length === 0 || allowedCommands.length === 0 || allowedTenants.length === 0) {
         throw new Error(`${surface} requires scoped authenticated transport context.`);
@@ -545,6 +547,23 @@ function operatorEmailFromTransportContext(
         throw new Error(`${surface} transport context is not allowed for ${commandKey}.`);
       }
 
+      if (target.requireWorkerRole && !target.workerRole) {
+        throw new Error(`${surface} requires worker.role for scoped worker lifecycle access.`);
+      }
+
+      if (target.requireWorkerRole && allowedWorkerRoles.length === 0) {
+        throw new Error(`${surface} requires scoped worker-role transport context.`);
+      }
+
+      if (
+        target.workerRole &&
+        allowedWorkerRoles.length > 0 &&
+        !allowedWorkerRoles.includes("*") &&
+        !allowedWorkerRoles.includes(target.workerRole)
+      ) {
+        throw new Error(`${surface} transport context is not allowed for this worker role.`);
+      }
+
       return operatorEmail;
     }
 
@@ -558,6 +577,31 @@ function operatorEmailFromTransportContext(
 
   assertTrustedLocalCoreAccess(surface, access);
   return requiredLocalCoreOperatorEmail(surface);
+}
+
+function coreWorkerRoleFromCommandConfig(command: string, config: Record<string, unknown>) {
+  if (command === "worker.upsert") {
+    return optionalString(config.role);
+  }
+
+  if (command === "worker.transition") {
+    return optionalString(config.role) ?? optionalString(objectValue(config.worker).role);
+  }
+
+  if (command === "worker.run.start" || command === "worker.run.complete") {
+    return optionalString(objectValue(config.worker).role);
+  }
+
+  return undefined;
+}
+
+function coreCommandRequiresWorkerRoleScope(command: string) {
+  return (
+    command === "worker.upsert" ||
+    command === "worker.transition" ||
+    command === "worker.run.start" ||
+    command === "worker.run.complete"
+  );
 }
 
 function requireIdempotency(value: unknown) {
@@ -1218,15 +1262,21 @@ export async function executeAppServerCoreTool(
     }
 
     const target = coreTargetFrom(args);
+    const config = objectValue(args.config);
+    const workerRole = coreWorkerRoleFromCommandConfig(command, config);
+    const requireWorkerRole = coreCommandRequiresWorkerRoleScope(command);
     const operatorEmail = operatorEmailFromTransportContext(
       "continuous.core.command",
       "write",
       `core:${command}`,
-      target,
+      {
+        ...target,
+        workerRole,
+        requireWorkerRole,
+      },
       context,
     );
     const idempotencyKey = requireIdempotency(args.idempotencyKey);
-    const config = objectValue(args.config);
     const result = await executeCoreCommand({
       command,
       target,

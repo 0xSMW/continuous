@@ -454,7 +454,12 @@ function workerRoleFromCoreCommandConfig(command: string | undefined, config: Re
 }
 
 function coreCommandRequiresWorkerRoleScope(command?: string) {
-  return command === "worker.upsert" || command === "worker.run.start" || command === "worker.run.complete";
+  return (
+    command === "worker.upsert" ||
+    command === "worker.transition" ||
+    command === "worker.run.start" ||
+    command === "worker.run.complete"
+  );
 }
 
 async function handleCoreSummaryRead(request: Request, tenantSlug: string | undefined) {

@@ -570,6 +570,7 @@ describe("future worker contracts", () => {
     const observabilityScript = read("scripts/check-observability-on-host.sh");
     const attestationScript = read("scripts/attest-control-plane-on-host.sh");
     const coreWorkerLifecycleSmokeScript = read("scripts/smoke-core-worker-lifecycle-on-host.sh");
+    const appServerCoreLifecycleSmokeScript = read("scripts/smoke-app-server-core-lifecycle-on-host.sh");
     const rotationScript = read("scripts/rotate-control-plane-token-on-host.sh");
     const backupScript = read("scripts/backup-db.sh");
     const normalizedDeployment = deployment.replace(/\s+/g, " ");
@@ -627,6 +628,14 @@ describe("future worker contracts", () => {
     expect(coreWorkerLifecycleSmokeScript).toContain('command: "worker.upsert"');
     expect(coreWorkerLifecycleSmokeScript).toContain('command: "worker.transition"');
     expect(coreWorkerLifecycleSmokeScript).toContain("systems_operations");
+    expect(appServerCoreLifecycleSmokeScript).toContain('tool: "continuous.core.command"');
+    expect(appServerCoreLifecycleSmokeScript).toContain('command: "worker.upsert"');
+    expect(appServerCoreLifecycleSmokeScript).toContain('command: "worker.transition"');
+    expect(appServerCoreLifecycleSmokeScript).toContain('command: "worker.run.start"');
+    expect(appServerCoreLifecycleSmokeScript).toContain('command: "worker.run.complete"');
+    expect(appServerCoreLifecycleSmokeScript).toContain("systems_operations");
+    expect(deployScript).toContain("smoke-app-server-core-lifecycle-on-host.sh");
+    expect(deployWorkflow).toContain("smoke-app-server-core-lifecycle-on-host.sh");
     expect(rotationScript).toContain("control_plane.token_rotation.attest");
     expect(rotationScript).toContain("TOKEN_ROTATION_ATTESTATION_ID");
     expect(rotationScript).toContain("NEXT_WORKER_RUN_TOKEN");
@@ -675,9 +684,6 @@ describe("future worker contracts", () => {
     expect(deployWorkflow).toContain("worker:view.price_policy");
     expect(deployWorkflow).toContain("app_server:worker.command.margin.review.prepare");
     expect(deployWorkflow).toContain("app_server:worker.view.price_policy");
-    expect(deployWorkflow).toContain("continuous.worker.command");
-    expect(deployWorkflow).toContain('command: "lead.read"');
-    expect(deployWorkflow).toContain("deploy-app-server-lead-read-smoke");
     expect(deployWorkflow).toContain("appServerTool");
     expect(deployWorkflow).toContain("missing or unparseable app-server tool response");
     expect(deployWorkflow).toContain("scripts/attest-control-plane-on-host.sh");
