@@ -100,6 +100,121 @@ function optionalBoolean(value: unknown) {
   return typeof value === "boolean" ? value : undefined;
 }
 
+function stringList(value: unknown) {
+  if (Array.isArray(value)) {
+    return Array.from(
+      new Set(
+        value
+          .map((item) => (typeof item === "string" ? item.trim() : ""))
+          .filter(Boolean),
+      ),
+    );
+  }
+
+  if (typeof value === "string") {
+    return Array.from(
+      new Set(
+        value
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean),
+      ),
+    );
+  }
+
+  return [];
+}
+
+function listAllows(allowed: string[], requested: string) {
+  return allowed.some((item) => item === "*" || item === requested);
+}
+
+function patternListAllows(allowed: string[], requested: string) {
+  return allowed.some((item) => {
+    if (item === "*" || item === requested) {
+      return true;
+    }
+
+    if (item.endsWith(":*")) {
+      return requested.startsWith(item.slice(0, -1));
+    }
+
+    return false;
+  });
+}
+
+function credentialScopePolicyError(input: {
+  config: Record<string, unknown>;
+  auth: Extract<ReturnType<typeof authorizeControlPlaneAccess>, { ok: true }>;
+}) {
+  const requestedTenants = stringList(input.config.allowedTenants);
+  const requestedWorkerRoles = stringList(input.config.allowedWorkerRoles);
+  const requestedRoutes = stringList(input.config.allowedRoutes);
+  const requestedAccess = stringList(input.config.allowedAccess);
+  const requestedCommands = stringList(input.config.allowedCommands);
+  const callerTenants = input.auth.scope.tenantSlugs;
+  const callerWorkerRoles = input.auth.scope.workerRoles;
+  const callerRoutes = input.auth.routes ?? [];
+  const callerAccess = input.auth.access ?? [];
+  const callerCommands = input.auth.commands ?? [];
+
+  if (requestedTenants.length === 0) {
+    return "config.allowedTenants must include at least one tenant slug.";
+  }
+
+  if (requestedRoutes.length === 0) {
+    return "config.allowedRoutes must include at least one route.";
+  }
+
+  if (requestedAccess.length === 0) {
+    return "config.allowedAccess must include at least one access mode.";
+  }
+
+  if (requestedCommands.length === 0) {
+    return "config.allowedCommands must include at least one exact route-qualified command.";
+  }
+
+  const tenantEscalation =
+    callerTenants.length > 0
+      ? requestedTenants.find((tenant) => !listAllows(callerTenants, tenant))
+      : undefined;
+
+  if (tenantEscalation) {
+    return `config.allowedTenants includes ${tenantEscalation}, which is outside the caller's tenant scope.`;
+  }
+
+  const workerRoleEscalation =
+    callerWorkerRoles.length > 0
+      ? requestedWorkerRoles.find((role) => !listAllows(callerWorkerRoles, role))
+      : undefined;
+
+  if (workerRoleEscalation) {
+    return `config.allowedWorkerRoles includes ${workerRoleEscalation}, which is outside the caller's worker-role scope.`;
+  }
+
+  const routeEscalation = requestedRoutes.find((route) => !patternListAllows(callerRoutes, route));
+
+  if (routeEscalation) {
+    return `config.allowedRoutes includes ${routeEscalation}, which is outside the caller's route scope.`;
+  }
+
+  const accessEscalation = requestedAccess.find((access) => !patternListAllows(callerAccess, access));
+
+  if (accessEscalation) {
+    return `config.allowedAccess includes ${accessEscalation}, which is outside the caller's access scope.`;
+  }
+
+  const commandEscalation = requestedCommands.find(
+    (command) => !callerCommands.includes(command),
+  );
+
+  if (commandEscalation) {
+    return `config.allowedCommands includes ${commandEscalation}, which is outside the caller's command scope.`;
+  }
+
+  return null;
+}
+
 function actorFrom(value: unknown) {
   const actor = bodyObject(value);
   return {
@@ -541,6 +656,18 @@ export async function POST(request: Request) {
           message: `Control-plane credential inventory accepts credential ids, token fingerprints, scopes, and evidence only. Remove unsupported or secret fields: ${forbiddenFields.join(", ")}.`,
         },
         400,
+      );
+    }
+
+    const policyError = credentialScopePolicyError({ config, auth });
+
+    if (policyError) {
+      return errorResponse(
+        {
+          code: "invalid_control_plane_credential_scope",
+          message: `Control-plane credential upserts cannot persist broader durable scopes than the caller has. ${policyError}`,
+        },
+        403,
       );
     }
 

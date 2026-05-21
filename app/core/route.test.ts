@@ -548,9 +548,9 @@ describe("POST /core", () => {
             tokenFingerprint: "aabbccddeeff0011",
             allowedTenants: ["continuous-demo"],
             allowedWorkerRoles: ["revenue_operations"],
-            allowedRoutes: ["core", "worker"],
+            allowedRoutes: ["core"],
             allowedAccess: ["read", "write"],
-            allowedCommands: ["core:control_plane.credential.upsert", "worker:run"],
+            allowedCommands: ["core:control_plane.credential.upsert"],
             evidence: {
               owner: "ops",
             },
@@ -582,14 +582,97 @@ describe("POST /core", () => {
       tokenFingerprint: "aabbccddeeff0011",
       allowedTenants: ["continuous-demo"],
       allowedWorkerRoles: ["revenue_operations"],
-      allowedRoutes: ["core", "worker"],
+      allowedRoutes: ["core"],
       allowedAccess: ["read", "write"],
-      allowedCommands: ["core:control_plane.credential.upsert", "worker:run"],
+      allowedCommands: ["core:control_plane.credential.upsert"],
       expiresAt: undefined,
       evidence: {
         owner: "ops",
       },
     });
+  });
+
+  it("rejects managed credential upserts that broaden caller command scope", async () => {
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "control_plane.credential.upsert",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "credential-upsert-escalation-001",
+          config: {
+            credentialId: "broader-worker-operator",
+            displayName: "Broader worker operator",
+            tokenFingerprint: "aabbccddeeff0011",
+            allowedTenants: ["continuous-demo"],
+            allowedWorkerRoles: ["revenue_operations"],
+            allowedRoutes: ["core"],
+            allowedAccess: ["write"],
+            allowedCommands: ["core:control_plane.credential.upsert", "worker:run"],
+            evidence: {
+              owner: "ops",
+            },
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(body.error).toEqual({
+      code: "invalid_control_plane_credential_scope",
+      message:
+        "Control-plane credential upserts cannot persist broader durable scopes than the caller has. config.allowedCommands includes worker:run, which is outside the caller's command scope.",
+    });
+    expect(mocks.upsertControlPlaneCredential).not.toHaveBeenCalled();
+  });
+
+  it("rejects managed credential upserts without durable route, access, command, and tenant scopes", async () => {
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "control_plane.credential.upsert",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "credential-upsert-empty-scopes-001",
+          config: {
+            credentialId: "empty-scope-operator",
+            displayName: "Empty scope operator",
+            tokenFingerprint: "aabbccddeeff0011",
+            allowedTenants: [],
+            allowedRoutes: [],
+            allowedAccess: [],
+            allowedCommands: [],
+            evidence: {
+              owner: "ops",
+            },
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(body.error).toEqual({
+      code: "invalid_control_plane_credential_scope",
+      message:
+        "Control-plane credential upserts cannot persist broader durable scopes than the caller has. config.allowedTenants must include at least one tenant slug.",
+    });
+    expect(mocks.upsertControlPlaneCredential).not.toHaveBeenCalled();
   });
 
   it("runs deterministic AI inference through the Core command envelope", async () => {

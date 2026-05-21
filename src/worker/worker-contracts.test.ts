@@ -305,6 +305,9 @@ describe("future worker contracts", () => {
     const revenueViews = workerFollowUpViews(registeredViews).filter(
       (view) => view.role === "revenue_operations",
     );
+    const paymentLinkContractSchema = workerContractForRole("revenue_operations")?.commands.find(
+      (command) => command.name === "payment_link.prepare",
+    )?.configSchema;
 
     expect(workerContracts.map((contract) => contract.role)).toEqual(contractRoleList);
     expect(new Set(workerContracts.map((contract) => contract.apiRoute))).toEqual(
@@ -327,6 +330,15 @@ describe("future worker contracts", () => {
     expect(workerContracts.every((contract) => contract.apiRoute === "/worker")).toBe(true);
     expect(revenueFollowUps.every((command) => command.apiRoute === "/worker")).toBe(true);
     expect(revenueViews.every((view) => view.apiRoute === "/worker")).toBe(true);
+    expect(paymentLinkContractSchema?.oneRequiredPaths).toEqual([
+      ["invoiceId"],
+      ["invoiceObjectId"],
+      ["sourceRefs", "invoiceId"],
+      ["sourceRefs", "invoiceObjectId"],
+    ]);
+    expect(paymentLinkContractSchema?.properties?.sourceRefs?.properties).toHaveProperty(
+      "invoiceObjectId",
+    );
   });
 
   it("uses one shared worker envelope guard across HTTP and tool surfaces", () => {
@@ -649,6 +661,7 @@ describe("future worker contracts", () => {
       "systems.sync_issue_to_worker",
       "revenue.quote_to_pricing",
       "customer.signal_to_experience",
+      "customer.signal_to_growth",
       "dispatch.asset_need_to_supply",
       "growth.campaign_to_owner_review",
       "systems.connection_to_packaged_worker",
@@ -685,6 +698,13 @@ describe("future worker contracts", () => {
       expect(entry.firstCommand).not.toMatch(/_worker|worker\./);
       expect(entry.firstView).not.toMatch(/_worker|worker\./);
     }
+
+    expect(
+      workerExpansionCatalog.find((entry) => entry.key === "growth_operations")?.incomingHandoff,
+    ).toBe("customer.signal_to_growth");
+    expect(read("docs/worker-handoffs.md")).toContain(
+      "`growth.campaign_to_owner_review` | Growth | Owner Chief-of-Staff",
+    );
   });
 
   it("publishes planned command metadata only for contract-backed non-runtime workers", () => {
@@ -726,6 +746,22 @@ describe("future worker contracts", () => {
         (command) => command.role === "vertical_packages" && command.name === "package.flow.prepare",
       )?.configSchema.required,
     ).toEqual(["packageKey", "sourceRefs", "policy"]);
+    expect(
+      plannedWorkerCommands().find(
+        (command) =>
+          command.role === "customer_experience_operations" && command.name === "recovery.draft",
+      )?.configSchema.properties?.sourceRefs.required,
+    ).toEqual(["customerObjectId", "customerSignalObjectId", "evidencePacketId"]);
+    expect(
+      plannedWorkerCommands().find(
+        (command) => command.role === "asset_supply_operations" && command.name === "reorder.plan",
+      )?.configSchema.properties?.sourceRefs.oneRequired,
+    ).toEqual(["materialObjectId", "assetObjectId"]);
+    expect(
+      plannedWorkerCommands().find(
+        (command) => command.role === "growth_operations" && command.name === "campaign.draft",
+      )?.configSchema.properties?.sourceRefs.required,
+    ).toEqual(["customerSignalObjectId", "evidencePacketId", "budgetReservationId"]);
     expect(
       plannedWorkerViews().find(
         (view) => view.role === "vertical_packages" && view.name === "package_readiness",

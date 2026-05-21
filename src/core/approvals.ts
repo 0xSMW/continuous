@@ -969,6 +969,14 @@ export async function decideApproval(input: {
       );
     }
 
+    if (approval.reviewerUserId && approval.reviewerUserId !== operator.userId) {
+      throw new PlatformUnavailableError(
+        "approval_reviewer_forbidden",
+        "Only the assigned approval reviewer can decide this approval request.",
+        403,
+      );
+    }
+
     const decision = {
       action: input.action,
       note: input.note ?? "",

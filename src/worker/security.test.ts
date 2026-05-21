@@ -317,6 +317,9 @@ describe("authorizeControlPlaneAccess", () => {
         tenantSlugs: ["continuous-demo"],
         workerRoles: ["revenue_operations"],
       },
+      routes: ["worker"],
+      access: ["write"],
+      commands: ["worker:run"],
     });
   });
 
@@ -353,6 +356,9 @@ describe("authorizeControlPlaneAccess", () => {
         tenantSlugs: [],
         workerRoles: [],
       },
+      routes: ["worker"],
+      access: ["write"],
+      commands: ["worker:lead.read"],
     });
   });
 
@@ -672,6 +678,9 @@ describe("authorizeControlPlaneAccess", () => {
         tenantSlugs: [],
         workerRoles: [],
       },
+      routes: ["worker"],
+      access: ["write"],
+      commands: ["worker:run"],
     });
   });
 
@@ -719,6 +728,9 @@ describe("authorizeControlPlaneAccess", () => {
         tenantSlugs: ["continuous-demo"],
         workerRoles: ["revenue_operations"],
       },
+      routes: ["worker"],
+      access: ["read", "write"],
+      commands: ["worker:*"],
     });
 
     expect(
@@ -742,6 +754,9 @@ describe("authorizeControlPlaneAccess", () => {
         tenantSlugs: ["continuous-demo"],
         workerRoles: ["revenue_operations"],
       },
+      routes: ["worker"],
+      access: ["read", "write"],
+      commands: ["worker:*"],
     });
 
     for (const [route, command] of [

@@ -407,7 +407,11 @@ non-production/bootstrap-only; production control-plane auth requires a catalog
 credential with `operatorEmail`, `allowedRoutes`, `allowedAccess`, and
 `allowedCommands`. Omitted route, access, or command scope fields fail closed,
 and `/core`, `/worker`, `/workflow`, and `/approval` also fail closed against
-the durable managed credential inventory after catalog auth succeeds.
+the durable managed credential inventory after catalog auth succeeds. Managed
+credential upserts must include non-empty durable tenant, route, access, and
+command scopes, and `/core command=control_plane.credential.upsert` refuses to
+persist any route, access mode, command, tenant, or worker role outside the
+caller token's own catalog scope.
 
 ## Production Readiness Gate
 

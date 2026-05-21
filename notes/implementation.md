@@ -420,3 +420,28 @@ money movement remain blocked.
 history or applying files. CI can run integration suites against the same test
 database in parallel, so the migration runner owns cross-process serialization
 instead of requiring every worker test file to coordinate separately.
+
+The code-owned worker contract metadata now uses the same nested invoice-ref
+schema as the runtime registry for Revenue `payment_link.prepare`. Future
+schema readers should see `config.invoiceId`, `config.invoiceObjectId`,
+`config.sourceRefs.invoiceId`, or `config.sourceRefs.invoiceObjectId` as the
+valid payment-link entry points, not a loose `sourceRefs` object.
+
+The expansion map now distinguishes Growth's inbound and outbound handoffs:
+`customer.signal_to_growth` opens Growth campaign drafting from customer or
+review evidence, while `growth.campaign_to_owner_review` remains Growth's
+owner-review output. Planned Customer Experience, Asset/Supply, Growth, and
+Vertical Package command schemas now name the concrete Core refs and policy
+flags expected by the contracts instead of exposing only broad object blobs.
+
+Approval decisions now enforce the assigned reviewer when
+`approval_requests.reviewer_user_id` is set. Tenant-scoped approval authority is
+not enough to approve someone else's pending packet; the reviewer has to match
+the active operator before Core, workflow, or worker state is mutated.
+
+Control-plane credential upsert now compares requested durable scope against
+the caller's authenticated catalog policy before persistence. `POST /core`
+`command=control_plane.credential.upsert` rejects empty tenant, route, access,
+or command scopes and refuses to mint credentials with routes, access modes,
+commands, tenants, or worker roles outside the caller's own scope, so token
+rotation and credential inventory cannot become a self-escalation path.

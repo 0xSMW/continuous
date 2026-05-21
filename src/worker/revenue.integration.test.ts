@@ -77,6 +77,7 @@ import {
   generatedViews,
   invoices,
   usageEvents,
+  users,
   workflowRuns,
   workflowSteps,
   workerRuns,
@@ -1811,6 +1812,10 @@ maybeDescribe("Revenue Worker integration eval", () => {
         ]),
       );
 
+    if (!approval) {
+      throw new Error("Expected approval request row.");
+    }
+
     expect(task?.state).toBe("approval_required");
     expect(objectValue(task?.outcome).approvalRequestId).toBe(approvalResult.approvalRequestId);
     expect(transitionEvent?.type).toBe("task.transitioned");
@@ -1822,6 +1827,33 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(approvalEvidence?.kind).toBe("approval");
     expect(objectValue(approvalEvidence?.data).approvalRequestId).toBe(approvalResult.approvalRequestId);
     expect(auditCount.value).toBe(3);
+
+    const nonReviewerEmail = `approval-non-reviewer-${runId}@continuoushq.com`;
+    await db
+      .insert(users)
+      .values({
+        id: randomUUID(),
+        tenantId: approval.tenantId,
+        email: nonReviewerEmail,
+        name: "Non Reviewer",
+        role: "member",
+        state: "active",
+      })
+      .onConflictDoNothing();
+
+    await expect(
+      decideApproval({
+        approvalId: approvalResult.approvalRequestId,
+        operatorEmail: nonReviewerEmail,
+        tenantSlug: "continuous-demo",
+        action: "approved",
+        subject: "task",
+        db,
+      }),
+    ).rejects.toMatchObject({
+      code: "approval_reviewer_forbidden",
+      status: 403,
+    });
 
     const transitionReplay = await transitionCoreTask({
       operatorEmail: "owner@continuoushq.com",

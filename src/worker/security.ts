@@ -63,6 +63,9 @@ export type ControlPlaneAccessResult =
       operatorEmail: string;
       credentialId: string;
       scope: ControlPlaneScope;
+      routes?: string[];
+      access?: string[];
+      commands?: string[];
     }
   | { ok: false; status: 401 | 403; code: string; message: string };
 
@@ -523,6 +526,9 @@ export function authorizeControlPlaneAccess(input: {
     operatorEmail: credential.operatorEmail,
     credentialId: credential.id,
     scope: credential.scope,
+    routes: credential.routes,
+    access: credential.access,
+    commands: credential.commands,
   };
 }
 

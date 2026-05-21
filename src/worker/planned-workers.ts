@@ -10,6 +10,7 @@ export type PlannedWorkerConfigSchema = {
   description?: string;
   required?: string[];
   oneRequired?: string[];
+  oneRequiredPaths?: string[][];
   properties?: Record<string, PlannedWorkerConfigSchema>;
   items?: PlannedWorkerConfigSchema;
   enum?: string[];
@@ -99,6 +100,7 @@ export type WorkerExpansionCatalogEntry = {
   firstView: string;
   coreObjects: string[];
   incomingHandoff?: string;
+  outgoingHandoff?: string;
   acceptanceChecks: string[];
   firstBlocker: string;
   launchGate: string;
@@ -128,6 +130,22 @@ function stringArraySchema(description?: string): PlannedWorkerConfigSchema {
   };
 }
 
+function booleanSchema(description?: string): PlannedWorkerConfigSchema {
+  return {
+    type: "boolean",
+    ...(description ? { description } : {}),
+  };
+}
+
+function integerSchema(description?: string, minimum?: number): PlannedWorkerConfigSchema {
+  return {
+    type: "number",
+    integer: true,
+    ...(minimum !== undefined ? { minimum } : {}),
+    ...(description ? { description } : {}),
+  };
+}
+
 function objectSchema(description?: string): PlannedWorkerConfigSchema {
   return {
     type: "object",
@@ -135,6 +153,163 @@ function objectSchema(description?: string): PlannedWorkerConfigSchema {
     ...(description ? { description } : {}),
   };
 }
+
+function schemaProperty(schema: PlannedWorkerConfigSchema, key: string): PlannedWorkerConfigSchema {
+  const property = schema.properties?.[key];
+
+  if (!property) {
+    throw new Error(`Missing planned worker schema property: ${key}`);
+  }
+
+  return property;
+}
+
+const customerRecoveryConfigSchema: PlannedWorkerConfigSchema = {
+  type: "object",
+  required: ["sourceRefs", "policy"],
+  properties: {
+    sourceRefs: {
+      type: "object",
+      required: ["customerObjectId", "customerSignalObjectId", "evidencePacketId"],
+      properties: {
+        customerObjectId: stringSchema("Customer Core object id."),
+        customerSignalObjectId: stringSchema("Customer signal Core object id."),
+        signalObjectId: stringSchema("Legacy or external signal object id."),
+        conversationObjectId: stringSchema("Optional conversation Core object id."),
+        reviewObjectId: stringSchema("Optional review Core object id."),
+        jobObjectId: stringSchema("Optional job Core object id."),
+        evidencePacketId: stringSchema("Source evidence packet id."),
+      },
+      additionalProperties: false,
+    },
+    policy: {
+      type: "object",
+      required: ["requiresOwnerApproval", "allowExternalSend"],
+      properties: {
+        tone: stringSchema("Draft tone."),
+        requiresOwnerApproval: booleanSchema("Whether owner approval is required before any send."),
+        allowExternalSend: booleanSchema("Must remain false before launch promotion."),
+      },
+      additionalProperties: false,
+    },
+  },
+  additionalProperties: false,
+};
+
+const assetReorderPlanConfigSchema: PlannedWorkerConfigSchema = {
+  type: "object",
+  required: ["sourceRefs", "policy"],
+  properties: {
+    sourceRefs: {
+      type: "object",
+      required: ["workOrderObjectId", "evidencePacketId"],
+      oneRequired: ["materialObjectId", "assetObjectId"],
+      properties: {
+        jobObjectId: stringSchema("Job Core object id."),
+        workOrderObjectId: stringSchema("Work-order Core object id."),
+        materialObjectId: stringSchema("Material or inventory Core object id."),
+        assetObjectId: stringSchema("Asset Core object id."),
+        vendorObjectId: stringSchema("Optional vendor Core object id."),
+        cashPacketId: stringSchema("Optional Finance cash packet id."),
+        evidencePacketId: stringSchema("Need source evidence packet id."),
+      },
+      additionalProperties: false,
+    },
+    policy: {
+      type: "object",
+      required: ["requiresOwnerApproval", "allowPurchase"],
+      properties: {
+        maxDraftSpendCents: integerSchema("Maximum dry-run spend before escalation.", 0),
+        requiresOwnerApproval: booleanSchema("Whether owner approval is required before purchase."),
+        allowPurchase: booleanSchema("Must remain false before launch promotion."),
+      },
+      additionalProperties: false,
+    },
+  },
+  additionalProperties: false,
+};
+
+const growthCampaignDraftConfigSchema: PlannedWorkerConfigSchema = {
+  type: "object",
+  required: ["sourceRefs", "policy"],
+  properties: {
+    sourceRefs: {
+      type: "object",
+      required: ["customerSignalObjectId", "evidencePacketId", "budgetReservationId"],
+      properties: {
+        customerSignalObjectId: stringSchema("Customer signal Core object id."),
+        customerObjectId: stringSchema("Optional customer Core object id."),
+        reviewObjectId: stringSchema("Optional review Core object id."),
+        campaignObjectId: stringSchema("Optional existing campaign Core object id."),
+        contentDraftObjectId: stringSchema("Optional existing content draft Core object id."),
+        audienceObjectId: stringSchema("Optional audience Core object id."),
+        budgetReservationId: stringSchema("Budget reservation id for the draft."),
+        evidencePacketId: stringSchema("Source evidence packet id."),
+      },
+      additionalProperties: false,
+    },
+    policy: {
+      type: "object",
+      required: ["channel", "audience", "requiresOwnerApproval", "allowPublish"],
+      properties: {
+        channel: stringSchema("Target channel such as email, social, CMS, or ads."),
+        audience: stringSchema("Audience or segment key."),
+        requiresOwnerApproval: booleanSchema("Whether owner approval is required before publish."),
+        allowPublish: booleanSchema("Must remain false before launch promotion."),
+      },
+      additionalProperties: false,
+    },
+  },
+  additionalProperties: false,
+};
+
+const packageFlowPrepareConfigSchema: PlannedWorkerConfigSchema = {
+  type: "object",
+  required: ["packageKey", "sourceRefs", "policy"],
+  properties: {
+    packageKey: stringSchema("Package key such as quote_to_cash_field or inventory_replenishment."),
+    sourceRefs: {
+      type: "object",
+      required: ["connectionId", "permissionGrantId"],
+      properties: {
+        connectionId: stringSchema("Systems connection id."),
+        permissionGrantId: stringSchema("Least-privilege permission grant id."),
+        workflowRunId: stringSchema("Optional package workflow run id."),
+        dataQualityIssueObjectId: stringSchema("Optional data-quality issue Core object id."),
+        rollbackPlanDocumentId: stringSchema("Optional rollback plan document id."),
+      },
+      additionalProperties: false,
+    },
+    policy: {
+      type: "object",
+      required: ["allowExternalExecution", "requireRollbackProof"],
+      properties: {
+        allowExternalExecution: booleanSchema("Must remain false before package launch promotion."),
+        requireRollbackProof: booleanSchema("Whether rollback evidence is required."),
+      },
+      additionalProperties: false,
+    },
+  },
+  additionalProperties: false,
+};
+
+const stateSeverityViewConfig: PlannedWorkerConfigSchema = {
+  type: "object",
+  properties: {
+    state: stringSchema("Optional state filter."),
+    severity: stringSchema("Optional severity filter."),
+  },
+  additionalProperties: false,
+};
+
+const stateChannelViewConfig: PlannedWorkerConfigSchema = {
+  type: "object",
+  properties: {
+    state: stringSchema("Optional state filter."),
+    channel: stringSchema("Optional channel filter."),
+  },
+  additionalProperties: false,
+};
 
 function windowSchema(): PlannedWorkerConfigSchema {
   return {
@@ -354,7 +529,57 @@ export const workerContracts: PlannedWorkerContractMetadata[] = [
         externalExecution: "blocked",
         requiresTenant: true,
         requiredConfig: [],
-        oneRequiredConfig: ["invoiceId", "invoiceObjectId", "sourceRefs"],
+        configSchema: {
+          type: "object",
+          oneRequiredPaths: [
+            ["invoiceId"],
+            ["invoiceObjectId"],
+            ["sourceRefs", "invoiceId"],
+            ["sourceRefs", "invoiceObjectId"],
+          ],
+          properties: {
+            invoiceId: stringSchema("Invoice id."),
+            invoiceObjectId: stringSchema("Core invoice object id."),
+            paymentId: stringSchema("Optional existing payment id."),
+            paymentObjectId: stringSchema("Optional existing payment Core object id."),
+            quoteObjectId: stringSchema("Optional quote Core object id."),
+            approvalRequestId: stringSchema("Optional linked approval request id."),
+            bankAccountId: stringSchema("Optional verified bank account id."),
+            amountCents: {
+              type: "number",
+              integer: true,
+              minimum: 0,
+              description: "Optional payment amount override in cents.",
+            },
+            currency: stringSchema("Optional ISO currency."),
+            customerName: stringSchema("Optional customer display name."),
+            dueAt: stringSchema("Optional ISO due timestamp."),
+            sourceRefs: {
+              type: "object",
+              properties: {
+                invoiceId: stringSchema("Invoice id."),
+                invoiceObjectId: stringSchema("Core invoice object id."),
+                paymentId: stringSchema("Optional existing payment id."),
+                paymentObjectId: stringSchema("Optional existing payment Core object id."),
+                quoteObjectId: stringSchema("Optional quote Core object id."),
+                approvalRequestId: stringSchema("Optional linked approval request id."),
+                bankAccountId: stringSchema("Optional verified bank account id."),
+                amountCents: {
+                  type: "number",
+                  integer: true,
+                  minimum: 0,
+                  description: "Optional payment amount override in cents.",
+                },
+                currency: stringSchema("Optional ISO currency."),
+                customerName: stringSchema("Optional customer display name."),
+                dueAt: stringSchema("Optional ISO due timestamp."),
+              },
+              additionalProperties: true,
+            },
+            policy: objectSchema("Optional payment-link policy context."),
+          },
+          additionalProperties: true,
+        },
       },
     ],
     views: [
@@ -1118,6 +1343,7 @@ export const workerContracts: PlannedWorkerContractMetadata[] = [
         externalExecution: "blocked",
         requiresTenant: true,
         requiredConfig: ["sourceRefs", "policy"],
+        configSchema: customerRecoveryConfigSchema,
       },
       {
         role: "customer_experience_operations",
@@ -1129,6 +1355,16 @@ export const workerContracts: PlannedWorkerContractMetadata[] = [
         externalExecution: "blocked",
         requiresTenant: true,
         requiredConfig: ["signalId", "severity"],
+        configSchema: {
+          type: "object",
+          required: ["signalId", "severity"],
+          properties: {
+            signalId: stringSchema("Customer signal id."),
+            severity: stringSchema("Escalation severity."),
+            sourceRefs: schemaProperty(customerRecoveryConfigSchema, "sourceRefs"),
+          },
+          additionalProperties: false,
+        },
       },
       {
         role: "customer_experience_operations",
@@ -1162,6 +1398,7 @@ export const workerContracts: PlannedWorkerContractMetadata[] = [
         sideEffects: "none",
         externalExecution: "blocked",
         requiresTenant: true,
+        configSchema: stateSeverityViewConfig,
       },
     ],
   },
@@ -1186,6 +1423,7 @@ export const workerContracts: PlannedWorkerContractMetadata[] = [
         externalExecution: "dry_run",
         requiresTenant: true,
         requiredConfig: ["sourceRefs", "policy"],
+        configSchema: assetReorderPlanConfigSchema,
       },
       {
         role: "asset_supply_operations",
@@ -1197,6 +1435,16 @@ export const workerContracts: PlannedWorkerContractMetadata[] = [
         externalExecution: "dry_run",
         requiresTenant: true,
         requiredConfig: ["assetId", "policy"],
+        configSchema: {
+          type: "object",
+          required: ["assetId", "policy"],
+          properties: {
+            assetId: stringSchema("Asset Core object id."),
+            sourceRefs: schemaProperty(assetReorderPlanConfigSchema, "sourceRefs"),
+            policy: schemaProperty(assetReorderPlanConfigSchema, "policy"),
+          },
+          additionalProperties: false,
+        },
       },
       {
         role: "asset_supply_operations",
@@ -1230,6 +1478,16 @@ export const workerContracts: PlannedWorkerContractMetadata[] = [
         sideEffects: "none",
         externalExecution: "blocked",
         requiresTenant: true,
+        configSchema: {
+          type: "object",
+          properties: {
+            state: stringSchema("Optional state filter."),
+            vendorObjectId: stringSchema("Optional vendor filter."),
+            materialObjectId: stringSchema("Optional material filter."),
+            assetObjectId: stringSchema("Optional asset filter."),
+          },
+          additionalProperties: false,
+        },
       },
     ],
   },
@@ -1254,6 +1512,7 @@ export const workerContracts: PlannedWorkerContractMetadata[] = [
         externalExecution: "blocked",
         requiresTenant: true,
         requiredConfig: ["sourceRefs", "policy"],
+        configSchema: growthCampaignDraftConfigSchema,
       },
       {
         role: "growth_operations",
@@ -1265,6 +1524,16 @@ export const workerContracts: PlannedWorkerContractMetadata[] = [
         externalExecution: "blocked",
         requiresTenant: true,
         requiredConfig: ["campaignId", "window"],
+        configSchema: {
+          type: "object",
+          required: ["campaignId", "window"],
+          properties: {
+            campaignId: stringSchema("Campaign Core object id."),
+            window: windowSchema(),
+            sourceRefs: schemaProperty(growthCampaignDraftConfigSchema, "sourceRefs"),
+          },
+          additionalProperties: false,
+        },
       },
       {
         role: "growth_operations",
@@ -1298,6 +1567,7 @@ export const workerContracts: PlannedWorkerContractMetadata[] = [
         sideEffects: "none",
         externalExecution: "blocked",
         requiresTenant: true,
+        configSchema: stateChannelViewConfig,
       },
     ],
   },
@@ -1322,6 +1592,7 @@ export const workerContracts: PlannedWorkerContractMetadata[] = [
         externalExecution: "blocked",
         requiresTenant: true,
         requiredConfig: ["packageKey", "sourceRefs", "policy"],
+        configSchema: packageFlowPrepareConfigSchema,
       },
       {
         role: "vertical_packages",
@@ -1446,7 +1717,7 @@ export const workerExpansionCatalog: WorkerExpansionCatalogEntry[] = [
     contractPath: "docs/owner-chief-of-staff-worker-v1-contract.md",
     evidencePacket: "owner_brief_packet",
     externalExecution: "blocked",
-    autonomyLevel: 2,
+    autonomyLevel: 1,
     sourceDocs: [
       "docs/worker-expansion.md",
       "docs/owner-chief-of-staff-worker-v1-contract.md",
@@ -1544,7 +1815,7 @@ export const workerExpansionCatalog: WorkerExpansionCatalogEntry[] = [
       "Credential",
       "Document",
     ],
-    incomingHandoff: "finance.invoice_to_owner_review",
+    incomingHandoff: "owner.staffing_need_to_workforce",
     acceptanceChecks: [
       "Restricted documents are redacted in evidence packets",
       "Payroll-input readiness lists blockers before submission",
@@ -1621,7 +1892,8 @@ export const workerExpansionCatalog: WorkerExpansionCatalogEntry[] = [
     firstCommand: "connector.health.scan",
     firstView: "snapshot",
     coreObjects: ["Adapter", "Connection", "SyncJob", "Webhook", "PermissionGrant", "DataQualityIssue"],
-    incomingHandoff: "systems.sync_issue_to_worker",
+    incomingHandoff: "core.connection_to_systems_review",
+    outgoingHandoff: "systems.sync_issue_to_worker",
     acceptanceChecks: [
       "Connector checks are tenant scoped",
       "Repair actions produce rollback plans",
@@ -1688,7 +1960,7 @@ export const workerExpansionCatalog: WorkerExpansionCatalogEntry[] = [
     familyKind: "operating_family",
     firstCommand: "recovery.draft",
     firstView: "signals",
-    coreObjects: ["Customer", "Conversation", "Promise", "SatisfactionSignal", "Complaint", "Review"],
+    coreObjects: ["Customer", "Conversation", "Promise", "SatisfactionSignal", "Complaint", "Testimonial", "Review"],
     incomingHandoff: "customer.signal_to_experience",
     acceptanceChecks: [
       "Signal type, source, and severity are present",
@@ -1759,7 +2031,8 @@ export const workerExpansionCatalog: WorkerExpansionCatalogEntry[] = [
     firstCommand: "campaign.draft",
     firstView: "campaigns",
     coreObjects: ["Campaign", "Channel", "Audience", "ContentDraft", "AttributionEvent", "BudgetReservation"],
-    incomingHandoff: "growth.campaign_to_owner_review",
+    incomingHandoff: "customer.signal_to_growth",
+    outgoingHandoff: "growth.campaign_to_owner_review",
     acceptanceChecks: [
       "Claims have source refs",
       "Budget is reserved",
@@ -1897,7 +2170,83 @@ export const workerExpansionCatalog: WorkerExpansionCatalogEntry[] = [
   {
     schemaVersion: "continuous.worker_expansion.v1",
     wave: 12,
+    order: 12.21,
+    key: "package_billing",
+    name: "Billing Worker",
+    status: "packaged",
+    kind: "packaged_worker",
+    apiRoute: workerApiRoute,
+    workerRole: "vertical_packages",
+    packageKey: "billing",
+    strategyFamily: "Expert-service SMBs",
+    familyKind: "packaged_bundle",
+    firstCommand: "package.flow.prepare",
+    firstView: "package_readiness",
+    coreObjects: ["Invoice", "Retainer", "Payment", "CashForecast", "Approval", "OwnerBrief"],
+    incomingHandoff: "systems.connection_to_packaged_worker",
+    acceptanceChecks: [
+      "Invoice and retainer object map exists",
+      "Accounting dry-run receipt is recorded",
+      "Money movement is blocked without dual control",
+    ],
+    firstBlocker: "Retainer invoice fixture, accounting dry-run receipt, and dual-control proof.",
+    launchGate: "Invoice/retainer object map, accounting dry-run, and no money movement without dual control.",
+    contractPath: "docs/vertical-packaged-worker-v1-contract.md",
+    evidencePacket: "package_readiness_packet",
+    externalExecution: "blocked",
+    autonomyLevel: 2,
+    cluster: "Expert-service SMBs",
+    composedFamilies: ["Finance", "Revenue", "Owner"],
+    firstPackagedOutcome: "Retainer invoice, AR follow-up, cash brief, and approval queue.",
+    sourceDocs: [
+      "docs/worker-expansion.md",
+      "docs/vertical-packaged-worker-v1-contract.md",
+      "docs/worker-roadmap.md",
+      "docs/worker-readiness.md",
+    ],
+  },
+  {
+    schemaVersion: "continuous.worker_expansion.v1",
+    wave: 12,
     order: 12.3,
+    key: "package_change_order",
+    name: "Change-Order Worker",
+    status: "packaged",
+    kind: "packaged_worker",
+    apiRoute: workerApiRoute,
+    workerRole: "vertical_packages",
+    packageKey: "change_order",
+    strategyFamily: "Local field-service SMBs",
+    familyKind: "packaged_bundle",
+    firstCommand: "package.flow.prepare",
+    firstView: "package_readiness",
+    coreObjects: ["WorkOrder", "QuoteLine", "MarginRule", "Approval", "InvoiceImpact", "CustomerUpdate"],
+    incomingHandoff: "systems.connection_to_packaged_worker",
+    acceptanceChecks: [
+      "Price and margin rule proof exists",
+      "Contract-term approval is present",
+      "Customer communication receipt is recorded or blocked",
+    ],
+    firstBlocker: "Change-order fixture with margin proof, customer approval, and invoice impact.",
+    launchGate: "Price/margin rule proof, contract-term approval, and customer communication receipt.",
+    contractPath: "docs/vertical-packaged-worker-v1-contract.md",
+    evidencePacket: "package_readiness_packet",
+    externalExecution: "blocked",
+    autonomyLevel: 2,
+    cluster: "Local field-service SMBs",
+    composedFamilies: ["Dispatch/Ops", "Offer/Pricing", "Finance", "Compliance"],
+    firstPackagedOutcome: "Change-order packet with margin, customer approval, and invoice impact.",
+    sourceDocs: [
+      "docs/worker-expansion.md",
+      "docs/vertical-packaged-worker-v1-contract.md",
+      "docs/worker-roadmap.md",
+      "docs/worker-readiness.md",
+    ],
+  },
+  {
+    schemaVersion: "continuous.worker_expansion.v1",
+    wave: 12,
+    order: 12.4,
     key: "package_inventory_replenishment",
     name: "Inventory and Replenishment Worker",
     status: "packaged",
@@ -1935,7 +2284,45 @@ export const workerExpansionCatalog: WorkerExpansionCatalogEntry[] = [
   {
     schemaVersion: "continuous.worker_expansion.v1",
     wave: 12,
-    order: 12.4,
+    order: 12.5,
+    key: "package_production_planner",
+    name: "Production Planner Worker",
+    status: "packaged",
+    kind: "packaged_worker",
+    apiRoute: workerApiRoute,
+    workerRole: "vertical_packages",
+    packageKey: "production_planner",
+    strategyFamily: "Physical goods SMBs",
+    familyKind: "packaged_bundle",
+    firstCommand: "package.flow.prepare",
+    firstView: "package_readiness",
+    coreObjects: ["ProductionRun", "CapacityPlan", "LaborPlan", "MaterialPlan", "Exception", "CashForecast"],
+    incomingHandoff: "systems.connection_to_packaged_worker",
+    acceptanceChecks: [
+      "Capacity and material object map exists",
+      "Labor readiness blockers are explicit",
+      "No purchase or labor commitment is unapproved",
+    ],
+    firstBlocker: "Capacity/material fixture and labor readiness approval gates.",
+    launchGate: "Capacity/material object map and no purchase/labor commitments without approval.",
+    contractPath: "docs/vertical-packaged-worker-v1-contract.md",
+    evidencePacket: "package_readiness_packet",
+    externalExecution: "dry_run",
+    autonomyLevel: 2,
+    cluster: "Physical goods SMBs",
+    composedFamilies: ["Operations", "Workforce", "Asset/Supply", "Finance"],
+    firstPackagedOutcome: "Production or run plan, labor/material readiness, and exception routing.",
+    sourceDocs: [
+      "docs/worker-expansion.md",
+      "docs/vertical-packaged-worker-v1-contract.md",
+      "docs/worker-roadmap.md",
+      "docs/worker-readiness.md",
+    ],
+  },
+  {
+    schemaVersion: "continuous.worker_expansion.v1",
+    wave: 12,
+    order: 12.6,
     key: "package_compliance_qa",
     name: "Compliance QA Worker",
     status: "packaged",
@@ -1973,7 +2360,159 @@ export const workerExpansionCatalog: WorkerExpansionCatalogEntry[] = [
   {
     schemaVersion: "continuous.worker_expansion.v1",
     wave: 12,
-    order: 12.5,
+    order: 12.7,
+    key: "package_intake_documentation",
+    name: "Intake and Documentation Worker",
+    status: "packaged",
+    kind: "packaged_worker",
+    apiRoute: workerApiRoute,
+    workerRole: "vertical_packages",
+    packageKey: "intake_documentation",
+    strategyFamily: "Regulated care/trust SMBs",
+    familyKind: "packaged_bundle",
+    firstCommand: "package.flow.prepare",
+    firstView: "package_readiness",
+    coreObjects: ["Intake", "EligibilityChecklist", "RestrictedDocument", "Appointment", "Task", "Consent"],
+    incomingHandoff: "systems.connection_to_packaged_worker",
+    acceptanceChecks: [
+      "Restricted data policy is present",
+      "Source evidence is attached",
+      "Regulated advice remains blocked without human review",
+    ],
+    firstBlocker: "Restricted-data policy fixture and intake evidence packet.",
+    launchGate: "Restricted data policy, source evidence, and no regulated advice without human review.",
+    contractPath: "docs/vertical-packaged-worker-v1-contract.md",
+    evidencePacket: "package_readiness_packet",
+    externalExecution: "blocked",
+    autonomyLevel: 2,
+    cluster: "Regulated care/trust SMBs",
+    composedFamilies: ["Customer Experience", "Compliance", "Workforce", "Systems"],
+    firstPackagedOutcome: "Privacy-safe intake, eligibility or document checklist, and appointment/task packet.",
+    sourceDocs: [
+      "docs/worker-expansion.md",
+      "docs/vertical-packaged-worker-v1-contract.md",
+      "docs/worker-roadmap.md",
+      "docs/worker-readiness.md",
+    ],
+  },
+  {
+    schemaVersion: "continuous.worker_expansion.v1",
+    wave: 12,
+    order: 12.8,
+    key: "package_demand_guest_experience",
+    name: "Demand and Guest Experience Worker",
+    status: "packaged",
+    kind: "packaged_worker",
+    apiRoute: workerApiRoute,
+    workerRole: "vertical_packages",
+    packageKey: "demand_guest_experience",
+    strategyFamily: "Hospitality/experience SMBs",
+    familyKind: "packaged_bundle",
+    firstCommand: "package.flow.prepare",
+    firstView: "package_readiness",
+    coreObjects: ["Campaign", "Booking", "GuestUpdate", "Review", "StaffingSignal", "BudgetReservation"],
+    incomingHandoff: "systems.connection_to_packaged_worker",
+    acceptanceChecks: [
+      "Approved publish or send gate exists",
+      "Review source evidence is attached",
+      "Budget and staffing blockers are visible",
+    ],
+    firstBlocker: "Demand campaign, guest update, and staffing blocker fixture.",
+    launchGate: "Approved publish/send gate, review-source evidence, budget and staffing blockers.",
+    contractPath: "docs/vertical-packaged-worker-v1-contract.md",
+    evidencePacket: "package_readiness_packet",
+    externalExecution: "blocked",
+    autonomyLevel: 2,
+    cluster: "Hospitality/experience SMBs",
+    composedFamilies: ["Growth", "Customer Experience", "Workforce", "Finance"],
+    firstPackagedOutcome: "Demand campaign draft, booking or guest update, review recovery, and staffing signal.",
+    sourceDocs: [
+      "docs/worker-expansion.md",
+      "docs/vertical-packaged-worker-v1-contract.md",
+      "docs/worker-roadmap.md",
+      "docs/worker-readiness.md",
+    ],
+  },
+  {
+    schemaVersion: "continuous.worker_expansion.v1",
+    wave: 12,
+    order: 12.9,
+    key: "package_event_menu",
+    name: "Event/Menu Worker",
+    status: "packaged",
+    kind: "packaged_worker",
+    apiRoute: workerApiRoute,
+    workerRole: "vertical_packages",
+    packageKey: "event_menu",
+    strategyFamily: "Hospitality/experience SMBs",
+    familyKind: "packaged_bundle",
+    firstCommand: "package.flow.prepare",
+    firstView: "package_readiness",
+    coreObjects: ["Offer", "Menu", "EventPackage", "InventoryItem", "LaborPlan", "CustomerPacket"],
+    incomingHandoff: "systems.connection_to_packaged_worker",
+    acceptanceChecks: [
+      "Margin and inventory proof exists",
+      "Staffing readiness blockers are visible",
+      "External publish remains approval gated",
+    ],
+    firstBlocker: "Event/menu fixture with inventory, labor, and publish gates.",
+    launchGate: "Margin/inventory proof, staffing readiness, and external publish approval.",
+    contractPath: "docs/vertical-packaged-worker-v1-contract.md",
+    evidencePacket: "package_readiness_packet",
+    externalExecution: "blocked",
+    autonomyLevel: 2,
+    cluster: "Hospitality/experience SMBs",
+    composedFamilies: ["Offer/Pricing", "Operations", "Asset/Supply", "Customer Experience"],
+    firstPackagedOutcome: "Event or menu package, inventory/labor readiness, and customer packet.",
+    sourceDocs: [
+      "docs/worker-expansion.md",
+      "docs/vertical-packaged-worker-v1-contract.md",
+      "docs/worker-roadmap.md",
+      "docs/worker-readiness.md",
+    ],
+  },
+  {
+    schemaVersion: "continuous.worker_expansion.v1",
+    wave: 12,
+    order: 12.95,
+    key: "package_dispatch_asset_utilization",
+    name: "Dispatch and Asset Utilization Worker",
+    status: "packaged",
+    kind: "packaged_worker",
+    apiRoute: workerApiRoute,
+    workerRole: "vertical_packages",
+    packageKey: "dispatch_asset_utilization",
+    strategyFamily: "Asset-heavy SMBs",
+    familyKind: "packaged_bundle",
+    firstCommand: "package.flow.prepare",
+    firstView: "package_readiness",
+    coreObjects: ["Route", "Job", "Asset", "UtilizationView", "MaintenanceEvent", "BillingHandoff"],
+    incomingHandoff: "systems.connection_to_packaged_worker",
+    acceptanceChecks: [
+      "Asset state proof exists",
+      "Route conflicts are explicit",
+      "Maintenance rollback or escalation plan is present",
+    ],
+    firstBlocker: "Route/job fixture with asset state and maintenance rollback evidence.",
+    launchGate: "Asset state proof, route conflict handling, and maintenance rollback/escalation plan.",
+    contractPath: "docs/vertical-packaged-worker-v1-contract.md",
+    evidencePacket: "package_readiness_packet",
+    externalExecution: "dry_run",
+    autonomyLevel: 2,
+    cluster: "Asset-heavy SMBs",
+    composedFamilies: ["Dispatch/Ops", "Asset/Supply", "Systems", "Finance"],
+    firstPackagedOutcome: "Route/job dispatch, utilization view, maintenance blocker, and billing handoff.",
+    sourceDocs: [
+      "docs/worker-expansion.md",
+      "docs/vertical-packaged-worker-v1-contract.md",
+      "docs/worker-roadmap.md",
+      "docs/worker-readiness.md",
+    ],
+  },
+  {
+    schemaVersion: "continuous.worker_expansion.v1",
+    wave: 12,
+    order: 13,
     key: "package_maintenance",
     name: "Maintenance Worker",
     status: "packaged",
