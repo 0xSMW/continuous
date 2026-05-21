@@ -97,7 +97,7 @@ Every worker action should become one or more durable records:
 | Record | Required when |
 |---|---|
 | Task | Work is created, assigned, blocked, approved, completed, canceled, or escalated |
-| WorkerRun | A worker is invoked by an operator, workflow, schedule, adapter, or policy trigger |
+| WorkerRun | A worker is invoked by an operator, workflow, schedule, adapter, or policy trigger; `worker.run.start` reserves budget, proves active grants, and opens the run, while `worker.run.complete` settles the run and budget without external execution |
 | Event | Something meaningful happened in Continuous or an external system |
 | Decision | A human, worker, rule, or model selected one action over alternatives |
 | Evidence | Proof is needed for trust, audit, support, evals, or reconstruction |
@@ -179,7 +179,7 @@ registered behind one shared worker surface:
 
 | Surface | Behavior |
 |---|---|
-| `POST /core` | Canonical Core command and read surface. Commands include `task.create`, `task.transition`, `object.upsert`, `adapter.upsert`, `connection.upsert`, `connection.health.record`, `entity.setup.record`, `worker.upsert`, `worker.transition`, `object.link`, `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`, `document.packet.prepare`, `decision.record`, `approval.request`, `adapter.intent.record`, `rule.change.record`, `external_action.record`, `capability.grant`, `budget.reserve`, `budget.charge`, `budget.release`, `ai.infer`, `view.publish`, `customer_signal.record`, `payroll.preview.record`, `payroll.preview.packet.prepare`, `control_plane.token_rotation.attest`, `control_plane.credential.upsert`, `control_plane.credential.revoke`, and `control_plane.session.review`; read payloads use `view`, `core`, and `config`, with `view: "summary"` returning active tasks, recent events, approvals, workers, capabilities, graph counts, and ledger counts. Invalid credentials fail before body reads, payload bodies are capped at 1 MiB, tenant selection and operation inputs live in structured `core` and `config` payloads, and no other top-level operation fields are accepted |
+| `POST /core` | Canonical Core command and read surface. Commands include `task.create`, `task.transition`, `object.upsert`, `adapter.upsert`, `connection.upsert`, `connection.health.record`, `entity.setup.record`, `worker.upsert`, `worker.transition`, `worker.run.start`, `worker.run.complete`, `object.link`, `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`, `document.packet.prepare`, `decision.record`, `approval.request`, `adapter.intent.record`, `rule.change.record`, `external_action.record`, `capability.grant`, `budget.reserve`, `budget.charge`, `budget.release`, `ai.infer`, `view.publish`, `customer_signal.record`, `payroll.preview.record`, `payroll.preview.packet.prepare`, `control_plane.token_rotation.attest`, `control_plane.credential.upsert`, `control_plane.credential.revoke`, and `control_plane.session.review`; read payloads use `view`, `core`, and `config`, with `view: "summary"` returning active tasks, recent events, approvals, workers, capabilities, graph counts, and ledger counts. Invalid credentials fail before body reads, payload bodies are capped at 1 MiB, tenant selection and operation inputs live in structured `core` and `config` payloads, and no other top-level operation fields are accepted |
 | `GET /core?tenantSlug=...` | Compatibility Core summary read; new callers should use the `POST /core` view envelope |
 | `POST /worker` with payload `view: "snapshot"` | Operator-only snapshot of worker state, active tasks, controls, budget usage, and recent events |
 | `POST /worker` with payload `view: "approvals"` | Operator-only approval queue for worker decisions |
@@ -243,7 +243,11 @@ manager, mission, role, scope, memory, policy, KPI, and autonomy setup.
 `worker.transition` owns lifecycle
 movement through `draft`, `training`, `active`, `paused`, and `retired` with
 reason and evidence packets; it does not execute tools or mutate external
-systems. `entity.setup.record` records legal entity facts, identifiers, work
+systems. `worker.run.start` and `worker.run.complete` own the reusable
+worker-run ledger boundary: selected worker role, active capability grant,
+worker-owned budget account, reservation or usage settlement, event, audit, and
+evidence proof stay in Core, while operation inputs and outputs remain under
+`config` and external execution remains blocked. `entity.setup.record` records legal entity facts, identifiers, work
 locations, masked bank-account references, blocked payment instructions, an
 entity setup workflow run, a setup packet, trace evidence, and audit proof
 through the same Core envelope. `adapter.upsert` and `connection.upsert` create or update connector

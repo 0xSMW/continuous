@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   createCoreTask: vi.fn(),
   transitionCoreTask: vi.fn(),
+  completeCoreWorkerRun: vi.fn(),
+  startCoreWorkerRun: vi.fn(),
   getCoreSummarySafe: vi.fn(),
   getHealth: vi.fn(),
 }));
@@ -20,6 +22,11 @@ vi.mock("./health", () => ({
   getHealth: mocks.getHealth,
 }));
 
+vi.mock("./worker-runs", () => ({
+  completeCoreWorkerRun: mocks.completeCoreWorkerRun,
+  startCoreWorkerRun: mocks.startCoreWorkerRun,
+}));
+
 import {
   appServerCoreToolManifest,
   executeAppServerCoreDynamicToolCall,
@@ -35,6 +42,14 @@ beforeEach(() => {
   mocks.createCoreTask.mockResolvedValue({
     created: true,
     taskId: "task-1",
+  });
+  mocks.startCoreWorkerRun.mockResolvedValue({
+    started: true,
+    workerRunId: "run-1",
+  });
+  mocks.completeCoreWorkerRun.mockResolvedValue({
+    completed: true,
+    workerRunId: "run-1",
   });
   mocks.getCoreSummarySafe.mockResolvedValue({
     ok: true,
@@ -100,6 +115,14 @@ describe("app-server Core tools", () => {
           name: "worker.upsert",
           apiRoute: "/core",
         }),
+        expect.objectContaining({
+          name: "worker.run.start",
+          apiRoute: "/core",
+        }),
+        expect.objectContaining({
+          name: "worker.run.complete",
+          apiRoute: "/core",
+        }),
       ]),
     );
     expect(schema.registry.views).toEqual([
@@ -154,6 +177,67 @@ describe("app-server Core tools", () => {
         tenantSlug: "continuous-demo",
         title: "Review Core app-server task",
         priority: "high",
+      }),
+    );
+  });
+
+  it("dispatches Core worker-run lifecycle commands through the app-server command envelope", async () => {
+    const result = await executeAppServerCoreTool(
+      "continuous.core.command",
+      {
+        command: "worker.run.start",
+        core: {
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "core-app-server-worker-run-start-001",
+        config: {
+          worker: {
+            role: "revenue_operations",
+            id: "22222222-2222-4222-8222-222222222222",
+          },
+          command: "quote.prepare",
+          mode: "dry_run",
+          capabilityKey: "quote.prepare",
+          budgetAccountId: "44444444-4444-4444-8444-444444444444",
+          units: 1200,
+          input: {
+            leadObjectId: "lead-1",
+          },
+        },
+      },
+      {
+        operatorEmail: "owner@continuoushq.com",
+        source: "control_plane",
+        allowedAccess: ["write"],
+        allowedCommands: ["core:worker.run.start"],
+        allowedTenants: ["continuous-demo"],
+      },
+    );
+
+    expect(result).toEqual({
+      command: "worker.run.start",
+      core: {
+        tenantSlug: "continuous-demo",
+      },
+      result: {
+        started: true,
+        workerRunId: "run-1",
+      },
+    });
+    expect(mocks.startCoreWorkerRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operatorEmail: "owner@continuoushq.com",
+        idempotencyKey: "core-app-server-worker-run-start-001",
+        tenantSlug: "continuous-demo",
+        worker: {
+          role: "revenue_operations",
+          id: "22222222-2222-4222-8222-222222222222",
+        },
+        command: "quote.prepare",
+        mode: "dry_run",
+        capabilityKey: "quote.prepare",
+        budgetAccountId: "44444444-4444-4444-8444-444444444444",
+        units: 1200,
       }),
     );
   });

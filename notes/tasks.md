@@ -6,7 +6,7 @@
 
 ## Agent
 
-- Add a canonical Core worker-run start/complete primitive so worker execution policy, grants, budget, evidence, and blocked external execution are enforced in one reusable Core gate before more worker families multiply.
+- Adopt the canonical Core `worker.run.start` and `worker.run.complete` lifecycle gate inside registered worker command execution so existing worker families stop carrying bespoke run/budget/evidence plumbing.
 - Move `worker_command` workflow execution out of the workflow row-lock transaction, or introduce a dedicated command-runner boundary, before long-running worker commands become normal scheduler traffic.
 - Promote Growth only after the first `growth_operations campaign.draft` slice can consume Customer Experience signal refs, write blocked campaign/draft/approval/view proof, and keep publish/send/spend/tracking mutation blocked.
 - Add DigitalOcean managed-backup verification to `scripts/create-droplet.sh`; live `continuous-01` backups are enabled and have available backup images, but provisioning should still verify the billable backup state explicitly.

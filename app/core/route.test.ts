@@ -33,6 +33,8 @@ const mocks = vi.hoisted(() => ({
   requestApproval: vi.fn(),
   reserveBudget: vi.fn(),
   transitionCoreTask: vi.fn(),
+  completeCoreWorkerRun: vi.fn(),
+  startCoreWorkerRun: vi.fn(),
   upsertControlPlaneCredential: vi.fn(),
   upsertCoreAdapter: vi.fn(),
   upsertCoreConnection: vi.fn(),
@@ -113,6 +115,11 @@ vi.mock("../../src/core/workers", () => ({
   upsertCoreWorker: mocks.upsertCoreWorker,
 }));
 
+vi.mock("../../src/core/worker-runs", () => ({
+  completeCoreWorkerRun: mocks.completeCoreWorkerRun,
+  startCoreWorkerRun: mocks.startCoreWorkerRun,
+}));
+
 const exactCoreRouteCommands = [
   "core:view.summary",
   "core:task.create",
@@ -124,6 +131,8 @@ const exactCoreRouteCommands = [
   "core:entity.setup.record",
   "core:worker.upsert",
   "core:worker.transition",
+  "core:worker.run.start",
+  "core:worker.run.complete",
   "core:object.link",
   "core:event.ingest",
   "core:evidence.attach",
@@ -2771,6 +2780,175 @@ describe("POST /core", () => {
         },
         evidence: {
           checklist: ["scope", "budget", "eval"],
+        },
+      }),
+    );
+  });
+
+  it("dispatches worker.run.start through the Core worker-run lifecycle gate", async () => {
+    mocks.startCoreWorkerRun.mockResolvedValue({
+      recorded: true,
+      started: true,
+      workerRunId: "run-1",
+      eventId: "event-1",
+      auditEventId: "audit-1",
+      evidenceId: "evidence-1",
+      budget: {
+        reservationId: "reservation-1",
+        state: "held",
+      },
+      run: {
+        id: "run-1",
+        state: "running",
+      },
+    });
+
+    const response = await postCore("worker.run.start", "worker-run-start-route-test-001", {
+      worker: {
+        id: "22222222-2222-4222-8222-222222222222",
+        role: "revenue_operations",
+      },
+      command: "quote.prepare",
+      mode: "dry_run",
+      taskId: "33333333-3333-4333-8333-333333333333",
+      capabilityKey: "quote.prepare",
+      budgetAccountId: "44444444-4444-4444-8444-444444444444",
+      units: 1200,
+      input: {
+        sourceRefs: {
+          leadObjectId: "lead-1",
+        },
+      },
+      policy: {
+        externalExecution: "blocked",
+      },
+      evidence: {
+        required: ["source_snapshot", "budget_reservation", "capability_grant"],
+      },
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.command).toBe("worker.run.start");
+    expect(body.data.result.workerRunId).toBe("run-1");
+    expect(mocks.startCoreWorkerRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operatorEmail: "operator@example.com",
+        tenantSlug: "continuous-demo",
+        idempotencyKey: "worker-run-start-route-test-001",
+        worker: {
+          id: "22222222-2222-4222-8222-222222222222",
+          role: "revenue_operations",
+        },
+        command: "quote.prepare",
+        mode: "dry_run",
+        taskId: "33333333-3333-4333-8333-333333333333",
+        capabilityKey: "quote.prepare",
+        budgetAccountId: "44444444-4444-4444-8444-444444444444",
+        units: 1200,
+      }),
+    );
+    expect(mocks.authorizeManagedControlPlaneCredential).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: "core",
+        access: "write",
+        command: "worker.run.start",
+        tenantSlug: "continuous-demo",
+        workerRole: "revenue_operations",
+        requireManagedCredential: true,
+      }),
+    );
+  });
+
+  it("requires worker role scope for Core worker-run starts", async () => {
+    vi.stubEnv(
+      "CONTROL_PLANE_TOKENS_JSON",
+      JSON.stringify([
+        {
+          id: "core-route-test",
+          token: "test-token",
+          operatorEmail: "operator@example.com",
+          allowedTenants: ["continuous-demo"],
+          allowedWorkerRoles: ["finance_operations"],
+          allowedRoutes: ["core"],
+          allowedAccess: ["write"],
+          allowedCommands: exactCoreRouteCommands,
+        },
+      ]),
+    );
+
+    const response = await postCore("worker.run.start", "worker-run-start-forbidden-role-001", {
+      worker: {
+        role: "revenue_operations",
+      },
+      command: "quote.prepare",
+      capabilityKey: "quote.prepare",
+      budgetAccountId: "44444444-4444-4444-8444-444444444444",
+      units: 1200,
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(body.error).toEqual({
+      code: "control_plane_worker_role_forbidden",
+      message: "This operator token is not allowed to access the requested worker role.",
+    });
+    expect(mocks.startCoreWorkerRun).not.toHaveBeenCalled();
+  });
+
+  it("dispatches worker.run.complete through the Core worker-run lifecycle gate", async () => {
+    mocks.completeCoreWorkerRun.mockResolvedValue({
+      recorded: true,
+      completed: true,
+      workerRunId: "run-1",
+      eventId: "event-2",
+      auditEventId: "audit-2",
+      evidenceId: "evidence-2",
+      budget: {
+        reservationId: "reservation-1",
+        usageEventId: "usage-1",
+        state: "used",
+      },
+      run: {
+        id: "run-1",
+        state: "done",
+      },
+    });
+
+    const response = await postCore("worker.run.complete", "worker-run-complete-route-test-001", {
+      worker: {
+        id: "22222222-2222-4222-8222-222222222222",
+        role: "revenue_operations",
+      },
+      workerRunId: "55555555-5555-4555-8555-555555555555",
+      state: "done",
+      reason: "Quote packet prepared with blocked external execution.",
+      output: {
+        packetId: "packet-1",
+      },
+      evidence: {
+        packetId: "packet-1",
+      },
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.command).toBe("worker.run.complete");
+    expect(body.data.result.completed).toBe(true);
+    expect(mocks.completeCoreWorkerRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operatorEmail: "operator@example.com",
+        tenantSlug: "continuous-demo",
+        idempotencyKey: "worker-run-complete-route-test-001",
+        worker: {
+          id: "22222222-2222-4222-8222-222222222222",
+          role: "revenue_operations",
+        },
+        workerRunId: "55555555-5555-4555-8555-555555555555",
+        state: "done",
+        reason: "Quote packet prepared with blocked external execution.",
+        output: {
+          packetId: "packet-1",
         },
       }),
     );

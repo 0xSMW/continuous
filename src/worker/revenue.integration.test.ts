@@ -39,6 +39,7 @@ import {
 import { preparePayrollPreviewPacket, recordPayrollPreview } from "../core/payroll";
 import { createCoreTask, transitionCoreTask } from "../core/tasks";
 import { transitionCoreWorker, upsertCoreWorker } from "../core/workers";
+import { completeCoreWorkerRun, startCoreWorkerRun } from "../core/worker-runs";
 import { executeWorkflowSteps, startWorkflowRun, transitionWorkflowRun } from "../core/workflows";
 import { db, pool } from "../db/client";
 import {
@@ -2363,6 +2364,179 @@ maybeDescribe("Revenue Worker integration eval", () => {
         idempotencyKey: `ci-budget-release-${runId}`,
         reservationId: releaseReserve.reservationId,
         reason: "Changed budget release input must conflict.",
+        db,
+      }),
+    ).rejects.toMatchObject({
+      code: "core_command_idempotency_conflict",
+      status: 409,
+    });
+  }, 120_000);
+
+  it("starts and completes worker runs through the Core lifecycle gate", async () => {
+    const runId = randomUUID();
+    const [capability] = await db
+      .select()
+      .from(capabilities)
+      .where(and(eq(capabilities.key, "worker.read"), eq(capabilities.active, true)))
+      .limit(1);
+    const [worker] = await db.select().from(workers).where(eq(workers.role, "revenue_operations")).limit(1);
+
+    expect(capability).toBeDefined();
+    expect(worker).toBeDefined();
+
+    const [budgetAccount] = await db
+      .select()
+      .from(budgetAccounts)
+      .where(
+        and(
+          eq(budgetAccounts.tenantId, worker.tenantId),
+          eq(budgetAccounts.target, "worker"),
+          eq(budgetAccounts.targetId, worker.id),
+          eq(budgetAccounts.active, true),
+        ),
+      )
+      .limit(1);
+
+    expect(budgetAccount).toBeDefined();
+
+    await grantCapability({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-worker-run-capability-${runId}`,
+      capabilityId: capability.id,
+      actor: {
+        type: "worker",
+        id: worker.id,
+      },
+      scope: {
+        flow: "core_worker_run_lifecycle",
+      },
+      policy: {
+        externalExecution: "blocked",
+      },
+      reason: "CI grants a scoped worker capability before starting a Core worker run.",
+      db,
+    });
+
+    const start = await startCoreWorkerRun({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-worker-run-start-${runId}`,
+      worker: {
+        id: worker.id,
+        role: "revenue_operations",
+      },
+      command: "lead.read",
+      mode: "read_only",
+      capabilityId: capability.id,
+      budgetAccountId: budgetAccount.id,
+      units: 10,
+      input: {
+        source: "ci.core.worker_run",
+      },
+      policy: {
+        externalExecution: "blocked",
+      },
+      evidence: {
+        required: ["capability_grant", "budget_reservation"],
+      },
+      db,
+    });
+
+    expect(start.started).toBe(true);
+    expect(start.run.state).toBe("running");
+    expect(start.run.worker.role).toBe("revenue_operations");
+    expect(start.budget.reservationId).toBeTruthy();
+    expect(start.capability.capabilityKey).toBe("worker.read");
+
+    const startReplay = await startCoreWorkerRun({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-worker-run-start-${runId}`,
+      worker: {
+        id: worker.id,
+        role: "revenue_operations",
+      },
+      command: "lead.read",
+      mode: "read_only",
+      capabilityId: capability.id,
+      budgetAccountId: budgetAccount.id,
+      units: 10,
+      input: {
+        source: "ci.core.worker_run",
+      },
+      policy: {
+        externalExecution: "blocked",
+      },
+      evidence: {
+        required: ["capability_grant", "budget_reservation"],
+      },
+      db,
+    });
+
+    expect(startReplay.started).toBe(false);
+    expect(startReplay.workerRunId).toBe(start.workerRunId);
+
+    const complete = await completeCoreWorkerRun({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-worker-run-complete-${runId}`,
+      worker: {
+        id: worker.id,
+        role: "revenue_operations",
+      },
+      workerRunId: start.workerRunId,
+      state: "done",
+      reason: "Worker run finished with blocked external execution.",
+      output: {
+        sourceRecordsRead: 1,
+      },
+      evidence: {
+        receipt: "ci_worker_run_complete",
+      },
+      db,
+    });
+
+    expect(complete.completed).toBe(true);
+    expect(complete.run.state).toBe("done");
+    expect(objectValue(complete.budget).state).toBe("used");
+    const reservationId = stringValue(start.budget.reservationId);
+
+    const [run] = await db
+      .select()
+      .from(workerRuns)
+      .where(eq(workerRuns.id, start.workerRunId))
+      .limit(1);
+    const [reservation] = await db
+      .select()
+      .from(budgetReservations)
+      .where(eq(budgetReservations.id, reservationId))
+      .limit(1);
+    const [usage] = await db
+      .select()
+      .from(usageEvents)
+      .where(eq(usageEvents.reservationId, reservationId))
+      .limit(1);
+
+    expect(run?.state).toBe("done");
+    expect(objectValue(run?.data).externalExecution).toBe("blocked");
+    expect(objectValue(objectValue(run?.data).completion).externalExecution).toBe("blocked");
+    expect(reservation?.state).toBe("used");
+    expect(usage?.actorType).toBe("worker");
+    expect(usage?.actorId).toBe(worker.id);
+
+    await expect(
+      completeCoreWorkerRun({
+        operatorEmail: "owner@continuoushq.com",
+        tenantSlug: "continuous-demo",
+        idempotencyKey: `ci-worker-run-complete-${runId}`,
+        worker: {
+          id: worker.id,
+          role: "revenue_operations",
+        },
+        workerRunId: start.workerRunId,
+        state: "failed",
+        reason: "Changed completion input must conflict.",
         db,
       }),
     ).rejects.toMatchObject({
@@ -7230,13 +7404,13 @@ maybeDescribe("Revenue Worker integration eval", () => {
       ? launchReadinessData.launchGates.map((gate) => objectValue(gate))
       : [];
 
-    expect(readinessHealth.status).toBe("ready");
+    expect(readinessHealth.status).toBe("needs_configuration");
     expect(launchReadinessData.status).toBe("ready");
     expect(launchReadinessData.dryRunReady).toBe(true);
     expect(launchReadinessData.launchStatus).toBe("blocked");
     expect(launchReadinessData.launchReady).toBe(false);
     expect(launchGates.find((gate) => gate.key === "lead_source_connection")?.state).toBe("ready");
-    expect(launchGates.find((gate) => gate.key === "lead_source_connection_health")?.state).toBe("ready");
+    expect(launchGates.find((gate) => gate.key === "lead_source_connection_health")?.state).toBe("blocked");
     expect(launchGates.find((gate) => gate.key === "scheduler_lead_read_cursor")?.state).toBe("blocked");
     expect(launchGates.find((gate) => gate.key === "controlled_customer_send_credentials")?.state).toBe("blocked");
     expect(JSON.stringify(launchReadinessData)).not.toContain("configured-fixture");
@@ -7306,6 +7480,14 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .limit(1);
     const schedulerLastLeadRead = objectValue(objectValue(schedulerUpdatedConnection?.config).lastLeadRead);
     const storedSchedulerProof = objectValue(schedulerLastLeadRead.schedulerProof);
+    const schedulerReadinessHealth = await recordCoreConnectionHealth({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-worker-scheduler-readiness-health-${runId}`,
+      connectionId: connection.id,
+      env: {},
+      db,
+    });
     const schedulerReadiness = await executeWorkerView({
       view: "readiness",
       target: {
@@ -7340,6 +7522,8 @@ maybeDescribe("Revenue Worker integration eval", () => {
       connectionId: connection.id,
       leadPollIdempotencyKey: schedulerIdempotencyKey,
     });
+    expect(schedulerReadinessHealth.status).toBe("ready");
+    expect(schedulerLaunchGates.find((gate) => gate.key === "lead_source_connection_health")?.state).toBe("ready");
     expect(schedulerLaunchGates.find((gate) => gate.key === "scheduler_lead_read_cursor")?.state).toBe("ready");
 
     await expect(

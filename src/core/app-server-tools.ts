@@ -26,6 +26,7 @@ import {
 import { getCoreSummarySafe } from "./summary";
 import { createCoreTask, transitionCoreTask } from "./tasks";
 import { transitionCoreWorker, upsertCoreWorker } from "./workers";
+import { completeCoreWorkerRun, startCoreWorkerRun } from "./worker-runs";
 import { normalizeIdempotencyKey } from "../worker/security";
 
 export type AppServerDynamicToolSpec = {
@@ -87,6 +88,8 @@ export const appServerCoreCommandNames = [
   "entity.setup.record",
   "worker.upsert",
   "worker.transition",
+  "worker.run.start",
+  "worker.run.complete",
   "object.link",
   "event.ingest",
   "evidence.attach",
@@ -970,6 +973,43 @@ async function executeCoreCommand(input: {
       reservationId: optionalString(config.reservationId) ?? "",
       reason: optionalString(config.reason),
       data: jsonObject(config.data),
+    });
+  }
+
+  if (command === "worker.run.start") {
+    return startCoreWorkerRun({
+      operatorEmail,
+      idempotencyKey,
+      tenantSlug,
+      worker: jsonObject(config.worker),
+      command: optionalString(config.command),
+      mode: optionalString(config.mode),
+      taskId: optionalString(config.taskId),
+      capabilityId: optionalString(config.capabilityId),
+      capabilityKey: optionalString(config.capabilityKey),
+      capabilityVersion: optionalString(config.capabilityVersion),
+      connectionId: optionalString(config.connectionId),
+      budgetAccountId: optionalString(config.budgetAccountId),
+      units: config.units,
+      expiresAt: optionalString(config.expiresAt),
+      input: config.input,
+      policy: config.policy,
+      evidence: config.evidence,
+    });
+  }
+
+  if (command === "worker.run.complete") {
+    return completeCoreWorkerRun({
+      operatorEmail,
+      idempotencyKey,
+      tenantSlug,
+      worker: jsonObject(config.worker),
+      workerRunId: optionalString(config.workerRunId),
+      state: optionalString(config.state),
+      output: config.output,
+      reason: optionalString(config.reason),
+      costUsd: config.costUsd,
+      evidence: config.evidence,
     });
   }
 

@@ -8,6 +8,7 @@ import { getHealth } from "../../src/core/health";
 import { preparePayrollPreviewPacket, recordPayrollPreview } from "../../src/core/payroll";
 import { getCoreSummarySafe } from "../../src/core/summary";
 import { transitionCoreWorker, upsertCoreWorker } from "../../src/core/workers";
+import { completeCoreWorkerRun, startCoreWorkerRun } from "../../src/core/worker-runs";
 import {
   authorizeManagedControlPlaneCredential,
   attestControlPlaneTokenRotation,
@@ -436,6 +437,26 @@ function coreCommandRequiresManagedCredential(command?: string) {
   return command !== "control_plane.token_rotation.attest" && command !== "control_plane.credential.upsert";
 }
 
+function workerRoleFromCoreCommandConfig(command: string | undefined, config: Record<string, unknown>) {
+  if (command === "worker.upsert") {
+    return optionalString(config.role);
+  }
+
+  if (command === "worker.transition") {
+    return optionalString(config.role) ?? optionalString(bodyObject(config.worker).role);
+  }
+
+  if (command === "worker.run.start" || command === "worker.run.complete") {
+    return optionalString(bodyObject(config.worker).role);
+  }
+
+  return undefined;
+}
+
+function coreCommandRequiresWorkerRoleScope(command?: string) {
+  return command === "worker.upsert" || command === "worker.run.start" || command === "worker.run.complete";
+}
+
 async function handleCoreSummaryRead(request: Request, tenantSlug: string | undefined) {
   const auth = authorizeControlPlaneAccess({
     appEnv: env.APP_ENV,
@@ -701,6 +722,8 @@ export async function POST(request: Request) {
   const configResult = configObject(body.config);
   const config = configResult.ok ? configResult.value : {};
   const tenantSlug = optionalString(core.tenantSlug);
+  const workerRole = workerRoleFromCoreCommandConfig(command, config);
+  const requireWorkerRoleScope = coreCommandRequiresWorkerRoleScope(command);
 
   if (unexpectedFields.length > 0) {
     return errorResponse(
@@ -768,6 +791,7 @@ export async function POST(request: Request) {
       access: "write",
       command,
       tenantSlug,
+      workerRole,
       auth,
     });
     return guardErrorResponse(auth);
@@ -776,7 +800,9 @@ export async function POST(request: Request) {
   const scope = authorizeControlPlaneScope({
     scope: auth.scope,
     tenantSlug,
+    workerRole,
     requireTenant: true,
+    requireWorkerRole: requireWorkerRoleScope,
   });
 
   if (!scope.ok) {
@@ -786,6 +812,7 @@ export async function POST(request: Request) {
       access: "write",
       command,
       tenantSlug,
+      workerRole,
       auth,
       scope,
     });
@@ -798,6 +825,7 @@ export async function POST(request: Request) {
     access: "write",
     command,
     tenantSlug,
+    workerRole,
     auth,
     requireManagedCredential: coreCommandRequiresManagedCredential(command),
   });
@@ -809,6 +837,7 @@ export async function POST(request: Request) {
       access: "write",
       command,
       tenantSlug,
+      workerRole,
       auth,
       scope,
       guard: managedCredential,
@@ -822,6 +851,7 @@ export async function POST(request: Request) {
     access: "write",
     command,
     tenantSlug,
+    workerRole,
     auth,
     scope,
   });
@@ -2190,6 +2220,113 @@ export async function POST(request: Request) {
     }
   }
 
+  if (command === "worker.run.start") {
+    const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
+
+    if (!idempotency.ok) {
+      return errorResponse(
+        {
+          code: "invalid_idempotency_key",
+          message: idempotency.message,
+        },
+        400,
+      );
+    }
+
+    try {
+      const result = await startCoreWorkerRun({
+        operatorEmail: auth.operatorEmail,
+        idempotencyKey: idempotency.key,
+        tenantSlug,
+        worker: jsonObject(config.worker),
+        command: optionalString(config.command),
+        mode: optionalString(config.mode),
+        taskId: optionalString(config.taskId),
+        capabilityId: optionalString(config.capabilityId),
+        capabilityKey: optionalString(config.capabilityKey),
+        capabilityVersion: optionalString(config.capabilityVersion),
+        connectionId: optionalString(config.connectionId),
+        budgetAccountId: optionalString(config.budgetAccountId),
+        units: config.units,
+        expiresAt: optionalString(config.expiresAt),
+        input: config.input,
+        policy: config.policy,
+        evidence: config.evidence,
+      });
+
+      return Response.json(
+        {
+          api: apiVersion,
+          data: {
+            command,
+            core: {
+              tenantSlug: tenantSlug ?? null,
+            },
+            result,
+          },
+          error: null,
+        },
+        {
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    } catch (error) {
+      return coreErrorResponse(error, "core_worker_run_start_failed");
+    }
+  }
+
+  if (command === "worker.run.complete") {
+    const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
+
+    if (!idempotency.ok) {
+      return errorResponse(
+        {
+          code: "invalid_idempotency_key",
+          message: idempotency.message,
+        },
+        400,
+      );
+    }
+
+    try {
+      const result = await completeCoreWorkerRun({
+        operatorEmail: auth.operatorEmail,
+        idempotencyKey: idempotency.key,
+        tenantSlug,
+        worker: jsonObject(config.worker),
+        workerRunId: optionalString(config.workerRunId),
+        state: optionalString(config.state),
+        output: config.output,
+        reason: optionalString(config.reason),
+        costUsd: config.costUsd,
+        evidence: config.evidence,
+      });
+
+      return Response.json(
+        {
+          api: apiVersion,
+          data: {
+            command,
+            core: {
+              tenantSlug: tenantSlug ?? null,
+            },
+            result,
+          },
+          error: null,
+        },
+        {
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    } catch (error) {
+      return coreErrorResponse(error, "core_worker_run_complete_failed");
+    }
+  }
+
   if (command === "ai.infer") {
     const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
 
@@ -2563,7 +2700,7 @@ export async function POST(request: Request) {
     {
       code: "core_command_unsupported",
       message:
-        "Core command must be task.create, task.transition, object.upsert, adapter.upsert, connection.upsert, connection.health.record, entity.setup.record, worker.upsert, worker.transition, object.link, event.ingest, evidence.attach, document.create, packet.prepare, document.packet.prepare, decision.record, approval.request, adapter.intent.record, rule.change.record, external_action.record, capability.grant, budget.reserve, budget.charge, budget.release, ai.infer, view.publish, customer_signal.record, payroll.preview.record, or payroll.preview.packet.prepare.",
+        "Core command must be task.create, task.transition, object.upsert, adapter.upsert, connection.upsert, connection.health.record, entity.setup.record, worker.upsert, worker.transition, worker.run.start, worker.run.complete, object.link, event.ingest, evidence.attach, document.create, packet.prepare, document.packet.prepare, decision.record, approval.request, adapter.intent.record, rule.change.record, external_action.record, capability.grant, budget.reserve, budget.charge, budget.release, ai.infer, view.publish, customer_signal.record, payroll.preview.record, or payroll.preview.packet.prepare.",
     },
     400,
   );

@@ -497,6 +497,118 @@ describe("/app-server route", () => {
     });
   });
 
+  it("role-scopes Core worker-run app-server commands before dynamic tool dispatch", async () => {
+    mocks.env.CONTROL_PLANE_TOKENS_JSON = tokenCatalog(
+      ["app_server:core.command.worker.run.start"],
+      {
+        allowedWorkerRoles: ["revenue_operations"],
+      },
+    );
+
+    const { POST } = await import("./route");
+    const payload = {
+      tool: "continuous.core.command",
+      arguments: {
+        command: "worker.run.start",
+        core: {
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "app-server-core-worker-run-start-001",
+        config: {
+          worker: {
+            role: "revenue_operations",
+          },
+          command: "quote.prepare",
+          capabilityKey: "quote.prepare",
+          budgetAccountId: "budget-1",
+          units: 1200,
+        },
+      },
+      callId: "call-core-worker-run-start-001",
+      threadId: "thread-001",
+      turnId: "turn-001",
+    };
+    const response = await POST(
+      new Request("http://localhost/app-server", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.authorizeManagedControlPlaneCredential).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: "app_server",
+        access: "write",
+        command: "core.command.worker.run.start",
+        tenantSlug: "continuous-demo",
+        workerRole: "revenue_operations",
+        requireManagedCredential: true,
+      }),
+    );
+    expect(mocks.executeAppServerCoreDynamicToolCall).toHaveBeenCalledWith(payload, {
+      operatorEmail: "operator@example.com",
+      source: "control_plane",
+      allowedAccess: ["write"],
+      allowedCommands: ["core:worker.run.start"],
+      allowedTenants: ["continuous-demo"],
+    });
+  });
+
+  it("rejects Core worker-run app-server commands outside worker-role scope", async () => {
+    mocks.env.CONTROL_PLANE_TOKENS_JSON = tokenCatalog(
+      ["app_server:core.command.worker.run.start"],
+      {
+        allowedWorkerRoles: ["finance_operations"],
+      },
+    );
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/app-server", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          tool: "continuous.core.command",
+          arguments: {
+            command: "worker.run.start",
+            core: {
+              tenantSlug: "continuous-demo",
+            },
+            idempotencyKey: "app-server-core-worker-run-forbidden-001",
+            config: {
+              worker: {
+                role: "revenue_operations",
+              },
+              command: "quote.prepare",
+              capabilityKey: "quote.prepare",
+              budgetAccountId: "budget-1",
+              units: 1200,
+            },
+          },
+          callId: "call-core-worker-run-forbidden-001",
+          threadId: "thread-001",
+          turnId: "turn-001",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "control_plane_worker_role_forbidden",
+      },
+    });
+    expect(mocks.executeAppServerCoreDynamicToolCall).not.toHaveBeenCalled();
+  });
+
   it("bridges authenticated Compliance commands through the same app-server worker envelope", async () => {
     mocks.env.CONTROL_PLANE_TOKENS_JSON = tokenCatalog(
       ["app_server:worker.command.filing.prepare"],

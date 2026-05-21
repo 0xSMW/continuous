@@ -423,6 +423,7 @@ function appServerBridgeTarget(body: Record<string, unknown>):
     }
 
     const core = coreTargetFrom(args);
+    const workerRole = coreWorkerRoleFromCommandArgs(command, args);
 
     return {
       ok: true,
@@ -433,8 +434,9 @@ function appServerBridgeTarget(body: Record<string, unknown>):
         controlCommand: `core.command.${command}`,
         innerCommand: `core:${command}`,
         tenantSlug: core.tenantSlug,
+        workerRole,
         requireTenantScope: true,
-        requireWorkerRoleScope: false,
+        requireWorkerRoleScope: coreCommandRequiresWorkerRoleScope(command),
         requireManagedCredential: true,
       },
     };
@@ -581,6 +583,28 @@ function coreTransportContextFor(input: {
     allowedCommands: input.target.innerCommand ? [input.target.innerCommand] : [],
     allowedTenants: input.target.tenantSlug ? [input.target.tenantSlug] : ["*"],
   };
+}
+
+function coreWorkerRoleFromCommandArgs(command: string, args: Record<string, unknown>) {
+  const config = bodyObject(args.config);
+
+  if (command === "worker.upsert") {
+    return optionalString(config.role);
+  }
+
+  if (command === "worker.transition") {
+    return optionalString(config.role) ?? optionalString(bodyObject(config.worker).role);
+  }
+
+  if (command === "worker.run.start" || command === "worker.run.complete") {
+    return optionalString(bodyObject(config.worker).role);
+  }
+
+  return undefined;
+}
+
+function coreCommandRequiresWorkerRoleScope(command: string) {
+  return command === "worker.upsert" || command === "worker.run.start" || command === "worker.run.complete";
 }
 
 export async function GET() {
