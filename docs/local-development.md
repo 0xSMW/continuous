@@ -112,8 +112,8 @@ source, provider, reader, and credential refs inside `config`; inline access
 tokens and passwords are rejected.
 
 The shared approval inbox is `/approvals` in the browser and `/approval` for
-operator-gated JSON. Decisions use `POST /approval` with `command`,
-`approval`, and `config` payload fields.
+operator-gated JSON. Decisions use `POST /approval` with `command`, top-level
+`idempotencyKey`, `approval`, and `config` payload fields.
 
 The repo also includes `.mcp.json` for the Next.js MCP bridge. With `bun run dev`
 running, compatible coding agents can inspect routes, runtime errors, metadata,

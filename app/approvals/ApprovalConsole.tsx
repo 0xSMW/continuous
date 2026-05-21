@@ -122,6 +122,17 @@ function decisionSubject(approval: ApprovalRecord): DecisionSubject {
   return "core";
 }
 
+function decisionIdempotencyKey(approval: ApprovalRecord, action: ApprovalAction, note: string) {
+  const source = JSON.stringify({ approvalId: approval.id, action, note: note.trim() });
+  let hash = 5381;
+
+  for (let index = 0; index < source.length; index += 1) {
+    hash = (Math.imul(hash, 33) ^ source.charCodeAt(index)) >>> 0;
+  }
+
+  return `approval-decision-${approval.id}-${action}-${hash.toString(16)}`;
+}
+
 export function ApprovalConsole() {
   const [token, setToken] = useState("");
   const [tenantSlug, setTenantSlug] = useState("continuous-demo");
@@ -199,6 +210,7 @@ export function ApprovalConsole() {
           },
           body: JSON.stringify({
             command: "approval.decide",
+            idempotencyKey: decisionIdempotencyKey(approval, action, note),
             approval: {
               id: approval.id,
               tenantSlug,
