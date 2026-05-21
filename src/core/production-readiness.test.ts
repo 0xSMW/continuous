@@ -42,6 +42,7 @@ describe("production readiness operations", () => {
     expect(readiness).toContain("attest-non-root-access-on-host.sh");
     expect(readiness).toContain("non_root_access_live_check");
     expect(readiness).toContain("awk -v name=\"$name\"");
+    expect(readiness).toContain("(export[[:space:]]+)?");
     expect(readiness).toContain("Decode simple backslash");
     expect(readiness).toContain("s3_env_args+=(-e \"$name=$value\")");
     expect(readiness).not.toContain("source \"$BACKUP_ENV_FILE\"");

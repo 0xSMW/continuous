@@ -51,7 +51,7 @@ env_value() {
       /^[[:space:]]*($|#)/ { next }
       {
         sub(/\r$/, "")
-        if ($0 ~ "^[[:space:]]*" name "=") {
+        if ($0 ~ "^[[:space:]]*(export[[:space:]]+)?" name "=") {
           print substr($0, index($0, "=") + 1)
         }
       }
