@@ -4,6 +4,7 @@ import { and, count, desc, eq, sql } from "drizzle-orm";
 
 import { PlatformUnavailableError } from "../core/errors";
 import { loadOperatorContext } from "../core/operators";
+import { completeCoreWorkerRun, startCoreWorkerRun } from "../core/worker-runs";
 import { db as defaultDb } from "../db/client";
 import {
   approvalRequests,
@@ -40,6 +41,7 @@ type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 export const growthWorkerRole = "growth_operations";
 
 const growthSource = "continuous.worker";
+const coreWorkerRunSource = "continuous.core.worker_runs";
 const campaignDraftCapabilityKey = "campaign.draft";
 const campaignDraftWorkflowKey = "campaign_drafting";
 const campaignDraftUnits = 2800;
@@ -101,14 +103,6 @@ type ResolvedObject = {
   name: string;
   state: string;
   data: JsonObject;
-};
-
-type ResolvedBudgetReservation = {
-  id: string;
-  units: number;
-  taskId: string | null;
-  state: string;
-  expiresAt: Date | null;
 };
 
 export type GrowthWorkerSnapshot = {
@@ -370,7 +364,6 @@ function blockerList(input: {
       ? ""
       : "customer_signal_ref_missing",
     uuidValue(input.sourceRefs.evidencePacketId) ? "" : "evidence_packet_missing",
-    uuidValue(input.sourceRefs.budgetReservationId) ? "" : "budget_reservation_missing",
     input.customerObjectId ? "" : "customer_ref_missing",
     optionalString(input.policy.channel) ? "" : "channel_missing",
     optionalString(input.policy.audience) ? "" : "audience_missing",
@@ -746,100 +739,6 @@ async function resolveEvidencePacket(input: {
   return packet;
 }
 
-async function resolveBudgetReservation(input: {
-  tx: Transaction;
-  tenantId: string;
-  budgetAccountId: string;
-  budgetReservationId?: string;
-  now: Date;
-  requiredUnits: number;
-}): Promise<ResolvedBudgetReservation> {
-  if (!input.budgetReservationId) {
-    throw new PlatformUnavailableError(
-      "invalid_worker_command_config",
-      "config.sourceRefs.budgetReservationId is required for campaign.draft.",
-      400,
-    );
-  }
-
-  await input.tx.execute(
-    sql`select id from budget_reservations where tenant_id = ${input.tenantId} and id = ${input.budgetReservationId} for update`,
-  );
-
-  const [reservation] = await input.tx
-    .select({
-      id: budgetReservations.id,
-      accountId: budgetReservations.accountId,
-      taskId: budgetReservations.taskId,
-      units: budgetReservations.units,
-      state: budgetReservations.state,
-      expiresAt: budgetReservations.expiresAt,
-    })
-    .from(budgetReservations)
-    .where(
-      and(
-        eq(budgetReservations.tenantId, input.tenantId),
-        eq(budgetReservations.id, input.budgetReservationId),
-      ),
-    )
-    .limit(1);
-
-  if (!reservation) {
-    throw new PlatformUnavailableError(
-      "worker_budget_reservation_not_found",
-      "config.sourceRefs.budgetReservationId does not match a budget reservation in this tenant.",
-      404,
-    );
-  }
-
-  if (reservation.accountId !== input.budgetAccountId) {
-    throw new PlatformUnavailableError(
-      "worker_budget_scope_mismatch",
-      "config.sourceRefs.budgetReservationId is not scoped to the Growth Worker budget account.",
-      403,
-    );
-  }
-
-  if (reservation.expiresAt && reservation.expiresAt <= input.now) {
-    await input.tx
-      .update(budgetReservations)
-      .set({ state: "expired", updatedAt: input.now })
-      .where(eq(budgetReservations.id, reservation.id));
-
-    throw new PlatformUnavailableError(
-      "worker_budget_reservation_expired",
-      "config.sourceRefs.budgetReservationId references an expired budget reservation.",
-      409,
-    );
-  }
-
-  if (reservation.taskId) {
-    throw new PlatformUnavailableError(
-      "worker_budget_reservation_already_bound",
-      "config.sourceRefs.budgetReservationId is already bound to another task.",
-      409,
-    );
-  }
-
-  if (reservation.state !== "held") {
-    throw new PlatformUnavailableError(
-      "worker_budget_reservation_unavailable",
-      "config.sourceRefs.budgetReservationId must reference a held budget reservation.",
-      409,
-    );
-  }
-
-  if (reservation.units < input.requiredUnits) {
-    throw new PlatformUnavailableError(
-      "worker_budget_reservation_insufficient",
-      "config.sourceRefs.budgetReservationId does not reserve enough units for campaign.draft.",
-      409,
-    );
-  }
-
-  return reservation;
-}
-
 async function writeGeneratedCampaignsView(input: {
   tx: Transaction;
   tenantId: string;
@@ -958,7 +857,6 @@ export async function prepareGrowthCampaignDraft(input: {
     tenantId: context.worker.tenantId,
     evidencePacketId: uuidValue(sourceRefs.evidencePacketId),
   });
-  const requestedBudgetReservationId = uuidValue(sourceRefs.budgetReservationId);
   const reviewObject = await loadObject({
     db,
     tenantId: context.worker.tenantId,
@@ -1004,14 +902,57 @@ export async function prepareGrowthCampaignDraft(input: {
     signalId: signal.id,
     customerObjectId: customerObjectId ?? null,
     evidencePacketId: evidencePacket.id,
-    budgetReservationId: requestedBudgetReservationId ?? null,
     blockers,
   });
   const now = new Date();
+  const coreRun = await startCoreWorkerRun({
+    operatorEmail: input.operatorEmail,
+    tenantSlug: context.worker.tenantSlug,
+    idempotencyKey: input.idempotencyKey,
+    worker: {
+      id: context.worker.id,
+      role: growthWorkerRole,
+    },
+    command: "campaign.draft",
+    mode: "simulation",
+    capabilityId: context.capabilityId,
+    budgetAccountId: context.budgetAccountId,
+    units: campaignDraftUnits,
+    input: {
+      inputHash,
+      config,
+      customerSignalId: signal.id,
+      signalObjectId: signal.objectId,
+      customerObjectId: customerObjectId ?? null,
+      evidencePacketId: evidencePacket.id,
+      sourceRefs,
+      blockers,
+    },
+    policy: safePolicy,
+    evidence: {
+      command: "campaign.draft",
+      required: ["customer_signal", "source_evidence_packet", "owner_approval"],
+      externalExecution: "blocked",
+      externalPublish: false,
+      externalSend: false,
+      externalSpend: false,
+      trackingMutation: "blocked",
+    },
+    db,
+  });
+  const coreBudget = objectValue(coreRun.budget);
+  const coreReservationId = optionalString(coreBudget.reservationId);
+  if (!coreReservationId) {
+    throw new PlatformUnavailableError(
+      "worker_run_budget_reservation_missing",
+      "Core worker.run.start did not return a Growth budget reservation.",
+      409,
+    );
+  }
 
   const result = await db.transaction(async (tx) => {
     await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${growthSource}:${input.idempotencyKey}`}))`,
+      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${coreWorkerRunSource}:growth:${input.idempotencyKey}`}))`,
     );
 
     const [existingRun] = await tx
@@ -1020,43 +961,43 @@ export async function prepareGrowthCampaignDraft(input: {
       .where(
         and(
           eq(workerRuns.tenantId, context.worker.tenantId),
-          eq(workerRuns.source, growthSource),
-          eq(workerRuns.idempotencyKey, input.idempotencyKey),
+          eq(workerRuns.id, coreRun.workerRunId),
         ),
       )
       .limit(1);
 
-    if (existingRun) {
-      const existingInput = objectValue(objectValue(existingRun.data).input);
-      const existingHash = optionalString(existingInput.inputHash);
+    if (!existingRun) {
+      throw new PlatformUnavailableError(
+        "worker_run_missing",
+        "Core worker.run.start did not return a persisted Growth worker run.",
+        409,
+      );
+    }
 
-      if (existingHash && existingHash !== inputHash) {
-        throw new PlatformUnavailableError(
-          "worker_idempotency_conflict",
-          "A Growth campaign draft already exists for this idempotency key with different input.",
-          409,
-        );
-      }
+    const existingInput = objectValue(objectValue(existingRun.data).input);
+    const existingRequest = objectValue(existingInput.request);
+    const existingHash = optionalString(existingRequest.inputHash) ?? optionalString(existingInput.inputHash);
 
-      const output = outputData(existingRun.data);
+    if (existingHash && existingHash !== inputHash) {
+      throw new PlatformUnavailableError(
+        "worker_idempotency_conflict",
+        "A Growth campaign draft already exists for this idempotency key with different input.",
+        409,
+      );
+    }
 
+    const existingOutput = outputData(existingRun.data);
+
+    if (optionalString(existingOutput.workerRunId)) {
       return {
         status: "replay" as const,
+        runState: existingRun.state,
         output: {
-          ...output,
+          ...existingOutput,
           created: false,
         } as JsonObject,
       };
     }
-
-    const budgetReservation = await resolveBudgetReservation({
-      tx,
-      tenantId: context.worker.tenantId,
-      budgetAccountId: context.budgetAccountId,
-      budgetReservationId: requestedBudgetReservationId,
-      now,
-      requiredUnits: campaignDraftUnits,
-    });
 
     const [definition] = await tx
       .select({ id: workflowDefinitions.id })
@@ -1095,10 +1036,11 @@ export async function prepareGrowthCampaignDraft(input: {
         state: evidencePacket.state,
       },
       budget: {
-        reservationId: budgetReservation.id,
-        units: budgetReservation.units,
-        state: budgetReservation.state,
-        expiresAt: budgetReservation.expiresAt?.toISOString() ?? null,
+        reservationId: coreReservationId,
+        budgetAccountId: context.budgetAccountId,
+        units: campaignDraftUnits,
+        state: optionalString(coreBudget.state) ?? "held",
+        expiresAt: optionalString(coreBudget.expiresAt) ?? null,
       },
       blockers,
       campaign: {
@@ -1256,7 +1198,7 @@ export async function prepareGrowthCampaignDraft(input: {
           signalObjectId: signal.objectId,
           customerObjectId: customerObjectId ?? null,
           evidencePacketId: evidencePacket.id,
-          budgetReservationId: budgetReservation.id,
+          budgetReservationId: coreReservationId,
           sourceRefs,
           blockers,
         },
@@ -1272,36 +1214,6 @@ export async function prepareGrowthCampaignDraft(input: {
       })
       .returning({ id: tasks.id });
 
-    await tx
-      .update(budgetReservations)
-      .set({ taskId: task.id, state: "used", updatedAt: now })
-      .where(eq(budgetReservations.id, budgetReservation.id));
-
-    const [run] = await tx
-      .insert(workerRuns)
-      .values({
-        tenantId: context.worker.tenantId,
-        workerId: context.worker.id,
-        taskId: task.id,
-        capabilityId: context.capabilityId,
-        budgetAccountId: context.budgetAccountId,
-        source: growthSource,
-        idempotencyKey: input.idempotencyKey,
-        state: "running",
-        mode: "simulation",
-        data: {
-          input: {
-            command: "campaign.draft",
-            inputHash,
-            config,
-          },
-        },
-        startedAt: now,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning({ id: workerRuns.id });
-
     const [workflowRun] = await tx
       .insert(workflowRuns)
       .values({
@@ -1315,13 +1227,13 @@ export async function prepareGrowthCampaignDraft(input: {
           ...campaignData,
           campaignObjectId: campaignObject.id,
           contentDraftObjectId: contentDraftObject.id,
-          workerRunId: run.id,
+          workerRunId: coreRun.workerRunId,
         },
         blockers: { items: blockers },
         metrics: {
           blockerCount: blockers.length,
           claimCount: claims.length,
-          budgetUnits: budgetReservation.units,
+          budgetUnits: campaignDraftUnits,
         },
         startedAt: now,
         updatedAt: now,
@@ -1345,7 +1257,7 @@ export async function prepareGrowthCampaignDraft(input: {
           ...campaignData,
           campaignObjectId: campaignObject.id,
           contentDraftObjectId: contentDraftObject.id,
-          workerRunId: run.id,
+          workerRunId: coreRun.workerRunId,
           workflowRunId: workflowRun.id,
         },
         occurredAt: now,
@@ -1372,7 +1284,7 @@ export async function prepareGrowthCampaignDraft(input: {
           signalObjectId: signal.objectId,
           customerObjectId: customerObjectId ?? null,
           evidencePacketId: evidencePacket.id,
-          budgetReservationId: budgetReservation.id,
+          budgetReservationId: coreReservationId,
           blockers,
           bodyHash,
           externalExecution: "blocked",
@@ -1440,7 +1352,7 @@ export async function prepareGrowthCampaignDraft(input: {
       .values({
         tenantId: context.worker.tenantId,
         taskId: task.id,
-        workerRunId: run.id,
+        workerRunId: coreRun.workerRunId,
         workflowRunId: workflowRun.id,
         eventId: event.id,
         objectId: campaignObject.id,
@@ -1565,10 +1477,10 @@ export async function prepareGrowthCampaignDraft(input: {
           fromState: "content_draft",
           toState: taskState === "blocked" ? "blocked" : "budget_review",
           idempotencyKey: `${input.idempotencyKey}:budget_review`,
-          input: { budgetReservationId: budgetReservation.id },
+          input: { budgetReservationId: coreReservationId },
           output: {
-            budgetReservationId: budgetReservation.id,
-            units: budgetReservation.units,
+            budgetReservationId: coreReservationId,
+            units: campaignDraftUnits,
             adSpend: "blocked",
           },
           startedAt: now,
@@ -1627,7 +1539,7 @@ export async function prepareGrowthCampaignDraft(input: {
           packetId: packet.id,
           documentId: document.id,
           evidenceId: traceEvidence.id,
-          budgetReservationId: budgetReservation.id,
+          budgetReservationId: coreReservationId,
           blockers,
           externalExecution: "blocked",
           externalPublish: false,
@@ -1639,25 +1551,9 @@ export async function prepareGrowthCampaignDraft(input: {
       now,
     });
 
-    await tx.insert(usageEvents).values({
-      tenantId: context.worker.tenantId,
-      accountId: context.budgetAccountId,
-      reservationId: budgetReservation.id,
-      taskId: task.id,
-      capabilityId: context.capabilityId,
-      actorType: "worker",
-      actorId: context.worker.id,
-      units: campaignDraftUnits,
-      data: {
-        command: "campaign.draft",
-        mode: "simulation",
-      },
-      createdAt: now,
-    });
-
     const output = {
       command: "campaign.draft",
-      workerRunId: run.id,
+      workerRunId: coreRun.workerRunId,
       taskId: task.id,
       eventId: event.id,
       campaignObjectId: campaignObject.id,
@@ -1672,7 +1568,7 @@ export async function prepareGrowthCampaignDraft(input: {
       workflowRunId: workflowRun.id,
       workflowStepIds,
       campaignsViewId,
-      budgetReservationId: budgetReservation.id,
+      budgetReservationId: coreReservationId,
       blockers,
       draft: campaignData.draft as JsonObject,
       policy: safePolicy,
@@ -1687,7 +1583,7 @@ export async function prepareGrowthCampaignDraft(input: {
         packetId: packet.id,
         documentId: document.id,
         workflowRunId: workflowRun.id,
-        budgetReservationId: budgetReservation.id,
+        budgetReservationId: coreReservationId,
         externalExecution: "blocked",
         externalPublish: "blocked",
         externalSend: "blocked",
@@ -1706,19 +1602,17 @@ export async function prepareGrowthCampaignDraft(input: {
       .update(workerRuns)
       .set({
         eventId: event.id,
-        state: "done",
-        endedAt: now,
+        taskId: task.id,
         updatedAt: now,
         data: {
-          input: {
-            command: "campaign.draft",
-            inputHash,
-            config,
-          },
+          ...objectValue(existingRun.data),
+          businessEventId: event.id,
+          taskId: task.id,
+          workflowRunId: workflowRun.id,
           output,
         },
       })
-      .where(eq(workerRuns.id, run.id));
+      .where(eq(workerRuns.id, coreRun.workerRunId));
 
     await tx
       .insert(auditEvents)
@@ -1734,7 +1628,7 @@ export async function prepareGrowthCampaignDraft(input: {
         taskId: task.id,
         eventId: event.id,
         objectId: campaignObject.id,
-        workerRunId: run.id,
+        workerRunId: coreRun.workerRunId,
         approvalRequestId: approval.id,
         capabilityId: context.capabilityId,
         risk: riskForCampaign(blockers, claims),
@@ -1746,7 +1640,7 @@ export async function prepareGrowthCampaignDraft(input: {
           customerObjectId: customerObjectId ?? null,
           packetId: packet.id,
           campaignsViewId,
-          budgetReservationId: budgetReservation.id,
+          budgetReservationId: coreReservationId,
           blockers,
           externalExecution: "blocked",
           externalPublish: false,
@@ -1761,6 +1655,38 @@ export async function prepareGrowthCampaignDraft(input: {
       output,
     };
   });
+
+  if (result.status === "created" || (result.status === "replay" && result.runState === "running")) {
+    await completeCoreWorkerRun({
+      operatorEmail: input.operatorEmail,
+      tenantSlug: context.worker.tenantSlug,
+      idempotencyKey: input.idempotencyKey,
+      worker: {
+        id: context.worker.id,
+        role: growthWorkerRole,
+      },
+      workerRunId: coreRun.workerRunId,
+      state: "done",
+      reason: "Growth Worker prepared a campaign draft packet with external publish, send, spend, and tracking blocked.",
+      output: result.output,
+      costUsd: 0,
+      evidence: {
+        command: "campaign.draft",
+        eventId: optionalString(result.output.eventId) ?? null,
+        evidenceId: optionalString(result.output.evidenceId) ?? null,
+        packetId: optionalString(result.output.packetId) ?? null,
+        documentId: optionalString(result.output.documentId) ?? null,
+        approvalRequestId: optionalString(result.output.approvalRequestId) ?? null,
+        workflowRunId: optionalString(result.output.workflowRunId) ?? null,
+        externalExecution: "blocked",
+        externalPublish: false,
+        externalSend: false,
+        externalSpend: false,
+        trackingMutation: "blocked",
+      },
+      db,
+    });
+  }
 
   const output = result.output;
   const outputRecord = objectValue(output);
@@ -1782,16 +1708,18 @@ export async function prepareGrowthCampaignDraft(input: {
       : output;
 
   if (result.status === "created") {
+    const [completedRun] = await db
+      .select({ data: workerRuns.data })
+      .from(workerRuns)
+      .where(eq(workerRuns.id, stringValue(output.workerRunId)))
+      .limit(1);
+
     await db
       .update(workerRuns)
       .set({
         updatedAt: new Date(),
         data: {
-          input: {
-            command: "campaign.draft",
-            inputHash,
-            config,
-          },
+          ...objectValue(completedRun?.data),
           output: responseOutput,
         },
       })

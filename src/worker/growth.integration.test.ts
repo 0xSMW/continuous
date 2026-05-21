@@ -5,7 +5,7 @@ import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { db, pool } from "../db/client";
-import { budgetAccounts, budgetReservations, customers, objects, workers } from "../db/schema";
+import { budgetReservations, customers, objects, usageEvents, workerRuns, workers } from "../db/schema";
 import { executeAppServerWorkerTool } from "./app-server-tools";
 import { executeWorkerCommand, executeWorkerView } from "./registry";
 
@@ -44,51 +44,6 @@ function stringValue(value: unknown) {
 
 function expectGeneratedId(value: unknown) {
   expect(stringValue(value)).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
-}
-
-async function createGrowthBudgetReservation(input: { units?: number; state?: "held" | "used" } = {}) {
-  const [worker] = await db
-    .select({ id: workers.id, tenantId: workers.tenantId })
-    .from(workers)
-    .where(and(eq(workers.role, growthWorker.role), eq(workers.state, "training")))
-    .limit(1);
-
-  if (!worker) {
-    throw new Error("Seeded Growth Worker is required for Growth integration tests.");
-  }
-
-  const [account] = await db
-    .select({ id: budgetAccounts.id })
-    .from(budgetAccounts)
-    .where(
-      and(
-        eq(budgetAccounts.target, "worker"),
-        eq(budgetAccounts.targetId, worker.id),
-        eq(budgetAccounts.active, true),
-      ),
-    )
-    .limit(1);
-
-  if (!account) {
-    throw new Error("Seeded Growth budget account is required for Growth integration tests.");
-  }
-
-  const [reservation] = await db
-    .insert(budgetReservations)
-    .values({
-      tenantId: worker.tenantId,
-      accountId: account.id,
-      units: input.units ?? 75_000,
-      state: input.state ?? "held",
-      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
-    })
-    .returning({ id: budgetReservations.id });
-
-  if (!reservation) {
-    throw new Error("Growth budget reservation insert did not return an id.");
-  }
-
-  return reservation.id;
 }
 
 async function createOtherCustomerObject() {
@@ -173,14 +128,12 @@ maybeDescribe("Growth Worker integration", () => {
 
   it("prepares a blocked growth campaign draft through the app-server worker envelope", async () => {
     const idempotencyKey = `ci-growth-campaign-${randomUUID()}`;
-    const budgetReservationId = await createGrowthBudgetReservation();
     const config = {
       sourceRefs: {
         customerObjectId: seedIds.customerObject,
         customerSignalId: seedIds.testimonial,
         reviewObjectId: seedIds.testimonialObject,
         evidencePacketId: seedIds.quotePacket,
-        budgetReservationId,
       },
       policy: {
         channel: "email",
@@ -248,6 +201,34 @@ maybeDescribe("Growth Worker integration", () => {
     expect(objectValue(output.policy).allowSpend).toBe(false);
     expect(objectValue(output.policy).allowTrackingMutation).toBe(false);
 
+    const [run] = await db
+      .select()
+      .from(workerRuns)
+      .where(eq(workerRuns.id, stringValue(result.workerRunId)))
+      .limit(1);
+    const runData = objectValue(run?.data);
+    const completionBudget = objectValue(objectValue(runData.completion).budget);
+
+    expect(run?.source).toBe("continuous.core.worker_runs");
+    expect(run?.state).toBe("done");
+    expect(completionBudget.state).toBe("used");
+    expect(completionBudget.reservationId).toBe(result.budgetReservationId);
+
+    const [reservation] = await db
+      .select({ state: budgetReservations.state, taskId: budgetReservations.taskId })
+      .from(budgetReservations)
+      .where(eq(budgetReservations.id, stringValue(result.budgetReservationId)))
+      .limit(1);
+    const [usage] = await db
+      .select({ id: usageEvents.id, units: usageEvents.units })
+      .from(usageEvents)
+      .where(eq(usageEvents.id, stringValue(completionBudget.usageEventId)))
+      .limit(1);
+
+    expect(reservation?.state).toBe("used");
+    expect(reservation?.taskId).toBe(result.taskId);
+    expect(usage?.units).toBe(2800);
+
     const view = await executeWorkerView({
       view: "campaigns",
       target: growthWorker,
@@ -288,18 +269,22 @@ maybeDescribe("Growth Worker integration", () => {
         command: "campaign.draft",
         target: growthWorker,
         operatorEmail,
-        idempotencyKey: `ci-growth-campaign-budget-reuse-${randomUUID()}`,
-        config,
+        idempotencyKey,
+        config: {
+          ...config,
+          policy: {
+            ...config.policy,
+            audience: "new_customers",
+          },
+        },
       }),
     ).rejects.toMatchObject({
-      code: "worker_budget_reservation_already_bound",
+      code: "core_command_idempotency_conflict",
       status: 409,
     });
   });
 
   it("rejects publish, send, spend, and tracking mutation requests", async () => {
-    const budgetReservationId = await createGrowthBudgetReservation();
-
     await expect(
       executeWorkerCommand({
         command: "campaign.draft",
@@ -311,7 +296,6 @@ maybeDescribe("Growth Worker integration", () => {
             customerObjectId: seedIds.customerObject,
             customerSignalId: seedIds.testimonial,
             evidencePacketId: seedIds.quotePacket,
-            budgetReservationId,
           },
           policy: {
             channel: "email",
@@ -329,35 +313,6 @@ maybeDescribe("Growth Worker integration", () => {
     });
   });
 
-  it("requires a held Growth budget reservation", async () => {
-    const budgetReservationId = await createGrowthBudgetReservation({ state: "used" });
-
-    await expect(
-      executeWorkerCommand({
-        command: "campaign.draft",
-        target: growthWorker,
-        operatorEmail,
-        idempotencyKey: `ci-growth-budget-used-${randomUUID()}`,
-        config: {
-          sourceRefs: {
-            customerObjectId: seedIds.customerObject,
-            customerSignalId: seedIds.testimonial,
-            evidencePacketId: seedIds.quotePacket,
-            budgetReservationId,
-          },
-          policy: {
-            channel: "email",
-            audience: "recent_customers",
-            requiresOwnerApproval: true,
-            allowPublish: false,
-          },
-        },
-      }),
-    ).rejects.toMatchObject({
-      code: "worker_budget_reservation_unavailable",
-    });
-  });
-
   it("rejects missing required source references", async () => {
     await expect(
       executeWorkerCommand({
@@ -368,7 +323,6 @@ maybeDescribe("Growth Worker integration", () => {
         config: {
           sourceRefs: {
             customerSignalId: seedIds.testimonial,
-            evidencePacketId: seedIds.quotePacket,
           },
           policy: {
             channel: "email",
@@ -384,7 +338,6 @@ maybeDescribe("Growth Worker integration", () => {
   });
 
   it("rejects customer refs that do not match the selected signal", async () => {
-    const budgetReservationId = await createGrowthBudgetReservation();
     const otherCustomerObjectId = await createOtherCustomerObject();
 
     await expect(
@@ -398,7 +351,6 @@ maybeDescribe("Growth Worker integration", () => {
             customerObjectId: otherCustomerObjectId,
             customerSignalId: seedIds.testimonial,
             evidencePacketId: seedIds.quotePacket,
-            budgetReservationId,
           },
           policy: {
             channel: "email",

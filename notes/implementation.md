@@ -556,13 +556,12 @@ provenance under `config.scheduler`, Revenue persists that as
 `scheduler_lead_read_cursor` as ready when the proof is verified for the
 connection and scheduler idempotency key.
 
-Growth `campaign.draft` now treats its budget reservation as a single-use
-runtime input. New runs lock the reservation row, reject expired, insufficient,
-or already-bound reservations, and mark the reservation used when the campaign
-draft consumes units; idempotent replay is resolved before that mutable check
-so retries do not double-consume budget. Growth snapshots and campaign views
-are also scoped to the authenticated operator's tenant and the Growth worker's
-own objects, runs, approvals, budget account, and generated views.
+Growth `campaign.draft` now starts and completes through Core
+`worker.run.start` and `worker.run.complete`, reusing the Core worker-run row
+for campaign proof and letting Core own budget reservation and usage settlement.
+Growth snapshots and campaign views are also scoped to the authenticated
+operator's tenant and the Growth worker's own objects, runs, approvals, budget
+account, and generated views.
 
 Production deploy schema smoke now treats Growth's `attribution.review` as a
 remaining Growth follow-up after promoting `campaign.draft` to runtime, without

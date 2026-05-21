@@ -859,7 +859,7 @@ describe("future worker contracts", () => {
       (command) => command.role === "growth_operations" && command.name === "campaign.draft",
     )?.configSchema?.properties?.sourceRefs;
 
-    expect(growthSourceRefsSchema?.required).toEqual(["evidencePacketId", "budgetReservationId"]);
+    expect(growthSourceRefsSchema?.required).toEqual(["evidencePacketId"]);
     expect(growthSourceRefsSchema?.oneRequired).toEqual(["customerSignalObjectId", "customerSignalId"]);
     expect(
       plannedWorkerViews().find(

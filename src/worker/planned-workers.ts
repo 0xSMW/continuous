@@ -294,7 +294,7 @@ const growthCampaignDraftConfigSchema: PlannedWorkerConfigSchema = {
   properties: {
     sourceRefs: {
       type: "object",
-      required: ["evidencePacketId", "budgetReservationId"],
+      required: ["evidencePacketId"],
       oneRequired: ["customerSignalObjectId", "customerSignalId"],
       properties: {
         customerSignalObjectId: stringSchema("Customer signal Core object id."),
@@ -304,7 +304,6 @@ const growthCampaignDraftConfigSchema: PlannedWorkerConfigSchema = {
         campaignObjectId: stringSchema("Optional existing campaign Core object id."),
         contentDraftObjectId: stringSchema("Optional existing content draft Core object id."),
         audienceObjectId: stringSchema("Optional audience Core object id."),
-        budgetReservationId: stringSchema("Budget reservation id for the draft."),
         evidencePacketId: stringSchema("Source evidence packet id."),
       },
       additionalProperties: false,
@@ -1578,7 +1577,7 @@ export const workerContracts: PlannedWorkerContractMetadata[] = [
     apiRoute: workerApiRoute,
     contractPath: "docs/growth-worker-v1-contract.md",
     firstOutcome:
-      "Campaign draft with source-backed claims, budget reservation, approval request, and generated campaign view",
+      "Campaign draft with source-backed claims, Core budget settlement, approval request, and generated campaign view",
     autonomyLevel: 2,
     externalExecution: "blocked",
     evidencePacket: "growth_campaign_packet",
@@ -2115,7 +2114,7 @@ export const workerExpansionCatalog: WorkerExpansionCatalogEntry[] = [
     familyKind: "operating_family",
     firstCommand: "campaign.draft",
     firstView: "campaigns",
-    coreObjects: ["Campaign", "Channel", "Audience", "ContentDraft", "AttributionEvent", "BudgetReservation"],
+    coreObjects: ["Campaign", "Channel", "Audience", "ContentDraft", "AttributionEvent", "WorkerRun"],
     incomingHandoff: "customer.signal_to_growth",
     outgoingHandoff: "growth.campaign_to_owner_review",
     acceptanceChecks: [
@@ -2789,7 +2788,6 @@ function expansionPromotionConfig(entry: WorkerExpansionCatalogEntry): WorkerCom
         sourceRefs: {
           ...handoffRef(entry),
           customerSignalObjectId: "<customerSignalObjectId>",
-          budgetReservationId: "<budgetReservationId>",
           evidencePacketId: "<evidencePacketId>",
         },
         policy: {

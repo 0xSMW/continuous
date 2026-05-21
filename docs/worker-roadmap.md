@@ -150,7 +150,7 @@ execution gates.
 |---|---|
 | Core objects | Invoice, bill, expense, receipt, cash forecast, reconciliation item |
 | Workflow | Invoice draft, AR follow-up, expense coding, payment draft |
-| Capabilities | `invoice.prepare`, `ar_followup.draft`, `cash_forecast.generate`, `payment_draft.prepare`, `approval.request` |
+| Capabilities | `invoice.prepare`, `ar_followup.draft`, `cash_forecast.generate`, `payment_draft.prepare`, Core `approval.request` side effects, and worker `approval.decide` continuations |
 | Adapters | Accounting/payment/bank feeds in draft mode with receipts |
 | Launch gate | Money movement remains blocked behind dual-control approval and receipt capture |
 

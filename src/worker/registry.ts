@@ -987,7 +987,7 @@ const growthCampaignDraftConfig: WorkerConfigSchema = {
   properties: {
     sourceRefs: {
       type: "object",
-      required: ["evidencePacketId", "budgetReservationId"],
+      required: ["evidencePacketId"],
       oneRequired: ["customerSignalObjectId", "customerSignalId"],
       properties: {
         customerSignalObjectId: { type: "string" },
@@ -997,7 +997,6 @@ const growthCampaignDraftConfig: WorkerConfigSchema = {
         campaignObjectId: { type: "string" },
         contentDraftObjectId: { type: "string" },
         audienceObjectId: { type: "string" },
-        budgetReservationId: { type: "string" },
         evidencePacketId: { type: "string" },
       },
       additionalProperties: false,

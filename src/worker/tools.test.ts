@@ -1152,7 +1152,7 @@ describe("worker tool contract", () => {
             required: ["sourceRefs", "policy"],
             properties: expect.objectContaining({
               sourceRefs: expect.objectContaining({
-                required: ["evidencePacketId", "budgetReservationId"],
+                required: ["evidencePacketId"],
                 oneRequired: ["customerSignalObjectId", "customerSignalId"],
               }),
             }),
@@ -1626,7 +1626,6 @@ describe("worker tool contract", () => {
         sourceRefs: expect.objectContaining({
           handoff: "customer.signal_to_growth",
           customerSignalObjectId: "<customerSignalObjectId>",
-          budgetReservationId: "<budgetReservationId>",
           evidencePacketId: "<evidencePacketId>",
         }),
         policy: expect.objectContaining({

@@ -2,16 +2,17 @@
 
 This contract defines the first Growth worker slice for campaign drafts,
 source-backed claims, audience/channel planning, attribution review, and
-budget-reservation evidence. The `campaign.draft` slice is runtime-registered
-on the canonical `/worker` API. V1 prepares drafts and internal packets only;
-it does not publish content, buy ads, send campaigns, or alter live tracking.
+Core-owned budget evidence. The `campaign.draft` slice is runtime-registered on
+the canonical `/worker` API and starts/completes through the Core worker-run
+lifecycle. V1 prepares drafts and internal packets only; it does not publish
+content, buy ads, send campaigns, or alter live tracking.
 
 ## Header
 
 | Field | Value |
 |---|---|
 | Worker role | `growth_operations` |
-| First outcome | Campaign draft with source-backed claims, budget reservation, approval request, and generated campaign view |
+| First outcome | Campaign draft with source-backed claims, Core budget settlement, approval request, and generated campaign view |
 | Autonomy level | `2` |
 | Runtime status | First runtime slice |
 | External execution | `blocked` |
@@ -21,9 +22,10 @@ it does not publish content, buy ads, send campaigns, or alter live tracking.
 All commands and views use `POST /worker`; no growth-specific route is added.
 The canonical runtime call is `worker.role=growth_operations`,
 `command=campaign.draft`, with `config.sourceRefs` and `config.policy`
-carrying source, budget, audience, claim, approval, and no-publish controls.
-Command names, worker selection, and view names are payload fields. Operation
-inputs and read filters stay under `config`.
+carrying source, audience, claim, approval, and no-publish controls. Core owns
+the worker-run row, budget reservation, and usage settlement. Command names,
+worker selection, and view names are payload fields. Operation inputs and read
+filters stay under `config`.
 
 ```json
 {
@@ -37,11 +39,11 @@ inputs and read filters stay under `config`.
     "sourceRefs": {
       "campaignObjectId": "campaign_object_uuid",
       "audienceObjectId": "audience_object_uuid",
-      "budgetReservationId": "budget_reservation_uuid",
       "evidencePacketId": "source_packet_uuid"
     },
     "policy": {
       "channel": "email",
+      "audience": "recent_customers",
       "requiresOwnerApproval": true,
       "allowPublish": false
     }
@@ -112,10 +114,10 @@ inputs and read filters stay under `config`.
 ## Evidence Packet
 
 `growth_campaign_packet` contains campaign refs, source-backed claims, audience
-criteria, suppression proof, budget reservation refs, content draft hash,
-attribution snapshot, approval request, generated view id, and no-external-
-publish proof. Customer contact details, ad account secrets, payment data,
-regulated audience attributes, and raw tracking identifiers are redacted.
+criteria, suppression proof, Core worker-run budget settlement refs, content
+draft hash, attribution snapshot, approval request, generated view id, and
+no-external-publish proof. Customer contact details, ad account secrets, payment
+data, regulated audience attributes, and raw tracking identifiers are redacted.
 
 ## Generated Views
 
