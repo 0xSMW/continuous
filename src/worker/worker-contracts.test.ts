@@ -656,8 +656,10 @@ describe("future worker contracts", () => {
       "revenue.quote_to_dispatch",
       "dispatch.closeout_to_finance",
       "finance.invoice_to_owner_review",
+      "owner.staffing_need_to_workforce",
       "workforce.payroll_to_compliance",
       "compliance.obligation_to_owner_review",
+      "core.connection_to_systems_review",
       "systems.sync_issue_to_worker",
       "revenue.quote_to_pricing",
       "customer.signal_to_experience",
@@ -694,6 +696,9 @@ describe("future worker contracts", () => {
       if (entry.incomingHandoff) {
         expect(handoffs).toContain(entry.incomingHandoff);
       }
+      if (entry.outgoingHandoff) {
+        expect(handoffs).toContain(entry.outgoingHandoff);
+      }
       expect(entry.apiRoute).toBe(workerApiRoute);
       expect(entry.firstCommand).not.toMatch(/_worker|worker\./);
       expect(entry.firstView).not.toMatch(/_worker|worker\./);
@@ -705,6 +710,12 @@ describe("future worker contracts", () => {
     expect(read("docs/worker-handoffs.md")).toContain(
       "`growth.campaign_to_owner_review` | Growth | Owner Chief-of-Staff",
     );
+    expect(
+      workerExpansionCatalog.find((entry) => entry.key === "workforce_operations")?.incomingHandoff,
+    ).toBe("owner.staffing_need_to_workforce");
+    expect(
+      workerExpansionCatalog.find((entry) => entry.key === "systems_operations")?.incomingHandoff,
+    ).toBe("core.connection_to_systems_review");
   });
 
   it("publishes planned command metadata only for contract-backed non-runtime workers", () => {

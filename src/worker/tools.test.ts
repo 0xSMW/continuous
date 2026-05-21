@@ -1014,17 +1014,22 @@ describe("worker tool contract", () => {
         type: string;
         required?: string[];
         oneRequired?: string[];
+        additionalProperties?: boolean;
         properties?: Record<
           string,
           {
             type?: string;
             minItems?: number;
             required?: string[];
+            additionalProperties?: boolean;
             properties?: Record<string, { type?: string }>;
           }
         >;
       };
     }>;
+    const plannedFutureCommands = workerToolSchema.registry.plannedFutureWorkerCommands as Array<
+      (typeof plannedCommands)[number]
+    >;
     const registeredSystemsCommands = workerToolSchema.registry.commands.filter(
       (command) => command.role === "systems_operations",
     );
@@ -1202,6 +1207,20 @@ describe("worker tool contract", () => {
           expect(command.configSchema.properties?.[field]).toBeTruthy();
         }
       }
+    }
+    for (const command of [
+      ["customer_experience_operations", "recovery.draft"],
+      ["asset_supply_operations", "reorder.plan"],
+      ["growth_operations", "campaign.draft"],
+      ["vertical_packages", "package.flow.prepare"],
+    ] as const) {
+      const planned = plannedFutureCommands.find(
+        (entry) => entry.role === command[0] && entry.name === command[1],
+      );
+
+      expect(planned?.configSchema.additionalProperties).toBe(false);
+      expect(planned?.configSchema.properties?.sourceRefs?.additionalProperties).toBe(false);
+      expect(planned?.configSchema.properties?.policy?.additionalProperties).toBe(false);
     }
     expect(workerToolSchema.registry.plannedCommands).not.toEqual(
       expect.arrayContaining([
@@ -1388,6 +1407,16 @@ describe("worker tool contract", () => {
         "vertical_packages",
         "package_quote_to_cash_field",
         "package_knowledge_delivery",
+        "package_billing",
+        "package_change_order",
+        "package_inventory_replenishment",
+        "package_production_planner",
+        "package_compliance_qa",
+        "package_intake_documentation",
+        "package_demand_guest_experience",
+        "package_event_menu",
+        "package_dispatch_asset_utilization",
+        "package_maintenance",
       ]),
     );
     expect(byKey.get("revenue_operations")).toEqual(
