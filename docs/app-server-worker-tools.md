@@ -51,11 +51,12 @@ The Revenue payment-link command can be executed through
 `continuous.worker.command` or `worker:tool`, but it only prepares an internal
 packet through the Core worker-run lifecycle; live provider payment-link
 creation and money movement remain blocked.
-Deploy smoke also exercises Core worker lifecycle commands plus Offer and
-Pricing `margin.review.prepare` and the `price_policy` view through
-`POST /app-server`, proving Core primitives and post-Revenue workers can use the
-same dynamic-tool envelope without a worker-specific route and with worker-role
-scope enforced before lifecycle dispatch.
+Deploy smoke also exercises Core worker lifecycle commands, Revenue
+`lead.read -> run`, Offer and Pricing `margin.review.prepare`, and the
+`price_policy` view through `POST /app-server`, proving Core primitives,
+Revenue worker execution, and post-Revenue workers can use the same dynamic-tool
+envelope without a worker-specific route and with worker-role scope enforced
+before lifecycle dispatch.
 Customer Experience `recovery.draft` and `signals` are runtime-registered the
 same way: customer, signal, evidence, channel, and no-send policy selectors
 live under `config`, while the app-server tool still sends only `command`,

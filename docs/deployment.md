@@ -348,10 +348,11 @@ Compliance follows the same rule: `filing.prepare` and Compliance views use
 `worker.role` plus `config`, not a compliance-specific route. Agency submission
 and legal advice remain blocked until live credential scope, rule-source
 breadth, and receipt capture are proven.
-The deploy workflow smokes `lead.read`, the source-selector `run` path, a
-registered `quote.prepare` packet, a blocked `payment_link.prepare` packet, a
-Core-created active buffered connection, one-shot scheduler `lead.read -> run`
-handoff proof, adapter reconciliation, continuation, and `/core` task creation,
+The deploy workflow smokes `lead.read`, the source-selector `run` path through
+both `/worker` and `POST /app-server`, a registered `quote.prepare` packet, a
+blocked `payment_link.prepare` packet, a Core-created active buffered
+connection, one-shot scheduler `lead.read -> run` handoff proof, adapter
+reconciliation, continuation, and `/core` task creation,
 task transition, approval request, capability grant, budget
 reserve/charge/release, object, object-link, event, evidence, document, packet,
 decision, generated-view, connector setup, connection health, shared approval
@@ -420,6 +421,7 @@ Control-plane token catalog entries have this shape when provided directly via
       "app_server:worker.view.signals",
       "app_server:worker.view.campaigns",
       "app_server:worker.command.lead.read",
+      "app_server:worker.command.run",
       "app_server:worker.command.payment_link.prepare",
       "app_server:worker.command.filing.prepare",
       "app_server:worker.command.margin.review.prepare",
@@ -672,6 +674,7 @@ and route-qualified command; unrelated commands remain closed.
       "app_server:worker.view.signals",
       "app_server:worker.view.campaigns",
       "app_server:worker.command.lead.read",
+      "app_server:worker.command.run",
       "app_server:worker.command.payment_link.prepare",
       "app_server:worker.command.filing.prepare",
       "app_server:worker.command.margin.review.prepare",

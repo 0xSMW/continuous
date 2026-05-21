@@ -1112,6 +1112,99 @@ jobs:
             )
           ' >/dev/null
 
+          APP_SERVER_LEAD_READ_TOOL="$(
+            echo "$APP_SERVER_LEAD_READ_RESPONSE" | /usr/bin/jq -c '.data.contentItems[0].text | fromjson'
+          )"
+          APP_SERVER_LEAD_OBJECT_ID="$(echo "$APP_SERVER_LEAD_READ_TOOL" | /usr/bin/jq -r '.data.result.selectors[0].objectId')"
+          APP_SERVER_LEAD_EVENT_ID="$(echo "$APP_SERVER_LEAD_READ_TOOL" | /usr/bin/jq -r '.data.result.selectors[0].eventId')"
+          APP_SERVER_LEAD_EVIDENCE_ID="$(echo "$APP_SERVER_LEAD_READ_TOOL" | /usr/bin/jq -r '.data.result.selectors[0].evidenceId')"
+          APP_SERVER_RUN_KEY="deploy-app-server-worker-run-smoke-$SMOKE_RUN_ID"
+          APP_SERVER_RUN_PAYLOAD="$(
+            /usr/bin/jq -nc \
+              --arg key "$APP_SERVER_RUN_KEY" \
+              --arg sourceEventId "$APP_SERVER_LEAD_READ_SOURCE_EVENT" '{
+              tool: "continuous.worker.command",
+              arguments: {
+                command: "run",
+                worker: {role: "revenue_operations", tenantSlug: "continuous-demo"},
+                idempotencyKey: $key,
+                config: {
+                  intake: {
+                    source: "deploy_app_server_smoke",
+                    sourceEventId: $sourceEventId
+                  }
+                }
+              },
+              callId: $key,
+              threadId: "deploy-smoke",
+              turnId: "deploy-smoke"
+            }'
+          )"
+          APP_SERVER_RUN_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/app-server \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              --data "$APP_SERVER_RUN_PAYLOAD"
+          )"
+          echo "$APP_SERVER_RUN_RESPONSE" | /usr/bin/jq -c '{api,error,success:.data.success,contentItemCount:(.data.contentItems | length)}'
+          echo "$APP_SERVER_RUN_RESPONSE" | /usr/bin/jq -c '
+            {
+              appServerTool: (
+                (.data.contentItems[0].text? | fromjson?) // {ok:null,error:"missing or unparseable app-server tool response"}
+                | {
+                    ok,
+                    tool,
+                    callId,
+                    error,
+                    command: .data.command,
+                    workerRole: .data.worker.role,
+                    workerRunId: .data.result.workerRunId,
+                    workflowRunId: .data.result.workflowRunId,
+                    sourceObjectId: .data.result.output.sourceObjectId,
+                    externalSend: .data.result.output.externalSend
+                  }
+              )
+            }
+          '
+          echo "$APP_SERVER_RUN_RESPONSE" | /usr/bin/jq -e \
+            --arg objectId "$APP_SERVER_LEAD_OBJECT_ID" \
+            --arg eventId "$APP_SERVER_LEAD_EVENT_ID" \
+            --arg evidenceId "$APP_SERVER_LEAD_EVIDENCE_ID" '
+            .api == "continuous.app_server.v1" and
+            .error == null and
+            .data.success == true and
+            (.data.contentItems[0].text | fromjson |
+              .ok == true and
+              .tool == "continuous.worker.command" and
+              .data.command == "run" and
+              .data.worker.role == "revenue_operations" and
+              .data.result.created == true and
+              (.data.result.workerRunId | length > 0) and
+              (.data.result.workflowRunId | length > 0) and
+              (.data.result.workflowStepIds | length) == 4 and
+              (.data.result.reservationId | length > 0) and
+              (.data.result.usageEventId | length > 0) and
+              .data.result.output.externalSend == false and
+              .data.result.output.classification == "quote_ready_for_owner_approval" and
+              .data.result.output.sourceObjectId == $objectId and
+              .data.result.output.sourceEventRowId == $eventId and
+              .data.result.output.sourceEvidenceId == $evidenceId and
+              .data.result.snapshot.controls.externalExecution == "disabled"
+            )
+          ' >/dev/null
+          APP_SERVER_RUN_TOOL="$(echo "$APP_SERVER_RUN_RESPONSE" | /usr/bin/jq -c '.data.contentItems[0].text | fromjson')"
+          APP_SERVER_WORKER_RUN_ID="$(echo "$APP_SERVER_RUN_TOOL" | /usr/bin/jq -r '.data.result.workerRunId')"
+          APP_SERVER_WORKER_RESERVATION_ID="$(echo "$APP_SERVER_RUN_TOOL" | /usr/bin/jq -r '.data.result.reservationId')"
+          APP_SERVER_WORKER_USAGE_ID="$(echo "$APP_SERVER_RUN_TOOL" | /usr/bin/jq -r '.data.result.usageEventId')"
+          APP_SERVER_WORKER_RUN_ROW="$(
+            psql_db -Atc "select coalesce(source,'') || '|' || coalesce(state::text,'') || '|' || coalesce(mode,'') || '|' || coalesce(data->'input'->>'command','') || '|' || coalesce(data->'output'->>'command','') || '|' || coalesce(data->'output'->>'externalSend','') || '|' || coalesce(data->'completion'->'budget'->>'state','') || '|' || coalesce(data->'completion'->'budget'->>'reservationId','') || '|' || coalesce(data->'completion'->'budget'->>'usageEventId','') from worker_runs where id = '$APP_SERVER_WORKER_RUN_ID'::uuid;"
+          )"
+          if [ "$APP_SERVER_WORKER_RUN_ROW" != "continuous.core.worker_runs|done|simulation|run|run|false|used|$APP_SERVER_WORKER_RESERVATION_ID|$APP_SERVER_WORKER_USAGE_ID" ]; then
+            echo "Unexpected app-server Core-backed Revenue run row: $APP_SERVER_WORKER_RUN_ROW" >&2
+            exit 1
+          fi
+
           APP_SERVER_PRICING_KEY="deploy-app-server-pricing-review-smoke-$SMOKE_RUN_ID"
           APP_SERVER_PRICING_PAYLOAD="$(
             /usr/bin/jq -nc --arg key "$APP_SERVER_PRICING_KEY" '{

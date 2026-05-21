@@ -146,6 +146,7 @@ printf '%s\n' "$APP_SERVER_WORKER_SCHEMA_RESPONSE" | /usr/bin/jq -e '
     (.data.registry.commands | all(.apiRoute == "/worker")) and
     (.data.registry.views | all(.apiRoute == "/worker")) and
     (.data.registry.commands | any(.role == "revenue_operations" and .name == "lead.read" and .configSchema.properties.records.type == "array")) and
+    (.data.registry.commands | any(.role == "revenue_operations" and .name == "run" and .apiRoute == "/worker" and .configSchema.oneRequired == ["intake","leadPacket","lead"])) and
     (.data.registry.commands | any(.role == "compliance_operations" and .name == "filing.prepare" and .configSchema.required == ["filingRequirementId","period"])) and
     (.data.registry.views | any(.role == "customer_experience_operations" and .name == "signals" and .apiRoute == "/worker")) and
     (.data.registry.followUpCommands | all(.apiRoute == "/worker" and .toolAlias == "worker.command"))

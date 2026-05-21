@@ -622,7 +622,7 @@ payment-provider execution, which remains blocked.
 
 Core obligation scanning now lives on the generic `POST /core` command envelope
 as `command=obligation.scan`, with `scope`, `jurisdiction`, rule/filing
-selectors, workflow refs, and scan facts under `config`. The scan creates or
+selectors, and scan facts under `config`. The scan creates or
 updates tenant obligations, source objects, review tasks, events, audit proof,
 and trace evidence while keeping agency submission blocked. The Compliance
 worker consumes those Core primitives instead of owning an
@@ -641,3 +641,9 @@ scans and refuses ambiguous fan-out or tasks already linked to a different
 object. Filing-backed proposals now require their active/effective rule pack in
 the current scan or fail when requested directly, so obligations are not opened
 without a source rule snapshot.
+
+Deploy smoke now runs Revenue `lead.read -> run` through the authenticated
+`POST /app-server` dynamic-tool bridge, then verifies the resulting Core-backed
+worker run row, budget settlement, source-object refs, workflow run, and
+external-send disabled posture. This closes the previous production proof gap
+where app-server smoke proved Revenue source reads but not the actual worker run.

@@ -591,6 +591,9 @@ describe("future worker contracts", () => {
     expect(deployment).toContain("CONTROL_PLANE_SESSION_REVIEW_VIEW_ID");
     expect(deployment).toContain("control-plane auth requires a catalog");
     expect(productionSmokeScript).toContain("</dev/null");
+    expect(productionSmokeScript).toContain(
+      '.name == "run" and .apiRoute == "/worker" and .configSchema.oneRequired == ["intake","leadPacket","lead"]',
+    );
     expect(compose).not.toContain("REVENUE_WORKER_");
     expect(readinessScript).toContain("TOKEN_ROTATION_ATTESTATION_ID");
     expect(readinessScript).toContain("CONTROL_PLANE_AUTH_AUDIT_ATTESTED_AT");
@@ -623,6 +626,7 @@ describe("future worker contracts", () => {
     expect(attestationScript).toContain("worker:margin.review.prepare");
     expect(attestationScript).toContain("worker:view.price_policy");
     expect(attestationScript).toContain("app_server:worker.command.margin.review.prepare");
+    expect(attestationScript).toContain("app_server:worker.command.run");
     expect(attestationScript).toContain("app_server:worker.view.price_policy");
     expect(attestationScript).toContain("workforce_operations");
     expect(attestationScript).toContain("systems_operations");
@@ -657,6 +661,7 @@ describe("future worker contracts", () => {
     expect(deployScript).toContain("worker:margin.review.prepare");
     expect(deployScript).toContain("worker:view.price_policy");
     expect(deployScript).toContain("app_server:worker.command.margin.review.prepare");
+    expect(deployScript).toContain("app_server:worker.command.run");
     expect(deployScript).toContain("app_server:worker.view.price_policy");
     expect(deployScript).toContain("scripts/rotate-control-plane-token-on-host.sh");
     expect(deployScript).toContain("scripts/smoke-core-worker-lifecycle-on-host.sh");
@@ -685,7 +690,12 @@ describe("future worker contracts", () => {
     expect(deployWorkflow).toContain("worker:margin.review.prepare");
     expect(deployWorkflow).toContain("worker:view.price_policy");
     expect(deployWorkflow).toContain("app_server:worker.command.margin.review.prepare");
+    expect(deployWorkflow).toContain("app_server:worker.command.run");
     expect(deployWorkflow).toContain("app_server:worker.view.price_policy");
+    expect(deployWorkflow).toContain("APP_SERVER_RUN_KEY");
+    expect(deployWorkflow).toContain("deploy-app-server-worker-run-smoke");
+    expect(deployWorkflow).toContain('tool: "continuous.worker.command"');
+    expect(deployWorkflow).toContain('command: "run"');
     expect(deployWorkflow).toContain("appServerTool");
     expect(deployWorkflow).toContain("missing or unparseable app-server tool response");
     expect(deployWorkflow).toContain("scripts/attest-control-plane-on-host.sh");
