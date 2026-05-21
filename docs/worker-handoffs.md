@@ -91,9 +91,9 @@ remain launch blockers.
 | Owner Chief-of-Staff | `revenue.lead_to_owner_review` approval packet with Revenue source evidence |
 | Dispatch/Ops | implemented: `revenue.quote_to_dispatch` approved quote with blocked adapter receipt produces a dry-run schedule proposal, blocked customer update draft, blocked closeout packet, and blocked exception route task |
 | Finance | implemented: `dispatch.closeout_to_finance` closeout packet with billable line summary produces a dry-run invoice draft; persisted invoice refs produce a blocked AR follow-up draft; and forecast window/account refs produce a blocked cash forecast, cash packet, owner approval request, and blocked money-movement posture |
-| Workforce | implemented: `hire.packet.prepare` produces a workforce packet with restricted-document proof and payroll blockers; `payroll_input.prepare` produces a dry-run payroll-input packet and readiness view while payroll submission and money movement stay blocked |
+| Workforce | implemented: `owner.staffing_need_to_workforce` and direct workforce refs can feed `hire.packet.prepare` for workforce packets with restricted-document proof and payroll blockers; `payroll_input.prepare` produces a dry-run payroll-input packet and readiness view while payroll submission and money movement stay blocked |
 | Compliance | implemented: `workforce.payroll_to_compliance` payroll preview feeds `filing.prepare` through `config.sourceRefs`, producing a filing draft packet, approval view, and blocked submission/legal-advice posture |
-| Systems | implemented: failing connection sync issue produces a dry-run repair plan, rollback packet, permission review evidence, and blocked external execution |
+| Systems | implemented: `core.connection_to_systems_review` can feed connection health scan and repair planning; failing connection sync issues produce dry-run repair plans, rollback packets, permission review evidence, and blocked external execution |
 | Offer and Pricing | `revenue.quote_to_pricing` quote draft with margin, discount, or change-order policy evidence |
 | Customer Experience | `customer.signal_to_experience` customer signal with source evidence and blocked recovery draft |
 | Asset and Supply | `dispatch.asset_need_to_supply` material, asset, or vendor need tied to a work order and cash posture |
