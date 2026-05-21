@@ -725,20 +725,22 @@ jobs:
             (.registry.views | any(.role == "workforce_operations" and .name == "readiness")) and
             (.registry.views | any(.role == "systems_operations" and .name == "health")) and
             (.registry.views | any(.role == "systems_operations" and .name == "repairs")) and
-            (.registry.contracts | map(.role) == ["revenue_operations","owner_chief_of_staff","dispatch_operations","finance_operations","workforce_operations","compliance_operations","systems_operations"]) and
+            (.registry.contracts | map(.role) == ["revenue_operations","owner_chief_of_staff","dispatch_operations","finance_operations","workforce_operations","compliance_operations","systems_operations","offer_pricing_operations"]) and
             (.registry.contracts | all(.apiRoute == "/worker")) and
             (.registry.runtimeContracts | map(.role) == ["revenue_operations","owner_chief_of_staff","dispatch_operations","finance_operations","workforce_operations","compliance_operations","systems_operations"]) and
-            (.registry.plannedContracts == []) and
+            (.registry.plannedContracts | map(.role) == ["offer_pricing_operations"]) and
             (.registry.commands | all(.apiRoute == "/worker")) and
             (.registry.views | all(.apiRoute == "/worker")) and
             (.registry.plannedCommands == .registry.followUpCommands) and
             (.registry.plannedViews == .registry.followUpViews) and
-            (.registry.followUpCommands | length) == 9 and
-            (.registry.followUpViews | length) == 1 and
+            (.registry.followUpCommands | length) == 11 and
+            (.registry.followUpViews | length) == 3 and
             (.registry.commands | any(.role == "compliance_operations" and .name == "filing.prepare" and .idempotency == "required" and .requiresTenant == true and .externalExecution == "blocked" and .configSchema.required == ["filingRequirementId","period"])) and
             (.registry.views | any(.role == "compliance_operations" and .name == "snapshot")) and
             (.registry.views | any(.role == "compliance_operations" and .name == "obligations")) and
             (.registry.views | any(.role == "compliance_operations" and .name == "packet")) and
+            (.registry.followUpCommands | any(.role == "offer_pricing_operations" and .name == "margin.review.prepare" and .apiRoute == "/worker" and .configSchema.required == ["sourceRefs","policy"])) and
+            (.registry.followUpViews | any(.role == "offer_pricing_operations" and .name == "price_policy" and .apiRoute == "/worker")) and
             (.registry.followUpCommands | any(.role == "revenue_operations" and .name == "payment_link.prepare" and .configSchema.properties.sourceRefs.type == "object")) and
             (.registry.followUpCommands | any(.role == "compliance_operations" and .name == "notice.response.prepare")) and
             (.registry.followUpCommands | any(.role == "compliance_operations" and .name == "evidence_binder.export")) and
@@ -774,10 +776,12 @@ jobs:
               .ok == true and
               .tool == "continuous.worker.schema" and
               (.data.registry.runtimeContracts | map(.role) == ["revenue_operations","owner_chief_of_staff","dispatch_operations","finance_operations","workforce_operations","compliance_operations","systems_operations"]) and
-              (.data.registry.plannedContracts == []) and
+              (.data.registry.plannedContracts | map(.role) == ["offer_pricing_operations"]) and
               (.data.registry.commands | any(.role == "compliance_operations" and .name == "filing.prepare" and .externalExecution == "blocked")) and
               (.data.registry.views | any(.role == "compliance_operations" and .name == "obligations")) and
               (.data.registry.views | any(.role == "compliance_operations" and .name == "packet")) and
+              (.data.registry.followUpCommands | any(.role == "offer_pricing_operations" and .name == "margin.review.prepare" and .apiRoute == "/worker")) and
+              (.data.registry.followUpViews | any(.role == "offer_pricing_operations" and .name == "price_policy" and .apiRoute == "/worker")) and
               (.data.registry.expansion | length) >= 12 and
               (.data.registry.expansion | all(.apiRoute == "/worker")) and
               (.data.registry.expansion | any(.key == "offer_pricing_operations" and .firstCommand == "margin.review.prepare" and .incomingHandoff == "revenue.quote_to_pricing")) and
