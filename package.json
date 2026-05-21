@@ -23,6 +23,7 @@
     "ops:non-root-access": "./scripts/install-non-root-access.sh",
     "ops:recovery-drill": "./scripts/recovery-drill.sh",
     "ops:recovery-drill-attest": "./scripts/attest-recovery-drill.sh",
+    "release:image": "./scripts/build-release-images.sh",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "bun src/db/migrate.ts",
     "db:studio": "drizzle-kit studio",
@@ -30,6 +31,9 @@
     "db:version-check": "bun scripts/check-postgres-major.ts",
     "worker:tool": "bun src/worker/run-tool.ts",
     "app-server:help": "codex app-server --help",
+    "app-server:daemon:start": "codex app-server daemon start",
+    "app-server:daemon:version": "codex app-server daemon version",
+    "app-server:proxy": "codex app-server proxy",
     "app-server:worker-tools": "bun src/worker/run-app-server-tool.ts",
     "app-server:generate-ts": "codex app-server generate-ts --out generated/app-server/ts",
     "app-server:generate-json-schema": "codex app-server generate-json-schema --out generated/app-server/schema"

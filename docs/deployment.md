@@ -47,9 +47,9 @@ WORKER_OPERATOR_EMAIL=owner@continuoushq.com HOST=45.55.53.92 ./scripts/deploy.s
 
 The deploy script waits for cloud-init, syncs the repo to `/opt/continuous`,
 creates a remote `.env` with a random Postgres credential, runs migrations, seeds
-bootstrap records, builds the app image, starts the stack, and runs the reusable
-production host smoke for HTTPS health, unauthenticated `/worker`, and Postgres
-17 parity. After DNS is pointed, the default hosts are
+bootstrap records, builds the app image on the host, starts the stack, and runs
+the reusable production host smoke for HTTPS health, unauthenticated `/worker`,
+and Postgres 17 parity. After DNS is pointed, the default hosts are
 `continuoushq.com, getcontinuous.app` and the default app URL is
 `https://continuoushq.com`. `WORKER_OPERATOR_EMAIL` must be a seeded active
 operator; it becomes the explicit local/deploy transport identity for bootstrap
@@ -89,13 +89,21 @@ temporary `/32` SSH source on `continuous-fw`, then removes that rule after the
 deploy job finishes. When `app_url` is omitted, the workflow derives `APP_URL`
 from the first hostname in `site_hosts`, matching `scripts/deploy.sh`; explicit
 `app_url` values must already be HTTPS.
-Each normal deploy tags app images as `sha-<commit>` by default, or the
-provided `app_tag`, and stores the prior app tag as `PREVIOUS_APP_TAG` in the
-remote `.env`.
+Each normal workflow deploy builds the app, migrate, and scheduler images on the
+GitHub runner first, saves them into a checksum-verified release archive, uploads
+that archive to `/opt/continuous/releases/<app_tag>/`, loads it on the droplet,
+and starts Compose with `--no-build`. The droplet no longer compiles mutable
+source during the workflow deploy path. Images are tagged as `sha-<commit>` by
+default, or the provided `app_tag`, and the prior app tag is stored as
+`PREVIOUS_APP_TAG` in the remote `.env`.
 Deploys also derive a control-plane token catalog from the generated bootstrap
 secret in `WORKER_RUN_TOKEN`: production HTTP auth uses the hashed
 `CONTROL_PLANE_TOKEN_CATALOG_B64` entry with explicit route, command, tenant,
-worker-role, operator, and read/write scope. The raw token remains in `.env` so
+worker-role, operator, and read/write scope. The bootstrap catalog includes the
+separate `app_server` route for dynamic-tool bridge calls; those bridge commands
+are scoped as `app_server:worker.command.<name>`,
+`app_server:worker.view.<name>`, or `app_server:worker.schema`, while the bridge
+still delegates actual worker execution to the `/worker` registry. The raw token remains in `.env` so
 deploy smoke, scheduler, rotation, and host recovery can present it as a bearer
 credential; it must not appear inside catalog entries. Production routes refuse
 raw catalog `token` fields and the legacy single-token path if the catalog is
@@ -119,6 +127,11 @@ HOST=45.55.53.92 APP_TAG=sha-previous ./scripts/rollback-app.sh
 ```
 
 CI is separate and runs on pushes to `main`, pull requests, and manual dispatch.
+To build the same release archive locally for inspection, use:
+
+```sh
+bun run release:image
+```
 
 ## Post-Deploy Verification
 
@@ -337,7 +350,7 @@ Control-plane token catalog entries have this shape when provided directly via
     "operatorEmail": "owner@continuoushq.com",
     "allowedTenants": ["continuous-demo"],
     "allowedWorkerRoles": ["revenue_operations", "owner_chief_of_staff", "dispatch_operations", "finance_operations", "workforce_operations", "systems_operations"],
-    "allowedRoutes": ["core", "worker", "workflow", "approval"],
+    "allowedRoutes": ["core", "worker", "workflow", "approval", "app_server"],
     "allowedAccess": ["read", "write"],
     "allowedCommands": [
       "core:view.summary",
@@ -358,6 +371,9 @@ Control-plane token catalog entries have this shape when provided directly via
       "worker:data_quality.remediate",
       "worker:permission.review",
       "worker:automation.plan",
+      "app_server:worker.schema",
+      "app_server:worker.view.snapshot",
+      "app_server:worker.command.lead.read",
       "workflow:view.overview",
       "approval:view.inbox"
     ],
@@ -535,7 +551,7 @@ shape:
       "workforce_operations",
       "systems_operations"
     ],
-    "allowedRoutes": ["core", "worker", "workflow", "approval"],
+    "allowedRoutes": ["core", "worker", "workflow", "approval", "app_server"],
     "allowedAccess": ["read", "write"],
     "allowedCommands": [
       "core:view.summary",
@@ -560,6 +576,9 @@ shape:
       "worker:data_quality.remediate",
       "worker:permission.review",
       "worker:automation.plan",
+      "app_server:worker.schema",
+      "app_server:worker.view.snapshot",
+      "app_server:worker.command.lead.read",
       "workflow:view.overview",
       "workflow:steps.execute",
       "workflow:approval.decide",

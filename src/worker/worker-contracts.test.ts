@@ -104,6 +104,7 @@ describe("future worker contracts", () => {
 
     expect(routeFiles).toEqual([
       "app/api/health/route.ts",
+      "app/app-server/route.ts",
       "app/approval/route.ts",
       "app/core/route.ts",
       "app/health/route.ts",

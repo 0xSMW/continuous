@@ -9,6 +9,7 @@ backups/
 reports/recovery-drills/
 dist/
 generated/app-server/
+release/
 *.log
 logs/
 *.tsbuildinfo

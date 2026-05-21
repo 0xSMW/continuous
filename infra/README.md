@@ -33,6 +33,10 @@ Postgres credential and requires HTTPS `SITE_HOSTS`. The current production host
 are `continuoushq.com, getcontinuous.app`. The deploy workflow also runs
 `scripts/smoke-production-on-host.sh` to verify HTTPS health, closed `/worker`
 auth, and Postgres 17 host parity before the deeper production smoke suite.
+The GitHub deploy workflow builds a release image archive on the runner, uploads
+it to the droplet, verifies its checksum, loads the app/migrate/scheduler images,
+and starts Compose with `--no-build` so production releases do not compile source
+on the host.
 
 ## Backup and restore
 

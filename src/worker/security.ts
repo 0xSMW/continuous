@@ -18,7 +18,7 @@ export type ControlPlaneScope = {
   workerRoles: string[];
 };
 
-export type ControlPlaneRoute = "core" | "worker" | "workflow" | "approval";
+export type ControlPlaneRoute = "core" | "worker" | "workflow" | "approval" | "app_server";
 export type ControlPlaneAccess = "read" | "write";
 
 type ControlPlaneTokenDefinition = {

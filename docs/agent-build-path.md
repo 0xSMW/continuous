@@ -43,6 +43,7 @@ Useful app surfaces for worker development:
 | `POST /approval` | Shared approval decision surface with `command`, explicit `approval.subject`, and `config` payload fields |
 | `POST /worker` with `view`, `worker`, and `config` | Canonical operator-gated worker read surface |
 | `POST /worker` with `command`, `worker`, `config`, and `idempotencyKey` | Canonical worker command surface |
+| `POST /app-server` with `tool`, `arguments`, `callId`, `threadId`, and `turnId` | Authenticated generic dynamic-tool bridge; worker command/view payloads stay under `arguments` and route through the `/worker` registry |
 | `/workflow?view=approvals` | Canonical operator-gated workflow approval queue |
 | `POST /workflow` | Canonical workflow command surface for starts, transitions, queued step execution, and workflow approval decisions |
 | `bun run worker:tool` | Repo-owned JSON worker toolbox for agents and local automation |
@@ -64,7 +65,9 @@ on the same `view`, `worker`, and `config` envelope as `worker.view`. The
 dynamic-call adapter returns Codex-compatible `contentItems` and never accepts
 operator identity in the tool arguments; authenticated bridges pass operator
 identity, access, route-qualified command or view, tenant, and worker-role
-scope through transport context after control-plane auth. The
+scope through transport context after control-plane auth. `POST /app-server`
+accepts only dynamic tool-call fields at the top level, so operation-specific
+worker inputs stay inside `arguments.config`. The
 Revenue Worker now records the
 configured operator, active capability grant, approval request, audit event, and
 evidence before any external action can be approved. The shared approval service

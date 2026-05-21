@@ -2,10 +2,21 @@
 
 ARG BUN_VERSION=1.3.14
 ARG NODE_VERSION=22
+ARG APP_REVISION=unknown
+ARG APP_CREATED=unknown
+ARG APP_SOURCE=https://github.com/0xSMW/continuous
 
 FROM oven/bun:${BUN_VERSION}-debian AS base
+ARG APP_REVISION
+ARG APP_CREATED
+ARG APP_SOURCE
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
+LABEL org.opencontainers.image.title="Continuous" \
+    org.opencontainers.image.description="Open source worker platform core for SMB operating flows." \
+    org.opencontainers.image.source="${APP_SOURCE}" \
+    org.opencontainers.image.revision="${APP_REVISION}" \
+    org.opencontainers.image.created="${APP_CREATED}"
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
@@ -26,11 +37,19 @@ COPY . .
 CMD ["bun", "run", "db:migrate"]
 
 FROM node:${NODE_VERSION}-bookworm-slim AS runner
+ARG APP_REVISION
+ARG APP_CREATED
+ARG APP_SOURCE
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
+LABEL org.opencontainers.image.title="Continuous" \
+    org.opencontainers.image.description="Open source worker platform core for SMB operating flows." \
+    org.opencontainers.image.source="${APP_SOURCE}" \
+    org.opencontainers.image.revision="${APP_REVISION}" \
+    org.opencontainers.image.created="${APP_CREATED}"
 RUN groupadd --system --gid 1001 nodejs \
     && useradd --system --uid 1001 --gid nodejs nextjs \
     && mkdir -p /app \
