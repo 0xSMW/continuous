@@ -69,7 +69,7 @@ before promotion.
 |---|---|
 | Shared graph summary | Cross-domain task, event, budget, obligation, approval, and worker run snapshot |
 | Workflow | Daily brief and decision queue workflows with read-only evidence packets |
-| Capabilities | `brief.generate`, `decision_queue.prepare`, `anomaly.triage`, `continue`, `approval.decide` |
+| Capabilities | `brief.generate`, `decision_queue.prepare`, `anomaly.triage`, `continue`, `approval.decide`; first three run through Core `worker.run.start` / `worker.run.complete` with Owner business proof kept under role-qualified events and audit |
 | Adapters | Read-only email, calendar, accounting, CRM, payment, and job data |
 | Launch gate | No mutation; owner brief factuality and missing-critical-item evals pass |
 

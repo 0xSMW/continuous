@@ -290,6 +290,8 @@ const capIds = {
   paymentDraftPrepare: "10000000-0000-4000-8000-000000000021",
   recoveryDraft: "10000000-0000-4000-8000-000000000022",
   campaignDraft: "10000000-0000-4000-8000-000000000023",
+  decisionQueuePrepare: "10000000-0000-4000-8000-000000000024",
+  anomalyTriage: "10000000-0000-4000-8000-000000000025",
 };
 
 const revenueExcludedCapabilityIds = new Set([
@@ -298,6 +300,8 @@ const revenueExcludedCapabilityIds = new Set([
   capIds.arFollowupDraft,
   capIds.paymentDraftPrepare,
   capIds.campaignDraft,
+  capIds.decisionQueuePrepare,
+  capIds.anomalyTriage,
 ]);
 const revenueCapabilityIds = Object.values(capIds).filter(
   (capabilityId) => !revenueExcludedCapabilityIds.has(capabilityId),
@@ -775,6 +779,28 @@ async function seed() {
         evidence: { required: ["task_rollup", "kpi_snapshot"] },
       },
       {
+        id: capIds.decisionQueuePrepare,
+        key: "decision_queue.prepare",
+        name: "Prepare owner decision queue",
+        class: "recommend",
+        risk: "medium",
+        sideEffect: "internal",
+        description: "Prepare source-backed owner decision proposals without external execution.",
+        rules: { external_execution: "blocked", sensitive_reveal: "approval_required" },
+        evidence: { required: ["task_rollup", "approval_queue", "obligation_snapshot"] },
+      },
+      {
+        id: capIds.anomalyTriage,
+        key: "anomaly.triage",
+        name: "Triage owner anomalies",
+        class: "classify",
+        risk: "medium",
+        sideEffect: "internal",
+        description: "Turn owner-facing metric variance into evidence and internal review work.",
+        rules: { external_execution: "blocked", sensitive_reveal: "approval_required" },
+        evidence: { required: ["metric_snapshot", "source_event_refs", "owner_anomaly_trace"] },
+      },
+      {
         id: capIds.approvalRequest,
         key: "approval.request",
         name: "Request approval",
@@ -931,6 +957,8 @@ async function seed() {
       [
         capIds.workerRead,
         capIds.ownerBriefGenerate,
+        capIds.decisionQueuePrepare,
+        capIds.anomalyTriage,
         capIds.approvalRequest,
         capIds.sensitiveReveal,
       ].map((capabilityId) => ({

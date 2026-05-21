@@ -39,6 +39,8 @@ const ownerSource = "continuous.worker";
 const coreWorkerRunSource = "continuous.core.worker_runs";
 const dailyBriefWorkflowKey = "daily_owner_brief";
 const ownerRunUnits = 4000;
+const ownerDecisionQueueUnits = 1500;
+const ownerAnomalyTriageUnits = 2000;
 const defaultBriefScopes = ["tasks", "approvals", "cash", "capacity", "obligations", "workers"];
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -157,6 +159,8 @@ export type OwnerDecisionQueueResult = {
   eventId: string | null;
   evidenceId: string | null;
   auditEventId: string | null;
+  reservationId: string | null;
+  usageEventId: string | null;
   decisionIds: string[];
   viewIds: string[];
   output: JsonObject;
@@ -170,6 +174,8 @@ export type OwnerAnomalyTriageResult = {
   eventId: string | null;
   evidenceId: string | null;
   auditEventId: string | null;
+  reservationId: string | null;
+  usageEventId: string | null;
   metricObjectIds: string[];
   taskId: string | null;
   viewIds: string[];
@@ -881,17 +887,20 @@ function replayedDecisionQueueResult(
   snapshot: OwnerWorkerSnapshot,
 ): OwnerDecisionQueueResult {
   const data = objectValue(run.data);
+  const output = outputData(data);
 
   return {
     created: false,
     idempotencyKey: run.idempotencyKey,
     workerRunId: run.id,
     eventId: run.eventId,
-    evidenceId: stringValue(data.evidenceId) ?? null,
-    auditEventId: stringValue(data.auditEventId) ?? null,
-    decisionIds: stringList(data.decisionIds),
-    viewIds: stringList(data.viewIds),
-    output: objectValue(data.output),
+    evidenceId: dataString(data, "evidenceId"),
+    auditEventId: dataString(data, "auditEventId"),
+    reservationId: dataString(data, "reservationId"),
+    usageEventId: dataString(data, "usageEventId"),
+    decisionIds: dataStringList(data, "decisionIds"),
+    viewIds: dataStringList(data, "viewIds"),
+    output,
     snapshot,
   };
 }
@@ -901,18 +910,21 @@ function replayedAnomalyResult(
   snapshot: OwnerWorkerSnapshot,
 ): OwnerAnomalyTriageResult {
   const data = objectValue(run.data);
+  const output = outputData(data);
 
   return {
     created: false,
     idempotencyKey: run.idempotencyKey,
     workerRunId: run.id,
     eventId: run.eventId,
-    evidenceId: stringValue(data.evidenceId) ?? null,
-    auditEventId: stringValue(data.auditEventId) ?? null,
-    metricObjectIds: stringList(data.metricObjectIds),
-    taskId: stringValue(data.taskId) ?? null,
-    viewIds: stringList(data.viewIds),
-    output: objectValue(data.output),
+    evidenceId: dataString(data, "evidenceId"),
+    auditEventId: dataString(data, "auditEventId"),
+    reservationId: dataString(data, "reservationId"),
+    usageEventId: dataString(data, "usageEventId"),
+    metricObjectIds: dataStringList(data, "metricObjectIds"),
+    taskId: dataString(data, "taskId"),
+    viewIds: dataStringList(data, "viewIds"),
+    output,
     snapshot,
   };
 }
@@ -2688,28 +2700,109 @@ export async function prepareOwnerDecisionQueue(input: {
             sourceIds: [],
           },
         ];
+  const requestHash = hashJson({
+    schemaVersion: "worker.owner_chief_of_staff.decision_queue_prepare.request.v1",
+    idempotencyKey: input.idempotencyKey,
+    tenantId: context.worker.tenantId,
+    workerId: context.worker.id,
+    operatorUserId: context.operator.userId,
+    config: input.config,
+    window: readModel.window,
+  });
+  const inputHash = hashJson({
+    schemaVersion: "worker.owner_chief_of_staff.decision_queue_prepare.input.v1",
+    requestHash,
+  });
+  const coreRun = await startCoreWorkerRun({
+    operatorEmail: input.operatorEmail,
+    tenantSlug: context.worker.tenantSlug,
+    idempotencyKey: input.idempotencyKey,
+    worker: {
+      id: context.worker.id,
+      role: ownerWorkerRole,
+    },
+    command: "decision_queue.prepare",
+    mode: "decision_queue",
+    capabilityKey: "decision_queue.prepare",
+    budgetAccountId: context.budgetAccount.id,
+    units: ownerDecisionQueueUnits,
+    input: {
+      requestHash,
+      inputHash,
+      config: input.config,
+      window: readModel.window,
+    },
+    policy: {
+      externalExecution: "blocked",
+      externalSend: "blocked",
+      sensitiveReveal: "approval_required",
+    },
+    evidence: {
+      command: "decision_queue.prepare",
+      required: ["task_rollup", "approval_queue", "obligation_snapshot"],
+      externalExecution: "blocked",
+      externalSend: false,
+    },
+    db,
+  });
+  const coreBudget = objectValue(coreRun.budget);
+  const coreReservationId = stringValue(coreBudget.reservationId);
 
   const result = await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${coreWorkerRunSource}:decision_queue.prepare:${input.idempotencyKey}`}))`,
+    );
+
     const [run] = await tx
-      .insert(workerRuns)
-      .values({
-        tenantId: context.worker.tenantId,
-        workerId: context.worker.id,
-        budgetAccountId: context.budgetAccount.id,
-        source: ownerSource,
-        idempotencyKey: input.idempotencyKey,
-        state: "done",
-        mode: "read_only",
-        data: {
-          command: "decision_queue.prepare",
-          externalExecution: "blocked",
-        },
-        startedAt: now,
-        endedAt: now,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning({ id: workerRuns.id });
+      .select()
+      .from(workerRuns)
+      .where(
+        and(
+          eq(workerRuns.tenantId, context.worker.tenantId),
+          eq(workerRuns.id, coreRun.workerRunId),
+        ),
+      )
+      .limit(1);
+
+    if (!run) {
+      throw new PlatformUnavailableError(
+        "worker_run_missing",
+        "Core worker.run.start did not return a persisted Owner decision queue run.",
+        409,
+      );
+    }
+
+    const runData = objectValue(run.data);
+    const existingInput = objectValue(runData.input);
+    const existingRequest = objectValue(existingInput.request);
+    const existingRequestHash = stringValue(existingRequest.requestHash) ?? stringValue(existingInput.requestHash);
+    const existingInputHash = stringValue(existingRequest.inputHash) ?? stringValue(existingInput.inputHash);
+
+    if (
+      stringValue(existingInput.command) !== "decision_queue.prepare" ||
+      run.mode !== "decision_queue" ||
+      (existingRequestHash && existingRequestHash !== requestHash) ||
+      (!existingRequestHash && existingInputHash && existingInputHash !== inputHash)
+    ) {
+      throw new PlatformUnavailableError(
+        "worker_idempotency_conflict",
+        "This idempotency key was already used with different owner decision queue input.",
+        409,
+      );
+    }
+
+    const existingOutput = outputData(runData);
+
+    if (
+      stringValue(existingOutput.command) === "decision_queue.prepare" ||
+      (run.state !== "running" && stringValue(runData.command) === "decision_queue.prepare")
+    ) {
+      return {
+        created: false as const,
+        run,
+      };
+    }
+
     const [event] = await tx
       .insert(events)
       .values({
@@ -2722,6 +2815,7 @@ export async function prepareOwnerDecisionQueue(input: {
         idempotencyKey: `${input.idempotencyKey}:decision_queue_prepared`,
         data: {
           workerRunId: run.id,
+          reservationId: coreReservationId ?? null,
           proposalCount: effectiveProposals.length,
           window: readModel.window,
           externalExecution: "blocked",
@@ -2838,11 +2932,15 @@ export async function prepareOwnerDecisionQueue(input: {
       })
       .returning({ id: auditEvents.id });
     const output = {
+      command: "decision_queue.prepare",
       window: readModel.window,
       proposalCount: effectiveProposals.length,
       proposals: effectiveProposals,
       decisionIds: decisionRows.map((decision) => decision.id),
       evidenceId: proof.id,
+      auditEventId: audit.id,
+      reservationId: coreReservationId ?? null,
+      usageEventId: null,
       viewIds: [view.id],
       externalExecution: "blocked",
       externalSend: false,
@@ -2853,27 +2951,96 @@ export async function prepareOwnerDecisionQueue(input: {
       .set({
         eventId: event.id,
         data: {
+          ...runData,
+          businessEventId: event.id,
+          eventId: event.id,
           command: "decision_queue.prepare",
           output,
           evidenceId: proof.id,
           auditEventId: audit.id,
+          reservationId: coreReservationId ?? null,
+          usageEventId: null,
           decisionIds: decisionRows.map((decision) => decision.id),
           viewIds: [view.id],
+          pendingCompletion: {
+            output,
+          },
           externalExecution: "blocked",
         },
       })
       .where(eq(workerRuns.id, run.id));
 
     return {
+      created: true as const,
       runId: run.id,
       eventId: event.id,
       evidenceId: proof.id,
       auditEventId: audit.id,
+      reservationId: coreReservationId ?? null,
+      usageEventId: null,
       decisionIds: decisionRows.map((decision) => decision.id),
       viewIds: [view.id],
       output,
     };
   });
+
+  if (!result.created) {
+    return replayedDecisionQueueResult(result.run, await getOwnerWorkerSnapshot(db, {
+      role: ownerWorkerRole,
+      tenantSlug: context.worker.tenantSlug,
+      workerId: context.worker.id,
+    }));
+  }
+
+  const completion = await completeCoreWorkerRun({
+    operatorEmail: input.operatorEmail,
+    tenantSlug: context.worker.tenantSlug,
+    idempotencyKey: input.idempotencyKey,
+    worker: {
+      id: context.worker.id,
+      role: ownerWorkerRole,
+    },
+    workerRunId: result.runId,
+    state: "done",
+    reason: "Owner Chief-of-Staff prepared a tenant-scoped decision queue with external execution blocked.",
+    output: result.output,
+    costUsd: 0,
+    evidence: {
+      command: "decision_queue.prepare",
+      eventId: result.eventId,
+      auditEventId: result.auditEventId,
+      evidenceId: result.evidenceId,
+      externalExecution: "blocked",
+      externalSend: false,
+    },
+    db,
+  });
+  const completionBudget = objectValue(completion.budget);
+  const settledReservationId = stringValue(completionBudget.reservationId) ?? result.reservationId;
+  const settledUsageEventId = stringValue(completionBudget.usageEventId) ?? result.usageEventId;
+  const settledOutput = {
+    ...result.output,
+    reservationId: settledReservationId,
+    usageEventId: settledUsageEventId,
+  } satisfies JsonObject;
+  const [completedRun] = await db
+    .select({ data: workerRuns.data })
+    .from(workerRuns)
+    .where(eq(workerRuns.id, result.runId))
+    .limit(1);
+
+  await db
+    .update(workerRuns)
+    .set({
+      data: {
+        ...objectValue(completedRun?.data),
+        output: settledOutput,
+        reservationId: settledReservationId,
+        usageEventId: settledUsageEventId,
+      },
+      updatedAt: new Date(),
+    })
+    .where(eq(workerRuns.id, result.runId));
 
   return {
     created: true,
@@ -2882,9 +3049,11 @@ export async function prepareOwnerDecisionQueue(input: {
     eventId: result.eventId,
     evidenceId: result.evidenceId,
     auditEventId: result.auditEventId,
+    reservationId: settledReservationId,
+    usageEventId: settledUsageEventId,
     decisionIds: result.decisionIds,
     viewIds: result.viewIds,
-    output: result.output,
+    output: settledOutput,
     snapshot: await getOwnerWorkerSnapshot(db, {
       role: ownerWorkerRole,
       tenantSlug: context.worker.tenantSlug,
@@ -2966,28 +3135,111 @@ export async function triageOwnerAnomalies(input: {
   });
   const anomalyMetrics = metrics.filter((metric) => metric.state === "anomaly");
   const now = new Date();
+  const requestHash = hashJson({
+    schemaVersion: "worker.owner_chief_of_staff.anomaly_triage.request.v1",
+    idempotencyKey: input.idempotencyKey,
+    tenantId: context.worker.tenantId,
+    workerId: context.worker.id,
+    operatorUserId: context.operator.userId,
+    config: input.config,
+    window: readModel.window,
+    metricKeys,
+  });
+  const inputHash = hashJson({
+    schemaVersion: "worker.owner_chief_of_staff.anomaly_triage.input.v1",
+    requestHash,
+  });
+  const coreRun = await startCoreWorkerRun({
+    operatorEmail: input.operatorEmail,
+    tenantSlug: context.worker.tenantSlug,
+    idempotencyKey: input.idempotencyKey,
+    worker: {
+      id: context.worker.id,
+      role: ownerWorkerRole,
+    },
+    command: "anomaly.triage",
+    mode: "anomaly_triage",
+    capabilityKey: "anomaly.triage",
+    budgetAccountId: context.budgetAccount.id,
+    units: ownerAnomalyTriageUnits,
+    input: {
+      requestHash,
+      inputHash,
+      config: input.config,
+      window: readModel.window,
+      metricKeys,
+    },
+    policy: {
+      externalExecution: "blocked",
+      externalSend: "blocked",
+      sensitiveReveal: "approval_required",
+    },
+    evidence: {
+      command: "anomaly.triage",
+      required: ["metric_snapshot", "source_event_refs", "owner_anomaly_trace"],
+      externalExecution: "blocked",
+      externalSend: false,
+    },
+    db,
+  });
+  const coreBudget = objectValue(coreRun.budget);
+  const coreReservationId = stringValue(coreBudget.reservationId);
 
   const result = await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${coreWorkerRunSource}:anomaly.triage:${input.idempotencyKey}`}))`,
+    );
+
     const [run] = await tx
-      .insert(workerRuns)
-      .values({
-        tenantId: context.worker.tenantId,
-        workerId: context.worker.id,
-        budgetAccountId: context.budgetAccount.id,
-        source: ownerSource,
-        idempotencyKey: input.idempotencyKey,
-        state: "done",
-        mode: "read_only",
-        data: {
-          command: "anomaly.triage",
-          externalExecution: "blocked",
-        },
-        startedAt: now,
-        endedAt: now,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning({ id: workerRuns.id });
+      .select()
+      .from(workerRuns)
+      .where(
+        and(
+          eq(workerRuns.tenantId, context.worker.tenantId),
+          eq(workerRuns.id, coreRun.workerRunId),
+        ),
+      )
+      .limit(1);
+
+    if (!run) {
+      throw new PlatformUnavailableError(
+        "worker_run_missing",
+        "Core worker.run.start did not return a persisted Owner anomaly triage run.",
+        409,
+      );
+    }
+
+    const runData = objectValue(run.data);
+    const existingInput = objectValue(runData.input);
+    const existingRequest = objectValue(existingInput.request);
+    const existingRequestHash = stringValue(existingRequest.requestHash) ?? stringValue(existingInput.requestHash);
+    const existingInputHash = stringValue(existingRequest.inputHash) ?? stringValue(existingInput.inputHash);
+
+    if (
+      stringValue(existingInput.command) !== "anomaly.triage" ||
+      run.mode !== "anomaly_triage" ||
+      (existingRequestHash && existingRequestHash !== requestHash) ||
+      (!existingRequestHash && existingInputHash && existingInputHash !== inputHash)
+    ) {
+      throw new PlatformUnavailableError(
+        "worker_idempotency_conflict",
+        "This idempotency key was already used with different owner anomaly triage input.",
+        409,
+      );
+    }
+
+    const existingOutput = outputData(runData);
+
+    if (
+      stringValue(existingOutput.command) === "anomaly.triage" ||
+      (run.state !== "running" && stringValue(runData.command) === "anomaly.triage")
+    ) {
+      return {
+        created: false as const,
+        run,
+      };
+    }
+
     const [event] = await tx
       .insert(events)
       .values({
@@ -3000,6 +3252,7 @@ export async function triageOwnerAnomalies(input: {
         idempotencyKey: `${input.idempotencyKey}:anomaly_triaged`,
         data: {
           workerRunId: run.id,
+          reservationId: coreReservationId ?? null,
           metricKeys,
           anomalyCount: anomalyMetrics.length,
           externalExecution: "blocked",
@@ -3176,11 +3429,15 @@ export async function triageOwnerAnomalies(input: {
       })
       .returning({ id: auditEvents.id });
     const output = {
+      command: "anomaly.triage",
       window: readModel.window,
       metrics,
       metricObjectIds: metricRows.map((metric) => metric.id),
       taskId: taskRow?.id ?? null,
       evidenceId: proof.id,
+      auditEventId: audit.id,
+      reservationId: coreReservationId ?? null,
+      usageEventId: null,
       viewIds: [view.id],
       externalExecution: "blocked",
       externalSend: false,
@@ -3192,29 +3449,99 @@ export async function triageOwnerAnomalies(input: {
         eventId: event.id,
         taskId: taskRow?.id,
         data: {
+          ...runData,
+          businessEventId: event.id,
+          eventId: event.id,
           command: "anomaly.triage",
           output,
           evidenceId: proof.id,
           auditEventId: audit.id,
+          reservationId: coreReservationId ?? null,
+          usageEventId: null,
           metricObjectIds: metricRows.map((metric) => metric.id),
           taskId: taskRow?.id ?? null,
           viewIds: [view.id],
+          pendingCompletion: {
+            output,
+          },
           externalExecution: "blocked",
         },
       })
       .where(eq(workerRuns.id, run.id));
 
     return {
+      created: true as const,
       runId: run.id,
       eventId: event.id,
       evidenceId: proof.id,
       auditEventId: audit.id,
+      reservationId: coreReservationId ?? null,
+      usageEventId: null,
       metricObjectIds: metricRows.map((metric) => metric.id),
       taskId: taskRow?.id ?? null,
       viewIds: [view.id],
       output,
     };
   });
+
+  if (!result.created) {
+    return replayedAnomalyResult(result.run, await getOwnerWorkerSnapshot(db, {
+      role: ownerWorkerRole,
+      tenantSlug: context.worker.tenantSlug,
+      workerId: context.worker.id,
+    }));
+  }
+
+  const completion = await completeCoreWorkerRun({
+    operatorEmail: input.operatorEmail,
+    tenantSlug: context.worker.tenantSlug,
+    idempotencyKey: input.idempotencyKey,
+    worker: {
+      id: context.worker.id,
+      role: ownerWorkerRole,
+    },
+    workerRunId: result.runId,
+    state: "done",
+    reason: "Owner Chief-of-Staff triaged tenant-scoped anomalies with external execution blocked.",
+    output: result.output,
+    costUsd: 0,
+    evidence: {
+      command: "anomaly.triage",
+      eventId: result.eventId,
+      auditEventId: result.auditEventId,
+      evidenceId: result.evidenceId,
+      taskId: result.taskId,
+      externalExecution: "blocked",
+      externalSend: false,
+    },
+    db,
+  });
+  const completionBudget = objectValue(completion.budget);
+  const settledReservationId = stringValue(completionBudget.reservationId) ?? result.reservationId;
+  const settledUsageEventId = stringValue(completionBudget.usageEventId) ?? result.usageEventId;
+  const settledOutput = {
+    ...result.output,
+    reservationId: settledReservationId,
+    usageEventId: settledUsageEventId,
+  } satisfies JsonObject;
+  const [completedRun] = await db
+    .select({ data: workerRuns.data })
+    .from(workerRuns)
+    .where(eq(workerRuns.id, result.runId))
+    .limit(1);
+
+  await db
+    .update(workerRuns)
+    .set({
+      data: {
+        ...objectValue(completedRun?.data),
+        output: settledOutput,
+        reservationId: settledReservationId,
+        usageEventId: settledUsageEventId,
+      },
+      updatedAt: new Date(),
+    })
+    .where(eq(workerRuns.id, result.runId));
 
   return {
     created: true,
@@ -3223,10 +3550,12 @@ export async function triageOwnerAnomalies(input: {
     eventId: result.eventId,
     evidenceId: result.evidenceId,
     auditEventId: result.auditEventId,
+    reservationId: settledReservationId,
+    usageEventId: settledUsageEventId,
     metricObjectIds: result.metricObjectIds,
     taskId: result.taskId,
     viewIds: result.viewIds,
-    output: result.output,
+    output: settledOutput,
     snapshot: await getOwnerWorkerSnapshot(db, {
       role: ownerWorkerRole,
       tenantSlug: context.worker.tenantSlug,

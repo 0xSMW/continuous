@@ -1677,6 +1677,93 @@ jobs:
             '.error == null and .data.command == "brief.generate" and .data.result.created == true and (.data.result.workerRunId | length > 0) and (.data.result.objectId | length > 0) and (.data.result.packetId | length > 0) and (.data.result.workflowStepIds | length) == 3 and (.data.result.decisionIds | length) >= 1 and (.data.result.viewIds | length) == 3 and .data.result.output.externalExecution == "blocked" and .data.result.output.externalSend == false and .data.result.snapshot.controls.externalExecution == "disabled"' \
             >/dev/null
 
+          OWNER_DECISION_PAYLOAD="$(
+            /usr/bin/jq -nc --arg key "deploy-owner-decision-$RUN_ID" '{
+              command: "decision_queue.prepare",
+              worker: {role: "owner_chief_of_staff", tenantSlug: "continuous-demo"},
+              idempotencyKey: $key,
+              config: {
+                window: {
+                  from: "2026-05-19T00:00:00.000Z",
+                  to: "2026-05-20T00:00:00.000Z"
+                }
+              }
+            }'
+          )"
+          OWNER_DECISION_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/worker \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$OWNER_DECISION_PAYLOAD"
+          )"
+
+          echo "$OWNER_DECISION_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,workerRunId:.data.result.workerRunId,decisionCount:(.data.result.decisionIds | length),viewCount:(.data.result.viewIds | length),reservationId:.data.result.reservationId,usageEventId:.data.result.usageEventId,externalExecution:.data.result.output.externalExecution,externalSend:.data.result.output.externalSend}}'
+          echo "$OWNER_DECISION_RESPONSE" | /usr/bin/jq -e \
+            '.error == null and .data.command == "decision_queue.prepare" and .data.result.created == true and (.data.result.workerRunId | length > 0) and (.data.result.decisionIds | length) >= 1 and (.data.result.viewIds | length) == 1 and (.data.result.reservationId | length > 0) and (.data.result.usageEventId | length > 0) and .data.result.output.externalExecution == "blocked" and .data.result.output.externalSend == false' \
+            >/dev/null
+
+          OWNER_DECISION_RUN_ID="$(echo "$OWNER_DECISION_RESPONSE" | /usr/bin/jq -r '.data.result.workerRunId')"
+          OWNER_DECISION_USAGE_ID="$(echo "$OWNER_DECISION_RESPONSE" | /usr/bin/jq -r '.data.result.usageEventId')"
+          OWNER_DECISION_RUN_ROW="$(
+            psql_db -Atc "select coalesce(source,'') || '|' || coalesce(state::text,'') || '|' || coalesce(mode,'') || '|' || coalesce(data->'input'->>'command','') || '|' || coalesce(data->'completion'->'budget'->>'state','') || '|' || coalesce(data->'completion'->'budget'->>'usageEventId','') from worker_runs where id = '$OWNER_DECISION_RUN_ID'::uuid;"
+          )"
+          if [ "$OWNER_DECISION_RUN_ROW" != "continuous.core.worker_runs|done|decision_queue|decision_queue.prepare|used|$OWNER_DECISION_USAGE_ID" ]; then
+            echo "Unexpected Owner decision queue Core worker run row: $OWNER_DECISION_RUN_ROW" >&2
+            exit 1
+          fi
+          OWNER_DECISION_LOCAL_RUN_COUNT="$(
+            psql_db -Atc "select count(*) from worker_runs where source = 'continuous.worker' and idempotency_key = 'deploy-owner-decision-$RUN_ID';"
+          )"
+          if [ "$OWNER_DECISION_LOCAL_RUN_COUNT" != "0" ]; then
+            echo "Owner decision queue smoke wrote a local continuous.worker run: $OWNER_DECISION_LOCAL_RUN_COUNT" >&2
+            exit 1
+          fi
+
+          OWNER_ANOMALY_PAYLOAD="$(
+            /usr/bin/jq -nc --arg key "deploy-owner-anomaly-$RUN_ID" '{
+              command: "anomaly.triage",
+              worker: {role: "owner_chief_of_staff", tenantSlug: "continuous-demo"},
+              idempotencyKey: $key,
+              config: {
+                window: {
+                  from: "2026-05-19T00:00:00.000Z",
+                  to: "2026-05-20T00:00:00.000Z"
+                },
+                metricKeys: ["pending_approvals", "high_priority_tasks", "open_obligations"]
+              }
+            }'
+          )"
+          OWNER_ANOMALY_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/worker \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$OWNER_ANOMALY_PAYLOAD"
+          )"
+
+          echo "$OWNER_ANOMALY_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,workerRunId:.data.result.workerRunId,metricCount:(.data.result.metricObjectIds | length),viewCount:(.data.result.viewIds | length),reservationId:.data.result.reservationId,usageEventId:.data.result.usageEventId,externalExecution:.data.result.output.externalExecution,externalSend:.data.result.output.externalSend}}'
+          echo "$OWNER_ANOMALY_RESPONSE" | /usr/bin/jq -e \
+            '.error == null and .data.command == "anomaly.triage" and .data.result.created == true and (.data.result.workerRunId | length > 0) and (.data.result.metricObjectIds | length) == 3 and (.data.result.viewIds | length) == 1 and (.data.result.reservationId | length > 0) and (.data.result.usageEventId | length > 0) and .data.result.output.externalExecution == "blocked" and .data.result.output.externalSend == false' \
+            >/dev/null
+
+          OWNER_ANOMALY_RUN_ID="$(echo "$OWNER_ANOMALY_RESPONSE" | /usr/bin/jq -r '.data.result.workerRunId')"
+          OWNER_ANOMALY_USAGE_ID="$(echo "$OWNER_ANOMALY_RESPONSE" | /usr/bin/jq -r '.data.result.usageEventId')"
+          OWNER_ANOMALY_RUN_ROW="$(
+            psql_db -Atc "select coalesce(source,'') || '|' || coalesce(state::text,'') || '|' || coalesce(mode,'') || '|' || coalesce(data->'input'->>'command','') || '|' || coalesce(data->'completion'->'budget'->>'state','') || '|' || coalesce(data->'completion'->'budget'->>'usageEventId','') from worker_runs where id = '$OWNER_ANOMALY_RUN_ID'::uuid;"
+          )"
+          if [ "$OWNER_ANOMALY_RUN_ROW" != "continuous.core.worker_runs|done|anomaly_triage|anomaly.triage|used|$OWNER_ANOMALY_USAGE_ID" ]; then
+            echo "Unexpected Owner anomaly Core worker run row: $OWNER_ANOMALY_RUN_ROW" >&2
+            exit 1
+          fi
+          OWNER_ANOMALY_LOCAL_RUN_COUNT="$(
+            psql_db -Atc "select count(*) from worker_runs where source = 'continuous.worker' and idempotency_key = 'deploy-owner-anomaly-$RUN_ID';"
+          )"
+          if [ "$OWNER_ANOMALY_LOCAL_RUN_COUNT" != "0" ]; then
+            echo "Owner anomaly smoke wrote a local continuous.worker run: $OWNER_ANOMALY_LOCAL_RUN_COUNT" >&2
+            exit 1
+          fi
+
           ADAPTER_RECONCILE_PAYLOAD="$(
             /usr/bin/jq -nc --arg key "deploy-adapters-reconcile-$RUN_ID" '{
               command: "adapters.reconcile",

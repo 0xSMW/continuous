@@ -9959,6 +9959,176 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(replayResult.created).toBe(false);
     expect(replayResult.workerRunId).toBe(ownerResult.workerRunId);
     expect(replayResult.usageEventId).toBe(ownerResult.usageEventId);
+
+    const decisionQueue = await executeAppServerWorkerTool("continuous.worker.command", {
+      command: "decision_queue.prepare",
+      worker: {
+        role: "owner_chief_of_staff",
+        tenantSlug: "continuous-demo",
+      },
+      idempotencyKey: `ci-owner-decision-queue-${runId}`,
+      config: {
+        window: {
+          from: "2026-05-19T00:00:00.000Z",
+          to: "2026-05-20T00:00:00.000Z",
+        },
+      },
+    });
+    const decisionEnvelope = objectValue(decisionQueue);
+    const decisionResult = decisionEnvelope.result as Awaited<
+      ReturnType<typeof import("./owner").prepareOwnerDecisionQueue>
+    >;
+    const [decisionRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(eq(workerRuns.id, decisionResult.workerRunId ?? ""))
+      .limit(1);
+    const [decisionLocalRun] = await db
+      .select({ id: workerRuns.id })
+      .from(workerRuns)
+      .where(
+        and(
+          eq(workerRuns.source, "continuous.worker"),
+          eq(workerRuns.idempotencyKey, `ci-owner-decision-queue-${runId}`),
+        ),
+      )
+      .limit(1);
+    const [decisionReservation] = await db
+      .select()
+      .from(budgetReservations)
+      .where(eq(budgetReservations.id, decisionResult.reservationId ?? ""))
+      .limit(1);
+    const [decisionUsage] = await db
+      .select()
+      .from(usageEvents)
+      .where(eq(usageEvents.id, decisionResult.usageEventId ?? ""))
+      .limit(1);
+    const decisionRunData = objectValue(decisionRun?.data);
+    const decisionCompletion = objectValue(decisionRunData.completion);
+    const decisionBudget = objectValue(decisionCompletion.budget);
+
+    expect(objectValue(decisionEnvelope.worker).role).toBe("owner_chief_of_staff");
+    expect(decisionEnvelope.command).toBe("decision_queue.prepare");
+    expect(decisionResult.created).toBe(true);
+    expect(decisionRun?.source).toBe("continuous.core.worker_runs");
+    expect(decisionRun?.state).toBe("done");
+    expect(decisionRun?.mode).toBe("decision_queue");
+    expect(objectValue(decisionRunData.input).command).toBe("decision_queue.prepare");
+    expect(objectValue(decisionRunData.output).command).toBe("decision_queue.prepare");
+    expect(decisionBudget.state).toBe("used");
+    expect(decisionBudget.reservationId).toBe(decisionResult.reservationId);
+    expect(decisionBudget.usageEventId).toBe(decisionResult.usageEventId);
+    expect(decisionReservation?.state).toBe("used");
+    expect(decisionUsage?.actorId).toBe(ownerWorker?.id);
+    expect(decisionLocalRun).toBeUndefined();
+
+    const decisionReplay = await executeWorkerCommand({
+      command: "decision_queue.prepare",
+      target: {
+        role: "owner_chief_of_staff",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: `ci-owner-decision-queue-${runId}`,
+      config: {
+        window: {
+          from: "2026-05-19T00:00:00.000Z",
+          to: "2026-05-20T00:00:00.000Z",
+        },
+      },
+    });
+    const decisionReplayResult = decisionReplay.result as Awaited<
+      ReturnType<typeof import("./owner").prepareOwnerDecisionQueue>
+    >;
+
+    expect(decisionReplayResult.created).toBe(false);
+    expect(decisionReplayResult.workerRunId).toBe(decisionResult.workerRunId);
+    expect(decisionReplayResult.usageEventId).toBe(decisionResult.usageEventId);
+
+    const anomaly = await executeAppServerWorkerTool("continuous.worker.command", {
+      command: "anomaly.triage",
+      worker: {
+        role: "owner_chief_of_staff",
+        tenantSlug: "continuous-demo",
+      },
+      idempotencyKey: `ci-owner-anomaly-triage-${runId}`,
+      config: {
+        window: {
+          from: "2026-05-19T00:00:00.000Z",
+          to: "2026-05-20T00:00:00.000Z",
+        },
+        metricKeys: ["pending_approvals", "high_priority_tasks", "open_obligations"],
+      },
+    });
+    const anomalyEnvelope = objectValue(anomaly);
+    const anomalyResult = anomalyEnvelope.result as Awaited<ReturnType<typeof import("./owner").triageOwnerAnomalies>>;
+    const [anomalyRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(eq(workerRuns.id, anomalyResult.workerRunId ?? ""))
+      .limit(1);
+    const [anomalyLocalRun] = await db
+      .select({ id: workerRuns.id })
+      .from(workerRuns)
+      .where(
+        and(
+          eq(workerRuns.source, "continuous.worker"),
+          eq(workerRuns.idempotencyKey, `ci-owner-anomaly-triage-${runId}`),
+        ),
+      )
+      .limit(1);
+    const [anomalyReservation] = await db
+      .select()
+      .from(budgetReservations)
+      .where(eq(budgetReservations.id, anomalyResult.reservationId ?? ""))
+      .limit(1);
+    const [anomalyUsage] = await db
+      .select()
+      .from(usageEvents)
+      .where(eq(usageEvents.id, anomalyResult.usageEventId ?? ""))
+      .limit(1);
+    const anomalyRunData = objectValue(anomalyRun?.data);
+    const anomalyCompletion = objectValue(anomalyRunData.completion);
+    const anomalyBudget = objectValue(anomalyCompletion.budget);
+
+    expect(objectValue(anomalyEnvelope.worker).role).toBe("owner_chief_of_staff");
+    expect(anomalyEnvelope.command).toBe("anomaly.triage");
+    expect(anomalyResult.created).toBe(true);
+    expect(anomalyRun?.source).toBe("continuous.core.worker_runs");
+    expect(anomalyRun?.state).toBe("done");
+    expect(anomalyRun?.mode).toBe("anomaly_triage");
+    expect(objectValue(anomalyRunData.input).command).toBe("anomaly.triage");
+    expect(objectValue(anomalyRunData.output).command).toBe("anomaly.triage");
+    expect(anomalyBudget.state).toBe("used");
+    expect(anomalyBudget.reservationId).toBe(anomalyResult.reservationId);
+    expect(anomalyBudget.usageEventId).toBe(anomalyResult.usageEventId);
+    expect(anomalyReservation?.state).toBe("used");
+    expect(anomalyUsage?.actorId).toBe(ownerWorker?.id);
+    expect(anomalyLocalRun).toBeUndefined();
+
+    const anomalyReplay = await executeWorkerCommand({
+      command: "anomaly.triage",
+      target: {
+        role: "owner_chief_of_staff",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: `ci-owner-anomaly-triage-${runId}`,
+      config: {
+        window: {
+          from: "2026-05-19T00:00:00.000Z",
+          to: "2026-05-20T00:00:00.000Z",
+        },
+        metricKeys: ["pending_approvals", "high_priority_tasks", "open_obligations"],
+      },
+    });
+    const anomalyReplayResult = anomalyReplay.result as Awaited<
+      ReturnType<typeof import("./owner").triageOwnerAnomalies>
+    >;
+
+    expect(anomalyReplayResult.created).toBe(false);
+    expect(anomalyReplayResult.workerRunId).toBe(anomalyResult.workerRunId);
+    expect(anomalyReplayResult.usageEventId).toBe(anomalyResult.usageEventId);
   }, 120_000);
 
   it("continues Owner Chief-of-Staff approval outcomes through the worker command spine", async () => {

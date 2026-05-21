@@ -59,9 +59,9 @@ Approval continuations use the same payload shape:
 |---|---|---|---|---|---|
 | `view: "snapshot"` payload | `worker.view` | `worker.role`, `config` | None | Read-only | Blocked |
 | `view: "briefs"` payload | `worker.view` | `worker.role`, optional `config.state`, `config.from`, `config.to` | None | Read-only | Blocked |
-| `brief.generate` | `worker.command` | `config.window`, `config.scopes[]` | Required | Evidence, document, decision drafts, view publish | Blocked |
-| `decision_queue.prepare` | `worker.command` | `config.window`, optional `config.priorityFloor` | Required | Internal task and decision proposals | Blocked |
-| `anomaly.triage` | `worker.command` | `config.window`, `config.metricKeys[]` | Required | Internal anomaly evidence and tasks | Blocked |
+| `brief.generate` | `worker.command` | `config.window`, `config.scopes[]` | Required | Core worker-run lifecycle, budget settlement, evidence, document, decision drafts, view publish | Blocked |
+| `decision_queue.prepare` | `worker.command` | `config.window`, optional `config.priorityFloor` | Required | Core worker-run lifecycle, budget settlement, internal decision proposals, decision queue view | Blocked |
+| `anomaly.triage` | `worker.command` | `config.window`, `config.metricKeys[]` | Required | Core worker-run lifecycle, budget settlement, metric evidence, internal review task, anomaly view | Blocked |
 | `approval.decide` | `worker.command` | `config.approvalId`, `config.action`, optional `config.note` | Required | Approval/task/workflow evidence only | Blocked |
 | `continue` | `worker.command` | `config.approvalId` | Required | Publish, revise, or stale an owner brief from a decided approval | Blocked |
 
@@ -78,6 +78,13 @@ Approval continuations use the same payload shape:
 
 Every object write must version through `object_versions`; every generated brief
 must include immutable source ids for the records summarized.
+
+`brief.generate`, `decision_queue.prepare`, and `anomaly.triage` all enter
+through `/worker`, but their canonical run rows are owned by Core
+`worker.run.start` and `worker.run.complete` with
+`source = continuous.core.worker_runs`. Owner-specific events, evidence, audit,
+objects, decisions, and generated views stay role-qualified business proof under
+the Owner worker.
 
 ## Workflow
 
@@ -96,6 +103,8 @@ approval decisions, and idempotent replay by `idempotencyKey`.
 |---|---:|---|---|---|---|
 | `worker.read` | 1 | Worker | Tenant-scoped worker, task, event, evidence, budget, approval reads | No | Blocked |
 | `owner_brief.generate` | 1 | Worker | Configured window and scopes | No unless sensitive reveal | Blocked |
+| `decision_queue.prepare` | 1 | Worker | Tenant-scoped tasks, approvals, obligations, evidence, and decision proposals | Yes for route changes | Blocked |
+| `anomaly.triage` | 1 | Worker | Tenant-scoped KPI, budget, task, obligation, and event evidence | Yes before routing to another worker | Blocked |
 | `approval.request` | 2 | Worker | Owner decisions and route proposals | Yes for route changes | Blocked |
 | `sensitive_data.reveal` | 1 | Worker | Redacted fields only unless explicitly approved | Yes | Blocked |
 
