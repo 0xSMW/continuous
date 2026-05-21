@@ -60,6 +60,47 @@ function jsonObject(value: unknown): JsonObject {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonObject) : {};
 }
 
+function publicWorkflowStepError(error: unknown): JsonObject {
+  const data = jsonObject(error);
+
+  return {
+    ...data,
+    code:
+      typeof data.code === "string" && data.code.trim()
+        ? data.code
+        : "workflow_step_execution_failed",
+    message: "Workflow step execution failed.",
+  };
+}
+
+function publicWorkflowStepExecutionResult(result: unknown) {
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    return result;
+  }
+
+  const execution = result as Record<string, unknown>;
+  const results = Array.isArray(execution.results)
+    ? execution.results.map((item) => {
+        if (!item || typeof item !== "object" || Array.isArray(item)) {
+          return item;
+        }
+
+        const step = item as Record<string, unknown>;
+        return step.error
+          ? {
+              ...step,
+              error: publicWorkflowStepError(step.error),
+            }
+          : step;
+      })
+    : execution.results;
+
+  return {
+    ...execution,
+    results,
+  };
+}
+
 function optionalBoundedInteger(
   value: unknown,
   field: string,
@@ -140,7 +181,7 @@ function workflowErrorResponse(error: unknown, fallbackCode: string) {
       ? {
           status: error.status,
           code: error.code,
-          message: error.message,
+          message: error.status >= 500 ? "Workflow command failed." : error.message,
         }
       : structuredError &&
           typeof structuredError.status === "number" &&
@@ -149,14 +190,16 @@ function workflowErrorResponse(error: unknown, fallbackCode: string) {
             status: structuredError.status,
             code: structuredError.code,
             message:
-              typeof structuredError.message === "string"
+              structuredError.status >= 500
+                ? "Workflow command failed."
+                : typeof structuredError.message === "string"
                 ? structuredError.message
                 : "Workflow command failed.",
           }
       : {
           status: 500,
           code: fallbackCode,
-          message: error instanceof Error ? error.message : "Unknown workflow error.",
+          message: "Workflow command failed.",
         };
 
   return errorResponse(
@@ -616,7 +659,7 @@ export async function POST(request: Request) {
             workflow: {
               tenantSlug: tenantSlug ?? null,
             },
-            result,
+            result: publicWorkflowStepExecutionResult(result),
           },
           error: null,
         },

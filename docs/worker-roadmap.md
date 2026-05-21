@@ -31,6 +31,7 @@ work from one worker family to the next.
 |---|---|
 | Lead source intake | `lead.read` persists website-form, authenticated-inbox, and CRM-style source records as Core object/event/evidence rows and returns stable selectors for `run` |
 | Lead-to-cash simulation | Run creates task, worker run, workflow run/steps, budget reservation, inference, usage, adapter dry-run, approval, audit, evidence, object version |
+| Workflow worker command drain | Queued `worker_command` steps invoke registered `/worker` commands from workflow data, inherit the workflow tenant, reject cross-tenant targets, and record command output on the step/run/task ledger |
 | Approval execution | Approval decision uses shared approval service, advances the allowed workflow state, and approved continuation can record controlled-send receipts from `config.execution` without changing the `/worker` envelope |
 | Adapter hardening | Reconciliation writes audit/evidence records and retry/review system tasks; due dry-run retries execute with blocked receipts, live-credential readiness checks, and rollback plans; production provider execution remains gated |
 | Payment-link preparation | `payment_link.prepare` writes a blocked payment packet, payment instruction when possible, owner approval, generated review view, dry-run adapter receipt, workflow, budget, and audit proof from persisted invoice refs |

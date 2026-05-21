@@ -636,6 +636,61 @@ describe("/workflow route scope", () => {
     });
   });
 
+  it("sanitizes workflow step execution errors in command responses", async () => {
+    mocks.env.CONTROL_PLANE_ALLOWED_TENANTS = "continuous-demo";
+    mocks.executeWorkflowSteps.mockResolvedValue({
+      processed: 1,
+      completed: 0,
+      failed: 1,
+      skipped: 0,
+      results: [
+        {
+          stepId: "step-1",
+          state: "failed",
+          attempt: 1,
+          handler: "worker_command",
+          error: {
+            code: "workflow_step_execution_failed",
+            message: "postgres://workflow-secret/provider-token",
+            retryable: false,
+          },
+        },
+      ],
+    });
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/workflow", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "steps.execute",
+          workflow: {
+            tenantSlug: "continuous-demo",
+          },
+          config: {
+            limit: 1,
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.result.results[0].error).toEqual(
+      expect.objectContaining({
+        code: "workflow_step_execution_failed",
+        message: "Workflow step execution failed.",
+        retryable: false,
+      }),
+    );
+    expect(JSON.stringify(body)).not.toContain("workflow-secret");
+    expect(JSON.stringify(body)).not.toContain("provider-token");
+  });
+
   it("rejects ad hoc top-level workflow command fields", async () => {
     mocks.env.CONTROL_PLANE_ALLOWED_TENANTS = "continuous-demo";
 
@@ -839,13 +894,13 @@ describe("/workflow route scope", () => {
     await expect(overview.json()).resolves.toMatchObject({
       error: {
         code: "workflow_overview_unavailable",
-        message: "Workflow overview is unavailable.",
+        message: "Workflow command failed.",
       },
     });
     await expect(approvals.json()).resolves.toMatchObject({
       error: {
         code: "worker_unavailable",
-        message: "Workflow approvals are unavailable.",
+        message: "Workflow command failed.",
       },
     });
     await expect(start.json()).resolves.toMatchObject({
@@ -887,5 +942,27 @@ describe("/workflow route scope", () => {
       note: undefined,
       subject: "workflow",
     });
+  });
+
+  it("sanitizes unexpected workflow failures", async () => {
+    mocks.env.CONTROL_PLANE_ALLOWED_TENANTS = "continuous-demo";
+    mocks.listWorkflows.mockRejectedValue(new Error("workflow secret dsn postgres://internal"));
+
+    const { GET } = await import("./route");
+    const response = await GET(
+      new Request("http://localhost/workflow?view=overview&tenantSlug=continuous-demo", {
+        headers: {
+          authorization: "Bearer test-token",
+        },
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(body.error).toEqual({
+      code: "workflow_list_failed",
+      message: "Workflow command failed.",
+    });
+    expect(JSON.stringify(body)).not.toContain("postgres://internal");
   });
 });

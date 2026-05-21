@@ -14,9 +14,11 @@ import {
   workflowDefinitions,
   workflowRuns,
   workflowSteps,
+  type Json,
   type JsonObject,
 } from "../db/schema";
 import { RevenueWorkerUnavailableError } from "../worker/revenue";
+import { executeWorkerCommand, type WorkerCommandResult } from "../worker/registry";
 import { PlatformUnavailableError } from "./errors";
 import { loadOperatorContext } from "./operators";
 import {
@@ -328,6 +330,7 @@ type WorkflowRisk = "low" | "medium" | "high" | "critical";
 const executableWorkflowStepKinds = new Set([
   "transition",
   "workflow_transition",
+  "worker_command",
   "worker_transition",
   "capability_execution",
   "approval_request",
@@ -392,6 +395,65 @@ function riskValue(value: unknown, fallback: WorkflowRisk): WorkflowRisk {
   return risk === "low" || risk === "medium" || risk === "high" || risk === "critical"
     ? risk
     : fallback;
+}
+
+function workflowWorkerCommandInput(
+  step: typeof workflowSteps.$inferSelect,
+  operator: Awaited<ReturnType<typeof loadOperatorContext>>,
+) {
+  const commandInput = jsonObject(step.input.workerCommand ?? step.input);
+  const workerInput = jsonObject(commandInput.worker ?? commandInput.target);
+  const command = stringValue(commandInput.command);
+  const role = stringValue(workerInput.role);
+
+  if (!command) {
+    throw new RevenueWorkerUnavailableError(
+      "workflow_worker_command_missing",
+      "Workflow worker_command steps require input.command.",
+      400,
+    );
+  }
+
+  if (!role) {
+    throw new RevenueWorkerUnavailableError(
+      "workflow_worker_role_missing",
+      "Workflow worker_command steps require input.worker.role.",
+      400,
+    );
+  }
+
+  const tenantSlug = stringValue(workerInput.tenantSlug);
+
+  if (tenantSlug && tenantSlug !== operator.tenantSlug) {
+    throw new RevenueWorkerUnavailableError(
+      "workflow_worker_tenant_mismatch",
+      "Workflow worker_command steps cannot target a different tenant.",
+      403,
+    );
+  }
+
+  return {
+    command,
+    target: {
+      role,
+      id: stringValue(workerInput.id) ?? step.workerId ?? undefined,
+      tenantSlug: operator.tenantSlug,
+    },
+    idempotencyKey: stringValue(commandInput.idempotencyKey) ?? `${step.id}:worker_command`,
+    config: jsonObject(commandInput.config),
+  };
+}
+
+function jsonValue(value: unknown): Json {
+  try {
+    return JSON.parse(JSON.stringify(value ?? null)) as Json;
+  } catch {
+    throw new RevenueWorkerUnavailableError(
+      "workflow_worker_result_invalid",
+      "Workflow worker_command results must be JSON-serializable.",
+      500,
+    );
+  }
 }
 
 function errorData(error: unknown, attempt: number, maxAttempts: number): JsonObject {
@@ -788,6 +850,8 @@ async function completeWorkflowStep(input: {
       null;
     let ruleChangeRecord: Awaited<ReturnType<typeof recordRuleChangeForOperator>> | null =
       null;
+    let workerCommand: WorkerCommandResult | null = null;
+    let workerCommandData: JsonObject | null = null;
 
     if (step.kind === "adapter_intent_record") {
       const adapterInput = jsonObject(step.input.adapterIntent ?? step.input.adapter ?? {});
@@ -1241,6 +1305,71 @@ async function completeWorkflowStep(input: {
       }
     }
 
+    if (step.kind === "worker_command") {
+      const workerCommandInput = workflowWorkerCommandInput(step, input.operator);
+
+      workerCommand = await executeWorkerCommand({
+        command: workerCommandInput.command,
+        target: workerCommandInput.target,
+        operatorEmail: input.operator.email,
+        idempotencyKey: workerCommandInput.idempotencyKey,
+        config: workerCommandInput.config,
+      });
+
+      workerCommandData = {
+        worker: jsonValue(workerCommand.worker),
+        command: workerCommand.command,
+        result: jsonValue(workerCommand.result),
+        workflowRunId: run.id,
+        workflowStepId: step.id,
+        workflowKey: definition.key,
+        idempotencyKey: workerCommandInput.idempotencyKey,
+        executedAt: input.now.toISOString(),
+        externalExecution: "registry_controlled",
+      };
+
+      await tx
+        .update(workflowRuns)
+        .set({
+          data: {
+            ...run.data,
+            lastExecutedStep: {
+              ...lastExecutedStep,
+              workerCommand: workerCommandData,
+            },
+            lastWorkflowWorkerCommand: workerCommandData,
+          },
+          updatedAt: input.now,
+        })
+        .where(eq(workflowRuns.id, run.id));
+
+      if (step.taskId) {
+        const workerCommandTask =
+          task?.id === step.taskId
+            ? task
+            : (
+                await tx
+                  .select()
+                  .from(tasks)
+                  .where(and(eq(tasks.tenantId, input.operator.tenantId), eq(tasks.id, step.taskId)))
+                  .limit(1)
+              )[0] ?? null;
+
+        if (workerCommandTask) {
+          await tx
+            .update(tasks)
+            .set({
+              outcome: {
+                ...workerCommandTask.outcome,
+                lastWorkflowWorkerCommand: workerCommandData,
+              },
+              updatedAt: input.now,
+            })
+            .where(and(eq(tasks.tenantId, input.operator.tenantId), eq(tasks.id, workerCommandTask.id)));
+        }
+      }
+    }
+
     const output = {
       ...step.output,
       ...executionData,
@@ -1276,6 +1405,14 @@ async function completeWorkflowStep(input: {
             packetPreparation: {
               ...packetPreparation,
               externalExecution: "blocked",
+            },
+          }
+        : {}),
+      ...(workerCommandData
+        ? {
+            workerCommand: {
+              ...workerCommandData,
+              externalExecution: "registry_controlled",
             },
           }
         : {}),

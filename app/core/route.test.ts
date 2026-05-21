@@ -257,6 +257,49 @@ describe("POST /core", () => {
     });
   });
 
+  it("sanitizes Core summary errors", async () => {
+    mocks.getCoreSummarySafe.mockResolvedValue({
+      ok: false,
+      error: "postgres://core-summary-secret/provider-token",
+      summary: {
+        counts: {
+          tasks: 0,
+        },
+        activeTasks: [],
+        recentEvents: [],
+      },
+    });
+    mocks.getHealth.mockReturnValue({
+      status: "degraded",
+      checks: {
+        db: "error",
+      },
+      dbError: "Core summary is unavailable.",
+    });
+
+    const { GET } = await import("./route");
+    const response = await GET(
+      new Request("http://localhost/core?tenantSlug=continuous-demo", {
+        headers: {
+          authorization: "Bearer test-token",
+        },
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.error).toBe("Core summary is unavailable.");
+    expect(JSON.stringify(body)).not.toContain("core-summary-secret");
+    expect(JSON.stringify(body)).not.toContain("provider-token");
+    expect(mocks.getHealth).toHaveBeenCalledWith({
+      dbOk: false,
+      dbError: "Core summary is unavailable.",
+      counts: {
+        tasks: 0,
+      },
+    });
+  });
+
   it("returns tenant-scoped Core summaries through the POST view envelope", async () => {
     mocks.getCoreSummarySafe.mockResolvedValue({
       ok: true,
@@ -870,6 +913,27 @@ describe("POST /core", () => {
       code: "ai_gateway_route_not_found",
       message: "config.routeKey does not match an active model route in this tenant.",
     });
+  });
+
+  it("sanitizes unexpected Core command failures", async () => {
+    mocks.executeAiInference.mockRejectedValue(
+      new Error("postgres://core-secret.internal/provider-token"),
+    );
+
+    const response = await postCore("ai.infer", "ai-infer-unexpected-error-001", {
+      routeKey: "lead-classification",
+      budgetAccountId: "budget-1",
+      maxUnits: 500,
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(body.error).toEqual({
+      code: "core_ai_infer_failed",
+      message: "Core command failed.",
+    });
+    expect(JSON.stringify(body)).not.toContain("core-secret");
+    expect(JSON.stringify(body)).not.toContain("provider-token");
   });
 
   it("rejects invalid Core command bodies before command dispatch", async () => {

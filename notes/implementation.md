@@ -458,3 +458,36 @@ the caller's authenticated catalog policy before persistence. `POST /core`
 or command scopes and refuses to mint credentials with routes, access modes,
 commands, tenants, or worker roles outside the caller's own scope, so token
 rotation and credential inventory cannot become a self-escalation path.
+
+Queued workflows can now invoke registered worker commands through a generic
+`worker_command` step kind. The workflow step carries `command`, `worker`, an
+optional step-scoped `idempotencyKey`, and command `config` in its input; the
+executor derives tenant scope from the claimed workflow tenant, rejects
+cross-tenant targets, calls the shared worker registry directly, and records the
+result on the workflow step, workflow run, and linked task outcome without
+adding worker-family routes.
+
+Live DigitalOcean state confirms DO-managed backups are enabled on
+`continuous-01` and available backup images exist. Provisioning still needs an
+explicit managed-backup verification step so newly created droplets do not rely
+on manual post-create state.
+
+The app-server bridge now exposes Core tools through the same generic dynamic
+tool route as workers. `continuous.core.command`, `continuous.core.view`, and
+`continuous.core.schema` keep Core target selection under `core`, operation
+input under `config`, and operator/scope context server-side; Core app-server
+authorization is tenant-scoped, while worker app-server authorization remains
+tenant plus worker-role scoped. Credential and token-rotation administration
+remains excluded from app-server dynamic tools. The local CLI entrypoint is now
+the generic `app-server:tools` script instead of a worker-specific name.
+
+Unexpected server-side failures on Core, Workflow, Approval, and Worker routes
+now return generic 500-class messages instead of raw internal exception text.
+Typed client/validation errors below 500 still preserve their specific code and
+message, while Core summary failures, workflow step execution failures, and
+worker view failures suppress raw internal details in API responses.
+
+Production deploy and control-plane attestation catalogs now include exact
+`app_server:core.*` scopes, and deploy smoke exercises Core schema, summary
+view, and `task.create` command calls through `POST /app-server` before worker
+app-server command smoke.

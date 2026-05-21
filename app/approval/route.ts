@@ -113,17 +113,34 @@ function errorResponse(error: { code: string; message: string }, status: number)
 }
 
 function approvalErrorResponse(error: unknown, fallbackCode: string) {
+  const structuredError =
+    error && typeof error === "object" && "status" in error && "code" in error
+      ? (error as { status: unknown; code: unknown; message?: unknown })
+      : null;
   const approvalError =
     error instanceof PlatformUnavailableError
       ? {
           status: error.status,
           code: error.code,
-          message: error.message,
+          message: error.status >= 500 ? "Approval request failed." : error.message,
         }
+      : structuredError &&
+          typeof structuredError.status === "number" &&
+          typeof structuredError.code === "string"
+        ? {
+            status: structuredError.status,
+            code: structuredError.code,
+            message:
+              structuredError.status >= 500
+                ? "Approval request failed."
+                : typeof structuredError.message === "string"
+                  ? structuredError.message
+                  : "Approval request failed.",
+          }
       : {
           status: 500,
           code: fallbackCode,
-          message: error instanceof Error ? error.message : "Unknown approval error.",
+          message: "Approval request failed.",
         };
 
   return errorResponse(

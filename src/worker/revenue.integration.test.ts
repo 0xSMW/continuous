@@ -5081,6 +5081,162 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(workflowRuleChangeDecision?.decision).toBe("owner_review_required");
     expect(ruleChangeTaskOutcome.objectId).toBe(workflowRuleChange.objectId);
 
+    const [workerCommandStep] = await db
+      .insert(workflowSteps)
+      .values({
+        tenantId: packetRun?.tenantId ?? "",
+        definitionId: packetRun?.definitionId ?? "",
+        workflowRunId: packetStart.run.id,
+        taskId: packetTask.taskId,
+        workerId: revenueWorkerId,
+        kind: "worker_command",
+        name: "CI classify a lead through workflow",
+        state: "queued",
+        priority: "urgent",
+        risk: "medium",
+        fromState: "awaiting_approval",
+        toState: "awaiting_approval",
+        attempt: 1,
+        maxAttempts: 2,
+        idempotencyKey: `ci-workflow-worker-command-step-${runId}`,
+        input: {
+          command: "lead.classify",
+          worker: {
+            role: "revenue_operations",
+            id: revenueWorkerId,
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: `ci-workflow-worker-command-${runId}`,
+          config: {
+            leadPacket: {
+              source: "workflow_worker_command_ci",
+              sourceEventId: `workflow-worker-command:${runId}`,
+              customerName: "Workflow Command Roofing",
+              customerIntent: "roof leak inspection",
+              serviceArea: "roofing",
+              urgency: "high",
+              missingFacts: ["preferred_time_window"],
+            },
+          },
+        },
+      })
+      .returning();
+
+    const workerCommandExecution = await executeWorkflowSteps({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      limit: 1,
+      leaseOwner: `ci-workflow-worker-command:${runId}`,
+      db,
+    });
+    const [workerCommandResult] = workerCommandExecution.results;
+    const [executedWorkerCommandStep] = await db
+      .select()
+      .from(workflowSteps)
+      .where(eq(workflowSteps.id, workerCommandStep.id))
+      .limit(1);
+    const [workerCommandRun] = await db
+      .select()
+      .from(workflowRuns)
+      .where(eq(workflowRuns.id, packetStart.run.id))
+      .limit(1);
+    const workerCommandOutput = objectValue(executedWorkerCommandStep?.output);
+    const workflowWorkerCommand = objectValue(workerCommandOutput.workerCommand);
+    const workflowWorkerCommandResult = objectValue(workflowWorkerCommand.result);
+    const [workflowWorkerRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(eq(workerRuns.id, String(workflowWorkerCommandResult.workerRunId ?? "")))
+      .limit(1);
+    const [workerCommandTask] = await db
+      .select()
+      .from(tasks)
+      .where(eq(tasks.id, packetTask.taskId))
+      .limit(1);
+    const workerCommandTaskOutcome = objectValue(
+      objectValue(workerCommandTask?.outcome).lastWorkflowWorkerCommand,
+    );
+    const workerCommandRunData = objectValue(workerCommandRun?.data);
+    const lastWorkflowWorkerCommand = objectValue(workerCommandRunData.lastWorkflowWorkerCommand);
+
+    expect(workerCommandExecution.processed).toBe(1);
+    expect(workerCommandExecution.completed).toBe(1);
+    expect(workerCommandResult?.stepId).toBe(workerCommandStep.id);
+    expect(executedWorkerCommandStep?.state).toBe("done");
+    expect(workerCommandOutput.externalExecution).toBe("blocked");
+    expect(workflowWorkerCommand.command).toBe("lead.classify");
+    expect(objectValue(workflowWorkerCommand.worker).role).toBe("revenue_operations");
+    expect(workflowWorkerCommand.externalExecution).toBe("registry_controlled");
+    expect(workflowWorkerCommandResult.workerRunId).toBeTruthy();
+    expect(workflowWorkerRun?.mode).toBe("classification");
+    expect(workerCommandRun?.state).toBe("awaiting_approval");
+    expect(lastWorkflowWorkerCommand.workflowStepId).toBe(workerCommandStep.id);
+    expect(workerCommandTaskOutcome.workflowStepId).toBe(workerCommandStep.id);
+    expect(objectValue(workerCommandTaskOutcome.result).workerRunId).toBe(workflowWorkerCommandResult.workerRunId);
+
+    const [crossTenantWorkerCommandStep] = await db
+      .insert(workflowSteps)
+      .values({
+        tenantId: packetRun?.tenantId ?? "",
+        definitionId: packetRun?.definitionId ?? "",
+        workflowRunId: packetStart.run.id,
+        workerId: revenueWorkerId,
+        kind: "worker_command",
+        name: "CI reject cross-tenant worker command",
+        state: "queued",
+        priority: "urgent",
+        risk: "high",
+        fromState: "awaiting_approval",
+        toState: "awaiting_approval",
+        attempt: 1,
+        maxAttempts: 1,
+        idempotencyKey: `ci-workflow-worker-command-cross-tenant-step-${runId}`,
+        input: {
+          command: "lead.classify",
+          worker: {
+            role: "revenue_operations",
+            id: revenueWorkerId,
+            tenantSlug: "other-tenant",
+          },
+          idempotencyKey: `ci-workflow-worker-command-cross-tenant-${runId}`,
+          config: {
+            leadPacket: {
+              source: "workflow_worker_command_cross_tenant_ci",
+              sourceEventId: `workflow-worker-command-cross-tenant:${runId}`,
+              customerName: "Wrong Tenant Roofing",
+              customerIntent: "roof leak inspection",
+              serviceArea: "roofing",
+              urgency: "high",
+            },
+          },
+        },
+      })
+      .returning();
+
+    const crossTenantExecution = await executeWorkflowSteps({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      limit: 1,
+      leaseOwner: `ci-workflow-worker-command-cross-tenant:${runId}`,
+      db,
+    });
+    const [crossTenantResult] = crossTenantExecution.results;
+    const [failedCrossTenantStep] = await db
+      .select()
+      .from(workflowSteps)
+      .where(eq(workflowSteps.id, crossTenantWorkerCommandStep.id))
+      .limit(1);
+    const crossTenantError = objectValue(failedCrossTenantStep?.error);
+
+    expect(crossTenantExecution.processed).toBe(1);
+    expect(crossTenantExecution.completed).toBe(0);
+    expect(crossTenantExecution.failed).toBe(1);
+    expect(crossTenantResult?.stepId).toBe(crossTenantWorkerCommandStep.id);
+    expect(crossTenantResult?.state).toBe("failed");
+    expect(failedCrossTenantStep?.state).toBe("failed");
+    expect(crossTenantError.code).toBe("workflow_worker_tenant_mismatch");
+    expect(crossTenantError.retryable).toBe(false);
+
     const retryStart = await startWorkflowRun({
       operatorEmail: "owner@continuoushq.com",
       tenantSlug: "continuous-demo",

@@ -2993,14 +2993,14 @@ export function workerErrorStatus(error: unknown, fallbackCode: string) {
     return {
       status: error.status,
       code: error.code,
-      message: error.message,
+      message: error.status >= 500 ? "Worker command failed." : error.message,
     };
   }
 
   return {
     status: 500,
     code: fallbackCode,
-    message: error instanceof Error ? error.message : "Unknown worker error.",
+    message: fallbackCode === "worker_view_failed" ? "Worker view failed." : "Worker command failed.",
   };
 }
 

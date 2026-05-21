@@ -32,6 +32,7 @@ fi
 
 POSTGRES_USER="$(grep '^POSTGRES_USER=' .env | cut -d= -f2- || true)"
 POSTGRES_DB="$(grep '^POSTGRES_DB=' .env | cut -d= -f2- || true)"
+WORKER_TOKEN="$(grep '^WORKER_RUN_TOKEN=' .env | cut -d= -f2- || true)"
 POSTGRES_USER="${POSTGRES_USER:-continuous}"
 POSTGRES_DB="${POSTGRES_DB:-continuous}"
 
@@ -87,6 +88,32 @@ if [ "$app_server_status" != "401" ]; then
   cat "$app_server_smoke_out" >&2 || true
   exit 1
 fi
+
+if [ -z "$WORKER_TOKEN" ]; then
+  echo "Missing WORKER_RUN_TOKEN for authenticated app-server schema smoke." >&2
+  exit 1
+fi
+
+APP_SERVER_CORE_SCHEMA_RESPONSE="$(
+  curl -fsS "${curl_args[@]}" --resolve "$resolve_arg" \
+    -X POST \
+    -H "authorization: Bearer $WORKER_TOKEN" \
+    -H 'content-type: application/json' \
+    --data '{"tool":"continuous.core.schema","arguments":{},"callId":"production-core-schema-smoke","threadId":"production-smoke","turnId":"production-smoke"}' \
+    "$app_server_url"
+)"
+printf '%s\n' "$APP_SERVER_CORE_SCHEMA_RESPONSE" | /usr/bin/jq -c '{api,error,success:.data.success,contentItemCount:(.data.contentItems | length)}'
+printf '%s\n' "$APP_SERVER_CORE_SCHEMA_RESPONSE" | /usr/bin/jq -e '
+  .api == "continuous.app_server.v1" and
+  .error == null and
+  .data.success == true and
+  (.data.contentItems[0].text | fromjson |
+    .ok == true and
+    .tool == "continuous.core.schema" and
+    (.data.registry.commands | any(.name == "task.create" and .apiRoute == "/core")) and
+    (.data.registry.views | any(.name == "summary" and .apiRoute == "/core"))
+  )
+' >/dev/null
 
 version_num="$(
   docker compose exec -T db psql -At -v ON_ERROR_STOP=1 \

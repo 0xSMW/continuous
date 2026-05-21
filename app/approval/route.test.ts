@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { PlatformUnavailableError } from "../../src/core/errors";
+
 const mocks = vi.hoisted(() => ({
   authorizeManagedControlPlaneCredential: vi.fn(),
   decideApproval: vi.fn(),
@@ -744,5 +746,67 @@ describe("/approval route", () => {
     expect(response.status).toBe(400);
     expect(body.error.code).toBe("invalid_approval_subject");
     expect(mocks.decideApproval).not.toHaveBeenCalled();
+  });
+
+  it("preserves typed approval validation failures", async () => {
+    mocks.decideApproval.mockRejectedValue(
+      new PlatformUnavailableError(
+        "approval_decision_invalid",
+        "Approval decision is invalid.",
+        422,
+      ),
+    );
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/approval", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "approval.decide",
+          approval: {
+            id: "77777777-7777-4777-8777-000000000001",
+            tenantSlug: "continuous-demo",
+            subject: "worker",
+          },
+          idempotencyKey: "approval-decision-invalid-001",
+          config: {
+            action: "approved",
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(422);
+    expect(body.error).toEqual({
+      code: "approval_decision_invalid",
+      message: "Approval decision is invalid.",
+    });
+  });
+
+  it("sanitizes unexpected approval failures", async () => {
+    mocks.listApprovals.mockRejectedValue(new Error("approval db password postgres://internal"));
+
+    const { GET } = await import("./route");
+    const response = await GET(
+      new Request("http://localhost/approval?tenantSlug=continuous-demo&subject=worker", {
+        headers: {
+          authorization: "Bearer test-token",
+        },
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(body.error).toEqual({
+      code: "approval_inbox_failed",
+      message: "Approval request failed.",
+    });
+    expect(JSON.stringify(body)).not.toContain("postgres://internal");
+    expect(JSON.stringify(body)).not.toContain("password");
   });
 });

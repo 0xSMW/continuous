@@ -376,7 +376,7 @@ function coreErrorResponse(error: unknown, fallbackCode: string) {
       ? {
           status: error.status,
           code: error.code,
-          message: error.message,
+          message: error.status >= 500 ? "Core command failed." : error.message,
         }
       : structuredError &&
           typeof structuredError.status === "number" &&
@@ -385,14 +385,16 @@ function coreErrorResponse(error: unknown, fallbackCode: string) {
             status: structuredError.status,
             code: structuredError.code,
             message:
-              typeof structuredError.message === "string"
+              structuredError.status >= 500
+                ? "Core command failed."
+                : typeof structuredError.message === "string"
                 ? structuredError.message
                 : "Core command failed.",
           }
       : {
           status: 500,
           code: fallbackCode,
-          message: error instanceof Error ? error.message : "Unknown core error.",
+          message: "Core command failed.",
         };
 
   return errorResponse(
@@ -515,9 +517,10 @@ async function handleCoreSummaryRead(request: Request, tenantSlug: string | unde
   });
 
   const result = await getCoreSummarySafe({ tenantSlug });
+  const summaryError = result.ok ? null : "Core summary is unavailable.";
   const health = getHealth({
     dbOk: result.ok,
-    dbError: result.error,
+    dbError: summaryError,
     counts: result.summary.counts,
   });
 
@@ -526,7 +529,7 @@ async function handleCoreSummaryRead(request: Request, tenantSlug: string | unde
       api: apiVersion,
       health,
       data: result.summary,
-      error: result.error,
+      error: summaryError,
     },
     {
       headers: {

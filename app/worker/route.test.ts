@@ -34,6 +34,25 @@ vi.mock("../../src/core/control-plane-auth", () => ({
   recordControlPlaneAuthAttempt: mocks.recordControlPlaneAuthAttempt,
 }));
 
+function mockedWorkerErrorStatus(error: unknown, fallbackCode: string) {
+  const status =
+    error && typeof error === "object" && "status" in error
+      ? Number((error as { status: unknown }).status)
+      : 500;
+  const code =
+    error && typeof error === "object" && "code" in error
+      ? String((error as { code: unknown }).code)
+      : fallbackCode;
+  const fallbackMessage =
+    fallbackCode === "worker_view_failed" ? "Worker view failed." : "Worker command failed.";
+
+  return {
+    status,
+    code,
+    message: status >= 500 ? fallbackMessage : error instanceof Error ? error.message : fallbackMessage,
+  };
+}
+
 describe("/worker route", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -47,17 +66,7 @@ describe("/worker route", () => {
       CONTROL_PLANE_TOKENS_JSON: undefined,
       CONTROL_PLANE_TOKEN_CATALOG_B64: undefined,
     });
-    mocks.workerErrorStatus.mockImplementation((error: unknown, fallbackCode: string) => ({
-      status:
-        error && typeof error === "object" && "status" in error
-          ? Number((error as { status: unknown }).status)
-          : 500,
-      code:
-        error && typeof error === "object" && "code" in error
-          ? String((error as { code: unknown }).code)
-          : fallbackCode,
-      message: error instanceof Error ? error.message : "Unknown worker error.",
-    }));
+    mocks.workerErrorStatus.mockImplementation(mockedWorkerErrorStatus);
     mocks.authorizeManagedControlPlaneCredential.mockResolvedValue({ ok: true });
     mocks.recordControlPlaneAuthAttempt.mockResolvedValue({ id: "auth-session-1" });
   });
@@ -1413,6 +1422,41 @@ describe("/worker route", () => {
     });
   });
 
+  it("sanitizes unexpected worker command failures", async () => {
+    mocks.executeWorkerCommand.mockRejectedValue(
+      new Error("worker command leaked api key postgres://internal"),
+    );
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/worker", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "run",
+          worker: {
+            role: "revenue_operations",
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "unexpected-worker-error-001",
+          config: {},
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(body.error).toEqual({
+      code: "worker_command_failed",
+      message: "Worker command failed.",
+    });
+    expect(JSON.stringify(body)).not.toContain("api key");
+    expect(JSON.stringify(body)).not.toContain("postgres://internal");
+  });
+
   it("routes read views through the generic worker payload shape", async () => {
     const viewResult = {
       data: {
@@ -1481,11 +1525,11 @@ describe("/worker route", () => {
     );
   });
 
-  it("preserves mapped worker view errors", async () => {
+  it("preserves mapped worker view validation errors", async () => {
     mocks.executeWorkerView.mockRejectedValue(
-      Object.assign(new Error("Worker view is unavailable."), {
-        status: 503,
-        code: "worker_view_unavailable",
+      Object.assign(new Error("Worker view config is invalid."), {
+        status: 422,
+        code: "worker_view_config_invalid",
       }),
     );
 
@@ -1509,11 +1553,50 @@ describe("/worker route", () => {
     );
     const body = await response.json();
 
-    expect(response.status).toBe(503);
+    expect(response.status).toBe(422);
     expect(body.error).toEqual({
-      code: "worker_view_unavailable",
-      message: "Worker view is unavailable.",
+      code: "worker_view_config_invalid",
+      message: "Worker view config is invalid.",
     });
+  });
+
+  it("sanitizes unexpected worker view failures", async () => {
+    mocks.executeWorkerView.mockResolvedValue({
+      status: 500,
+      data: {
+        internal: "postgres://worker-view-secret",
+      },
+      error: "worker view leaked api key",
+    });
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/worker", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          view: "briefs",
+          worker: {
+            role: "owner_chief_of_staff",
+            tenantSlug: "continuous-demo",
+          },
+          config: {},
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(body).toEqual({
+      api: "continuous.worker.v1",
+      data: null,
+      error: "Worker view failed.",
+    });
+    expect(JSON.stringify(body)).not.toContain("postgres://worker-view-secret");
+    expect(JSON.stringify(body)).not.toContain("api key");
   });
 
   it("rejects GET worker reads because reads require a payload envelope", async () => {

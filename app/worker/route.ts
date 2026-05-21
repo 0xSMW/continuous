@@ -583,15 +583,16 @@ async function handleWorkerView(request: Request, body: Record<string, unknown>)
       view,
       config,
     });
+    const status = result.status ?? 200;
 
     return Response.json(
       {
         api: workerApiVersion,
-        data: result.data,
-        error: result.error,
+        data: status >= 500 ? null : result.data,
+        error: status >= 500 ? "Worker view failed." : result.error,
       },
       {
-        status: result.status ?? 200,
+        status,
         headers: {
           "Cache-Control": "no-store",
         },
