@@ -559,6 +559,7 @@ async function handleWorkerView(request: Request, body: Record<string, unknown>)
       operatorEmail: auth.operatorEmail,
       target,
       view,
+      config,
       state: optionalString(config.state),
     });
 

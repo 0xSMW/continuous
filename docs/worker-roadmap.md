@@ -128,7 +128,7 @@ execution gates.
 
 Status: first runtime slices are registered on `/worker` for
 `command=hire.packet.prepare` and `command=payroll_input.prepare`, plus
-`view=readiness`. The commands keep role, tenant, idempotency, and operation
+payload `view: "readiness"`. The commands keep role, tenant, idempotency, and operation
 inputs in the generic worker envelope, write workforce packet, document,
 approval, workflow, budget, audit, and generated-view proof, and keep
 restricted documents redacted while payroll submission and money movement stay
@@ -154,6 +154,14 @@ schedule readiness, and live HR/payroll credential gates.
 | Launch gate | Human approval required for submissions; every rule claim has a source ref |
 
 ## Phase 7: Systems Worker
+
+Status: first runtime slice is promoted on the generic `/worker` envelope for
+`worker.role=systems_operations`. The slice covers connector health, sync
+repair planning, data-quality remediation proposals, permission review, and
+automation planning while keeping all external connector writes, permission
+changes, repair application, and automation enablement dry-run or blocked. It
+does not add systems-specific HTTP routes; role selection stays under `worker`
+and operation inputs stay under `config`.
 
 | Dependency | Implementation target |
 |---|---|

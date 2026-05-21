@@ -134,7 +134,7 @@ payloads. Compose containers fail fast if the deploy operator is not provided.
 The deploy path also writes a hashed control-plane token catalog and scopes that
 credential to
 `CONTROL_PLANE_ALLOWED_TENANTS=continuous-demo` and
-`CONTROL_PLANE_ALLOWED_WORKER_ROLES=revenue_operations,owner_chief_of_staff,dispatch_operations,finance_operations`;
+`CONTROL_PLANE_ALLOWED_WORKER_ROLES=revenue_operations,owner_chief_of_staff,dispatch_operations,finance_operations,workforce_operations,systems_operations`;
 requests to `/worker`, `/core`, or `/workflow` must carry an allowed
 `tenantSlug`, and worker requests must carry an allowed `worker.role`. Use the
 CLI path over SSH for direct operator-controlled smoke runs:
@@ -333,7 +333,7 @@ Control-plane token catalog entries have this shape when provided directly via
     "tokenSha256": "hex_sha256_of_bearer_token",
     "operatorEmail": "owner@continuoushq.com",
     "allowedTenants": ["continuous-demo"],
-    "allowedWorkerRoles": ["revenue_operations", "owner_chief_of_staff", "dispatch_operations", "finance_operations", "workforce_operations"],
+    "allowedWorkerRoles": ["revenue_operations", "owner_chief_of_staff", "dispatch_operations", "finance_operations", "workforce_operations", "systems_operations"],
     "allowedRoutes": ["core", "worker", "workflow", "approval"],
     "allowedAccess": ["read", "write"],
     "allowedCommands": [
@@ -343,11 +343,18 @@ Control-plane token catalog entries have this shape when provided directly via
       "core:entity.setup.record",
       "worker:view.snapshot",
       "worker:view.readiness",
+      "worker:view.health",
+      "worker:view.repairs",
       "worker:lead.read",
       "worker:quote.prepare",
       "worker:run",
       "worker:hire.packet.prepare",
       "worker:payroll_input.prepare",
+      "worker:connector.health.scan",
+      "worker:sync.repair.plan",
+      "worker:data_quality.remediate",
+      "worker:permission.review",
+      "worker:automation.plan",
       "workflow:view.overview",
       "approval:view.inbox"
     ],
@@ -519,7 +526,8 @@ shape:
       "owner_chief_of_staff",
       "dispatch_operations",
       "finance_operations",
-      "workforce_operations"
+      "workforce_operations",
+      "systems_operations"
     ],
     "allowedRoutes": ["core", "worker", "workflow", "approval"],
     "allowedAccess": ["read", "write"],
@@ -532,6 +540,8 @@ shape:
       "core:entity.setup.record",
       "worker:view.snapshot",
       "worker:view.readiness",
+      "worker:view.health",
+      "worker:view.repairs",
       "worker:lead.read",
       "worker:quote.prepare",
       "worker:run",
@@ -539,6 +549,11 @@ shape:
       "worker:payroll_input.prepare",
       "worker:continue",
       "worker:approval.decide",
+      "worker:connector.health.scan",
+      "worker:sync.repair.plan",
+      "worker:data_quality.remediate",
+      "worker:permission.review",
+      "worker:automation.plan",
       "workflow:view.overview",
       "workflow:steps.execute",
       "workflow:approval.decide",

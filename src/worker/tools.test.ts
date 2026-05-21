@@ -216,8 +216,8 @@ describe("worker tool contract", () => {
 
     expect(Object.keys(localView.inputSchema.properties)).toEqual(["view", "worker", "config"]);
     expect(Object.keys(appServerView.inputSchema.properties)).toEqual(["view", "worker", "config"]);
-    expect(localView.inputSchema.required).toEqual(["worker"]);
-    expect(appServerView.inputSchema.required).toEqual(["worker"]);
+    expect(localView.inputSchema.required).toEqual(["worker", "config"]);
+    expect(appServerView.inputSchema.required).toEqual(["worker", "config"]);
     expect(localView.inputSchema.additionalProperties).toBe(false);
     expect(appServerView.inputSchema.additionalProperties).toBe(false);
 
@@ -806,6 +806,7 @@ describe("worker tool contract", () => {
         worker: {
           role: "payroll_operations",
         },
+        config: {},
       }),
     ).rejects.toThrow("Worker role payroll_operations is not available yet.");
   });
@@ -825,10 +826,25 @@ describe("worker tool contract", () => {
         properties?: Record<string, { type?: string; minItems?: number }>;
       };
     }>;
+    const registeredSystemsCommands = workerToolSchema.registry.commands.filter(
+      (command) => command.role === "systems_operations",
+    );
+    const systemsCommandMetadata =
+      registeredSystemsCommands.length > 0
+        ? registeredSystemsCommands
+        : plannedCommands.filter((command) => command.role === "systems_operations");
+    const registeredSystemsViews = workerToolSchema.registry.views.filter(
+      (view) => view.role === "systems_operations",
+    );
+    const systemsViewMetadata =
+      registeredSystemsViews.length > 0
+        ? registeredSystemsViews
+        : workerToolSchema.registry.plannedViews.filter(
+            (view) => view.role === "systems_operations",
+          );
 
     expect(workerToolSchema.registry.plannedContracts.map((contract) => contract.role)).toEqual([
       "compliance_operations",
-      "systems_operations",
     ]);
     expect(workerToolSchema.registry.contracts.map((contract) => contract.role)).toEqual([
       "revenue_operations",
@@ -845,7 +861,18 @@ describe("worker tool contract", () => {
       "dispatch_operations",
       "finance_operations",
       "workforce_operations",
+      "systems_operations",
     ]);
+    expect(
+      workerToolSchema.registry.plannedFutureWorkerCommands.some(
+        (command) => command.role === "systems_operations",
+      ),
+    ).toBe(false);
+    expect(
+      workerToolSchema.registry.plannedFutureWorkerViews.some(
+        (view) => view.role === "systems_operations",
+      ),
+    ).toBe(false);
     expect(workerToolSchema.registry.plannedCommands).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -853,12 +880,6 @@ describe("worker tool contract", () => {
           name: "expense_code.propose",
           apiRoute: "/worker",
           sideEffects: "internal",
-        }),
-        expect.objectContaining({
-          role: "systems_operations",
-          name: "sync.repair.plan",
-          apiRoute: "/worker",
-          sideEffects: "dry_run",
         }),
         expect.objectContaining({
           role: "workforce_operations",
@@ -892,15 +913,25 @@ describe("worker tool contract", () => {
       ]),
     );
     expect(
-      plannedCommands.find(
+      systemsCommandMetadata.find(
         (command) => command.role === "systems_operations" && command.name === "connector.health.scan",
-      )?.configSchema.properties?.checks?.type,
+      )?.configSchema?.properties?.checks?.type,
     ).toBe("array");
     expect(
-      plannedCommands.find(
+      systemsCommandMetadata.find(
+        (command) => command.role === "systems_operations" && command.name === "sync.repair.plan",
+      )?.configSchema?.required,
+    ).toEqual(["connectionId", "issueId"]);
+    expect(
+      systemsCommandMetadata.find(
         (command) => command.role === "systems_operations" && command.name === "permission.review",
-      )?.configSchema.oneRequired,
+      )?.configSchema?.oneRequired,
     ).toEqual(["connectionId", "grantId"]);
+    expect(
+      systemsCommandMetadata.find(
+        (command) => command.role === "systems_operations" && command.name === "automation.plan",
+      )?.configSchema?.properties?.trigger?.type,
+    ).toBe("object");
     expect(workerToolSchema.registry.plannedCommands).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -934,6 +965,13 @@ describe("worker tool contract", () => {
           requiresTenant: true,
           evidencePacket: null,
         }),
+      ]),
+    );
+    expect(systemsViewMetadata).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: "systems_operations", name: "snapshot", apiRoute: "/worker" }),
+        expect.objectContaining({ role: "systems_operations", name: "health", apiRoute: "/worker" }),
+        expect.objectContaining({ role: "systems_operations", name: "repairs", apiRoute: "/worker" }),
       ]),
     );
     expect(

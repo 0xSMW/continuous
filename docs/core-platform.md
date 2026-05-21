@@ -174,16 +174,16 @@ The first worker should prove the whole platform loop:
 
 ## Runtime Slice
 
-The first implementation keeps the Revenue Worker deterministic and
-policy-bound:
+The implementation keeps worker execution deterministic, policy-bound, and
+registered behind one shared worker surface:
 
 | Surface | Behavior |
 |---|---|
 | `POST /core` | Canonical Core command surface for `task.create`, `task.transition`, `object.upsert`, `adapter.upsert`, `connection.upsert`, `connection.health.record`, `entity.setup.record`, `object.link`, `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`, `document.packet.prepare`, `decision.record`, `approval.request`, `adapter.intent.record`, `rule.change.record`, `external_action.record`, `capability.grant`, `budget.reserve`, `budget.charge`, `budget.release`, `ai.infer`, `view.publish`, `customer_signal.record`, `payroll.preview.record`, `payroll.preview.packet.prepare`, `control_plane.token_rotation.attest`, `control_plane.credential.upsert`, `control_plane.credential.revoke`, and `control_plane.session.review`; invalid credentials fail before body reads, command bodies are capped at 1 MiB, tenant selection and command fields live in structured `core` and `config` payloads, and no other top-level command fields are accepted |
 | `GET /core?tenantSlug=...` | Tenant-scoped Core summary for active tasks, recent events, approvals, workers, capabilities, graph counts, and ledger counts |
-| `POST /worker` with `view=snapshot` | Operator-only snapshot of worker state, active tasks, controls, budget usage, and recent events |
-| `POST /worker` with `view=approvals` | Operator-only approval queue for worker decisions |
-| `POST /worker` | Canonical worker command surface for Revenue `lead.read`, `lead.classify`, `response.draft`, `quote.prepare`, `run`, `continue`, `approval.decide`, `adapters.reconcile`, and `adapters.retry`; Owner `brief.generate`, `decision_queue.prepare`, `anomaly.triage`, `approval.decide`, and `continue`; Dispatch `schedule.propose`, `customer_update.draft`, `closeout.prepare`, and `exception.route`; and Finance `invoice.prepare`, `ar_followup.draft`, `cash_forecast.generate`, and `payment_draft.prepare`; invalid credentials fail before body reads, command bodies are capped at 1 MiB, and worker role, tenant selection, idempotency, and operation config live in structured payload fields |
+| `POST /worker` with payload `view: "snapshot"` | Operator-only snapshot of worker state, active tasks, controls, budget usage, and recent events |
+| `POST /worker` with payload `view: "approvals"` | Operator-only approval queue for worker decisions |
+| `POST /worker` | Canonical worker command surface for Revenue `lead.read`, `lead.classify`, `response.draft`, `quote.prepare`, `run`, `continue`, `approval.decide`, `adapters.reconcile`, and `adapters.retry`; Owner `brief.generate`, `decision_queue.prepare`, `anomaly.triage`, `approval.decide`, and `continue`; Dispatch `schedule.propose`, `customer_update.draft`, `closeout.prepare`, and `exception.route`; Finance `invoice.prepare`, `ar_followup.draft`, `cash_forecast.generate`, and `payment_draft.prepare`; Workforce `hire.packet.prepare` and `payroll_input.prepare`; and Systems `connector.health.scan`, `sync.repair.plan`, `data_quality.remediate`, `permission.review`, and `automation.plan`; invalid credentials fail before body reads, command bodies are capped at 1 MiB, and worker role, tenant selection, idempotency, and operation config live in structured payload fields |
 | `/approval` | Shared operator approval inbox and decision surface across Core, workflow, and worker subjects; `POST /approval` uses auth-before-body, 1 MiB bounded command reads, and structured `approval` / `config` payloads |
 | `/workflow` | Canonical workflow command surface for listing definitions/runs/steps and executing validated `start` / `transition` / `steps.execute` / `approval.decide` commands; `POST /workflow` uses auth-before-body, 1 MiB bounded command reads, top-level idempotency keys for mutation replay boundaries, and structured `workflow` / `config` payloads |
 | `/workflow?view=approvals` | Operator-only approval queue for workflow decisions backed by the shared approval service |

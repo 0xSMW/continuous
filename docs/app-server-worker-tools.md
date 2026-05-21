@@ -83,7 +83,8 @@ The app-server worker tools are intentionally narrow:
 - Reads are resolved by the same view registry as `POST /worker` view payloads
   and `worker.view`.
 - Read envelopes are strict. `continuous.worker.view` accepts only `view`,
-  `worker`, and `config`; read filters such as `state` belong under `config`.
+  `worker`, and `config`; send `{}` when there are no read filters, and put
+  filters such as `state` under `config`.
 - Mutation envelopes are strict. `continuous.worker.command` accepts only
   `command`, `worker`, `idempotencyKey`, and `config`; `approvalId`, source
   records, retry limits, lead payloads, and every other operation input belong

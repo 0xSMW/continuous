@@ -58,6 +58,20 @@ describe("app-server worker tools", () => {
     const revenueFollowUpCommands = registry.followUpCommands.filter(
       (command) => command.role === "revenue_operations",
     );
+    const registeredSystemsCommands = registry.commands.filter(
+      (command) => command.role === "systems_operations",
+    );
+    const systemsCommandMetadata =
+      registeredSystemsCommands.length > 0
+        ? registeredSystemsCommands
+        : registry.followUpCommands.filter((command) => command.role === "systems_operations");
+    const registeredSystemsViews = registry.views.filter(
+      (view) => view.role === "systems_operations",
+    );
+    const systemsViewMetadata =
+      registeredSystemsViews.length > 0
+        ? registeredSystemsViews
+        : registry.followUpViews.filter((view) => view.role === "systems_operations");
 
     expect(registry.contracts.map((contract) => contract.role)).toEqual([
       "revenue_operations",
@@ -77,11 +91,20 @@ describe("app-server worker tools", () => {
       "dispatch_operations",
       "finance_operations",
       "workforce_operations",
+      "systems_operations",
     ]);
-    expect(plannedRoles).toEqual(["compliance_operations", "systems_operations"]);
+    expect(plannedRoles).toEqual(["compliance_operations"]);
     expect(registry.plannedCommands).toEqual(registry.followUpCommands);
     expect(registry.plannedViews).toEqual(registry.followUpViews);
     expect(revenueFollowUpCommands.map((command) => command.name)).toEqual(["payment_link.prepare"]);
+    expect(
+      registry.plannedFutureWorkerCommands.some(
+        (command) => command.role === "systems_operations",
+      ),
+    ).toBe(false);
+    expect(
+      registry.plannedFutureWorkerViews.some((view) => view.role === "systems_operations"),
+    ).toBe(false);
     expect(
       revenueFollowUpCommands.find((command) => command.name === "payment_link.prepare")?.configSchema.properties
         ?.sourceRefs?.type,
@@ -196,6 +219,57 @@ describe("app-server worker tools", () => {
       ),
     ).toBe(true);
     expect(registry.views.some((view) => view.role === "workforce_operations" && view.name === "readiness")).toBe(true);
+    expect(systemsCommandMetadata).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "systems_operations",
+          name: "connector.health.scan",
+          apiRoute: "/worker",
+          configSchema: expect.objectContaining({
+            required: ["checks"],
+            properties: expect.objectContaining({
+              checks: expect.objectContaining({ type: "array", minItems: 1 }),
+            }),
+          }),
+        }),
+        expect.objectContaining({
+          role: "systems_operations",
+          name: "sync.repair.plan",
+          apiRoute: "/worker",
+          sideEffects: "dry_run",
+          externalExecution: "dry_run",
+          configSchema: expect.objectContaining({
+            required: ["connectionId", "issueId"],
+          }),
+        }),
+        expect.objectContaining({
+          role: "systems_operations",
+          name: "permission.review",
+          apiRoute: "/worker",
+          configSchema: expect.objectContaining({
+            oneRequired: ["connectionId", "grantId"],
+          }),
+        }),
+        expect.objectContaining({
+          role: "systems_operations",
+          name: "automation.plan",
+          apiRoute: "/worker",
+          configSchema: expect.objectContaining({
+            required: ["workflowKey", "trigger"],
+            properties: expect.objectContaining({
+              trigger: expect.objectContaining({ type: "object" }),
+            }),
+          }),
+        }),
+      ]),
+    );
+    expect(systemsViewMetadata).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: "systems_operations", name: "snapshot", apiRoute: "/worker" }),
+        expect.objectContaining({ role: "systems_operations", name: "health", apiRoute: "/worker" }),
+        expect.objectContaining({ role: "systems_operations", name: "repairs", apiRoute: "/worker" }),
+      ]),
+    );
   });
 
   it("requires a clean canonical command envelope before dispatch", async () => {
@@ -303,6 +377,16 @@ describe("app-server worker tools", () => {
         config: {},
       }),
     ).rejects.toThrow("worker.role is required.");
+
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.view", {
+        view: "snapshot",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+      }),
+    ).rejects.toThrow("config is required and must be an object.");
 
     await expect(
       executeAppServerWorkerTool("continuous.worker.view", {

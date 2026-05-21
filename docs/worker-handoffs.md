@@ -53,7 +53,10 @@ instruction drafts, dual-control approval requests, generated review views, and
 `finance.invoice_to_owner_review` approval handoffs while customer sends,
 payment links, external execution, and money movement remain blocked. Live
 calendar, customer-send, accounting, payment, and bank credentials remain
-launch blockers.
+launch blockers. Systems now has a first runtime fixture shape on the generic
+`/worker` envelope: connection and sync issues produce dry-run repair evidence,
+rollback packets, permission review proof, and blocked external execution for
+the consuming worker to verify before it trusts recovered data.
 
 | Worker | Required first fixture |
 |---|---|
@@ -62,7 +65,7 @@ launch blockers.
 | Finance | implemented: `dispatch.closeout_to_finance` closeout packet with billable line summary produces a dry-run invoice draft; persisted invoice refs produce a blocked AR follow-up draft; and forecast window/account refs produce a blocked cash forecast, cash packet, owner approval request, and blocked money-movement posture |
 | Workforce | implemented: `hire.packet.prepare` produces a workforce packet with restricted-document proof and payroll blockers; `payroll_input.prepare` produces a dry-run payroll-input packet and readiness view while payroll submission and money movement stay blocked |
 | Compliance | `workforce.payroll_to_compliance` payroll preview with filing draft |
-| Systems | failing connection sync issue with dry-run repair and rollback plan |
+| Systems | implemented: failing connection sync issue produces a dry-run repair plan, rollback packet, permission review evidence, and blocked external execution |
 | Offer and Pricing | `revenue.quote_to_pricing` quote draft with margin, discount, or change-order policy evidence |
 | Customer Experience | `customer.signal_to_experience` customer signal with source evidence and blocked recovery draft |
 | Asset and Supply | `dispatch.asset_need_to_supply` material, asset, or vendor need tied to a work order and cash posture |

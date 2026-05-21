@@ -230,8 +230,8 @@ and local toolbox aliases resolve to the same handlers and validation rules.
 
 | HTTP command or view | Tool surface | Required config | Idempotency | Side effects | External execution |
 |---|---|---|---|---|---|
-| `POST view=snapshot` | `worker.view` | None | None | Read-only | Blocked |
-| `POST view=approvals` | `worker.view` | Optional `config.state` | None | Read-only | Blocked |
+| `view: "snapshot"` payload | `worker.view` | `worker.role`, `config` | None | Read-only | Blocked |
+| `view: "approvals"` payload | `worker.view` | `worker.role`, optional `config.state` | None | Read-only | Blocked |
 | `lead.read` | `worker.command` | `config.source`, direct `config.records[]` / `config.record`, or `config.reader` referencing an active connection | Required | Core lead object/event/evidence, worker run, budget/usage, connection cursor proof, audit | Blocked |
 | `lead.classify` | `worker.command` | One of `config.intake`, `config.leadPacket`, or `config.lead` | Required | Classification worker run, budget/usage, inference, trace evidence, audit | Blocked |
 | `response.draft` | `worker.command` | One of `config.intake`, `config.leadPacket`, or `config.lead` | Required | Draft worker run, budget/usage, inference, draft evidence, audit | Blocked |

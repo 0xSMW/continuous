@@ -51,7 +51,7 @@ const contracts = [
     path: "docs/systems-operations-worker-v1-contract.md",
     role: "systems_operations",
     evidencePacket: "systems_packet",
-    runtime: false,
+    runtime: true,
   },
 ] as const;
 
@@ -254,6 +254,7 @@ describe("future worker contracts", () => {
       "dispatch_operations",
       "finance_operations",
       "workforce_operations",
+      "systems_operations",
     ]);
     expect(workerContractForRole("revenue_operations")?.contractPath).toBe(
       "docs/revenue-operations-worker-v1-contract.md",
@@ -481,7 +482,12 @@ describe("future worker contracts", () => {
     expect(attestationScript).toContain("worker:hire.packet.prepare");
     expect(attestationScript).toContain("worker:payroll_input.prepare");
     expect(attestationScript).toContain("worker:view.readiness");
+    expect(attestationScript).toContain("worker:view.health");
+    expect(attestationScript).toContain("worker:view.repairs");
+    expect(attestationScript).toContain("worker:sync.repair.plan");
+    expect(attestationScript).toContain("worker:permission.review");
     expect(attestationScript).toContain("workforce_operations");
+    expect(attestationScript).toContain("systems_operations");
     expect(rotationScript).toContain("control_plane.token_rotation.attest");
     expect(rotationScript).toContain("TOKEN_ROTATION_ATTESTATION_ID");
     expect(rotationScript).toContain("NEXT_WORKER_RUN_TOKEN");
@@ -494,6 +500,10 @@ describe("future worker contracts", () => {
     expect(deployScript).toContain("worker:hire.packet.prepare");
     expect(deployScript).toContain("worker:payroll_input.prepare");
     expect(deployScript).toContain("worker:view.readiness");
+    expect(deployScript).toContain("worker:view.health");
+    expect(deployScript).toContain("worker:view.repairs");
+    expect(deployScript).toContain("worker:sync.repair.plan");
+    expect(deployScript).toContain("worker:permission.review");
     expect(deployScript).toContain("scripts/rotate-control-plane-token-on-host.sh");
     expect(deployScript).toContain("preserving the existing bootstrap token");
     expect(deployScript).toContain('SITE_HOST="$SITE_HOST"');
@@ -506,6 +516,10 @@ describe("future worker contracts", () => {
     expect(deployWorkflow).toContain("worker:hire.packet.prepare");
     expect(deployWorkflow).toContain("worker:payroll_input.prepare");
     expect(deployWorkflow).toContain("worker:view.readiness");
+    expect(deployWorkflow).toContain("worker:view.health");
+    expect(deployWorkflow).toContain("worker:view.repairs");
+    expect(deployWorkflow).toContain("worker:sync.repair.plan");
+    expect(deployWorkflow).toContain("worker:permission.review");
     expect(deployWorkflow).toContain("scripts/attest-control-plane-on-host.sh");
     expect(deployWorkflow).toContain("scripts/rotate-control-plane-token-on-host.sh");
     expect(deployWorkflow).toContain("preserving the existing bootstrap token");

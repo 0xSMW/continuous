@@ -52,7 +52,7 @@ export const workerTools = [
           additionalProperties: true,
         },
       },
-      required: ["worker"],
+      required: ["worker", "config"],
       additionalProperties: false,
     },
   },
@@ -353,7 +353,7 @@ function assertWorkerToolEnvelope(name: string, payload: JsonObject) {
     throw new Error(targetResult.message);
   }
 
-  if (name === "worker.command") {
+  if (name === "worker.command" || name === "worker.view") {
     const configResult = validateWorkerConfigEnvelope(payload.config);
 
     if (!configResult.ok) {
@@ -378,6 +378,7 @@ export async function executeWorkerTool(name: string, payload: JsonObject = {}) 
       view,
       target,
       operatorEmail,
+      config: viewConfig,
       state: stringValue(viewConfig.state),
     });
 

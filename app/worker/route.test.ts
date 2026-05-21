@@ -1078,6 +1078,9 @@ describe("/worker route", () => {
         tenantSlug: "continuous-demo",
       },
       view: "briefs",
+      config: {
+        state: "review_ready",
+      },
       state: "review_ready",
     });
     expect(mocks.authorizeManagedControlPlaneCredential).toHaveBeenCalledWith(

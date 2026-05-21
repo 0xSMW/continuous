@@ -39,7 +39,7 @@ All commands use `POST /worker`; no compliance-specific route is added.
 
 | Command or view | Tool surface | Required config | Idempotency | Side effects | External execution |
 |---|---|---|---|---|---|
-| `POST view=snapshot` | `worker.view` | `worker.role` | None | Read-only | Blocked |
+| `view: "snapshot"` payload | `worker.view` | `worker.role`, `config` | None | Read-only | Blocked |
 | `obligation.scan` | `worker.command` | `config.scope`, `config.jurisdiction` | Required | Obligation proposals and evidence | Blocked |
 | `notice.response.prepare` | `worker.command` | `config.noticeId` | Required | Response draft, packet, approval request | Blocked |
 | `license.renewal.prepare` | `worker.command` | `config.licenseId` | Required | Renewal packet and blocker tasks | Blocked |

@@ -86,7 +86,7 @@ export const appServerWorkerTools = [
           additionalProperties: true,
         },
       },
-      required: ["worker"],
+      required: ["worker", "config"],
       additionalProperties: false,
       $defs: {
         workerTarget: {
@@ -183,6 +183,12 @@ function assertAppServerWorkerViewEnvelope(args: JsonObject) {
   if (!targetResult.ok) {
     throw new Error(targetResult.message);
   }
+
+  const configResult = validateWorkerConfigEnvelope(args.config);
+
+  if (!configResult.ok) {
+    throw new Error(configResult.message);
+  }
 }
 
 export async function executeAppServerWorkerTool(name: string, args: JsonObject = {}) {
@@ -233,6 +239,7 @@ export async function executeAppServerWorkerTool(name: string, args: JsonObject 
       view,
       target: targetFrom(args),
       operatorEmail,
+      config,
       state: stringValue(config.state),
     });
 

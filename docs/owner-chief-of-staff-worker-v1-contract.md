@@ -56,8 +56,8 @@ Approval continuations use the same payload shape:
 
 | Command or view | Tool surface | Required config | Idempotency | Side effects | External execution |
 |---|---|---|---|---|---|
-| `POST view=snapshot` | `worker.view` | `worker.role` | None | Read-only | Blocked |
-| `POST view=briefs` | `worker.briefs.list` | Optional `config.state`, `config.from`, `config.to` | None | Read-only | Blocked |
+| `view: "snapshot"` payload | `worker.view` | `worker.role`, `config` | None | Read-only | Blocked |
+| `view: "briefs"` payload | `worker.view` | `worker.role`, optional `config.state`, `config.from`, `config.to` | None | Read-only | Blocked |
 | `brief.generate` | `worker.command` | `config.window`, `config.scopes[]` | Required | Evidence, document, decision drafts, view publish | Blocked |
 | `decision_queue.prepare` | `worker.command` | `config.window`, optional `config.priorityFloor` | Required | Internal task and decision proposals | Blocked |
 | `anomaly.triage` | `worker.command` | `config.window`, `config.metricKeys[]` | Required | Internal anomaly evidence and tasks | Blocked |

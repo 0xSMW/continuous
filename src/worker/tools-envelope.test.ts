@@ -64,6 +64,9 @@ describe("worker tool envelope forwarding", () => {
         tenantSlug: "continuous-demo",
       },
       operatorEmail: "owner@continuoushq.com",
+      config: {
+        state: "pending",
+      },
       state: "pending",
     });
     expect(result).toMatchObject({
@@ -124,6 +127,9 @@ describe("worker tool envelope forwarding", () => {
         tenantSlug: "continuous-demo",
       },
       operatorEmail: "owner@continuoushq.com",
+      config: {
+        state: "pending",
+      },
       state: "pending",
     });
     expect(result).toMatchObject({

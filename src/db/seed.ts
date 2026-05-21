@@ -74,6 +74,7 @@ const ids = {
   dispatchWorker: "aaaaaaaa-aaaa-4aaa-8aaa-000000000003",
   financeWorker: "aaaaaaaa-aaaa-4aaa-8aaa-000000000004",
   workforceWorker: "aaaaaaaa-aaaa-4aaa-8aaa-000000000005",
+  systemsWorker: "aaaaaaaa-aaaa-4aaa-8aaa-000000000006",
   adapter: "56565656-5656-4565-8565-565656565656",
   dispatchAdapter: "56565656-5656-4565-8565-000000000002",
   financeAdapter: "56565656-5656-4565-8565-000000000003",
@@ -95,6 +96,12 @@ const ids = {
   financeBudgetAllocation: "bbbbbbbb-bbbb-4bbb-8bbb-000000000011",
   workforceBudgetAccount: "bbbbbbbb-bbbb-4bbb-8bbb-000000000012",
   workforceBudgetAllocation: "bbbbbbbb-bbbb-4bbb-8bbb-000000000013",
+  systemsBudgetAccount: "bbbbbbbb-bbbb-4bbb-8bbb-000000000014",
+  systemsBudgetAllocation: "bbbbbbbb-bbbb-4bbb-8bbb-000000000015",
+  systemsWorkerReadGrant: "10101010-1010-4010-8010-000000000001",
+  systemsApprovalGrant: "10101010-1010-4010-8010-000000000002",
+  systemsDocumentGrant: "10101010-1010-4010-8010-000000000003",
+  systemsPermissionGrant: "10101010-1010-4010-8010-000000000004",
   legalEntityObject: "33333333-3333-4333-8333-000000000101",
   workLocationObject: "33333333-3333-4333-8333-000000000102",
   personObject: "33333333-3333-4333-8333-000000000103",
@@ -137,6 +144,7 @@ const ids = {
   evidenceQuote: "eeeeeeee-eeee-4eee-8eee-000000000002",
   evidenceAdapterReceipt: "eeeeeeee-eeee-4eee-8eee-000000000003",
   evidenceFiling: "eeeeeeee-eeee-4eee-8eee-000000000004",
+  evidenceSystemsReview: "eeeeeeee-eeee-4eee-8eee-000000000005",
   adapterRunSeed: "abababab-abab-4aba-8aba-000000000001",
   adapterActionSeed: "abababab-abab-4aba-8aba-000000000002",
   usage: "12121212-1212-4121-8121-121212121212",
@@ -255,7 +263,12 @@ const capIds = {
   workerRead: "10000000-0000-4000-8000-000000000015",
   exceptionRoute: "10000000-0000-4000-8000-000000000016",
   cashForecastGenerate: "10000000-0000-4000-8000-000000000017",
+  permissionReview: "10000000-0000-4000-8000-000000000018",
 };
+
+const revenueCapabilityIds = Object.values(capIds).filter(
+  (capabilityId) => capabilityId !== capIds.permissionReview,
+);
 
 const leadToCashStates = {
   order: [
@@ -444,6 +457,38 @@ async function seed() {
           approval_requests_created: 0,
         },
       },
+      {
+        id: ids.systemsWorker,
+        tenantId: ids.tenant,
+        managerUserId: ids.owner,
+        kind: "agent",
+        state: "training",
+        name: "Systems Operations Worker",
+        role: "systems_operations",
+        mission:
+          "Review workers, capability grants, adapter scopes, and connection permissions before any system-level change reaches owner approval.",
+        autonomyLevel: 2,
+        scope: {
+          flows: ["worker_lifecycle_review", "permission_review", "connection_review"],
+          systems: ["adapters", "connections", "capability_grants", "evidence_packets"],
+          reads: ["workers", "capability_grants", "adapters", "connections", "evidence"],
+        },
+        memory: {
+          systems_context: "tenant_scoped",
+          permission_changes: "diffs_only",
+        },
+        policy: {
+          external_execution: "blocked",
+          permission_changes: "approval_required",
+          connection_changes: "approval_required",
+        },
+        kpis: {
+          permission_reviews_prepared: 0,
+          connection_reviews_prepared: 0,
+          approval_requests_created: 0,
+          unexpected_admin_actions: 0,
+        },
+      },
     ])
     .onConflictDoNothing();
 
@@ -626,12 +671,23 @@ async function seed() {
         description: "Read scoped human or synthetic worker records for workflow execution.",
         evidence: { required: ["scope_check"] },
       },
+      {
+        id: capIds.permissionReview,
+        key: "permission.review",
+        name: "Review permission",
+        class: "policy",
+        risk: "high",
+        sideEffect: "internal",
+        description: "Review worker grants, adapter scopes, and connection permissions before approval.",
+        rules: { mutation: "blocked", approval_required: true },
+        evidence: { required: ["worker_scope", "capability_grant_snapshot", "adapter_connection_scope"] },
+      },
     ])
     .onConflictDoNothing();
 
   await db
     .insert(capabilityGrants)
-    .values(Object.values(capIds).map((capabilityId) => ({
+    .values(revenueCapabilityIds.map((capabilityId) => ({
       tenantId: ids.tenant,
       capabilityId,
       actorType: "worker" as const,
@@ -750,6 +806,36 @@ async function seed() {
           payroll_submission: "blocked",
           money_movement: "blocked",
           restricted_data: "redacted_by_default",
+        },
+      })),
+    )
+    .onConflictDoNothing();
+
+  await db
+    .insert(capabilityGrants)
+    .values(
+      [
+        { id: ids.systemsWorkerReadGrant, capabilityId: capIds.workerRead },
+        { id: ids.systemsApprovalGrant, capabilityId: capIds.approvalRequest },
+        { id: ids.systemsDocumentGrant, capabilityId: capIds.documentPacketPrepare },
+        { id: ids.systemsPermissionGrant, capabilityId: capIds.permissionReview },
+      ].map(({ id, capabilityId }) => ({
+        id,
+        tenantId: ids.tenant,
+        capabilityId,
+        actorType: "worker" as const,
+        actorId: ids.systemsWorker,
+        scope: {
+          tenant_id: ids.tenant,
+          objects: ["worker", "capability_grant", "adapter", "connection", "evidence_packet"],
+          evidence: ["permission_review", "adapter_connection_scope"],
+        },
+        policy: {
+          mode: "review_only",
+          autonomy_level: 2,
+          external_execution: "blocked",
+          permission_changes: "approval_required",
+          connection_changes: "approval_required",
         },
       })),
     )
@@ -939,6 +1025,14 @@ async function seed() {
         target: "worker",
         targetId: ids.workforceWorker,
       },
+      {
+        id: ids.systemsBudgetAccount,
+        tenantId: ids.tenant,
+        policyId: ids.budgetPolicy,
+        name: "Systems Operations Worker monthly intelligence budget",
+        target: "worker",
+        targetId: ids.systemsWorker,
+      },
     ])
     .onConflictDoNothing();
 
@@ -986,6 +1080,15 @@ async function seed() {
         tenantId: ids.tenant,
         poolId: ids.budgetPool,
         accountId: ids.workforceBudgetAccount,
+        units: 1000000,
+        startsAt: now,
+        endsAt: nextMonth,
+      },
+      {
+        id: ids.systemsBudgetAllocation,
+        tenantId: ids.tenant,
+        poolId: ids.budgetPool,
+        accountId: ids.systemsBudgetAccount,
         units: 1000000,
         startsAt: now,
         endsAt: nextMonth,
@@ -1847,7 +1950,7 @@ async function seed() {
         idempotencyKey: "seed-synthetic-worker-lifecycle",
         data: { workerId: ids.worker, autonomyLevel: 2 },
         blockers: { open: ["external_execution_disabled"] },
-        metrics: { grants: Object.values(capIds).length },
+        metrics: { grants: revenueCapabilityIds.length },
       },
     ])
     .onConflictDoNothing();
@@ -2553,6 +2656,39 @@ async function seed() {
           obligationId: ids.obligation,
           validation: "draft_only",
           submission: "blocked",
+        },
+      },
+      {
+        id: ids.evidenceSystemsReview,
+        tenantId: ids.tenant,
+        kind: "trace",
+        name: "Systems permission review",
+        capabilityId: capIds.permissionReview,
+        actorType: "worker",
+        actorId: ids.systemsWorker,
+        hash: "bootstrap-systems-permission-review",
+        data: {
+          workerId: ids.systemsWorker,
+          reviewedWorkerIds: [
+            ids.worker,
+            ids.ownerWorker,
+            ids.dispatchWorker,
+            ids.financeWorker,
+            ids.workforceWorker,
+            ids.systemsWorker,
+          ],
+          adapterIds: [ids.adapter, ids.dispatchAdapter, ids.financeAdapter],
+          connectionIds: [ids.connection, ids.dispatchConnection, ids.financeConnection],
+          capabilityIds: [
+            capIds.workerRead,
+            capIds.approvalRequest,
+            capIds.documentPacketPrepare,
+            capIds.permissionReview,
+          ],
+          outcome: "review_ready",
+          permissionChanges: "approval_required",
+          connectionChanges: "approval_required",
+          externalExecution: "blocked",
         },
       },
     ])

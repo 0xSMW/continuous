@@ -1,8 +1,9 @@
 # Systems Operations Worker V1 Contract
 
-This contract defines the systems worker for connector health, sync repair,
-data quality, permission review, and workflow automation planning. V1 creates
-repair plans, dry-run actions, and rollback packets; live connector mutation is
+This contract defines the first Systems Operations runtime slice for connector
+health, sync repair, data quality, permission review, and workflow automation
+planning. V1 runs on the generic `/worker` envelope, creates repair plans,
+dry-run actions, and rollback packets, and keeps live connector mutation
 approval-gated and blocked until scoped credentials exist.
 
 ## Header
@@ -12,11 +13,14 @@ approval-gated and blocked until scoped credentials exist.
 | Worker role | `systems_operations` |
 | First outcome | Connector health and sync repair packet with rollback plan |
 | Autonomy level | `2` |
-| External execution | `dry_run`; live connector mutation blocked |
+| Runtime status | First runtime slice |
+| External execution | `dry_run` or blocked; live connector mutation blocked |
 
 ## API Shape
 
-All commands use `POST /worker`; no systems-specific route is added.
+All commands and views use `POST /worker`; no systems-specific route is added.
+Command names, worker selection, and view names are payload fields. Operation
+inputs and read filters stay under `config`.
 
 ```json
 {
@@ -33,17 +37,40 @@ All commands use `POST /worker`; no systems-specific route is added.
 }
 ```
 
+```json
+{
+  "view": "repairs",
+  "worker": {
+    "role": "systems_operations",
+    "tenantSlug": "continuous-demo"
+  },
+  "config": {
+    "state": "pending"
+  }
+}
+```
+
 ## Registry Entries
 
 | Command or view | Tool surface | Required config | Idempotency | Side effects | External execution |
 |---|---|---|---|---|---|
-| `POST view=snapshot` | `worker.view` | `worker.role` | None | Read-only | Blocked |
+| `view: "snapshot"` payload | `worker.view` | `worker.role`, `config` | None | Read-only | Blocked |
+| `view: "health"` payload | `worker.view` | `worker.role`, tenant selector, `config` | None | Read-only | Blocked |
+| `view: "repairs"` payload | `worker.view` | `worker.role`, tenant selector, `config` | None | Read-only | Blocked |
 | `connector.health.scan` | `worker.command` | `config.checks[]` | Required | Health evidence and tasks | Blocked |
 | `sync.repair.plan` | `worker.command` | `config.connectionId`, `config.issueId` | Required | Repair plan, dry-run adapter actions | Dry-run |
 | `data_quality.remediate` | `worker.command` | `config.issueId`, `config.policy` | Required | Proposed object updates and evidence | Dry-run |
 | `permission.review` | `worker.command` | `config.connectionId` or `config.grantId` | Required | Permission audit packet | Blocked |
 | `automation.plan` | `worker.command` | `config.workflowKey`, `config.trigger` | Required | Automation proposal only | Blocked |
 | `approval.decide` | `worker.command` | `config.approvalId`, `config.action`, optional `config.note` | None | Approval/task/workflow evidence only | Blocked |
+
+## Runtime Posture
+
+The runtime slice can read connector state, prepare repair evidence, propose
+object-quality fixes, review scopes, and produce automation plans. It cannot
+write to external systems, revoke or grant live permissions, enable automation,
+or apply data repairs. Those actions stay blocked behind scoped credentials,
+explicit approval, receipt capture, and rollback proof.
 
 ## Core Object Map
 

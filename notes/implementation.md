@@ -62,7 +62,8 @@
 | Added Finance AR follow-up runtime | `finance_operations` now registers `command=ar_followup.draft`; it consumes persisted invoice selectors from `config.invoiceId` or `config.sourceRefs`, writes a blocked AR follow-up draft, cash packet, approval request, generated review view, workflow/budget/audit proof, and keeps customer sends, payment links, and money movement blocked |
 | Added Finance cash forecast runtime | `finance_operations` now registers `command=cash_forecast.generate`; it consumes forecast windows, account refs, cash drivers, and policy from `config`, writes a cash forecast object, cash packet, approval request, generated review view, workflow/budget/audit proof, and keeps external execution and money movement blocked |
 | Added Finance payment draft runtime | `finance_operations` now registers `command=payment_draft.prepare`; it consumes bill or payment selectors from `config`/`config.sourceRefs`, writes a blocked payment object and payment instruction draft, cash packet, dual-control approval request, generated review view, workflow/budget/audit proof, and keeps ACH, payment links, bank writes, and money movement blocked |
-| Added Workforce packet runtime | `workforce_operations` now registers `command=hire.packet.prepare`, `command=payroll_input.prepare`, `view=snapshot`, and `view=readiness` on `/worker`; config stays in the generic worker envelope while the handlers write workforce packets, document/checklist proof, restricted-document redaction proof, payroll blockers, approvals, generated views, workflow/budget/audit records, and blocked/dry-run execution posture |
+| Added Workforce packet runtime | `workforce_operations` now registers `command=hire.packet.prepare`, `command=payroll_input.prepare`, `view: "snapshot"`, and `view: "readiness"` on `/worker`; config stays in the generic worker envelope while the handlers write workforce packets, document/checklist proof, restricted-document redaction proof, payroll blockers, approvals, generated views, workflow/budget/audit records, and blocked/dry-run execution posture |
+| Documented Systems Operations runtime promotion | Systems Operations is now treated in docs as a first runtime slice on the generic `/worker` envelope; repair planning stays dry-run, permission and automation execution stay blocked, and no systems-specific routes should be introduced |
 | Tightened control-plane scopes | `/core`, `/worker`, `/workflow`, and `/approval` now fail closed when tenant or worker-role scope is required, even if a token catalog entry has an empty allowlist |
 | Scoped Core summaries by tenant | Authenticated `GET /core` now passes the requested tenant into Core summary counts, active tasks, and recent events instead of returning global platform rows |
 | Redacted public health | `/api/health` now reports service status and check states without leaking detailed record counts or operational internals |
@@ -92,7 +93,7 @@
 | Added shared approval inbox | `/approval` and `/approvals` expose a token-gated, subject-neutral approval inbox and decision surface on top of the shared `approval_requests`, `audit_events`, and evidence records |
 | Expanded shared approval inbox detail | `/approval` now supports priority, risk, kind, state, and subject filters; approval records include evidence references and subject-aware continuation hints for worker, workflow, task, and Core decisions |
 | Guarded canonical worker API surface | Contract tests now fail if worker-family-specific or `/api/*` control-plane route files appear; worker families must extend `/worker` through registered commands, `worker` selectors, `idempotencyKey`, and `config` payloads |
-| Added planned-worker config schemas | `worker:tool schema` and `continuous.worker.schema` now expose non-executable `configSchema` metadata for follow-up commands and future Compliance/Systems commands before runtime handlers are added |
+| Added planned-worker config schemas | `worker:tool schema` and `continuous.worker.schema` now expose non-executable `configSchema` metadata for follow-up commands and future Compliance commands before runtime handlers are added |
 | Added customer-signal primitives | Satisfaction, feedback, complaint, testimonial, and review records persist as `CustomerSignal.type` rows, and `POST /core` `command=customer_signal.record` writes them with object links, note evidence, events, and audit proof |
 | Added payroll preview kernel | Pay statements, payroll lines, payroll liabilities, and payroll calculation traces now persist as first-class Core tables; `POST /core` `command=payroll.preview.record` records preview artifacts with event, audit, and trace evidence while external execution stays blocked |
 | Added payroll preview packet handoff | `POST /core` `command=payroll.preview.packet.prepare` gathers preview artifacts into variance reports, pay statement documents, approval packets, pending approval requests, and blocked payroll funding/tax draft records |
@@ -289,6 +290,11 @@ Workforce readiness now includes existing employment objects updated by
 `hire.packet.prepare`, so production deploy smoke can keep proving both hire
 packet visibility and payroll readiness rows through the generic `/worker`
 readiness view.
+
+Systems Operations is now documented as a first runtime slice on the generic
+`/worker` envelope. The slice is limited to dry-run repair planning, permission
+and automation review evidence, rollback packets, and blocked external
+execution; it should not introduce systems-specific routes.
 
 The expansion roadmap now has a concrete Revenue completion gate and a
 post-Systems sequencing wave for Offer/Pricing, Customer Experience,

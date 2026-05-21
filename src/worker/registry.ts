@@ -49,6 +49,16 @@ import {
   prepareWorkforcePayrollInput,
   workforceWorkerRole,
 } from "./workforce";
+import {
+  getSystemsRepairs,
+  getSystemsWorkerSnapshotSafe,
+  planSystemsAutomation,
+  planSystemsSyncRepair,
+  remediateSystemsDataQuality,
+  reviewSystemsPermission,
+  scanSystemsConnectorHealth,
+  systemsWorkerRole,
+} from "./systems";
 import { plannedWorkerContractForRole, workerApiRoute } from "./planned-workers";
 import { normalizeIdempotencyKey } from "./security";
 
@@ -94,6 +104,7 @@ type WorkerCommandDefinition = {
 type WorkerViewContext = {
   target: WorkerTarget;
   operatorEmail: string;
+  config: JsonObject;
   state?: string;
 };
 
@@ -198,6 +209,22 @@ function commandConfig(value: unknown): JsonObject {
 
   throw new PlatformUnavailableError(
     "invalid_worker_command_config",
+    "config must be an object when provided.",
+    400,
+  );
+}
+
+function viewConfig(value: unknown): JsonObject {
+  if (value === undefined || value === null) {
+    return {};
+  }
+
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as JsonObject;
+  }
+
+  throw new PlatformUnavailableError(
+    "invalid_worker_view_config",
     "config must be an object when provided.",
     400,
   );
@@ -682,6 +709,87 @@ const workforcePayrollInputConfig: WorkerConfigSchema = {
       type: "array",
       items: { type: "string" },
     },
+    sourceRefs: jsonObjectConfig,
+    policy: jsonObjectConfig,
+  },
+  additionalProperties: true,
+};
+const systemsConnectorHealthConfig: WorkerConfigSchema = {
+  type: "object",
+  required: ["checks"],
+  properties: {
+    checks: {
+      type: "array",
+      minItems: 1,
+      items: { type: "string" },
+    },
+    connectionId: { type: "string" },
+    adapterIds: {
+      type: "array",
+      items: { type: "string" },
+    },
+    policy: jsonObjectConfig,
+  },
+  additionalProperties: true,
+};
+const systemsSyncRepairPlanConfig: WorkerConfigSchema = {
+  type: "object",
+  required: ["connectionId", "issueId"],
+  properties: {
+    connectionId: { type: "string" },
+    issueId: { type: "string" },
+    severity: { type: "string" },
+    strategy: { type: "string" },
+    checks: {
+      type: "array",
+      items: { type: "string" },
+    },
+    sourceRefs: jsonObjectConfig,
+    rollback: jsonObjectConfig,
+    policy: jsonObjectConfig,
+  },
+  additionalProperties: true,
+};
+const systemsDataQualityRemediateConfig: WorkerConfigSchema = {
+  type: "object",
+  required: ["issueId", "policy"],
+  properties: {
+    issueId: { type: "string" },
+    policy: jsonObjectConfig,
+    sourceRefs: jsonObjectConfig,
+    checks: {
+      type: "array",
+      items: { type: "string" },
+    },
+    rollback: jsonObjectConfig,
+  },
+  additionalProperties: true,
+};
+const systemsPermissionReviewConfig: WorkerConfigSchema = {
+  type: "object",
+  oneRequired: ["connectionId", "grantId"],
+  properties: {
+    connectionId: { type: "string" },
+    grantId: { type: "string" },
+    requestedScopes: {
+      type: "array",
+      items: { type: "string" },
+    },
+    expectedScopes: {
+      type: "array",
+      items: { type: "string" },
+    },
+    sourceRefs: jsonObjectConfig,
+    policy: jsonObjectConfig,
+  },
+  additionalProperties: true,
+};
+const systemsAutomationPlanConfig: WorkerConfigSchema = {
+  type: "object",
+  required: ["workflowKey", "trigger"],
+  properties: {
+    workflowKey: { type: "string" },
+    trigger: jsonObjectConfig,
     sourceRefs: jsonObjectConfig,
     policy: jsonObjectConfig,
   },
@@ -1349,6 +1457,252 @@ const workerDefinitions: Record<string, WorkerDefinition> = {
       },
     },
   },
+  [systemsWorkerRole]: {
+    role: systemsWorkerRole,
+    commands: {
+      "connector.health.scan": {
+        name: "connector.health.scan",
+        description: "Scan connector health, scopes, sync lag, schema drift, and error rates.",
+        idempotency: "required",
+        sideEffects: "internal",
+        externalExecution: "blocked",
+        requiresTenant: true,
+        configSchema: systemsConnectorHealthConfig,
+        async handle(context) {
+          if (!context.idempotencyKey) {
+            throw new PlatformUnavailableError(
+              "invalid_idempotency_key",
+              "A string idempotency key is required.",
+              400,
+            );
+          }
+
+          return scanSystemsConnectorHealth({
+            idempotencyKey: context.idempotencyKey,
+            tenantSlug: context.target.tenantSlug,
+            workerId: context.target.workerId,
+            operatorEmail: context.operatorEmail,
+            config: context.config,
+          });
+        },
+      },
+      "sync.repair.plan": {
+        name: "sync.repair.plan",
+        description: "Prepare a sync repair plan, dry-run action, reconciliation evidence, and rollback packet.",
+        idempotency: "required",
+        sideEffects: "dry_run",
+        externalExecution: "dry_run",
+        requiresTenant: true,
+        configSchema: systemsSyncRepairPlanConfig,
+        async handle(context) {
+          if (!context.idempotencyKey) {
+            throw new PlatformUnavailableError(
+              "invalid_idempotency_key",
+              "A string idempotency key is required.",
+              400,
+            );
+          }
+
+          return planSystemsSyncRepair({
+            idempotencyKey: context.idempotencyKey,
+            tenantSlug: context.target.tenantSlug,
+            workerId: context.target.workerId,
+            operatorEmail: context.operatorEmail,
+            config: context.config,
+          });
+        },
+      },
+      "data_quality.remediate": {
+        name: "data_quality.remediate",
+        description: "Prepare a data-quality remediation proposal and object diff without applying live changes.",
+        idempotency: "required",
+        sideEffects: "dry_run",
+        externalExecution: "dry_run",
+        requiresTenant: true,
+        configSchema: systemsDataQualityRemediateConfig,
+        async handle(context) {
+          if (!context.idempotencyKey) {
+            throw new PlatformUnavailableError(
+              "invalid_idempotency_key",
+              "A string idempotency key is required.",
+              400,
+            );
+          }
+
+          return remediateSystemsDataQuality({
+            idempotencyKey: context.idempotencyKey,
+            tenantSlug: context.target.tenantSlug,
+            workerId: context.target.workerId,
+            operatorEmail: context.operatorEmail,
+            config: context.config,
+          });
+        },
+      },
+      "permission.review": {
+        name: "permission.review",
+        description: "Review connection or capability grant scopes and prepare least-privilege decisions.",
+        idempotency: "required",
+        sideEffects: "internal",
+        externalExecution: "blocked",
+        requiresTenant: true,
+        configSchema: systemsPermissionReviewConfig,
+        async handle(context) {
+          if (!context.idempotencyKey) {
+            throw new PlatformUnavailableError(
+              "invalid_idempotency_key",
+              "A string idempotency key is required.",
+              400,
+            );
+          }
+
+          return reviewSystemsPermission({
+            idempotencyKey: context.idempotencyKey,
+            tenantSlug: context.target.tenantSlug,
+            workerId: context.target.workerId,
+            operatorEmail: context.operatorEmail,
+            config: context.config,
+          });
+        },
+      },
+      "automation.plan": {
+        name: "automation.plan",
+        description: "Prepare a workflow automation plan and simulation packet without enabling automation.",
+        idempotency: "required",
+        sideEffects: "internal",
+        externalExecution: "blocked",
+        requiresTenant: true,
+        configSchema: systemsAutomationPlanConfig,
+        async handle(context) {
+          if (!context.idempotencyKey) {
+            throw new PlatformUnavailableError(
+              "invalid_idempotency_key",
+              "A string idempotency key is required.",
+              400,
+            );
+          }
+
+          return planSystemsAutomation({
+            idempotencyKey: context.idempotencyKey,
+            tenantSlug: context.target.tenantSlug,
+            workerId: context.target.workerId,
+            operatorEmail: context.operatorEmail,
+            config: context.config,
+          });
+        },
+      },
+      "approval.decide": {
+        name: "approval.decide",
+        description: "Decide a systems approval request without executing external actions.",
+        idempotency: "none",
+        sideEffects: "internal",
+        externalExecution: "blocked",
+        requiresTenant: true,
+        configSchema: {
+          type: "object",
+          required: ["approvalId", "action"],
+          properties: {
+            approvalId: { type: "string" },
+            action: {
+              type: "string",
+              enum: ["approved", "rejected", "revision_requested"],
+            },
+            note: { type: "string" },
+          },
+          additionalProperties: true,
+        },
+        async handle(context) {
+          const approvalId = optionalString(context.config.approvalId);
+          const action = normalizeApprovalDecision(context.config.action);
+
+          if (!approvalId || !action) {
+            throw new PlatformUnavailableError(
+              "invalid_worker_command_config",
+              "config.approvalId and config.action are required for approval.decide.",
+              400,
+            );
+          }
+
+          return decideApproval({
+            approvalId,
+            operatorEmail: context.operatorEmail,
+            tenantSlug: context.target.tenantSlug,
+            action,
+            note: optionalString(context.config.note),
+            subject: "worker",
+          });
+        },
+      },
+    },
+    views: {
+      snapshot: {
+        name: "snapshot",
+        description: "Read the Systems Operations Worker runtime snapshot.",
+        async handle(context) {
+          const result = await getSystemsWorkerSnapshotSafe({
+            tenantSlug: context.target.tenantSlug,
+            workerId: context.target.workerId,
+            role: context.target.role,
+          });
+
+          return {
+            status: result.ok ? 200 : 500,
+            data: {
+              worker: responseTarget(context.target),
+              view: "snapshot",
+              snapshot: result.snapshot,
+            },
+            error: result.error,
+          };
+        },
+      },
+      health: {
+        name: "health",
+        description: "Read connector health, sync jobs, data-quality issues, and permission reviews.",
+        async handle(context) {
+          const result = await getSystemsWorkerSnapshotSafe({
+            tenantSlug: context.target.tenantSlug,
+            workerId: context.target.workerId,
+            role: context.target.role,
+          });
+
+          return {
+            status: result.ok ? 200 : 500,
+            data: {
+              worker: responseTarget(context.target),
+              view: "health",
+              health: {
+                controls: result.snapshot.controls,
+                connections: result.snapshot.connections,
+                permissions: result.snapshot.permissions,
+              },
+            },
+            error: result.error,
+          };
+        },
+      },
+      repairs: {
+        name: "repairs",
+        description: "Read sync repair plans, dry-run receipts, rollback plans, and approval state.",
+        async handle(context) {
+          const repairs = await getSystemsRepairs({
+            tenantSlug: context.target.tenantSlug,
+            workerId: context.target.workerId,
+            role: context.target.role,
+          });
+
+          return {
+            status: repairs.error ? 500 : 200,
+            data: {
+              worker: responseTarget(context.target),
+              view: "repairs",
+              repairs,
+            },
+            error: repairs.error,
+          };
+        },
+      },
+    },
+  },
   [ownerWorkerRole]: {
     role: ownerWorkerRole,
     commands: {
@@ -1955,12 +2309,14 @@ export async function executeWorkerView(input: {
   view?: string;
   target?: WorkerTargetInput;
   operatorEmail: string;
+  config?: unknown;
   state?: string;
 }): Promise<WorkerViewResult> {
   const target = resolveWorkerTarget(input.target);
   const definition = workerDefinitions[target.role];
   const viewName = optionalString(input.view) ?? "snapshot";
   const view = definition.views[viewName];
+  const config = viewConfig(input.config);
 
   if (!view) {
     throw new PlatformUnavailableError(
@@ -1973,6 +2329,7 @@ export async function executeWorkerView(input: {
   return view.handle({
     target,
     operatorEmail: input.operatorEmail,
-    state: input.state,
+    config,
+    state: input.state ?? optionalString(config.state),
   });
 }
