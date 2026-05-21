@@ -1,10 +1,13 @@
-# App-Server Worker Tools
+# App-Server Tools
 
-Continuous exposes repo-owned app-server dynamic tool specs for worker
+Continuous exposes repo-owned app-server dynamic tool specs for Core and worker
 discovery plus registry-backed read and command execution:
 
 | Tool | Mode | Purpose |
 |---|---|---|
+| `continuous.core.schema` | Read-only | Returns the Core app-server registry, command/view names, canonical `apiRoute: "/core"`, and excluded credential-admin commands |
+| `continuous.core.view` | Registry-backed read | Reads registered Core views with the same `view`, `core`, and `config` envelope used by `POST /core` read payloads |
+| `continuous.core.command` | Registry-backed command | Invokes an existing Core command with the same `command`, `core`, `idempotencyKey`, and `config` envelope used by `/core` |
 | `continuous.worker.schema` | Read-only | Returns worker contracts, runtime roles, registered commands, follow-up commands, planned future-worker metadata, worker tool schema, and integration boundary |
 | `continuous.worker.view` | Registry-backed read | Reads registered worker views with the same `view`, `worker`, and `config` envelope used by local worker tooling and `POST /worker` read payloads |
 | `continuous.worker.command` | Registry-backed command | Invokes an existing worker command with the same `command`, `worker`, `idempotencyKey`, and `config` envelope used by `/worker` |
@@ -12,8 +15,13 @@ discovery plus registry-backed read and command execution:
 The generated Codex app-server protocol defines a dynamic tool as `name`,
 `description`, and `inputSchema`, and invokes dynamic tools with a payload
 containing `tool`, `arguments`, `callId`, `threadId`, and `turnId`. The local
-manifest and dynamic-call adapter in `src/worker/app-server-tools.ts` follow
-that shape and delegate reads and commands to the shared worker registry.
+manifest and dynamic-call adapters follow that shape: Core tools live in
+`src/core/app-server-tools.ts`, worker tools live in
+`src/worker/app-server-tools.ts`, and both delegate reads and commands to
+registered handlers rather than worker-family-specific routes.
+`continuous.core.schema` exposes registered Core command and view names for the
+app-server bridge. Credential and token-rotation administration remains on
+`POST /core` and is intentionally excluded from dynamic app-server tools.
 `continuous.worker.schema` exposes each registered command's `configSchema`,
 canonical `apiRoute: "/worker"`, the full `contracts` catalog, current
 `runtimeContracts`, `plannedContracts`, and `followUpCommands` that are
@@ -90,24 +98,30 @@ until runtime handlers are registered.
 
 ```sh
 export WORKER_OPERATOR_EMAIL=owner@continuoushq.com
-bun run app-server:worker-tools
+bun run app-server:tools
 bun run app-server:daemon:start
 bun run app-server:daemon:version
 bun run app-server:proxy
-bun run app-server:worker-tools continuous.worker.schema
-bun run app-server:worker-tools dynamic-call --payload='{"tool":"continuous.worker.schema","arguments":{},"callId":"local-schema-001","threadId":"local-thread-001","turnId":"local-turn-001"}'
-bun run app-server:worker-tools continuous.worker.view --payload='{"view":"snapshot","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{}}'
-bun run app-server:worker-tools continuous.worker.view --payload='{"view":"readiness","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{}}'
+bun run app-server:tools continuous.core.schema
+bun run app-server:tools continuous.core.view --payload='{"view":"summary","core":{"tenantSlug":"continuous-demo"},"config":{}}'
+bun run app-server:tools continuous.worker.schema
+bun run app-server:tools dynamic-call --payload='{"tool":"continuous.worker.schema","arguments":{},"callId":"local-schema-001","threadId":"local-thread-001","turnId":"local-turn-001"}'
+bun run app-server:tools continuous.worker.view --payload='{"view":"snapshot","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{}}'
+bun run app-server:tools continuous.worker.view --payload='{"view":"readiness","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{}}'
 ```
 
 The local app-server executor may accept a trusted-local context through
-`--context` or `APP_SERVER_WORKER_TRANSPORT_CONTEXT_JSON`, but it rejects
+`--context` or `APP_SERVER_TRANSPORT_CONTEXT_JSON`, but it rejects
 `source: "control_plane"` context. Control-plane context must be constructed by
 an authenticated bridge after it has verified route, access, command/view,
 tenant, and worker-role scope.
 
 ```sh
-bun run app-server:worker-tools continuous.worker.command --payload='{"command":"lead.read","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-app-server-lead-001","config":{"source":"website_form","records":[{"sourceEventId":"form-001","customerName":"Acme Roof Repair","customerIntent":"roof leak inspection","serviceArea":"roofing","urgency":"high"}]}}'
+bun run app-server:tools continuous.core.command --payload='{"command":"task.create","core":{"tenantSlug":"continuous-demo"},"idempotencyKey":"local-core-task-001","config":{"title":"Confirm app-server Core bridge","priority":"high"}}'
+```
+
+```sh
+bun run app-server:tools continuous.worker.command --payload='{"command":"lead.read","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-app-server-lead-001","config":{"source":"website_form","records":[{"sourceEventId":"form-001","customerName":"Acme Roof Repair","customerIntent":"roof leak inspection","serviceArea":"roofing","urgency":"high"}]}}'
 ```
 
 Inbox and CRM lead intake use the same command surface with source-reader
@@ -116,14 +130,24 @@ registry without loading production tokens or executing external reads.
 
 ## Boundary
 
-The app-server worker tools are intentionally narrow:
+The app-server Core and worker tools are intentionally narrow:
 
-- Commands are resolved by the same registry as `/worker` and `worker:tool`.
+- Core commands are resolved by the registered Core app-server command list and
+  invoke the same persisted primitive handlers used by `POST /core`.
+- Worker commands are resolved by the same registry as `/worker` and
+  `worker:tool`.
+- Core reads currently expose the `summary` view through the same `view`,
+  `core`, and `config` envelope as `POST /core`.
 - Reads are resolved by the same view registry as `POST /worker` view payloads
   and `worker.view`.
+- Core read envelopes are strict. `continuous.core.view` accepts only `view`,
+  `core`, and `config`; send `{}` when there are no read filters.
 - Read envelopes are strict. `continuous.worker.view` accepts only `view`,
   `worker`, and `config`; send `{}` when there are no read filters, and put
   filters such as `state` under `config`.
+- Core mutation envelopes are strict. `continuous.core.command` accepts only
+  `command`, `core`, `idempotencyKey`, and `config`; operation inputs belong
+  under `config`.
 - Mutation envelopes are strict. `continuous.worker.command` accepts only
   `command`, `worker`, `idempotencyKey`, and `config`; `approvalId`, source
   records, retry limits, lead payloads, and every other operation input belong
@@ -151,24 +175,26 @@ The app-server worker tools are intentionally narrow:
 Remote app-server bridges should authenticate against the control plane first,
 then call the repo dynamic-tool executor with transport context containing the
 authorized operator identity, access mode, route-qualified command or view,
-tenant, and worker-role scope. Do not pass bearer tokens or operator identity
-in the tool payload. Dynamic tool responses return Codex-compatible
+tenant, and worker-role scope where the tool needs it. Do not pass bearer
+tokens or operator identity in the tool payload. Dynamic tool responses return Codex-compatible
 `contentItems` with a JSON text body and set `success=false` for registry or
 envelope errors instead of moving context into the payload.
 
 ## Remote Bridge
 
 `POST /app-server` is the generic authenticated bridge for dynamic tool calls.
-It is not a worker-family API route; worker execution still goes through the
-same registry and payload envelope as `POST /worker`. The bridge accepts only
-`tool`, `arguments`, `callId`, `threadId`, and `turnId` at the top level. Put
-worker envelope fields under `arguments`, put operation-specific inputs under
-`arguments.config`, and never send `operatorEmail`, bearer tokens, transport
-context, tenant scope, or worker-role scope in the payload.
+It is not a worker-family or command-specific API route; worker execution still
+goes through the same registry and payload envelope as `POST /worker`, and Core
+execution still uses registered Core command/view envelopes. The bridge accepts
+only `tool`, `arguments`, `callId`, `threadId`, and `turnId` at the top level.
+Put Core or worker envelope fields under `arguments`, put operation-specific
+inputs under `arguments.config`, and never send `operatorEmail`, bearer tokens,
+transport context, tenant scope, or worker-role scope in the payload.
 
+`continuous.core.command`, `continuous.core.view`,
 `continuous.worker.command`, `continuous.worker.view`, `worker.command`, and
-`worker.view` are tool names; `/worker` is the HTTP route; `command`, `view`,
-`worker`, `idempotencyKey`, and `config` are payload fields.
+`worker.view` are tool names; `/core` and `/worker` are HTTP routes; `command`,
+`view`, `core`, `worker`, `idempotencyKey`, and `config` are payload fields.
 
 ```http
 POST /app-server
@@ -206,12 +232,15 @@ authorization: Bearer <control-plane-token>
 The route authorizes against the `app_server` control-plane route with exact
 bridge command scope, such as `app_server:worker.command.lead.read`,
 `app_server:worker.view.snapshot`, `app_server:worker.view.readiness`, or
-`app_server:worker.schema`. For commands
-and views it also requires tenant and worker-role scope plus a durable managed
-control-plane credential. After those checks pass, the route constructs
-`source: "control_plane"` transport context itself and passes worker-registry
-scope such as `worker:lead.read`, `worker:view.snapshot`, or
-`worker:view.readiness` into the dynamic-tool executor.
+`app_server:worker.schema` for workers, and `app_server:core.command.task.create`,
+`app_server:core.view.summary`, or `app_server:core.schema` for Core. Core
+commands and views require tenant scope; worker commands and views require
+tenant and worker-role scope. Mutation and read tools require a durable managed
+control-plane credential except schema discovery. After those checks pass, the
+route constructs `source: "control_plane"` transport context itself and passes
+Core scope such as `core:task.create` or worker-registry scope such as
+`worker:lead.read`, `worker:view.snapshot`, or `worker:view.readiness` into the
+dynamic-tool executor.
 
 The generic local worker tool remains available for explicit operator-gated
 commands:

@@ -1,12 +1,18 @@
 import { pool } from "../db/client";
 import type { JsonObject } from "../db/schema";
 import {
+  appServerCoreToolManifest,
+  executeAppServerCoreDynamicToolCall,
+  executeAppServerCoreTool,
+  type AppServerCoreTransportContext,
+} from "../core/app-server-tools";
+import {
   appServerWorkerToolManifest,
   executeAppServerWorkerDynamicToolCall,
   executeAppServerWorkerTool,
   type AppServerDynamicToolCallParams,
   type AppServerWorkerTransportContext,
-} from "./app-server-tools";
+} from "../worker/app-server-tools";
 
 function argValue(name: string) {
   const prefix = `--${name}=`;
@@ -24,16 +30,16 @@ async function readStdin() {
   return Buffer.concat(chunks).toString("utf8").trim();
 }
 
-function transportContextFromArgs(): AppServerWorkerTransportContext | undefined {
+function transportContextFromArgs(): AppServerWorkerTransportContext | AppServerCoreTransportContext | undefined {
   const inlineContext = argValue("context");
-  const envContext = process.env.APP_SERVER_WORKER_TRANSPORT_CONTEXT_JSON?.trim();
+  const envContext = process.env.APP_SERVER_TRANSPORT_CONTEXT_JSON?.trim();
   const contextSource = inlineContext ?? envContext;
 
   if (!contextSource) {
     return undefined;
   }
 
-  const context = JSON.parse(contextSource) as AppServerWorkerTransportContext;
+  const context = JSON.parse(contextSource) as AppServerWorkerTransportContext | AppServerCoreTransportContext;
 
   if (context.source === "control_plane") {
     throw new Error(
@@ -42,6 +48,39 @@ function transportContextFromArgs(): AppServerWorkerTransportContext | undefined
   }
 
   return context;
+}
+
+async function runDynamicCall(
+  payload: AppServerDynamicToolCallParams,
+  context?: AppServerWorkerTransportContext | AppServerCoreTransportContext,
+) {
+  return payload.tool.startsWith("continuous.core.")
+    ? executeAppServerCoreDynamicToolCall(
+        payload,
+        context as AppServerCoreTransportContext | undefined,
+      )
+    : executeAppServerWorkerDynamicToolCall(
+        payload,
+        context as AppServerWorkerTransportContext | undefined,
+      );
+}
+
+async function runNamedTool(
+  name: string,
+  payload: JsonObject,
+  context?: AppServerWorkerTransportContext | AppServerCoreTransportContext,
+) {
+  return name.startsWith("continuous.core.")
+    ? executeAppServerCoreTool(
+        name,
+        payload,
+        context as AppServerCoreTransportContext | undefined,
+      )
+    : executeAppServerWorkerTool(
+        name,
+        payload,
+        context as AppServerWorkerTransportContext | undefined,
+      );
 }
 
 async function main() {
@@ -53,13 +92,26 @@ async function main() {
     const stdinPayload = inlinePayload ? "" : await readStdin();
     const payloadSource = inlinePayload ?? (stdinPayload || "{}");
     const payload = JSON.parse(payloadSource) as AppServerDynamicToolCallParams;
-    const result = await executeAppServerWorkerDynamicToolCall(payload, context);
+    const result = await runDynamicCall(payload, context);
     console.log(JSON.stringify(result, null, 2));
     return;
   }
 
   if (!name || name === "manifest" || name === "--manifest") {
-    console.log(JSON.stringify(appServerWorkerToolManifest, null, 2));
+    console.log(
+      JSON.stringify(
+        {
+          protocol: "codex.app-server.dynamic_tools",
+          mode: "continuous_app_server_control",
+          owner: "continuous",
+          tools: [...appServerCoreToolManifest.tools, ...appServerWorkerToolManifest.tools],
+          core: appServerCoreToolManifest,
+          worker: appServerWorkerToolManifest,
+        },
+        null,
+        2,
+      ),
+    );
     return;
   }
 
@@ -67,7 +119,7 @@ async function main() {
   const stdinPayload = inlinePayload ? "" : await readStdin();
   const payloadSource = inlinePayload ?? (stdinPayload || "{}");
   const payload = JSON.parse(payloadSource) as JsonObject;
-  const result = await executeAppServerWorkerTool(name, payload, context);
+  const result = await runNamedTool(name, payload, context);
   console.log(JSON.stringify({ ok: true, tool: name, data: result, error: null }, null, 2));
 }
 
@@ -77,7 +129,7 @@ main()
       JSON.stringify(
         {
           ok: false,
-          error: error instanceof Error ? error.message : "Unknown app-server worker tool error",
+          error: error instanceof Error ? error.message : "Unknown app-server tool error",
         },
         null,
         2,

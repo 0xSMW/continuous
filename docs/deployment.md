@@ -102,8 +102,11 @@ secret in `WORKER_RUN_TOKEN`: production HTTP auth uses the hashed
 worker-role, operator, and read/write scope. The bootstrap catalog includes the
 separate `app_server` route for dynamic-tool bridge calls; those bridge commands
 are scoped as `app_server:worker.command.<name>`,
-`app_server:worker.view.<name>`, or `app_server:worker.schema`, while the bridge
-still delegates actual worker execution to the `/worker` registry. The raw token remains in `.env` so
+`app_server:worker.view.<name>`, `app_server:worker.schema`,
+`app_server:core.command.<name>`, `app_server:core.view.<name>`, or
+`app_server:core.schema`, while the bridge still delegates actual worker
+execution to the `/worker` registry and Core primitive execution to registered
+Core handlers. The raw token remains in `.env` so
 deploy smoke, scheduler, rotation, and host recovery can present it as a bearer
 credential; it must not appear inside catalog entries. Production routes refuse
 raw catalog `token` fields and the legacy single-token path if the catalog is
@@ -399,6 +402,9 @@ Control-plane token catalog entries have this shape when provided directly via
       "app_server:worker.command.filing.prepare",
       "app_server:worker.command.margin.review.prepare",
       "app_server:worker.command.recovery.draft",
+      "app_server:core.schema",
+      "app_server:core.view.summary",
+      "app_server:core.command.task.create",
       "workflow:view.overview",
       "approval:view.inbox"
     ],
@@ -638,6 +644,9 @@ and route-qualified command; unrelated commands remain closed.
       "app_server:worker.command.filing.prepare",
       "app_server:worker.command.margin.review.prepare",
       "app_server:worker.command.recovery.draft",
+      "app_server:core.schema",
+      "app_server:core.view.summary",
+      "app_server:core.command.task.create",
       "workflow:view.overview",
       "workflow:steps.execute",
       "workflow:approval.decide",

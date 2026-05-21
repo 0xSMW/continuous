@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   authorizeManagedControlPlaneCredential: vi.fn(),
+  executeAppServerCoreDynamicToolCall: vi.fn(),
   executeAppServerWorkerDynamicToolCall: vi.fn(),
   recordControlPlaneAuthAttempt: vi.fn(),
   env: {
@@ -23,6 +24,15 @@ vi.mock("../../src/env", () => ({
 vi.mock("../../src/worker/app-server-tools", () => ({
   executeAppServerWorkerDynamicToolCall: mocks.executeAppServerWorkerDynamicToolCall,
 }));
+
+vi.mock("../../src/core/app-server-tools", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/core/app-server-tools")>();
+
+  return {
+    ...actual,
+    executeAppServerCoreDynamicToolCall: mocks.executeAppServerCoreDynamicToolCall,
+  };
+});
 
 vi.mock("../../src/core/control-plane-auth", () => ({
   authorizeManagedControlPlaneCredential: mocks.authorizeManagedControlPlaneCredential,
@@ -65,6 +75,15 @@ describe("/app-server route", () => {
     mocks.authorizeManagedControlPlaneCredential.mockResolvedValue({ ok: true });
     mocks.recordControlPlaneAuthAttempt.mockResolvedValue({ id: "auth-session-1" });
     mocks.executeAppServerWorkerDynamicToolCall.mockResolvedValue({
+      success: true,
+      contentItems: [
+        {
+          type: "inputText",
+          text: "{}",
+        },
+      ],
+    });
+    mocks.executeAppServerCoreDynamicToolCall.mockResolvedValue({
       success: true,
       contentItems: [
         {
@@ -189,6 +208,7 @@ describe("/app-server route", () => {
       allowedTenants: ["continuous-demo"],
       allowedWorkerRoles: ["revenue_operations"],
     });
+    expect(mocks.executeAppServerCoreDynamicToolCall).not.toHaveBeenCalled();
   });
 
   it("bridges authenticated worker views into read-scoped app-server context", async () => {
@@ -226,6 +246,254 @@ describe("/app-server route", () => {
       allowedCommands: ["worker:view.snapshot"],
       allowedTenants: ["continuous-demo"],
       allowedWorkerRoles: ["revenue_operations"],
+    });
+  });
+
+  it("bridges authenticated Core commands into control-plane app-server context", async () => {
+    mocks.env.CONTROL_PLANE_TOKENS_JSON = tokenCatalog(
+      ["app_server:core.command.task.create"],
+      {
+        allowedWorkerRoles: [],
+      },
+    );
+
+    const { POST } = await import("./route");
+    const payload = {
+      tool: "continuous.core.command",
+      arguments: {
+        command: "task.create",
+        core: {
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "app-server-core-task-create-001",
+        config: {
+          title: "Review Core app-server primitive",
+          priority: "high",
+        },
+      },
+      callId: "call-core-command-001",
+      threadId: "thread-001",
+      turnId: "turn-001",
+    };
+    const response = await POST(
+      new Request("http://localhost/app-server", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.authorizeManagedControlPlaneCredential).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: "app_server",
+        access: "write",
+        command: "core.command.task.create",
+        tenantSlug: "continuous-demo",
+        workerRole: undefined,
+        requireManagedCredential: true,
+      }),
+    );
+    expect(mocks.executeAppServerCoreDynamicToolCall).toHaveBeenCalledWith(payload, {
+      operatorEmail: "operator@example.com",
+      source: "control_plane",
+      allowedAccess: ["write"],
+      allowedCommands: ["core:task.create"],
+      allowedTenants: ["continuous-demo"],
+    });
+    expect(mocks.executeAppServerWorkerDynamicToolCall).not.toHaveBeenCalled();
+  });
+
+  it("bridges authenticated Core views into read-scoped app-server context", async () => {
+    mocks.env.CONTROL_PLANE_TOKENS_JSON = tokenCatalog(
+      ["app_server:core.view.summary"],
+      {
+        allowedWorkerRoles: [],
+      },
+    );
+
+    const { POST } = await import("./route");
+    const payload = {
+      tool: "continuous.core.view",
+      arguments: {
+        view: "summary",
+        core: {
+          tenantSlug: "continuous-demo",
+        },
+        config: {},
+      },
+      callId: "call-core-view-001",
+      threadId: "thread-001",
+      turnId: "turn-001",
+    };
+    const response = await POST(
+      new Request("http://localhost/app-server", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.executeAppServerCoreDynamicToolCall).toHaveBeenCalledWith(payload, {
+      operatorEmail: "operator@example.com",
+      source: "control_plane",
+      allowedAccess: ["read"],
+      allowedCommands: ["core:view.summary"],
+      allowedTenants: ["continuous-demo"],
+    });
+  });
+
+  it("authorizes Core schema discovery through an explicit app-server schema command", async () => {
+    mocks.env.CONTROL_PLANE_TOKENS_JSON = tokenCatalog(["app_server:core.schema"]);
+
+    const { POST } = await import("./route");
+    const payload = {
+      tool: "continuous.core.schema",
+      arguments: {},
+      callId: "call-core-schema-001",
+      threadId: "thread-001",
+      turnId: "turn-001",
+    };
+    const response = await POST(
+      new Request("http://localhost/app-server", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.authorizeManagedControlPlaneCredential).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: "app_server",
+        access: "read",
+        command: "core.schema",
+        requireManagedCredential: false,
+      }),
+    );
+    expect(mocks.executeAppServerCoreDynamicToolCall).toHaveBeenCalledWith(payload, undefined);
+  });
+
+  it("rejects Core bridge calls outside token command or tenant scope", async () => {
+    const { POST } = await import("./route");
+    const basePayload = {
+      tool: "continuous.core.command",
+      arguments: {
+        command: "task.create",
+        core: {
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "app-server-core-denied-001",
+        config: {
+          title: "Denied Core bridge command",
+        },
+      },
+      callId: "call-core-denied-001",
+      threadId: "thread-001",
+      turnId: "turn-001",
+    };
+
+    mocks.env.CONTROL_PLANE_TOKENS_JSON = tokenCatalog(["app_server:core.view.summary"], {
+      allowedWorkerRoles: [],
+    });
+    const deniedCommand = await POST(
+      new Request("http://localhost/app-server", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(basePayload),
+      }),
+    );
+
+    mocks.env.CONTROL_PLANE_TOKENS_JSON = tokenCatalog(["app_server:core.command.task.create"], {
+      allowedWorkerRoles: [],
+    });
+    const deniedTenant = await POST(
+      new Request("http://localhost/app-server", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          ...basePayload,
+          arguments: {
+            ...basePayload.arguments,
+            core: {
+              tenantSlug: "other-tenant",
+            },
+          },
+        }),
+      }),
+    );
+
+    expect(deniedCommand.status).toBe(403);
+    await expect(deniedCommand.json()).resolves.toMatchObject({
+      error: { code: "control_plane_command_forbidden" },
+    });
+    expect(deniedTenant.status).toBe(403);
+    await expect(deniedTenant.json()).resolves.toMatchObject({
+      error: { code: "control_plane_tenant_forbidden" },
+    });
+    expect(mocks.executeAppServerCoreDynamicToolCall).not.toHaveBeenCalled();
+    expect(mocks.executeAppServerWorkerDynamicToolCall).not.toHaveBeenCalled();
+  });
+
+  it("keeps Core bridge auth tenant-scoped instead of worker-role scoped", async () => {
+    mocks.env.CONTROL_PLANE_TOKENS_JSON = tokenCatalog(
+      ["app_server:core.command.task.create"],
+      {
+        allowedWorkerRoles: ["revenue_operations"],
+      },
+    );
+
+    const { POST } = await import("./route");
+    const payload = {
+      tool: "continuous.core.command",
+      arguments: {
+        command: "task.create",
+        core: {
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "app-server-core-worker-role-scope-001",
+        config: {
+          title: "Core auth is tenant scoped",
+        },
+      },
+      callId: "call-core-worker-role-scope-001",
+      threadId: "thread-001",
+      turnId: "turn-001",
+    };
+    const response = await POST(
+      new Request("http://localhost/app-server", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.executeAppServerCoreDynamicToolCall).toHaveBeenCalledWith(payload, {
+      operatorEmail: "operator@example.com",
+      source: "control_plane",
+      allowedAccess: ["write"],
+      allowedCommands: ["core:task.create"],
+      allowedTenants: ["continuous-demo"],
     });
   });
 

@@ -1,8 +1,9 @@
 # Agent Build Path
 
 The installed Codex app-server CLI can run over stdio or WebSocket and can
-generate protocol bindings. Continuous defines repo-owned app-server worker
-tools: `continuous.worker.schema` for registry discovery and
+generate protocol bindings. Continuous defines repo-owned app-server Core and
+worker tools: `continuous.core.schema` and `continuous.worker.schema` for
+registry discovery, plus `continuous.core.view` / `continuous.core.command` and
 `continuous.worker.view` / `continuous.worker.command` for registry-backed read
 and command execution. The local executor also accepts Codex dynamic tool-call
 payloads with `tool`, `arguments`, `callId`, `threadId`, and `turnId`. Use the
@@ -10,14 +11,15 @@ Next.js 16 MCP bridge for route/runtime visibility.
 
 ```sh
 bun run app-server:help
-bun run app-server:worker-tools
+bun run app-server:tools
 bun run app-server:generate-ts
 bun run app-server:generate-json-schema
 ```
 
 Generated app-server protocol files are written under `generated/app-server/`
-and ignored by git. They are protocol references. The committed worker tool
-manifest lives in `src/worker/app-server-tools.ts`; details are in
+and ignored by git. They are protocol references. The committed Core and worker
+tool manifests live in `src/core/app-server-tools.ts` and
+`src/worker/app-server-tools.ts`; details are in
 `docs/app-server-worker-tools.md`.
 
 ## Next.js MCP
@@ -43,13 +45,16 @@ Useful app surfaces for worker development:
 | `POST /approval` | Shared approval decision surface with `command`, top-level `idempotencyKey`, explicit `approval.subject`, and `config` payload fields |
 | `POST /worker` with `view`, `worker`, and `config` | Canonical operator-gated worker read surface |
 | `POST /worker` with `command`, `worker`, `config`, and `idempotencyKey` | Canonical worker command surface |
-| `POST /app-server` with `tool`, `arguments`, `callId`, `threadId`, and `turnId` | Authenticated generic dynamic-tool bridge; worker command/view payloads stay under `arguments` and route through the `/worker` registry |
+| `POST /app-server` with `tool`, `arguments`, `callId`, `threadId`, and `turnId` | Authenticated generic dynamic-tool bridge; Core and worker command/view payloads stay under `arguments` and route through the Core or worker registry |
 | `/workflow?view=approvals` | Canonical operator-gated workflow approval queue |
 | `POST /workflow` | Canonical workflow command surface for starts, transitions, queued step execution, and workflow approval decisions |
 | `bun run worker:tool` | Repo-owned JSON worker toolbox for agents and local automation |
-| `bun run app-server:worker-tools continuous.worker.view` | App-server read surface backed by the same worker view registry |
-| `bun run app-server:worker-tools continuous.worker.command` | App-server command surface backed by the same worker command registry |
-| `bun run app-server:worker-tools dynamic-call` | Codex dynamic tool-call adapter for the same app-server worker tools |
+| `bun run app-server:tools continuous.core.schema` | App-server Core discovery surface for registered Core commands and views |
+| `bun run app-server:tools continuous.core.view` | App-server Core read surface backed by the same Core view registry |
+| `bun run app-server:tools continuous.core.command` | App-server Core command surface backed by registered Core command handlers |
+| `bun run app-server:tools continuous.worker.view` | App-server read surface backed by the same worker view registry |
+| `bun run app-server:tools continuous.worker.command` | App-server command surface backed by the same worker command registry |
+| `bun run app-server:tools dynamic-call` | Codex dynamic tool-call adapter for the same app-server Core and worker tools |
 
 `bun run worker:tool schema` exposes the registered worker commands and local
 generic tool surfaces. Agents should inspect that registry metadata before
@@ -58,16 +63,18 @@ and `idempotencyKey` payload shape through either the toolbox or `/worker`.
 
 ## Boundary
 
-Use the Next.js MCP bridge for Next.js diagnostics. Keep side-effecting worker
-execution on explicit operator commands, guarded `POST` routes, or the
-registry-backed app-server worker command. Worker reads through app-server stay
-on the same `view`, `worker`, and `config` envelope as `worker.view`. The
-dynamic-call adapter returns Codex-compatible `contentItems` and never accepts
-operator identity in the tool arguments; authenticated bridges pass operator
-identity, access, route-qualified command or view, tenant, and worker-role
-scope through transport context after control-plane auth. `POST /app-server`
-accepts only dynamic tool-call fields at the top level, so operation-specific
-worker inputs stay inside `arguments.config`. The
+Use the Next.js MCP bridge for Next.js diagnostics. Keep side-effecting Core and
+worker execution on explicit operator commands, guarded `POST` routes, or the
+registry-backed app-server command tools. Worker reads through app-server stay
+on the same `view`, `worker`, and `config` envelope as `worker.view`; Core
+reads stay on the same `view`, `core`, and `config` envelope as `POST /core`.
+The dynamic-call adapter returns Codex-compatible `contentItems` and never
+accepts operator identity in the tool arguments; authenticated bridges pass
+operator identity, access, route-qualified command or view, tenant, and
+worker-role scope when needed through transport context after control-plane
+auth. `POST /app-server` accepts only dynamic tool-call fields at the top
+level, so operation-specific Core and worker inputs stay inside
+`arguments.config`. The
 Revenue Worker now records the
 configured operator, active capability grant, approval request, audit event, and
 evidence before any external action can be approved. The shared approval service

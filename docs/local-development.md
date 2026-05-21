@@ -53,7 +53,7 @@ shell history, and logs never carry bearer values:
 ```sh
 read -rsp "Route-scoped operator token: " CONTROL_PLANE_OPERATOR_TOKEN
 CONTROL_PLANE_TOKEN_SHA256="$(printf '%s' "$CONTROL_PLANE_OPERATOR_TOKEN" | shasum -a 256 | awk '{print $1}')"
-export CONTROL_PLANE_TOKENS_JSON='[{"id":"local-operator","tokenSha256":"'"$CONTROL_PLANE_TOKEN_SHA256"'","operatorEmail":"owner@continuoushq.com","allowedTenants":["continuous-demo"],"allowedWorkerRoles":["revenue_operations","offer_pricing_operations","customer_experience_operations"],"allowedRoutes":["core","worker","workflow","approval","app_server"],"allowedAccess":["read","write"],"allowedCommands":["core:view.summary","core:task.create","core:object.upsert","core:entity.setup.record","core:worker.upsert","core:worker.transition","worker:view.snapshot","worker:view.approvals","worker:lead.read","worker:run","worker:quote.prepare","worker:payment_link.prepare","worker:margin.review.prepare","worker:view.price_policy","worker:recovery.draft","worker:view.signals","worker:adapters.reconcile","worker:adapters.retry","app_server:worker.schema","app_server:worker.view.snapshot","app_server:worker.command.lead.read","app_server:worker.command.payment_link.prepare","app_server:worker.command.margin.review.prepare","app_server:worker.view.price_policy","app_server:worker.command.recovery.draft","app_server:worker.view.signals","workflow:view.overview","approval:view.inbox","approval:approval.decide"]}]'
+export CONTROL_PLANE_TOKENS_JSON='[{"id":"local-operator","tokenSha256":"'"$CONTROL_PLANE_TOKEN_SHA256"'","operatorEmail":"owner@continuoushq.com","allowedTenants":["continuous-demo"],"allowedWorkerRoles":["revenue_operations","offer_pricing_operations","customer_experience_operations"],"allowedRoutes":["core","worker","workflow","approval","app_server"],"allowedAccess":["read","write"],"allowedCommands":["core:view.summary","core:task.create","core:object.upsert","core:entity.setup.record","core:worker.upsert","core:worker.transition","worker:view.snapshot","worker:view.approvals","worker:lead.read","worker:run","worker:quote.prepare","worker:payment_link.prepare","worker:margin.review.prepare","worker:view.price_policy","worker:recovery.draft","worker:view.signals","worker:adapters.reconcile","worker:adapters.retry","app_server:core.schema","app_server:core.view.summary","app_server:core.command.task.create","app_server:core.command.object.upsert","app_server:core.command.worker.upsert","app_server:worker.schema","app_server:worker.view.snapshot","app_server:worker.command.lead.read","app_server:worker.command.payment_link.prepare","app_server:worker.command.margin.review.prepare","app_server:worker.view.price_policy","app_server:worker.command.recovery.draft","app_server:worker.view.signals","workflow:view.overview","approval:view.inbox","approval:approval.decide"]}]'
 ```
 
 Core side effects use a structured command payload. For local-only testing,
@@ -119,7 +119,7 @@ The repo also includes `.mcp.json` for the Next.js MCP bridge. With `bun run dev
 running, compatible coding agents can inspect routes, runtime errors, metadata,
 and logs through `next-devtools-mcp`. The installed Codex app-server CLI exposes
 stdio/WebSocket serving, protocol generation, and repo-owned worker controls;
-inspect it with `bun run app-server:help` and `bun run app-server:worker-tools`
+inspect it with `bun run app-server:help` and `bun run app-server:tools`
 when worker build tooling needs it.
 
 ## Revenue Operations Worker
@@ -239,19 +239,20 @@ bun run worker:tool worker.command --payload='{"command":"lead.read","worker":{"
 generic tool surfaces, idempotency policy, tenant requirements, and
 external-execution status before a command is invoked.
 
-The app-server worker tools use the same read and command envelopes as the
-worker registry:
+The app-server Core and worker tools use the same read and command envelopes as
+the Core and worker registries:
 
-`continuous.worker.command` and `worker.command` are tool names, `/worker` is
-the HTTP route, and operation inputs belong under the `config` payload field.
+`continuous.core.command`, `continuous.worker.command`, and `worker.command`
+are tool names, `/core` and `/worker` are HTTP routes, and operation inputs
+belong under the `config` payload field.
 
 ```sh
 export WORKER_OPERATOR_EMAIL=owner@continuoushq.com
-bun run app-server:worker-tools continuous.worker.view --payload='{"view":"snapshot","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{}}'
+bun run app-server:tools continuous.worker.view --payload='{"view":"snapshot","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"config":{}}'
 ```
 
 ```sh
-bun run app-server:worker-tools continuous.worker.command --payload='{"command":"lead.read","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-app-server-lead-001","config":{"source":"website_form","records":[{"sourceEventId":"form-local-app-server-001","customerName":"Acme Roof Repair","customerIntent":"roof leak inspection","serviceArea":"roofing","urgency":"high"}]}}'
+bun run app-server:tools continuous.worker.command --payload='{"command":"lead.read","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-app-server-lead-001","config":{"source":"website_form","records":[{"sourceEventId":"form-local-app-server-001","customerName":"Acme Roof Repair","customerIntent":"roof leak inspection","serviceArea":"roofing","urgency":"high"}]}}'
 ```
 
 The same reconciliation command is available through the canonical worker API:

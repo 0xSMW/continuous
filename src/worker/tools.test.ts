@@ -110,7 +110,9 @@ describe("worker tool contract", () => {
       scripts: Record<string, string>;
     };
 
-    expect(pkg.scripts["worker:tool"]).toBe("bun src/worker/run-tool.ts");
+    expect(pkg.scripts["worker:tool"]).toBe("bun ./src/worker/run-tool.ts");
+    expect(pkg.scripts["app-server:tools"]).toBe("bun ./src/app-server/run-tool.ts");
+    expect(pkg.scripts["app-server:worker-tools"]).toBeUndefined();
     expect(Object.keys(pkg.scripts).filter((scriptName) => scriptName.startsWith("worker:"))).toEqual([
       "worker:tool",
     ]);

@@ -1,5 +1,15 @@
 import { env } from "../../src/env";
 import {
+  coreOperationDescription,
+  coreTargetFrom,
+  executeAppServerCoreDynamicToolCall,
+  isAppServerCoreCommand,
+  isAppServerCoreView,
+  isCoreOperationIdentifier,
+  validateAppServerCoreArguments,
+  type AppServerCoreTransportContext,
+} from "../../src/core/app-server-tools";
+import {
   executeAppServerWorkerDynamicToolCall,
   type AppServerDynamicToolCallParams,
   type AppServerWorkerTransportContext,
@@ -39,12 +49,14 @@ const appServerDynamicToolCallFields = new Set([
 ]);
 
 type AppServerBridgeTarget = {
+  kind: "core" | "worker";
   access: ControlPlaneAccess;
   controlCommand: string;
-  workerCommand?: string;
+  innerCommand?: string;
   tenantSlug?: string;
   workerRole?: string;
-  requireScope: boolean;
+  requireTenantScope: boolean;
+  requireWorkerRoleScope: boolean;
   requireManagedCredential: boolean;
 };
 
@@ -292,11 +304,13 @@ function appServerBridgeTarget(body: Record<string, unknown>):
       payload: body as AppServerDynamicToolCallParams,
       target: {
         access: "write",
+        kind: "worker",
         controlCommand: `worker.command.${command}`,
-        workerCommand: `worker:${command}`,
+        innerCommand: `worker:${command}`,
         tenantSlug,
         workerRole,
-        requireScope: true,
+        requireTenantScope: true,
+        requireWorkerRoleScope: true,
         requireManagedCredential: true,
       },
     };
@@ -339,11 +353,13 @@ function appServerBridgeTarget(body: Record<string, unknown>):
       payload: body as AppServerDynamicToolCallParams,
       target: {
         access: "read",
+        kind: "worker",
         controlCommand: `worker.view.${view}`,
-        workerCommand: `worker:view.${view}`,
+        innerCommand: `worker:view.${view}`,
         tenantSlug,
         workerRole,
-        requireScope: true,
+        requireTenantScope: true,
+        requireWorkerRoleScope: true,
         requireManagedCredential: true,
       },
     };
@@ -355,8 +371,145 @@ function appServerBridgeTarget(body: Record<string, unknown>):
       payload: body as AppServerDynamicToolCallParams,
       target: {
         access: "read",
+        kind: "worker",
         controlCommand: "worker.schema",
-        requireScope: false,
+        requireTenantScope: false,
+        requireWorkerRoleScope: false,
+        requireManagedCredential: false,
+      },
+    };
+  }
+
+  if (tool === "continuous.core.command") {
+    const envelope = validateAppServerCoreArguments(args, "command");
+
+    if (!envelope.ok) {
+      return {
+        ok: false,
+        error: envelope.error,
+      };
+    }
+
+    const command = optionalString(args.command);
+
+    if (!command) {
+      return {
+        ok: false,
+        error: {
+          code: "invalid_app_server_tool_call",
+          message: "continuous.core.command requires arguments.command.",
+        },
+      };
+    }
+
+    if (!isCoreOperationIdentifier(command)) {
+      return {
+        ok: false,
+        error: {
+          code: "invalid_app_server_tool_call",
+          message: coreOperationDescription,
+        },
+      };
+    }
+
+    if (!isAppServerCoreCommand(command)) {
+      return {
+        ok: false,
+        error: {
+          code: "unknown_app_server_tool",
+          message: `Unsupported app-server Core command: ${command}`,
+        },
+      };
+    }
+
+    const core = coreTargetFrom(args);
+
+    return {
+      ok: true,
+      payload: body as AppServerDynamicToolCallParams,
+      target: {
+        access: "write",
+        kind: "core",
+        controlCommand: `core.command.${command}`,
+        innerCommand: `core:${command}`,
+        tenantSlug: core.tenantSlug,
+        requireTenantScope: true,
+        requireWorkerRoleScope: false,
+        requireManagedCredential: true,
+      },
+    };
+  }
+
+  if (tool === "continuous.core.view") {
+    const envelope = validateAppServerCoreArguments(args, "view");
+
+    if (!envelope.ok) {
+      return {
+        ok: false,
+        error: envelope.error,
+      };
+    }
+
+    const view = optionalString(args.view);
+
+    if (!view) {
+      return {
+        ok: false,
+        error: {
+          code: "invalid_app_server_tool_call",
+          message: "continuous.core.view requires arguments.view.",
+        },
+      };
+    }
+
+    if (!isCoreOperationIdentifier(view)) {
+      return {
+        ok: false,
+        error: {
+          code: "invalid_app_server_tool_call",
+          message: coreOperationDescription,
+        },
+      };
+    }
+
+    if (!isAppServerCoreView(view)) {
+      return {
+        ok: false,
+        error: {
+          code: "unknown_app_server_tool",
+          message: `Unsupported app-server Core view: ${view}`,
+        },
+      };
+    }
+
+    const core = coreTargetFrom(args);
+
+    return {
+      ok: true,
+      payload: body as AppServerDynamicToolCallParams,
+      target: {
+        access: "read",
+        kind: "core",
+        controlCommand: `core.view.${view}`,
+        innerCommand: `core:view.${view}`,
+        tenantSlug: core.tenantSlug,
+        requireTenantScope: true,
+        requireWorkerRoleScope: false,
+        requireManagedCredential: true,
+      },
+    };
+  }
+
+  if (tool === "continuous.core.schema") {
+    return {
+      ok: true,
+      payload: body as AppServerDynamicToolCallParams,
+      target: {
+        access: "read",
+        kind: "core",
+        controlCommand: "core.schema",
+        requireTenantScope: false,
+        requireWorkerRoleScope: false,
         requireManagedCredential: false,
       },
     };
@@ -366,7 +519,7 @@ function appServerBridgeTarget(body: Record<string, unknown>):
     ok: false,
     error: {
       code: "unknown_app_server_tool",
-      message: `Unknown app-server worker tool: ${tool}`,
+      message: `Unknown app-server tool: ${tool}`,
     },
   };
 }
@@ -411,9 +564,22 @@ function transportContextFor(input: {
     operatorEmail: input.operatorEmail,
     source: "control_plane",
     allowedAccess: [input.target.access],
-    allowedCommands: input.target.workerCommand ? [input.target.workerCommand] : [],
+    allowedCommands: input.target.innerCommand ? [input.target.innerCommand] : [],
     allowedTenants: input.target.tenantSlug ? [input.target.tenantSlug] : ["*"],
     allowedWorkerRoles: input.target.workerRole ? [input.target.workerRole] : ["*"],
+  };
+}
+
+function coreTransportContextFor(input: {
+  operatorEmail: string;
+  target: AppServerBridgeTarget;
+}): AppServerCoreTransportContext {
+  return {
+    operatorEmail: input.operatorEmail,
+    source: "control_plane",
+    allowedAccess: [input.target.access],
+    allowedCommands: input.target.innerCommand ? [input.target.innerCommand] : [],
+    allowedTenants: input.target.tenantSlug ? [input.target.tenantSlug] : ["*"],
   };
 }
 
@@ -487,13 +653,13 @@ export async function POST(request: Request) {
     return guardErrorResponse(auth);
   }
 
-  if (target.requireScope) {
+  if (target.requireTenantScope || target.requireWorkerRoleScope) {
     const scope = authorizeControlPlaneScope({
       scope: auth.scope,
       tenantSlug: target.tenantSlug,
       workerRole: target.workerRole,
-      requireTenant: true,
-      requireWorkerRole: true,
+      requireTenant: target.requireTenantScope,
+      requireWorkerRole: target.requireWorkerRoleScope,
     });
 
     if (!scope.ok) {
@@ -546,12 +712,20 @@ export async function POST(request: Request) {
     auth,
   });
 
-  const result = await executeAppServerWorkerDynamicToolCall(
-    payload,
-    payload.tool === "continuous.worker.schema"
-      ? undefined
-      : transportContextFor({ operatorEmail: auth.operatorEmail, target }),
-  );
+  const result =
+    target.kind === "core"
+      ? await executeAppServerCoreDynamicToolCall(
+          payload,
+          payload.tool === "continuous.core.schema"
+            ? undefined
+            : coreTransportContextFor({ operatorEmail: auth.operatorEmail, target }),
+        )
+      : await executeAppServerWorkerDynamicToolCall(
+          payload,
+          payload.tool === "continuous.worker.schema"
+            ? undefined
+            : transportContextFor({ operatorEmail: auth.operatorEmail, target }),
+        );
 
   return Response.json(
     {
