@@ -1518,6 +1518,7 @@ async function prepareSystemsCommand(input: {
     });
   }
 
+  const resultOutput = objectValue(result.output);
   const completion = await completeCoreWorkerRun({
     operatorEmail: input.operatorEmail,
     tenantSlug: context.worker.tenantSlug,
@@ -1529,7 +1530,7 @@ async function prepareSystemsCommand(input: {
     workerRunId: coreRun.workerRunId,
     state: "done",
     reason: "Systems Operations Worker prepared connector, permission, repair, or automation proof with live external mutation blocked.",
-    output: result.output,
+    output: resultOutput,
     costUsd: 0,
     evidence: {
       command: input.command,
@@ -1549,14 +1550,14 @@ async function prepareSystemsCommand(input: {
   });
   const settledReservationId =
     optionalString(objectValue(completion.budget).reservationId) ??
-    optionalString(result.output.budgetReservationId) ??
+    optionalString(resultOutput.budgetReservationId) ??
     null;
   const settledUsageEventId =
     optionalString(objectValue(completion.budget).usageEventId) ??
-    optionalString(result.output.usageEventId) ??
+    optionalString(resultOutput.usageEventId) ??
     null;
   const settledOutput = {
-    ...result.output,
+    ...resultOutput,
     budgetReservationId: settledReservationId,
     usageEventId: settledUsageEventId,
   } satisfies JsonObject;
