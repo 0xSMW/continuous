@@ -9734,8 +9734,45 @@ export async function continueRevenueWorker(input: {
         );
       }
 
+      if (executionRecorded && !controlledConnectionId) {
+        throw new RevenueWorkerUnavailableError(
+          "worker_controlled_send_connection_required",
+          "Controlled customer-message execution requires a tenant-scoped execution connection.",
+          409,
+        );
+      }
+
       const controlledReceiptObject = objectValue(controlledSendReceipt);
       const controlledReceipt = objectValue(controlledReceiptObject.receipt);
+
+      if (executionRecorded) {
+        await tx
+          .update(adapterActions)
+          .set({
+            state: "done",
+            connectionId: controlledConnectionId,
+            mode: "controlled_record",
+            operation: "customer_message.send",
+            reconciliationState: "matched",
+            updatedAt: now,
+          })
+          .where(and(eq(adapterActions.tenantId, context.worker.tenantId), eq(adapterActions.id, adapterActionId)));
+
+        if (adapterRunId) {
+          await tx
+            .update(adapterRuns)
+            .set({
+              state: "done",
+              connectionId: controlledConnectionId,
+              mode: "controlled_record",
+              operation: "customer_message.send",
+              reconciliationState: "matched",
+              writeCount: 1,
+            })
+            .where(and(eq(adapterRuns.tenantId, context.worker.tenantId), eq(adapterRuns.id, adapterRunId)));
+        }
+      }
+
       const externalActionRecord = executionRecorded
         ? await recordExternalActionForOperator(
             tx,
