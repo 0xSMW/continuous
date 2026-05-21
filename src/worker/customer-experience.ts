@@ -4,6 +4,7 @@ import { and, count, desc, eq, sql } from "drizzle-orm";
 
 import { PlatformUnavailableError } from "../core/errors";
 import { loadOperatorContext } from "../core/operators";
+import { completeCoreWorkerRun, startCoreWorkerRun } from "../core/worker-runs";
 import { db as defaultDb } from "../db/client";
 import {
   approvalRequests,
@@ -240,7 +241,13 @@ function hashObject(value: unknown) {
 }
 
 function outputData(data: JsonObject) {
-  return objectValue(data.output);
+  const output = objectValue(data.output);
+
+  if (Object.keys(output).length > 0) {
+    return output;
+  }
+
+  return objectValue(objectValue(data.pendingCompletion).output);
 }
 
 function severityFrom(data: JsonObject) {
@@ -646,6 +653,116 @@ async function writeGeneratedSignalsView(input: {
   return view.id;
 }
 
+async function loadRecoveryRunOutput(input: {
+  db: Database;
+  tenantId: string;
+  workerRunId: string;
+  inputHash: string;
+}) {
+  const [run] = await input.db
+    .select()
+    .from(workerRuns)
+    .where(and(eq(workerRuns.tenantId, input.tenantId), eq(workerRuns.id, input.workerRunId)))
+    .limit(1);
+
+  if (!run) {
+    return null;
+  }
+
+  const runData = objectValue(run.data);
+  const runInput = objectValue(runData.input);
+  const requestInput = objectValue(runInput.request);
+  const existingHash = optionalString(requestInput.inputHash) ?? optionalString(runInput.inputHash);
+
+  if (existingHash && existingHash !== input.inputHash) {
+    throw new PlatformUnavailableError(
+      "worker_idempotency_conflict",
+      "A Customer Experience recovery draft already exists for this idempotency key with different input.",
+      409,
+    );
+  }
+
+  const output = outputData(runData);
+
+  return {
+    run,
+    output: optionalString(output.workerRunId) ? output : null,
+  };
+}
+
+async function completeRecoveryCoreRun(input: {
+  db: Database;
+  idempotencyKey: string;
+  operatorEmail: string;
+  tenantSlug: string;
+  workerId: string;
+  workerRunId: string;
+  output: JsonObject;
+}) {
+  await completeCoreWorkerRun({
+    operatorEmail: input.operatorEmail,
+    tenantSlug: input.tenantSlug,
+    idempotencyKey: input.idempotencyKey,
+    worker: {
+      id: input.workerId,
+      role: customerExperienceWorkerRole,
+    },
+    workerRunId: input.workerRunId,
+    state: "done",
+    reason: "Customer Experience recovery draft prepared with external send blocked.",
+    output: input.output,
+    evidence: {
+      command: "recovery.draft",
+      evidenceId: optionalString(input.output.evidenceId) ?? null,
+      packetId: optionalString(input.output.packetId) ?? null,
+      documentId: optionalString(input.output.documentId) ?? null,
+      approvalRequestId: optionalString(input.output.approvalRequestId) ?? null,
+      workflowRunId: optionalString(input.output.workflowRunId) ?? null,
+      externalExecution: "blocked",
+      externalSend: false,
+    },
+    db: input.db,
+  });
+}
+
+async function recoveryResultFromOutput(input: {
+  created: boolean;
+  idempotencyKey: string;
+  context: CustomerExperienceContext;
+  db: Database;
+  output: JsonObject;
+}): Promise<CustomerExperienceRecoveryDraftResult> {
+  const output = input.created ? input.output : { ...input.output, created: false };
+  const snapshot = await getCustomerExperienceWorkerSnapshot({
+    tenantSlug: input.context.worker.tenantSlug,
+    workerId: input.context.worker.id,
+    db: input.db,
+  });
+
+  return {
+    created: input.created,
+    idempotencyKey: input.idempotencyKey,
+    workerRunId: stringValue(output.workerRunId),
+    taskId: optionalString(output.taskId) ?? null,
+    eventId: optionalString(output.eventId) ?? null,
+    recoveryObjectId: optionalString(output.recoveryObjectId) ?? null,
+    customerSignalId: optionalString(output.customerSignalId) ?? null,
+    signalObjectId: optionalString(output.signalObjectId) ?? null,
+    customerObjectId: optionalString(output.customerObjectId) ?? null,
+    approvalRequestId: optionalString(output.approvalRequestId) ?? null,
+    evidenceId: optionalString(output.evidenceId) ?? null,
+    packetId: optionalString(output.packetId) ?? null,
+    documentId: optionalString(output.documentId) ?? null,
+    workflowRunId: optionalString(output.workflowRunId) ?? null,
+    workflowStepIds: stringList(output.workflowStepIds),
+    signalsViewId: optionalString(output.signalsViewId) ?? null,
+    externalExecution: "blocked",
+    externalSend: false,
+    output,
+    snapshot,
+  };
+}
+
 export async function prepareCustomerRecoveryDraft(input: {
   idempotencyKey: string;
   tenantSlug?: string;
@@ -714,6 +831,65 @@ export async function prepareCustomerRecoveryDraft(input: {
     blockers,
   });
   const now = new Date();
+  const coreRun = await startCoreWorkerRun({
+    operatorEmail: input.operatorEmail,
+    tenantSlug: context.worker.tenantSlug,
+    idempotencyKey: input.idempotencyKey,
+    worker: {
+      id: context.worker.id,
+      role: customerExperienceWorkerRole,
+    },
+    command: "recovery.draft",
+    mode: "simulation",
+    capabilityId: context.capabilityId,
+    budgetAccountId: context.budgetAccountId,
+    units: recoveryDraftUnits,
+    input: {
+      inputHash,
+      config,
+      customerSignalId: signal.id,
+      signalObjectId: signal.objectId,
+      customerObjectId: customerObjectId ?? null,
+      sourceRefs,
+      blockers,
+    },
+    policy: safePolicy,
+    evidence: {
+      command: "recovery.draft",
+      required: ["customer_signal", "recovery_packet", "owner_approval"],
+      externalExecution: "blocked",
+      externalSend: false,
+    },
+    db,
+  });
+  const replay = await loadRecoveryRunOutput({
+    db,
+    tenantId: context.worker.tenantId,
+    workerRunId: coreRun.workerRunId,
+    inputHash,
+  });
+
+  if (replay?.output) {
+    if (replay.run.state === "running") {
+      await completeRecoveryCoreRun({
+        db,
+        idempotencyKey: input.idempotencyKey,
+        operatorEmail: input.operatorEmail,
+        tenantSlug: context.worker.tenantSlug,
+        workerId: context.worker.id,
+        workerRunId: coreRun.workerRunId,
+        output: replay.output,
+      });
+    }
+
+    return recoveryResultFromOutput({
+      created: false,
+      idempotencyKey: input.idempotencyKey,
+      context,
+      db,
+      output: replay.output,
+    });
+  }
 
   const result = await db.transaction(async (tx) => {
     await tx.execute(
@@ -726,15 +902,16 @@ export async function prepareCustomerRecoveryDraft(input: {
       .where(
         and(
           eq(workerRuns.tenantId, context.worker.tenantId),
-          eq(workerRuns.source, customerExperienceSource),
-          eq(workerRuns.idempotencyKey, input.idempotencyKey),
+          eq(workerRuns.id, coreRun.workerRunId),
         ),
       )
       .limit(1);
 
     if (existingRun) {
       const existingInput = objectValue(objectValue(existingRun.data).input);
-      const existingHash = optionalString(existingInput.inputHash);
+      const existingRequest = objectValue(existingInput.request);
+      const existingHash = optionalString(existingRequest.inputHash) ?? optionalString(existingInput.inputHash);
+      const existingOutput = outputData(existingRun.data);
 
       if (existingHash && existingHash !== inputHash) {
         throw new PlatformUnavailableError(
@@ -744,15 +921,15 @@ export async function prepareCustomerRecoveryDraft(input: {
         );
       }
 
-      const output = outputData(existingRun.data);
-
-      return {
-        status: "replay" as const,
-        output: {
-          ...output,
-          created: false,
-        } as JsonObject,
-      };
+      if (optionalString(existingOutput.workerRunId)) {
+        return {
+          status: "replay" as const,
+          output: {
+            ...existingOutput,
+            created: false,
+          } as JsonObject,
+        };
+      }
     }
 
     const [definition] = await tx
@@ -890,31 +1067,6 @@ export async function prepareCustomerRecoveryDraft(input: {
       })
       .returning({ id: tasks.id });
 
-    const [run] = await tx
-      .insert(workerRuns)
-      .values({
-        tenantId: context.worker.tenantId,
-        workerId: context.worker.id,
-        taskId: task.id,
-        capabilityId: context.capabilityId,
-        budgetAccountId: context.budgetAccountId,
-        source: customerExperienceSource,
-        idempotencyKey: input.idempotencyKey,
-        state: "running",
-        mode: "simulation",
-        data: {
-          input: {
-            command: "recovery.draft",
-            inputHash,
-            config,
-          },
-        },
-        startedAt: now,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning({ id: workerRuns.id });
-
     const [workflowRun] = await tx
       .insert(workflowRuns)
       .values({
@@ -926,7 +1078,7 @@ export async function prepareCustomerRecoveryDraft(input: {
         idempotencyKey: input.idempotencyKey,
         data: {
           ...recoveryData,
-          workerRunId: run.id,
+          workerRunId: coreRun.workerRunId,
         },
         blockers: { items: blockers },
         metrics: {
@@ -953,7 +1105,7 @@ export async function prepareCustomerRecoveryDraft(input: {
         idempotencyKey: `${input.idempotencyKey}:recovery_draft_completed`,
         data: {
           ...recoveryData,
-          workerRunId: run.id,
+          workerRunId: coreRun.workerRunId,
           workflowRunId: workflowRun.id,
         },
         occurredAt: now,
@@ -976,6 +1128,7 @@ export async function prepareCustomerRecoveryDraft(input: {
         hash: `${customerExperienceSource}:recovery:${recoveryObject.id}:${input.idempotencyKey}`,
         data: {
           inputHash,
+          workerRunId: coreRun.workerRunId,
           customerSignalId: signal.id,
           signalObjectId: signal.objectId,
           customerObjectId: customerObjectId ?? null,
@@ -1040,7 +1193,7 @@ export async function prepareCustomerRecoveryDraft(input: {
       .values({
         tenantId: context.worker.tenantId,
         taskId: task.id,
-        workerRunId: run.id,
+        workerRunId: coreRun.workerRunId,
         workflowRunId: workflowRun.id,
         eventId: event.id,
         objectId: recoveryObject.id,
@@ -1196,24 +1349,9 @@ export async function prepareCustomerRecoveryDraft(input: {
       now,
     });
 
-    await tx.insert(usageEvents).values({
-      tenantId: context.worker.tenantId,
-      accountId: context.budgetAccountId,
-      taskId: task.id,
-      capabilityId: context.capabilityId,
-      actorType: "worker",
-      actorId: context.worker.id,
-      units: recoveryDraftUnits,
-      data: {
-        command: "recovery.draft",
-        mode: "simulation",
-      },
-      createdAt: now,
-    });
-
     const output = {
       command: "recovery.draft",
-      workerRunId: run.id,
+      workerRunId: coreRun.workerRunId,
       taskId: task.id,
       eventId: event.id,
       recoveryObjectId: recoveryObject.id,
@@ -1254,19 +1392,19 @@ export async function prepareCustomerRecoveryDraft(input: {
       .update(workerRuns)
       .set({
         eventId: event.id,
-        state: "done",
-        endedAt: now,
+        taskId: task.id,
         updatedAt: now,
         data: {
-          input: {
-            command: "recovery.draft",
-            inputHash,
-            config,
+          ...objectValue(existingRun?.data),
+          businessEventId: event.id,
+          taskId: task.id,
+          workflowRunId: workflowRun.id,
+          pendingCompletion: {
+            output,
           },
-          output,
         },
       })
-      .where(eq(workerRuns.id, run.id));
+      .where(eq(workerRuns.id, coreRun.workerRunId));
 
     await tx
       .insert(auditEvents)
@@ -1282,7 +1420,7 @@ export async function prepareCustomerRecoveryDraft(input: {
         taskId: task.id,
         eventId: event.id,
         objectId: recoveryObject.id,
-        workerRunId: run.id,
+        workerRunId: coreRun.workerRunId,
         approvalRequestId: approval.id,
         capabilityId: context.capabilityId,
         risk: riskForSignal(signal.type, severity),
@@ -1306,35 +1444,25 @@ export async function prepareCustomerRecoveryDraft(input: {
     };
   });
 
-  const output = result.output;
-  const snapshot = await getCustomerExperienceWorkerSnapshot({
-    tenantSlug: context.worker.tenantSlug,
-    workerId: context.worker.id,
-    db,
-  });
+  if (result.status === "created") {
+    await completeRecoveryCoreRun({
+      db,
+      idempotencyKey: input.idempotencyKey,
+      operatorEmail: input.operatorEmail,
+      tenantSlug: context.worker.tenantSlug,
+      workerId: context.worker.id,
+      workerRunId: coreRun.workerRunId,
+      output: result.output,
+    });
+  }
 
-  return {
+  return recoveryResultFromOutput({
     created: result.status === "created",
     idempotencyKey: input.idempotencyKey,
-    workerRunId: stringValue(output.workerRunId),
-    taskId: optionalString(output.taskId) ?? null,
-    eventId: optionalString(output.eventId) ?? null,
-    recoveryObjectId: optionalString(output.recoveryObjectId) ?? null,
-    customerSignalId: optionalString(output.customerSignalId) ?? null,
-    signalObjectId: optionalString(output.signalObjectId) ?? null,
-    customerObjectId: optionalString(output.customerObjectId) ?? null,
-    approvalRequestId: optionalString(output.approvalRequestId) ?? null,
-    evidenceId: optionalString(output.evidenceId) ?? null,
-    packetId: optionalString(output.packetId) ?? null,
-    documentId: optionalString(output.documentId) ?? null,
-    workflowRunId: optionalString(output.workflowRunId) ?? null,
-    workflowStepIds: stringList(output.workflowStepIds),
-    signalsViewId: optionalString(output.signalsViewId) ?? null,
-    externalExecution: "blocked",
-    externalSend: false,
-    output,
-    snapshot,
-  };
+    context,
+    db,
+    output: result.output,
+  });
 }
 
 async function getCustomerExperienceWorkerSnapshot(input: {

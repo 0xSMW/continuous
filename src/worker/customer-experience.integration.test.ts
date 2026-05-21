@@ -1,9 +1,11 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 
+import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { pool } from "../db/client";
+import { db, pool } from "../db/client";
+import { budgetReservations, usageEvents, workerRuns } from "../db/schema";
 import { executeAppServerWorkerTool } from "./app-server-tools";
 import { executeWorkerCommand, executeWorkerView } from "./registry";
 
@@ -135,6 +137,41 @@ maybeDescribe("Customer Experience Worker integration", () => {
     expect(objectValue(output.handoff).name).toBe("customer.signal_to_experience");
     expect(objectValue(output.draft).externalSend).toBe(false);
     expect(objectValue(output.policy).customerSend).toBe("blocked");
+
+    const [run] = await db.select().from(workerRuns).where(eq(workerRuns.id, stringValue(result.workerRunId))).limit(1);
+    const runData = objectValue(run?.data);
+    const runBudget = objectValue(runData.budget);
+    const runCompletion = objectValue(runData.completion);
+    const [localDuplicate] = await db
+      .select({ id: workerRuns.id })
+      .from(workerRuns)
+      .where(
+        and(
+          eq(workerRuns.idempotencyKey, idempotencyKey),
+          eq(workerRuns.source, "continuous.worker"),
+        ),
+      )
+      .limit(1);
+    const [reservation] = await db
+      .select()
+      .from(budgetReservations)
+      .where(eq(budgetReservations.id, stringValue(runBudget.reservationId)))
+      .limit(1);
+    const [usage] = await db
+      .select()
+      .from(usageEvents)
+      .where(eq(usageEvents.reservationId, stringValue(runBudget.reservationId)))
+      .limit(1);
+
+    expect(run?.source).toBe("continuous.core.worker_runs");
+    expect(run?.state).toBe("done");
+    expect(run?.taskId).toBe(result.taskId);
+    expect(runCompletion.state).toBe("done");
+    expect(objectValue(runCompletion.output).recoveryObjectId).toBe(result.recoveryObjectId);
+    expect(localDuplicate).toBeUndefined();
+    expect(reservation?.state).toBe("used");
+    expect(usage?.actorType).toBe("worker");
+    expect(usage?.actorId).toBe(objectValue(runCompletion.worker).id);
 
     const view = await executeWorkerView({
       view: "signals",

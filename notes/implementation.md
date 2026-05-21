@@ -234,6 +234,8 @@
 | Release image boundary | The GitHub deploy workflow now uses runner-built image archives with checksum verification and an exact-SHA CI success gate. It is not yet a registry-pushed immutable digest flow; `scripts/deploy.sh` also still keeps a host-build bootstrap/break-glass path |
 | Deploy timeout boundary | The GitHub deploy workflow has bounded service readiness and smoke calls, but the strict customer-data gate remains opt-in until non-root deploy, observability, backup, recovery-drill, and credential evidence are all provisioned |
 | Hardened Core/workflow failure coverage | `/core external_action.record` now has route-level invalid-idempotency, adapter mismatch, and replay-conflict coverage plus integration coverage for changed-input replay and adapter/connection mismatch; `/workflow` now preserves structured route failures across overview, approvals, start, transition, step execution, and approval decisions |
+| Adopted Core lifecycle in one worker slice | Customer Experience `recovery.draft` now starts and completes through Core `worker.run.start` and `worker.run.complete`, reuses the Core `worker_runs` row for its business proof, and lets Core settle the budget reservation instead of writing a duplicate local run or usage event |
+| Captured next audit lanes | The next high-impact gaps are app-server lifecycle smoke coverage, consistent worker-transition role scope, Growth `campaign.draft` runtime promotion, readiness/roadmap status normalization, and production readiness hardening beyond backup freshness |
 
 ### Current State
 
