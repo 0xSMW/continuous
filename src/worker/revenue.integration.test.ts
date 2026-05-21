@@ -4130,10 +4130,15 @@ maybeDescribe("Revenue Worker integration eval", () => {
     const approvedExecutionPacket = objectValue(approvedOutput.approvedExecutionPacket);
 
     expect(approvedContinuation.created).toBe(true);
+    expect(approvedContinuation.reservationId).toBeTruthy();
+    expect(approvedContinuation.usageEventId).toBeTruthy();
     expect(approvedContinuation.originalWorkerRunId).toBe(first.workerRunId);
     expect(approvedContinuation.workflowRunId).toBe(first.workflowRunId);
+    expect(approvedOutput.command).toBe("continue");
     expect(approvedOutput.status).toBe("approved_execution_blocked");
     expect(approvedOutput.approvalRequestId).toBe(first.approvalRequestId);
+    expect(approvedOutput.reservationId).toBe(approvedContinuation.reservationId);
+    expect(approvedOutput.usageEventId).toBe(approvedContinuation.usageEventId);
     expect(approvedOutput.nextAction).toBe("enable_scoped_adapter_execution");
     expect(approvedOutput.externalExecution).toBe("blocked");
     expect(approvedOutput.externalSend).toBe(false);
@@ -4226,6 +4231,40 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(continuedAdapterReceipt.externalMutation).toBe(false);
     expect(continuedAdapterReceipt.externalSend).toBe(false);
 
+    const [approvedContinuationRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(eq(workerRuns.id, approvedContinuation.workerRunId ?? ""))
+      .limit(1);
+    const approvedContinuationRunData = objectValue(approvedContinuationRun?.data);
+    const approvedContinuationRunInput = objectValue(approvedContinuationRunData.input);
+    const approvedContinuationRunRequest = objectValue(approvedContinuationRunInput.request);
+    const approvedContinuationCompletion = objectValue(approvedContinuationRunData.completion);
+    const approvedContinuationBudget = objectValue(approvedContinuationCompletion.budget);
+    const [approvedContinuationReservation] = await db
+      .select()
+      .from(budgetReservations)
+      .where(eq(budgetReservations.id, stringValue(approvedContinuation.reservationId)))
+      .limit(1);
+    const [approvedContinuationUsage] = await db
+      .select()
+      .from(usageEvents)
+      .where(eq(usageEvents.id, stringValue(approvedContinuation.usageEventId)))
+      .limit(1);
+
+    expect(approvedContinuationRun?.source).toBe("continuous.core.worker_runs");
+    expect(approvedContinuationRun?.state).toBe("done");
+    expect(approvedContinuationRun?.mode).toBe("continuation");
+    expect(approvedContinuationRunInput.command).toBe("continue");
+    expect(approvedContinuationRunRequest.approvalId).toBe(first.approvalRequestId);
+    expect(approvedContinuationRunData.businessEventId).toBe(approvedContinuation.eventId);
+    expect(approvedContinuationBudget.state).toBe("used");
+    expect(approvedContinuationBudget.reservationId).toBe(approvedContinuation.reservationId);
+    expect(approvedContinuationBudget.usageEventId).toBe(approvedContinuation.usageEventId);
+    expect(approvedContinuationReservation?.state).toBe("used");
+    expect(approvedContinuationReservation?.taskId).toBe(approvedContinuationRun?.taskId);
+    expect(approvedContinuationUsage?.reservationId).toBe(approvedContinuation.reservationId);
+
     const approvedReplay = await continueRevenueWorker({
       approvalId: first.approvalRequestId ?? "",
       idempotencyKey: `ci-worker-approved-continue-${runId}`,
@@ -4236,7 +4275,87 @@ maybeDescribe("Revenue Worker integration eval", () => {
 
     expect(approvedReplay.created).toBe(false);
     expect(approvedReplay.workerRunId).toBe(approvedContinuation.workerRunId);
+    expect(approvedReplay.reservationId).toBe(approvedContinuation.reservationId);
+    expect(approvedReplay.usageEventId).toBe(approvedContinuation.usageEventId);
     expect(objectValue(approvedReplay.output).status).toBe("approved_execution_blocked");
+
+    const [approvedContinuationStepCountBeforeRepair] = await db
+      .select({ value: count() })
+      .from(workflowSteps)
+      .where(eq(workflowSteps.id, approvedContinuation.workflowStepId ?? ""));
+    const pendingApprovedContinuationOutput = {
+      ...approvedOutput,
+      reservationId: stringValue(approvedContinuation.reservationId),
+      usageEventId: null,
+    } satisfies JsonObject;
+
+    await db
+      .delete(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.source, "continuous.core.worker_runs"),
+          eq(
+            auditEvents.idempotencyKey,
+            `ci-worker-approved-continue-${runId}:worker_run_completed`,
+          ),
+        ),
+      );
+    await db
+      .delete(events)
+      .where(
+        and(
+          eq(events.source, "continuous.core.worker_runs"),
+          eq(events.idempotencyKey, `ci-worker-approved-continue-${runId}:worker_run_completed`),
+        ),
+      );
+    await db.delete(usageEvents).where(eq(usageEvents.id, stringValue(approvedContinuation.usageEventId)));
+    await db
+      .update(budgetReservations)
+      .set({ state: "held", taskId: null, updatedAt: new Date() })
+      .where(eq(budgetReservations.id, stringValue(approvedContinuation.reservationId)));
+    await db
+      .update(workerRuns)
+      .set({
+        state: "running",
+        eventId: stringValue(approvedContinuation.eventId),
+        data: {
+          ...approvedContinuationRunData,
+          output: {},
+          completion: {},
+          pendingCompletion: {
+            output: pendingApprovedContinuationOutput,
+          },
+        },
+        updatedAt: new Date(),
+      })
+      .where(eq(workerRuns.id, stringValue(approvedContinuation.workerRunId)));
+
+    const repairedApprovedReplay = await continueRevenueWorker({
+      approvalId: first.approvalRequestId ?? "",
+      idempotencyKey: `ci-worker-approved-continue-${runId}`,
+      tenantSlug: "continuous-demo",
+      operatorEmail: "owner@continuoushq.com",
+      db,
+    });
+    const [approvedContinuationStepCountAfterRepair] = await db
+      .select({ value: count() })
+      .from(workflowSteps)
+      .where(eq(workflowSteps.id, approvedContinuation.workflowStepId ?? ""));
+    const [repairedContinuationReservation] = await db
+      .select()
+      .from(budgetReservations)
+      .where(eq(budgetReservations.id, stringValue(approvedContinuation.reservationId)))
+      .limit(1);
+
+    expect(repairedApprovedReplay.created).toBe(false);
+    expect(repairedApprovedReplay.workerRunId).toBe(approvedContinuation.workerRunId);
+    expect(repairedApprovedReplay.usageEventId).toBeTruthy();
+    expect(repairedApprovedReplay.usageEventId).not.toBe(approvedContinuation.usageEventId);
+    expect(approvedContinuationStepCountAfterRepair.value).toBe(
+      approvedContinuationStepCountBeforeRepair.value,
+    );
+    expect(repairedContinuationReservation?.state).toBe("used");
+    expect(repairedContinuationReservation?.taskId).toBe(approvedContinuationRun?.taskId);
   }, 120_000);
 
   it("records approved controlled-send receipts through config.execution on the generic worker command", async () => {
