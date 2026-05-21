@@ -69,6 +69,8 @@ CONTROL_PLANE_ALLOWED_COMMANDS_JSON='[
   "worker:hire.packet.prepare",
   "worker:payroll_input.prepare",
   "worker:filing.prepare",
+  "worker:margin.review.prepare",
+  "worker:view.price_policy",
   "worker:continue",
   "worker:approval.decide",
   "worker:adapters.reconcile",
@@ -109,6 +111,8 @@ CONTROL_PLANE_ALLOWED_COMMANDS_JSON='[
   "app_server:worker.command.hire.packet.prepare",
   "app_server:worker.command.payroll_input.prepare",
   "app_server:worker.command.filing.prepare",
+  "app_server:worker.command.margin.review.prepare",
+  "app_server:worker.view.price_policy",
   "app_server:worker.command.continue",
   "app_server:worker.command.approval.decide",
   "app_server:worker.command.adapters.reconcile",
@@ -215,7 +219,8 @@ BOOTSTRAP_PAYLOAD="$(
           "finance_operations",
           "workforce_operations",
           "compliance_operations",
-          "systems_operations"
+          "systems_operations",
+          "offer_pricing_operations"
         ],
         allowedRoutes: ["core", "worker", "workflow", "approval", "app_server"],
         allowedAccess: ["read", "write"],

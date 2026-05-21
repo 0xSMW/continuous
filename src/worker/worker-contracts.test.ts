@@ -507,8 +507,13 @@ describe("future worker contracts", () => {
     expect(attestationScript).toContain("worker:view.repairs");
     expect(attestationScript).toContain("worker:sync.repair.plan");
     expect(attestationScript).toContain("worker:permission.review");
+    expect(attestationScript).toContain("worker:margin.review.prepare");
+    expect(attestationScript).toContain("worker:view.price_policy");
+    expect(attestationScript).toContain("app_server:worker.command.margin.review.prepare");
+    expect(attestationScript).toContain("app_server:worker.view.price_policy");
     expect(attestationScript).toContain("workforce_operations");
     expect(attestationScript).toContain("systems_operations");
+    expect(attestationScript).toContain("offer_pricing_operations");
     expect(coreWorkerLifecycleSmokeScript).toContain('command: "worker.upsert"');
     expect(coreWorkerLifecycleSmokeScript).toContain('command: "worker.transition"');
     expect(coreWorkerLifecycleSmokeScript).toContain("systems_operations");
@@ -528,6 +533,10 @@ describe("future worker contracts", () => {
     expect(deployScript).toContain("worker:view.repairs");
     expect(deployScript).toContain("worker:sync.repair.plan");
     expect(deployScript).toContain("worker:permission.review");
+    expect(deployScript).toContain("worker:margin.review.prepare");
+    expect(deployScript).toContain("worker:view.price_policy");
+    expect(deployScript).toContain("app_server:worker.command.margin.review.prepare");
+    expect(deployScript).toContain("app_server:worker.view.price_policy");
     expect(deployScript).toContain("scripts/rotate-control-plane-token-on-host.sh");
     expect(deployScript).toContain("scripts/smoke-core-worker-lifecycle-on-host.sh");
     expect(deployScript).toContain("preserving the existing bootstrap token");
@@ -545,6 +554,10 @@ describe("future worker contracts", () => {
     expect(deployWorkflow).toContain("worker:view.repairs");
     expect(deployWorkflow).toContain("worker:sync.repair.plan");
     expect(deployWorkflow).toContain("worker:permission.review");
+    expect(deployWorkflow).toContain("worker:margin.review.prepare");
+    expect(deployWorkflow).toContain("worker:view.price_policy");
+    expect(deployWorkflow).toContain("app_server:worker.command.margin.review.prepare");
+    expect(deployWorkflow).toContain("app_server:worker.view.price_policy");
     expect(deployWorkflow).toContain("continuous.worker.command");
     expect(deployWorkflow).toContain('command: "lead.read"');
     expect(deployWorkflow).toContain("deploy-app-server-lead-read-smoke");
