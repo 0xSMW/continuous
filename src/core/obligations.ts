@@ -301,7 +301,23 @@ async function loadSources(input: {
     );
   }
 
-  return { ruleRows, filingRows };
+  const activeRulePackIds = new Set(ruleRows.map((rule) => rule.id));
+  const unavailableFilingRows = filingRows.filter(
+    (filing) => filing.rulePackId && !activeRulePackIds.has(filing.rulePackId),
+  );
+
+  if (input.filingRequirementId && unavailableFilingRows.length > 0) {
+    throw new PlatformUnavailableError(
+      "core_filing_requirement_rule_pack_unavailable",
+      "config.filingRequirementId belongs to a rule pack that is not active and effective for this scan.",
+      409,
+    );
+  }
+
+  return {
+    ruleRows,
+    filingRows: filingRows.filter((filing) => !filing.rulePackId || activeRulePackIds.has(filing.rulePackId)),
+  };
 }
 
 function proposalsFor(input: {
@@ -318,8 +334,16 @@ function proposalsFor(input: {
 
   for (const filing of input.filings) {
     const rule = filing.rulePackId ? rulesById.get(filing.rulePackId) : undefined;
-    const ruleData = objectValue(rule?.rules);
-    const sourceRefs = objectValue(rule?.sourceRefs);
+    const missingRulePack = !rule;
+    const ruleData = missingRulePack
+      ? ({ blockers: ["source_required"], sourceState: "missing_rule_pack" } satisfies JsonObject)
+      : objectValue(rule.rules);
+    const sourceRefs = missingRulePack
+      ? ({
+          placeholder: true,
+          reason: filing.rulePackId ? "active_rule_pack_required" : "rule_pack_required",
+        } satisfies JsonObject)
+      : objectValue(rule.sourceRefs);
     const filingData = objectValue(filing.data);
     const kind = optionalString(filingData.obligationKind) ?? "filing_due";
     const dueAt = dueDateFor({
@@ -331,6 +355,7 @@ function proposalsFor(input: {
     });
     const blockers = [
       ...blockersForRule({ sourceRefs, data: ruleData, facts: input.facts }),
+      ...(missingRulePack ? ["rule_pack_required"] : []),
       ...(filing.legalEntityId ? [] : ["legal_entity_missing"]),
     ].sort();
     const identityHash = proposalIdentity({
@@ -364,6 +389,7 @@ function proposalsFor(input: {
         rulePackVersion: rule?.version ?? null,
         domain: rule?.domain ?? "filing",
         jurisdiction: rule?.jurisdiction ?? null,
+        sourceState: missingRulePack ? "missing_rule_pack" : "active",
         form: filing.form,
         agency: filing.agency,
         cadence: filing.cadence,
@@ -555,11 +581,18 @@ async function writeProposal(input: {
     .limit(1);
   const [providedTask] = input.taskId
     ? await input.tx
-        .select({ id: tasks.id, outcome: tasks.outcome })
+        .select({ id: tasks.id, objectId: tasks.objectId, outcome: tasks.outcome })
         .from(tasks)
         .where(and(eq(tasks.tenantId, input.operator.tenantId), eq(tasks.id, input.taskId)))
         .limit(1)
     : [];
+  if (input.taskId && providedTask?.objectId && providedTask.objectId !== objectRow.id) {
+    throw new PlatformUnavailableError(
+      "core_task_object_mismatch",
+      "config.taskId is already linked to a different object.",
+      409,
+    );
+  }
   const taskState = input.proposal.blockers.length > 0 ? "blocked" : "active";
   const taskEvidence = {
     command: "obligation.scan",
@@ -578,6 +611,7 @@ async function writeProposal(input: {
         await input.tx
           .update(tasks)
           .set({
+            objectId: providedTask?.objectId ?? objectRow.id,
             title: `Review obligation: ${input.proposal.name}`,
             state: taskState,
             priority: input.proposal.blockers.length > 0 ? "high" : "normal",
@@ -759,6 +793,13 @@ export async function scanObligationsForOperator(
     asOf,
     dueAt,
   });
+  if (taskId && proposals.length !== 1) {
+    throw new PlatformUnavailableError(
+      "core_obligation_scan_task_scope_ambiguous",
+      "config.taskId can only be attached when obligation.scan produces exactly one obligation.",
+      400,
+    );
+  }
   const now = new Date();
   const written = [];
 
@@ -776,85 +817,87 @@ export async function scanObligationsForOperator(
     );
   }
 
+  const primaryObjectId = written.length === 1 ? (written[0]?.objectId ?? null) : null;
+  const primaryTaskId = written.length === 1 ? (taskId ?? written[0]?.taskId ?? null) : null;
   const result = {
-      created: true,
-      scannedAt: now.toISOString(),
-      asOf: asOf.toISOString(),
-      jurisdiction: jurisdiction ?? null,
-      domain: domain ?? null,
-      rulePackIds: ruleRows.map((rule) => rule.id),
-      filingRequirementIds: filingRows.map((filing) => filing.id),
-      obligationIds: written.map((item) => item.obligationId),
-      objectIds: written.map((item) => item.objectId),
-      taskIds: [...new Set(written.map((item) => item.taskId))],
-      obligations: written,
-      blockers: [...new Set(written.flatMap((item) => item.blockers))].sort(),
-      workflowRunId: workflowRunId ?? null,
-      externalExecution: "blocked",
+    created: true,
+    scannedAt: now.toISOString(),
+    asOf: asOf.toISOString(),
+    jurisdiction: jurisdiction ?? null,
+    domain: domain ?? null,
+    rulePackIds: ruleRows.map((rule) => rule.id),
+    filingRequirementIds: filingRows.map((filing) => filing.id),
+    obligationIds: written.map((item) => item.obligationId),
+    objectIds: written.map((item) => item.objectId),
+    taskIds: [...new Set(written.map((item) => item.taskId))],
+    obligations: written,
+    blockers: [...new Set(written.flatMap((item) => item.blockers))].sort(),
+    workflowRunId: workflowRunId ?? null,
+    externalExecution: "blocked",
   } satisfies JsonObject;
   const [event] = await tx
-      .insert(events)
-      .values({
-        tenantId: operator.tenantId,
-        type: "core.obligations.scanned",
-        source,
-        actorType: "user",
-        actorId: operator.userId,
-        actorRef: operator.actorRef,
-        objectId: written[0]?.objectId ?? null,
-        taskId: taskId ?? written[0]?.taskId ?? null,
-        idempotencyKey: `${input.idempotencyKey}:obligation_scanned`,
-        data: {
-          ...result,
-          idempotency,
-        },
-        occurredAt: now,
-        createdAt: now,
-      })
-      .returning({ id: events.id });
+    .insert(events)
+    .values({
+      tenantId: operator.tenantId,
+      type: "core.obligations.scanned",
+      source,
+      actorType: "user",
+      actorId: operator.userId,
+      actorRef: operator.actorRef,
+      objectId: primaryObjectId,
+      taskId: primaryTaskId,
+      idempotencyKey: `${input.idempotencyKey}:obligation_scanned`,
+      data: {
+        ...result,
+        idempotency,
+      },
+      occurredAt: now,
+      createdAt: now,
+    })
+    .returning({ id: events.id });
   const [audit] = await tx
-      .insert(auditEvents)
-      .values({
-        tenantId: operator.tenantId,
-        type: "core.obligations.scanned",
-        source,
-        actorType: "user",
-        actorId: operator.userId,
-        actorRef: operator.actorRef,
-        targetType: "obligation_scan",
-        targetId: written[0]?.obligationId ?? null,
-        taskId: taskId ?? written[0]?.taskId ?? null,
-        eventId: event.id,
-        objectId: written[0]?.objectId ?? null,
-        risk: result.blockers.length > 0 ? "high" : "medium",
-        idempotencyKey: `${input.idempotencyKey}:obligation_scanned`,
-        data: {
-          result,
-          idempotency,
-        },
-      })
-      .returning({ id: auditEvents.id });
+    .insert(auditEvents)
+    .values({
+      tenantId: operator.tenantId,
+      type: "core.obligations.scanned",
+      source,
+      actorType: "user",
+      actorId: operator.userId,
+      actorRef: operator.actorRef,
+      targetType: "obligation_scan",
+      targetId: written.length === 1 ? (written[0]?.obligationId ?? null) : null,
+      taskId: primaryTaskId,
+      eventId: event.id,
+      objectId: primaryObjectId,
+      risk: result.blockers.length > 0 ? "high" : "medium",
+      idempotencyKey: `${input.idempotencyKey}:obligation_scanned`,
+      data: {
+        result,
+        idempotency,
+      },
+    })
+    .returning({ id: auditEvents.id });
   const [proof] = await tx
-      .insert(evidence)
-      .values({
-        tenantId: operator.tenantId,
-        kind: "trace",
-        name: "Core obligation scan trace",
-        objectId: written[0]?.objectId ?? null,
-        taskId: taskId ?? written[0]?.taskId ?? null,
+    .insert(evidence)
+    .values({
+      tenantId: operator.tenantId,
+      kind: "trace",
+      name: "Core obligation scan trace",
+      objectId: primaryObjectId,
+      taskId: primaryTaskId,
+      eventId: event.id,
+      actorType: "user",
+      actorId: operator.userId,
+      hash: `${source}:${input.idempotencyKey}:${idempotency.inputHash}`,
+      data: {
+        ...result,
+        auditEventId: audit.id,
         eventId: event.id,
-        actorType: "user",
-        actorId: operator.userId,
-        hash: `${source}:${input.idempotencyKey}:${idempotency.inputHash}`,
-        data: {
-          ...result,
-          auditEventId: audit.id,
-          eventId: event.id,
-          idempotency,
-        },
-        createdAt: now,
-      })
-      .returning({ id: evidence.id });
+        idempotency,
+      },
+      createdAt: now,
+    })
+    .returning({ id: evidence.id });
 
   return {
     ...result,

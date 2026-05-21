@@ -217,6 +217,7 @@ maybeDescribe("Core obligation scan", () => {
       },
     });
     const resultRecord = objectValue(result);
+    const objectId = String(arrayValue(resultRecord.objectIds)[0]);
     const [updatedTask] = await db.select().from(tasks).where(eq(tasks.id, task.id)).limit(1);
     if (!updatedTask) {
       throw new Error("Updated task missing after obligation scan.");
@@ -226,7 +227,7 @@ maybeDescribe("Core obligation scan", () => {
 
     expect(resultRecord.taskIds).toEqual([task.id]);
     expect(updatedTask.state).toBe("blocked");
-    expect(updatedTask.objectId).toBeNull();
+    expect(updatedTask.objectId).toBe(objectId);
     expect(evidenceData.command).toBe("obligation.scan");
     expect(evidenceData.obligationId).toBe(arrayValue(resultRecord.obligationIds)[0]);
     expect(evidenceData.externalExecution).toBe("blocked");

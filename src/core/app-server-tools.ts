@@ -961,6 +961,14 @@ async function executeCoreCommand(input: {
   }
 
   if (command === "obligation.scan") {
+    const forbiddenLineageFields = ["workflowRunId", "taskId"].filter((field) => config[field] !== undefined);
+
+    if (forbiddenLineageFields.length > 0) {
+      throw new Error(
+        `obligation.scan workflow linkage is owned by workflow execution. Unexpected config fields: ${forbiddenLineageFields.join(", ")}.`,
+      );
+    }
+
     return scanObligations({
       operatorEmail,
       idempotencyKey,
@@ -971,8 +979,6 @@ async function executeCoreCommand(input: {
       dueAt: optionalString(config.dueAt),
       rulePackId: optionalString(config.rulePackId),
       filingRequirementId: optionalString(config.filingRequirementId),
-      workflowRunId: optionalString(config.workflowRunId),
-      taskId: optionalString(config.taskId),
       facts: jsonObject(config.facts),
       data: jsonObject(config.data),
     });

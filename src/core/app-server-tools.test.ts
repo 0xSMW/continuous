@@ -270,13 +270,39 @@ describe("app-server Core tools", () => {
       dueAt: undefined,
       rulePackId: "55555555-5555-4555-8555-000000000008",
       filingRequirementId: "55555555-5555-4555-8555-000000000010",
-      workflowRunId: undefined,
-      taskId: undefined,
       facts: {
         period: "2026-Q2",
       },
       data: {},
     });
+  });
+
+  it("rejects caller-owned Core obligation scan lineage fields through app-server tools", async () => {
+    await expect(
+      executeAppServerCoreTool(
+        "continuous.core.command",
+        {
+          command: "obligation.scan",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "core-app-server-obligation-scan-002",
+          config: {
+            jurisdiction: "US",
+            taskId: "task-1",
+          },
+        },
+        {
+          operatorEmail: "owner@continuoushq.com",
+          source: "control_plane",
+          allowedAccess: ["write"],
+          allowedCommands: ["core:obligation.scan"],
+          allowedTenants: ["continuous-demo"],
+          allowedWorkerRoles: ["*"],
+        },
+      ),
+    ).rejects.toThrow("workflow linkage is owned by workflow execution");
+    expect(mocks.scanObligations).not.toHaveBeenCalled();
   });
 
   it("dispatches Core worker identity lifecycle through the app-server command envelope", async () => {

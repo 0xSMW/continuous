@@ -1054,7 +1054,16 @@ async function completeWorkflowStep(input: {
 
     if (step.kind === "obligation_scan") {
       const obligationInput = jsonObject(step.input.obligationScan ?? step.input.obligation ?? {});
-      const obligationTaskId = stringValue(obligationInput.taskId) ?? step.taskId ?? undefined;
+      const forbiddenLineageFields = ["workflowRunId", "taskId"].filter((field) => obligationInput[field] !== undefined);
+
+      if (forbiddenLineageFields.length > 0) {
+        throw new PlatformUnavailableError(
+          "workflow_obligation_scan_lineage_forbidden",
+          `Workflow obligation_scan lineage is derived from the claimed workflow step. Unexpected input fields: ${forbiddenLineageFields.join(", ")}.`,
+          400,
+        );
+      }
+      const linkedTaskId = step.taskId ?? undefined;
 
       obligationScanRecord = await scanObligationsForOperator(tx, input.operator, {
         idempotencyKey: `${step.id}:obligation_scan`,
@@ -1064,8 +1073,7 @@ async function completeWorkflowStep(input: {
         dueAt: stringValue(obligationInput.dueAt),
         rulePackId: stringValue(obligationInput.rulePackId),
         filingRequirementId: stringValue(obligationInput.filingRequirementId),
-        workflowRunId: stringValue(obligationInput.workflowRunId) ?? run.id,
-        taskId: obligationTaskId,
+        workflowRunId: run.id,
         facts: jsonObject(obligationInput.facts),
         data: {
           ...jsonObject(obligationInput.data),
@@ -1098,11 +1106,11 @@ async function completeWorkflowStep(input: {
         })
         .where(eq(workflowRuns.id, run.id));
 
-      if (obligationTaskId) {
+      if (linkedTaskId) {
         const [obligationTask] = await tx
           .select()
           .from(tasks)
-          .where(and(eq(tasks.tenantId, input.operator.tenantId), eq(tasks.id, obligationTaskId)))
+          .where(and(eq(tasks.tenantId, input.operator.tenantId), eq(tasks.id, linkedTaskId)))
           .limit(1);
 
         if (obligationTask) {

@@ -102,11 +102,11 @@ approvals, generated review views, workflow/budget/audit proof, and a
 money movement remain blocked or dry-run.
 Compliance uses that same envelope for `filing.prepare` plus the `snapshot`,
 `obligations`, and `packet` views. Filing requirement, period, source refs,
-validation, and policy live under `config`. The runtime writes filing draft
-packets, approval requests, workflow/budget/audit proof, and keeps agency
-submission and legal advice blocked. Obligation scan, notice response, license
-renewal, evidence binder export, live credentials, broader rule sources, and
-receipt capture remain follow-ups.
+validation, and policy live under `config`. Core `obligation.scan` supplies the
+shared obligation intake ledger; the worker runtime writes filing draft packets,
+approval requests, workflow/budget/audit proof, and keeps agency submission and
+legal advice blocked. Notice response, license renewal, evidence binder export,
+live credentials, broader rule sources, and receipt capture remain follow-ups.
 Asset and Supply and Vertical Packaged Worker contracts are discoverable as
 planned future-worker metadata. Their first commands still use `/worker`, keep
 operation inputs under `config`, and remain non-executable until runtime

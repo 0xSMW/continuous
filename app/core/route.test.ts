@@ -3432,7 +3432,6 @@ describe("POST /core", () => {
             dueAt: "2026-06-30T00:00:00.000Z",
             rulePackId: "55555555-5555-4555-8555-000000000008",
             filingRequirementId: "55555555-5555-4555-8555-000000000010",
-            workflowRunId: "66666666-6666-4666-8666-000000000006",
             scope: {
               domain: "payroll",
             },
@@ -3464,8 +3463,6 @@ describe("POST /core", () => {
       dueAt: "2026-06-30T00:00:00.000Z",
       rulePackId: "55555555-5555-4555-8555-000000000008",
       filingRequirementId: "55555555-5555-4555-8555-000000000010",
-      workflowRunId: "66666666-6666-4666-8666-000000000006",
-      taskId: undefined,
       facts: {
         period: "2026-Q2",
       },
@@ -3473,6 +3470,37 @@ describe("POST /core", () => {
         source: "route-test",
       },
     });
+  });
+
+  it("rejects caller-owned obligation scan lineage fields", async () => {
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "obligation.scan",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "obligation-scan-route-test-002",
+          config: {
+            jurisdiction: "US",
+            taskId: "dddddddd-dddd-4ddd-8ddd-000000000001",
+            workflowRunId: "66666666-6666-4666-8666-000000000006",
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error.code).toBe("invalid_core_command_config");
+    expect(body.error.message).toContain("workflow linkage is owned by workflow execution");
+    expect(mocks.scanObligations).not.toHaveBeenCalled();
   });
 
   it("rejects commands outside the configured tenant scope before dispatch", async () => {

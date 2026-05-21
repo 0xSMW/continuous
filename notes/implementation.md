@@ -633,3 +633,11 @@ The app-server bridge exposes the same Core operation as
 `continuous.core.command` with `command=obligation.scan`; the dynamic-tool
 payload still keeps operation inputs under `arguments.config`, matching `/core`
 instead of creating a Compliance-specific tool.
+
+The public `obligation.scan` API does not accept caller-supplied `taskId` or
+`workflowRunId`; workflow lineage is derived inside `/workflow` from the claimed
+step and run. Direct task attachment is reserved for internal single-obligation
+scans and refuses ambiguous fan-out or tasks already linked to a different
+object. Filing-backed proposals now require their active/effective rule pack in
+the current scan or fail when requested directly, so obligations are not opened
+without a source rule snapshot.

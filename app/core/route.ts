@@ -2026,12 +2026,23 @@ export async function POST(request: Request) {
 
   if (command === "obligation.scan") {
     const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
+    const forbiddenLineageFields = ["workflowRunId", "taskId"].filter((field) => config[field] !== undefined);
 
     if (!idempotency.ok) {
       return errorResponse(
         {
           code: "invalid_idempotency_key",
           message: idempotency.message,
+        },
+        400,
+      );
+    }
+
+    if (forbiddenLineageFields.length > 0) {
+      return errorResponse(
+        {
+          code: "invalid_core_command_config",
+          message: `obligation.scan workflow linkage is owned by workflow execution. Unexpected config fields: ${forbiddenLineageFields.join(", ")}.`,
         },
         400,
       );
@@ -2048,8 +2059,6 @@ export async function POST(request: Request) {
         dueAt: optionalString(config.dueAt),
         rulePackId: optionalString(config.rulePackId),
         filingRequirementId: optionalString(config.filingRequirementId),
-        workflowRunId: optionalString(config.workflowRunId),
-        taskId: optionalString(config.taskId),
         facts: jsonObject(config.facts),
         data: jsonObject(config.data),
       });
