@@ -24,12 +24,15 @@ handlers exist.
 `continuous.worker.view`, `continuous.worker.command`, `/worker`, and
 `worker:tool` all run through the same registry validation before dispatch.
 The CI integration suite exercises `continuous.worker.command` on real
-Revenue `lead.read`, `run`, `lead.classify`, `response.draft`, and
-`quote.prepare`. It also exercises Owner `brief.generate`, Dispatch
+Revenue `lead.read`, `run`, `lead.classify`, `response.draft`,
+`quote.prepare`, and `payment_link.prepare`. It also exercises Owner `brief.generate`, Dispatch
 `schedule.propose`, and Finance
 `payment_draft.prepare` commands, proving the app-server boundary writes the
 same worker run, approval, evidence, budget, event, adapter dry-run, generated
 view, and workflow records as `/worker`.
+The Revenue payment-link command can be executed through
+`continuous.worker.command` or `worker:tool`, but it only prepares an internal
+packet; live provider payment-link creation and money movement remain blocked.
 Deploy smoke also exercises Offer and Pricing `margin.review.prepare` plus the
 `price_policy` view through `POST /app-server`, proving a post-Revenue worker
 can use the same dynamic-tool envelope without a worker-specific route.
@@ -216,6 +219,10 @@ bun run worker:tool worker.command --payload='{"command":"lead.read","worker":{"
 
 ```sh
 bun run worker:tool worker.command --payload='{"command":"run","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-run-001","config":{"intake":{"source":"website_form","sourceEventId":"form-001"}}}'
+```
+
+```sh
+bun run worker:tool worker.command --payload='{"command":"payment_link.prepare","worker":{"role":"revenue_operations","tenantSlug":"continuous-demo"},"idempotencyKey":"local-revenue-payment-link-001","config":{"invoiceId":"invoice_row_or_invoice_object_uuid","sourceRefs":{"invoiceObjectId":"invoice_object_uuid","quoteObjectId":"quote_object_uuid"},"policy":{"requireOwnerApproval":true,"providerPaymentLinkCreation":"blocked","moneyMovement":"blocked"}}}'
 ```
 
 ```sh

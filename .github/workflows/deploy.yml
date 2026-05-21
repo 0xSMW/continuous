@@ -411,9 +411,9 @@ jobs:
           }
           set_control_plane_token_catalog() {
             token_hash="$(printf '%s' "$worker_token" | sha256sum | awk '{print $1}')"
-            allowed_commands='"core:view.summary","core:task.create","core:task.transition","core:object.upsert","core:adapter.upsert","core:connection.upsert","core:connection.health.record","core:entity.setup.record","core:worker.upsert","core:worker.transition","core:object.link","core:event.ingest","core:evidence.attach","core:document.create","core:packet.prepare","core:document.packet.prepare","core:decision.record","core:approval.request","core:adapter.intent.record","core:rule.change.record","core:external_action.record","core:capability.grant","core:budget.reserve","core:budget.charge","core:budget.release","core:ai.infer","core:view.publish","core:customer_signal.record","core:payroll.preview.record","core:payroll.preview.packet.prepare","core:control_plane.token_rotation.attest","core:control_plane.credential.upsert","core:control_plane.credential.revoke","core:control_plane.session.review","worker:view.snapshot","worker:view.approvals","worker:view.briefs","worker:view.decisions","worker:view.board","worker:view.exceptions","worker:view.readiness","worker:view.health","worker:view.repairs","worker:run","worker:lead.read","worker:lead.classify","worker:response.draft","worker:quote.prepare","worker:schedule.propose","worker:customer_update.draft","worker:closeout.prepare","worker:exception.route","worker:invoice.prepare","worker:ar_followup.draft","worker:cash_forecast.generate","worker:payment_draft.prepare","worker:hire.packet.prepare","worker:payroll_input.prepare","worker:continue","worker:approval.decide","worker:adapters.reconcile","worker:adapters.retry","worker:brief.generate","worker:decision_queue.prepare","worker:anomaly.triage","worker:connector.health.scan","worker:sync.repair.plan","worker:data_quality.remediate","worker:permission.review","worker:automation.plan","worker:margin.review.prepare","worker:view.price_policy","workflow:view.overview","workflow:view.approvals","workflow:start","workflow:transition","workflow:steps.execute","workflow:approval.decide","approval:view.inbox","approval:approval.decide"'
+            allowed_commands='"core:view.summary","core:task.create","core:task.transition","core:object.upsert","core:adapter.upsert","core:connection.upsert","core:connection.health.record","core:entity.setup.record","core:worker.upsert","core:worker.transition","core:object.link","core:event.ingest","core:evidence.attach","core:document.create","core:packet.prepare","core:document.packet.prepare","core:decision.record","core:approval.request","core:adapter.intent.record","core:rule.change.record","core:external_action.record","core:capability.grant","core:budget.reserve","core:budget.charge","core:budget.release","core:ai.infer","core:view.publish","core:customer_signal.record","core:payroll.preview.record","core:payroll.preview.packet.prepare","core:control_plane.token_rotation.attest","core:control_plane.credential.upsert","core:control_plane.credential.revoke","core:control_plane.session.review","worker:view.snapshot","worker:view.approvals","worker:view.briefs","worker:view.decisions","worker:view.board","worker:view.exceptions","worker:view.readiness","worker:view.health","worker:view.repairs","worker:run","worker:lead.read","worker:lead.classify","worker:response.draft","worker:quote.prepare","worker:payment_link.prepare","worker:schedule.propose","worker:customer_update.draft","worker:closeout.prepare","worker:exception.route","worker:invoice.prepare","worker:ar_followup.draft","worker:cash_forecast.generate","worker:payment_draft.prepare","worker:hire.packet.prepare","worker:payroll_input.prepare","worker:continue","worker:approval.decide","worker:adapters.reconcile","worker:adapters.retry","worker:brief.generate","worker:decision_queue.prepare","worker:anomaly.triage","worker:connector.health.scan","worker:sync.repair.plan","worker:data_quality.remediate","worker:permission.review","worker:automation.plan","worker:margin.review.prepare","worker:view.price_policy","workflow:view.overview","workflow:view.approvals","workflow:start","workflow:transition","workflow:steps.execute","workflow:approval.decide","approval:view.inbox","approval:approval.decide"'
             compliance_worker_permissions='"worker:view.obligations","worker:view.packet","worker:filing.prepare"'
-            app_server_commands='"app_server:worker.schema","app_server:worker.view.snapshot","app_server:worker.view.approvals","app_server:worker.view.briefs","app_server:worker.view.decisions","app_server:worker.view.board","app_server:worker.view.exceptions","app_server:worker.view.readiness","app_server:worker.view.health","app_server:worker.view.repairs","app_server:worker.command.run","app_server:worker.command.lead.read","app_server:worker.command.lead.classify","app_server:worker.command.response.draft","app_server:worker.command.quote.prepare","app_server:worker.command.schedule.propose","app_server:worker.command.customer_update.draft","app_server:worker.command.closeout.prepare","app_server:worker.command.exception.route","app_server:worker.command.invoice.prepare","app_server:worker.command.ar_followup.draft","app_server:worker.command.cash_forecast.generate","app_server:worker.command.payment_draft.prepare","app_server:worker.command.hire.packet.prepare","app_server:worker.command.payroll_input.prepare","app_server:worker.command.continue","app_server:worker.command.approval.decide","app_server:worker.command.adapters.reconcile","app_server:worker.command.adapters.retry","app_server:worker.command.brief.generate","app_server:worker.command.decision_queue.prepare","app_server:worker.command.anomaly.triage","app_server:worker.command.connector.health.scan","app_server:worker.command.sync.repair.plan","app_server:worker.command.data_quality.remediate","app_server:worker.command.permission.review","app_server:worker.command.automation.plan","app_server:worker.command.margin.review.prepare","app_server:worker.view.price_policy"'
+            app_server_commands='"app_server:worker.schema","app_server:worker.view.snapshot","app_server:worker.view.approvals","app_server:worker.view.briefs","app_server:worker.view.decisions","app_server:worker.view.board","app_server:worker.view.exceptions","app_server:worker.view.readiness","app_server:worker.view.health","app_server:worker.view.repairs","app_server:worker.command.run","app_server:worker.command.lead.read","app_server:worker.command.lead.classify","app_server:worker.command.response.draft","app_server:worker.command.quote.prepare","app_server:worker.command.payment_link.prepare","app_server:worker.command.schedule.propose","app_server:worker.command.customer_update.draft","app_server:worker.command.closeout.prepare","app_server:worker.command.exception.route","app_server:worker.command.invoice.prepare","app_server:worker.command.ar_followup.draft","app_server:worker.command.cash_forecast.generate","app_server:worker.command.payment_draft.prepare","app_server:worker.command.hire.packet.prepare","app_server:worker.command.payroll_input.prepare","app_server:worker.command.continue","app_server:worker.command.approval.decide","app_server:worker.command.adapters.reconcile","app_server:worker.command.adapters.retry","app_server:worker.command.brief.generate","app_server:worker.command.decision_queue.prepare","app_server:worker.command.anomaly.triage","app_server:worker.command.connector.health.scan","app_server:worker.command.sync.repair.plan","app_server:worker.command.data_quality.remediate","app_server:worker.command.permission.review","app_server:worker.command.automation.plan","app_server:worker.command.margin.review.prepare","app_server:worker.view.price_policy"'
             compliance_app_server_permissions='"app_server:worker.view.obligations","app_server:worker.view.packet","app_server:worker.command.filing.prepare"'
             allowed_commands="${allowed_commands},${compliance_worker_permissions},${app_server_commands},${compliance_app_server_permissions}"
             catalog_json="$(
@@ -852,6 +852,7 @@ jobs:
             (.registry.commands | any(.role == "revenue_operations" and .name == "lead.classify" and .idempotency == "required" and .requiresTenant == true and .externalExecution == "blocked")) and
             (.registry.commands | any(.role == "revenue_operations" and .name == "response.draft" and .idempotency == "required" and .requiresTenant == true and .externalExecution == "blocked")) and
             (.registry.commands | any(.role == "revenue_operations" and .name == "quote.prepare" and .idempotency == "required" and .requiresTenant == true and .externalExecution == "blocked" and .configSchema.oneRequired == ["intake","leadPacket","lead"])) and
+            (.registry.commands | any(.role == "revenue_operations" and .name == "payment_link.prepare" and .idempotency == "required" and .requiresTenant == true and .externalExecution == "blocked" and .configSchema.oneRequiredPaths == [["invoiceId"],["invoiceObjectId"],["sourceRefs","invoiceId"],["sourceRefs","invoiceObjectId"]] and .configSchema.properties.sourceRefs.type == "object")) and
             (.registry.commands | map(.name) | index("continue")) != null and
             (.registry.commands | map(.name) | index("approval.decide")) != null and
             (.registry.commands | map(.name) | index("adapters.reconcile")) != null and
@@ -890,7 +891,7 @@ jobs:
             (.registry.views | all(.apiRoute == "/worker")) and
             (.registry.plannedCommands == .registry.followUpCommands) and
             (.registry.plannedViews == .registry.followUpViews) and
-            (.registry.followUpCommands | length) == 9 and
+            (.registry.followUpCommands | length) == 8 and
             (.registry.followUpViews | length) == 1 and
             (.registry.commands | any(.role == "compliance_operations" and .name == "filing.prepare" and .idempotency == "required" and .requiresTenant == true and .externalExecution == "blocked" and .configSchema.required == ["filingRequirementId","period"])) and
             (.registry.views | any(.role == "compliance_operations" and .name == "snapshot")) and
@@ -898,7 +899,6 @@ jobs:
             (.registry.views | any(.role == "compliance_operations" and .name == "packet")) and
             (.registry.commands | any(.role == "offer_pricing_operations" and .name == "margin.review.prepare" and .apiRoute == "/worker" and .configSchema.required == ["sourceRefs","policy"] and .configSchema.properties.sourceRefs.properties.leadObjectId.type == "string" and .configSchema.properties.sourceRefs.properties.customerObjectId.type == "string")) and
             (.registry.views | any(.role == "offer_pricing_operations" and .name == "price_policy" and .apiRoute == "/worker" and .configSchema.properties.quoteObjectId.type == "string" and .configSchema.properties.priceBookId.type == "string" and .configSchema.additionalProperties == false)) and
-            (.registry.followUpCommands | any(.role == "revenue_operations" and .name == "payment_link.prepare" and .configSchema.properties.sourceRefs.type == "object")) and
             (.registry.followUpCommands | any(.role == "compliance_operations" and .name == "notice.response.prepare")) and
             (.registry.followUpCommands | any(.role == "compliance_operations" and .name == "evidence_binder.export")) and
             (.registry.followUpCommands | any(.role == "workforce_operations" and .name == "contractor.packet.prepare")) and
@@ -1873,6 +1873,54 @@ jobs:
           from workflow_runs where id = '$QUOTE_PREPARE_WORKFLOW_RUN_ID'::uuid;
           select 'quote_prepare_audit' as kind, type, data->>'command'
           from audit_events where id = '$QUOTE_PREPARE_AUDIT_ID'::uuid;
+          SQL
+
+          PAYMENT_LINK_KEY="deploy-payment-link-prepare-$RUN_ID"
+          PAYMENT_LINK_PAYLOAD="$(
+            /usr/bin/jq -nc --arg key "$PAYMENT_LINK_KEY" '{
+              command: "payment_link.prepare",
+              worker: {role: "revenue_operations", tenantSlug: "continuous-demo"},
+              idempotencyKey: $key,
+              config: {
+                invoiceId: "44444444-4444-4444-8444-000000000006",
+                sourceRefs: {
+                  invoiceObjectId: "33333333-3333-4333-8333-000000000006",
+                  quoteObjectId: "33333333-3333-4333-8333-000000000004"
+                },
+                policy: {
+                  requireOwnerApproval: true,
+                  providerPaymentLinkCreation: "blocked",
+                  moneyMovement: "blocked"
+                }
+              }
+            }'
+          )"
+          PAYMENT_LINK_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/worker \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$PAYMENT_LINK_PAYLOAD"
+          )"
+
+          echo "$PAYMENT_LINK_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,workerRunId:.data.result.workerRunId,eventId:.data.result.eventId,workflowRunId:.data.result.workflowRunId,paymentObjectId:.data.result.paymentObjectId,paymentId:.data.result.paymentId,paymentInstructionId:.data.result.paymentInstructionId,approvalRequestId:.data.result.approvalRequestId,paymentReviewViewId:.data.result.paymentReviewViewId,externalExecution:.data.result.output.externalExecution,providerPaymentLinkCreation:.data.result.output.providerPaymentLinkCreation,moneyMovement:.data.result.output.moneyMovement}}'
+          echo "$PAYMENT_LINK_RESPONSE" | /usr/bin/jq -e \
+            '.error == null and .data.command == "payment_link.prepare" and .data.result.created == true and (.data.result.workerRunId | length > 0) and (.data.result.eventId | length > 0) and (.data.result.workflowRunId | length > 0) and (.data.result.paymentObjectId | length > 0) and (.data.result.paymentId | length > 0) and (.data.result.paymentInstructionId | length > 0) and (.data.result.approvalRequestId | length > 0) and (.data.result.paymentReviewViewId | length > 0) and .data.result.output.command == "payment_link.prepare" and .data.result.output.externalExecution == "blocked" and .data.result.output.externalMutation == false and .data.result.output.providerPaymentLinkCreation == "blocked" and .data.result.output.moneyMovement == "blocked"' \
+            >/dev/null
+
+          PAYMENT_LINK_WORKER_RUN_ID="$(echo "$PAYMENT_LINK_RESPONSE" | /usr/bin/jq -r '.data.result.workerRunId')"
+          PAYMENT_LINK_EVENT_ID="$(echo "$PAYMENT_LINK_RESPONSE" | /usr/bin/jq -r '.data.result.eventId')"
+          PAYMENT_LINK_WORKFLOW_RUN_ID="$(echo "$PAYMENT_LINK_RESPONSE" | /usr/bin/jq -r '.data.result.workflowRunId')"
+          PAYMENT_LINK_APPROVAL_ID="$(echo "$PAYMENT_LINK_RESPONSE" | /usr/bin/jq -r '.data.result.approvalRequestId')"
+          psql_db -At <<SQL
+          select 'payment_link_worker_run' as kind, state, mode, data->'input'->>'command', data->'output'->>'providerPaymentLinkCreation', data->'output'->>'moneyMovement'
+          from worker_runs where id = '$PAYMENT_LINK_WORKER_RUN_ID'::uuid;
+          select 'payment_link_event' as kind, type, source, data->>'command'
+          from events where id = '$PAYMENT_LINK_EVENT_ID'::uuid;
+          select 'payment_link_workflow' as kind, state, data->>'workerRunId', data->>'approvalRequestId'
+          from workflow_runs where id = '$PAYMENT_LINK_WORKFLOW_RUN_ID'::uuid;
+          select 'payment_link_approval' as kind, kind, state, requested_action->>'providerPaymentLinkCreation', requested_action->>'moneyMovement'
+          from approval_requests where id = '$PAYMENT_LINK_APPROVAL_ID'::uuid;
           SQL
 
           LEAD_OBJECT_KEY="deploy-lead-object-$RUN_ID"

@@ -47,9 +47,9 @@ export const financeWorkerRole = "finance_operations";
 
 const financeSource = "continuous.worker";
 const invoicePrepareCapabilityKey = "invoice.prepare";
-const arFollowupDraftCapabilityKey = "payment_link.prepare";
+const arFollowupDraftCapabilityKey = "ar_followup.draft";
 const cashForecastGenerateCapabilityKey = "cash_forecast.generate";
-const paymentDraftPrepareCapabilityKey = "ach_draft.prepare";
+const paymentDraftPrepareCapabilityKey = "payment_draft.prepare";
 const invoiceDraftWorkflowKey = "invoice_draft";
 const arFollowupWorkflowKey = "ar_followup";
 const cashForecastWorkflowKey = "cash_forecast";
@@ -2500,7 +2500,7 @@ export async function draftFinanceArFollowup(input: {
     selector: { role: financeWorkerRole, tenantSlug: input.tenantSlug, workerId: input.workerId },
     operatorEmail: input.operatorEmail,
     capabilityKey: arFollowupDraftCapabilityKey,
-    capabilityLabel: "payment_link.prepare",
+    capabilityLabel: "ar_followup.draft",
   });
   const config = input.config ?? {};
   const refs = await loadArFollowupRefs(db, context.worker.tenantId, config);
@@ -4203,7 +4203,7 @@ export async function prepareFinancePaymentDraft(input: {
     selector: { role: financeWorkerRole, tenantSlug: input.tenantSlug, workerId: input.workerId },
     operatorEmail: input.operatorEmail,
     capabilityKey: paymentDraftPrepareCapabilityKey,
-    capabilityLabel: "ach_draft.prepare",
+    capabilityLabel: "payment_draft.prepare",
   });
   const config = input.config ?? {};
   const refs = await loadPaymentDraftRefs(db, context.worker.tenantId, config);

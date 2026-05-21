@@ -12,6 +12,7 @@ import {
   draftRevenueResponse,
   getRevenueReadinessSafe,
   getRevenueWorkerSnapshotSafe,
+  prepareRevenuePaymentLink,
   prepareRevenueQuote,
   readRevenueLeads,
   RevenueWorkerUnavailableError,
@@ -145,6 +146,7 @@ type WorkerConfigSchema = {
   description?: string;
   required?: string[];
   oneRequired?: string[];
+  oneRequiredPaths?: string[][];
   properties?: Record<string, WorkerConfigSchema>;
   items?: WorkerConfigSchema;
   enum?: string[];
@@ -258,6 +260,24 @@ function describeFields(fields: string[]) {
   return `${fields.slice(0, -1).join(", ")} or ${fields[fields.length - 1]}`;
 }
 
+function describePathFields(paths: string[][], prefix: string) {
+  return describeFields(paths.map((fieldPath) => `${prefix}.${fieldPath.join(".")}`));
+}
+
+function hasPathValue(record: Record<string, unknown>, path: string[]) {
+  let current: unknown = record;
+
+  for (const segment of path) {
+    if (!current || typeof current !== "object" || Array.isArray(current)) {
+      return false;
+    }
+
+    current = (current as Record<string, unknown>)[segment];
+  }
+
+  return current !== undefined && current !== null && current !== "";
+}
+
 function failConfig(message: string, code = "invalid_worker_command_config"): never {
   throw new PlatformUnavailableError(code, message, 400);
 }
@@ -282,8 +302,12 @@ function validateConfigSchema(
       }
     }
 
-    if (schema.oneRequired && !schema.oneRequired.some((field) => record[field] !== undefined && record[field] !== null)) {
+    if (schema.oneRequired && !schema.oneRequired.some((field) => record[field] !== undefined && record[field] !== null && record[field] !== "")) {
       failConfig(`${path}.${describeFields(schema.oneRequired)} is required for ${operationName}.`, errorCode);
+    }
+
+    if (schema.oneRequiredPaths && !schema.oneRequiredPaths.some((fieldPath) => hasPathValue(record, fieldPath))) {
+      failConfig(`${describePathFields(schema.oneRequiredPaths, path)} is required for ${operationName}.`, errorCode);
     }
 
     if (schema.additionalProperties === false && schema.properties) {
@@ -455,6 +479,48 @@ const workerRunConfig: WorkerConfigSchema = {
       additionalProperties: true,
     },
     expectedAction: { type: "string" },
+  },
+  additionalProperties: true,
+};
+const revenuePaymentLinkSourceRefsConfig: WorkerConfigSchema = {
+  type: "object",
+  properties: {
+    invoiceId: { type: "string" },
+    invoiceObjectId: { type: "string" },
+    paymentId: { type: "string" },
+    paymentObjectId: { type: "string" },
+    quoteObjectId: { type: "string" },
+    approvalRequestId: { type: "string" },
+    bankAccountId: { type: "string" },
+    amountCents: { type: "number", integer: true, minimum: 0 },
+    currency: { type: "string" },
+    customerName: { type: "string" },
+    dueAt: { type: "string" },
+  },
+  additionalProperties: true,
+};
+const revenuePaymentLinkPrepareConfig: WorkerConfigSchema = {
+  type: "object",
+  oneRequiredPaths: [
+    ["invoiceId"],
+    ["invoiceObjectId"],
+    ["sourceRefs", "invoiceId"],
+    ["sourceRefs", "invoiceObjectId"],
+  ],
+  properties: {
+    invoiceId: { type: "string" },
+    invoiceObjectId: { type: "string" },
+    paymentId: { type: "string" },
+    paymentObjectId: { type: "string" },
+    quoteObjectId: { type: "string" },
+    approvalRequestId: { type: "string" },
+    bankAccountId: { type: "string" },
+    amountCents: { type: "number", integer: true, minimum: 0 },
+    currency: { type: "string" },
+    customerName: { type: "string" },
+    dueAt: { type: "string" },
+    sourceRefs: revenuePaymentLinkSourceRefsConfig,
+    policy: jsonObjectConfig,
   },
   additionalProperties: true,
 };
@@ -1060,6 +1126,33 @@ const revenueDefinition: WorkerDefinition = {
         });
       },
     },
+    "payment_link.prepare": {
+      name: "payment_link.prepare",
+      description:
+        "Prepare an owner-reviewable payment-link packet while live provider creation and money movement stay blocked.",
+      idempotency: "required",
+      sideEffects: "internal",
+      externalExecution: "blocked",
+      requiresTenant: true,
+      configSchema: revenuePaymentLinkPrepareConfig,
+      async handle(context) {
+        if (!context.idempotencyKey) {
+          throw new PlatformUnavailableError(
+            "invalid_idempotency_key",
+            "A string idempotency key is required.",
+            400,
+          );
+        }
+
+        return prepareRevenuePaymentLink({
+          idempotencyKey: context.idempotencyKey,
+          tenantSlug: context.target.tenantSlug,
+          workerId: context.target.workerId,
+          operatorEmail: context.operatorEmail,
+          config: context.config,
+        });
+      },
+    },
     continue: {
       name: "continue",
       description:
@@ -1312,7 +1405,7 @@ const financeDefinition: WorkerDefinition = {
     },
     "ar_followup.draft": {
       name: "ar_followup.draft",
-      description: "Draft an AR follow-up and payment-link preparation packet without external send.",
+      description: "Draft an AR follow-up packet without external send or payment-link creation.",
       idempotency: "required",
       sideEffects: "internal",
       externalExecution: "blocked",

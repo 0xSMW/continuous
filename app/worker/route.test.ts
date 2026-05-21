@@ -218,6 +218,72 @@ describe("/worker route", () => {
     });
   });
 
+  it("routes payment-link preparation through the canonical worker envelope", async () => {
+    const commandResult = {
+      worker: {
+        role: "revenue_operations",
+        id: null,
+        tenantSlug: "continuous-demo",
+      },
+      command: "payment_link.prepare",
+      result: {
+        paymentObjectId: "payment-object-1",
+        providerPaymentLinkCreation: "blocked",
+        moneyMovement: "blocked",
+      },
+    };
+    mocks.executeWorkerCommand.mockResolvedValue(commandResult);
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/worker", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "payment_link.prepare",
+          worker: {
+            role: "revenue_operations",
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "payment-link-route-001",
+          config: {
+            invoiceObjectId: "33333333-3333-4333-8333-000000000006",
+            sourceRefs: {
+              quoteObjectId: "33333333-3333-4333-8333-000000000004",
+            },
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      api: "continuous.worker.v1",
+      data: commandResult,
+      error: null,
+    });
+    expect(mocks.executeWorkerCommand).toHaveBeenCalledWith({
+      command: "payment_link.prepare",
+      target: {
+        role: "revenue_operations",
+        id: undefined,
+        tenantSlug: "continuous-demo",
+      },
+      config: {
+        invoiceObjectId: "33333333-3333-4333-8333-000000000006",
+        sourceRefs: {
+          quoteObjectId: "33333333-3333-4333-8333-000000000004",
+        },
+      },
+      idempotencyKey: "payment-link-route-001",
+      operatorEmail: "operator@example.com",
+    });
+  });
+
   it("rejects unauthorized POST commands before reading the request body", async () => {
     const getReader = vi.fn(() => {
       throw new Error("Body should not be read before auth succeeds.");
@@ -1183,6 +1249,54 @@ describe("/worker route", () => {
       message: "config is required and must be an object.",
     });
     expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
+  });
+
+  it("rejects missing or non-object view config before registry dispatch", async () => {
+    const { POST } = await import("./route");
+
+    for (const [name, payload] of [
+      [
+        "missing",
+        {
+          view: "snapshot",
+          worker: {
+            role: "revenue_operations",
+            tenantSlug: "continuous-demo",
+          },
+        },
+      ],
+      [
+        "array",
+        {
+          view: "snapshot",
+          worker: {
+            role: "revenue_operations",
+            tenantSlug: "continuous-demo",
+          },
+          config: ["state"],
+        },
+      ],
+    ] as const) {
+      const response = await POST(
+        new Request("http://localhost/worker", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer test-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        }),
+      );
+      const body = await response.json();
+
+      expect(response.status, name).toBe(400);
+      expect(body.error).toEqual({
+        code: "invalid_worker_view_config",
+        message: "config is required and must be an object.",
+      });
+    }
+
+    expect(mocks.executeWorkerView).not.toHaveBeenCalled();
   });
 
   it("preserves mapped worker command errors", async () => {

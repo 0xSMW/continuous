@@ -18,6 +18,7 @@ recording without storing live credential material or moving money.
 | Source read command | `POST /worker` with payload `command: "lead.read"`, `idempotencyKey`, `config.source`, optional `config.reader`, and direct `config.records[]` or an active connection reference; persists website-form, inbox, CRM, buffered connection, or read-only API-polled source records as Core lead object/event/evidence rows, updates connection cursor proof when connection-backed, and returns `config.intake` selectors |
 | Split classify/draft commands | `POST /worker` with payload `command: "lead.classify"` or `command: "response.draft"`; both accept `config.intake` selectors or direct fallback `config.leadPacket`, write worker run/event/evidence/audit/budget records, and keep external sends blocked |
 | Quote prepare command | `POST /worker` with payload `command: "quote.prepare"`; accepts the same `config.intake` selectors or direct fallback `config.leadPacket`, writes quote packet, approval, generated view, event/evidence/audit/budget records, and keeps external sends blocked |
+| Payment-link prepare command | `POST /worker` with payload `command: "payment_link.prepare"`; accepts persisted invoice refs under `config.invoiceId`, `config.invoiceObjectId`, or keyed `config.sourceRefs`, writes a payment primitive, payment instruction when a bank account exists, packet, approval, generated view, workflow, budget, event/evidence/audit, and dry-run adapter receipt while live provider link creation and money movement stay blocked |
 | Run command | `POST /worker` with payload `command: "run"` and `config.intake` source selectors or Core references; direct `config.leadPacket` remains an operator/test fallback |
 | Continuation command | `POST /worker` with payload `command: "continue"`, `idempotencyKey`, and `config.approvalId`; approved decisions default to blocked no-send execution packets, or record an approved controlled-send receipt when scoped details are supplied under `config.execution`; `revision_requested` decisions create revised packets plus fresh pending owner approval, and `rejected` decisions create closed no-send stop packets |
 | Adapter reconciliation commands | `POST /worker` with payload `command: "adapters.reconcile"` or `command: "adapters.retry"`, tenant-scoped and bearer-token required |
@@ -62,9 +63,9 @@ smoke test.
 | `lead.classify` | Allowed | Registered command now writes classification run, inference, usage, trace evidence, event, and audit proof |
 | `response.draft` | Allowed | Registered command now writes draft run, inference, usage, draft evidence, event, and audit proof; external send remains blocked |
 | `quote.prepare` | Allowed | Registered command prepares owner-reviewable quote packets, approval requests, generated quote views, and dry-run adapter receipts while external send remains blocked |
+| `payment_link.prepare` | Human approval | Registered command prepares owner-reviewable blocked payment-link packets; live provider creation and money movement remain blocked |
 | `schedule.propose` | Approval required | Do not commit external calendars yet |
 | `invoice.prepare` | Approval required | Tie to job closeout evidence |
-| `payment_link.prepare` | Human approval | No autonomous money movement |
 
 ## Adapter Order
 

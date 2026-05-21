@@ -240,6 +240,17 @@ function appServerBridgeTarget(body: Record<string, unknown>):
   }
 
   const args = argumentsResult.args;
+
+  if (tool === "continuous.worker.schema" && Object.keys(args).length > 0) {
+    return {
+      ok: false,
+      error: {
+        code: "invalid_app_server_tool_call",
+        message: "continuous.worker.schema does not accept arguments.",
+      },
+    };
+  }
+
   const worker = bodyObject(args.worker);
   const tenantSlug = optionalString(worker.tenantSlug);
   const workerRole = optionalString(worker.role);

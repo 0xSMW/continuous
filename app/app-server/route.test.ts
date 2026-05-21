@@ -327,6 +327,38 @@ describe("/app-server route", () => {
     expect(mocks.executeAppServerWorkerDynamicToolCall).toHaveBeenCalledWith(payload, undefined);
   });
 
+  it("rejects schema discovery arguments before dynamic dispatch", async () => {
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/app-server", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          tool: "continuous.worker.schema",
+          arguments: {
+            view: "snapshot",
+          },
+          callId: "call-schema-extra",
+          threadId: "thread-001",
+          turnId: "turn-001",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "invalid_app_server_tool_call",
+        message: "continuous.worker.schema does not accept arguments.",
+      },
+    });
+    expect(mocks.authorizeManagedControlPlaneCredential).not.toHaveBeenCalled();
+    expect(mocks.executeAppServerWorkerDynamicToolCall).not.toHaveBeenCalled();
+  });
+
   it("rejects bridge calls outside token command, tenant, and worker-role scope", async () => {
     const { POST } = await import("./route");
     const basePayload = {
@@ -717,6 +749,66 @@ describe("/app-server route", () => {
           "continuous.worker.command arguments fields must be command, worker, idempotencyKey, and config. Put worker operation inputs under arguments.config. Unexpected fields: source, records.",
       },
     });
+    expect(mocks.authorizeManagedControlPlaneCredential).not.toHaveBeenCalled();
+    expect(mocks.executeAppServerWorkerDynamicToolCall).not.toHaveBeenCalled();
+  });
+
+  it("rejects command and view argument cross-contamination before dynamic dispatch", async () => {
+    const { POST } = await import("./route");
+
+    for (const payload of [
+      {
+        tool: "continuous.worker.command",
+        arguments: {
+          command: "lead.read",
+          view: "snapshot",
+          worker: {
+            role: "revenue_operations",
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "app-server-route-command-view-contamination-001",
+          config: {},
+        },
+        callId: "call-command-view-contamination",
+        threadId: "thread-001",
+        turnId: "turn-001",
+      },
+      {
+        tool: "continuous.worker.view",
+        arguments: {
+          view: "snapshot",
+          command: "lead.read",
+          worker: {
+            role: "revenue_operations",
+            tenantSlug: "continuous-demo",
+          },
+          config: {},
+        },
+        callId: "call-view-command-contamination",
+        threadId: "thread-001",
+        turnId: "turn-001",
+      },
+    ]) {
+      const response = await POST(
+        new Request("http://localhost/app-server", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer test-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        }),
+      );
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        error: {
+          code: "invalid_app_server_tool_call",
+          message: expect.stringContaining("Unexpected fields:"),
+        },
+      });
+    }
+
     expect(mocks.authorizeManagedControlPlaneCredential).not.toHaveBeenCalled();
     expect(mocks.executeAppServerWorkerDynamicToolCall).not.toHaveBeenCalled();
   });

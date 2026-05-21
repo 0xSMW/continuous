@@ -33,7 +33,8 @@ work from one worker family to the next.
 | Lead-to-cash simulation | Run creates task, worker run, workflow run/steps, budget reservation, inference, usage, adapter dry-run, approval, audit, evidence, object version |
 | Approval execution | Approval decision uses shared approval service, advances the allowed workflow state, and approved continuation can record controlled-send receipts from `config.execution` without changing the `/worker` envelope |
 | Adapter hardening | Reconciliation writes audit/evidence records and retry/review system tasks; due dry-run retries execute with blocked receipts, live-credential readiness checks, and rollback plans; production provider execution remains gated |
-| Readiness view | `POST /worker` with `view: "readiness"` reports the worker, capability, budget, workflow, dry-run receipt, quote-review view, and live credential gates |
+| Payment-link preparation | `payment_link.prepare` writes a blocked payment packet, payment instruction when possible, owner approval, generated review view, dry-run adapter receipt, workflow, budget, and audit proof from persisted invoice refs |
+| Readiness view | `POST /worker` with `view: "readiness"` reports the worker, capability, budget, workflow, dry-run receipt, quote-review view, payment-review view when payment-link proof is latest, and live credential gates |
 | Eval harness | CI-enforced lead-to-quote cases prove classification, approval, budget, adapter receipt, and idempotency replay |
 | First controlled send | Approved external message sends through adapter with receipt and rollback/escalation evidence |
 
@@ -47,10 +48,10 @@ credentials and rollback playbooks before customer-data use.
 | Gate | Required evidence |
 |---|---|
 | Source coverage | Production `lead.read` runs from at least one live inbox or CRM connection created through `/core connection.upsert`, with `/core connection.health.record` proof and scheduler cursor evidence |
-| Quote decision | `lead.classify`, `response.draft`, `quote.prepare`, `run`, shared approval, and `continue` all write worker run, workflow, approval, audit, evidence, budget, generated-view, and adapter records from persisted Core refs |
+| Quote and payment decision | `lead.classify`, `response.draft`, `quote.prepare`, `payment_link.prepare`, `run`, shared approval, and `continue` all write worker run, workflow, approval, audit, evidence, budget, generated-view, and adapter records from persisted Core refs |
 | Controlled send | An approved customer message send uses a scoped managed credential, stores an adapter receipt, records rollback/escalation evidence, and rejects replay with changed input |
 | Cash handoff | Approved quote or closeout records can hand Dispatch/Ops and Finance enough Core refs to prepare schedule, invoice, AR follow-up, and payment-draft packets without private payloads |
-| Eval and deploy | CI evals plus production smoke prove no send, payment link, filing, payroll submission, or money movement happens without the matching approval and receipt gate |
+| Eval and deploy | CI evals plus production smoke prove no send, live provider payment-link creation, filing, payroll submission, or money movement happens without the matching approval, credential, receipt, and rollback gate |
 | Readiness report | The generic `/worker` readiness view returns ready dry-run checks and explicit live credential blockers before customer-data use |
 
 ## Phase 2: Owner Chief-of-Staff Worker
@@ -123,7 +124,7 @@ execution gates.
 |---|---|
 | Core objects | Invoice, bill, expense, receipt, cash forecast, reconciliation item |
 | Workflow | Invoice draft, AR follow-up, expense coding, payment draft |
-| Capabilities | `invoice.prepare`, `payment_link.prepare`, `ach_draft.prepare`, `approval.request` |
+| Capabilities | `invoice.prepare`, `ar_followup.draft`, `cash_forecast.generate`, `payment_draft.prepare`, `approval.request` |
 | Adapters | Accounting/payment/bank feeds in draft mode with receipts |
 | Launch gate | Money movement remains blocked behind dual-control approval and receipt capture |
 

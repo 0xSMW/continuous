@@ -104,6 +104,7 @@ import {
 const runIntegration = Boolean(process.env.CI && process.env.DATABASE_URL);
 const maybeDescribe = runIntegration ? describe : describe.skip;
 const originalWorkerOperatorEmail = process.env.WORKER_OPERATOR_EMAIL;
+const bunExecutable = process.env.BUN_EXECUTABLE ?? "bun";
 
 function objectValue(value: unknown): JsonObject {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonObject) : {};
@@ -123,12 +124,12 @@ maybeDescribe("Revenue Worker integration eval", () => {
   beforeAll(() => {
     process.env.WORKER_OPERATOR_EMAIL = originalWorkerOperatorEmail ?? "owner@continuoushq.com";
 
-    execFileSync("bun", ["run", "db:migrate"], {
+    execFileSync(bunExecutable, ["run", "db:migrate"], {
       cwd: process.cwd(),
       env: process.env,
       stdio: "inherit",
     });
-    execFileSync("bun", ["run", "db:seed"], {
+    execFileSync(bunExecutable, ["run", "db:seed"], {
       cwd: process.cwd(),
       env: process.env,
       stdio: "inherit",
@@ -6241,6 +6242,147 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(readinessProof.adapterReceiptEvidenceId).toBe(quoteResult.adapterReceiptEvidenceId);
     expect(liveCredentialGates.every((gate) => gate.state === "blocked")).toBe(true);
 
+    const paymentLink = await executeWorkerCommand({
+      command: "payment_link.prepare",
+      target: {
+        role: "revenue_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: `ci-worker-payment-link-prepare-${runId}`,
+      config: {
+        invoiceObjectId: "33333333-3333-4333-8333-000000000006",
+        sourceRefs: {
+          quoteObjectId: "33333333-3333-4333-8333-000000000004",
+        },
+        policy: {
+          requireOwnerApproval: true,
+          providerPaymentLinkCreation: "blocked",
+          moneyMovement: "blocked",
+        },
+      },
+    });
+    const paymentLinkResult = objectValue(paymentLink.result);
+    const paymentLinkOutput = objectValue(paymentLinkResult.output);
+
+    expect(paymentLink.command).toBe("payment_link.prepare");
+    expect(paymentLinkResult.created).toBe(true);
+    expect(paymentLinkOutput.command).toBe("payment_link.prepare");
+    expect(paymentLinkOutput.invoiceId).toBe("44444444-4444-4444-8444-000000000006");
+    expect(paymentLinkOutput.externalExecution).toBe("blocked");
+    expect(paymentLinkOutput.providerPaymentLinkCreation).toBe("blocked");
+    expect(paymentLinkOutput.moneyMovement).toBe("blocked");
+    expect(paymentLinkOutput.externalMutation).toBe(false);
+    expect(paymentLinkOutput.requiresApproval).toBe(true);
+
+    const paymentLinkReplay = await executeWorkerCommand({
+      command: "payment_link.prepare",
+      target: {
+        role: "revenue_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+      idempotencyKey: `ci-worker-payment-link-prepare-${runId}`,
+      config: {
+        invoiceObjectId: "33333333-3333-4333-8333-000000000006",
+        sourceRefs: {
+          quoteObjectId: "33333333-3333-4333-8333-000000000004",
+        },
+        policy: {
+          requireOwnerApproval: true,
+          providerPaymentLinkCreation: "blocked",
+          moneyMovement: "blocked",
+        },
+      },
+    });
+    const paymentLinkReplayResult = objectValue(paymentLinkReplay.result);
+
+    expect(paymentLinkReplayResult.created).toBe(false);
+    expect(stringValue(paymentLinkReplayResult.workerRunId)).toBe(
+      stringValue(paymentLinkResult.workerRunId),
+    );
+
+    const [paymentLinkRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(eq(workerRuns.id, stringValue(paymentLinkResult.workerRunId)))
+      .limit(1);
+    const [paymentLinkObject] = await db
+      .select()
+      .from(objects)
+      .where(eq(objects.id, stringValue(paymentLinkResult.paymentObjectId)))
+      .limit(1);
+    const [paymentLinkPayment] = await db
+      .select()
+      .from(payments)
+      .where(eq(payments.id, stringValue(paymentLinkResult.paymentId)))
+      .limit(1);
+    const [paymentLinkInstruction] = await db
+      .select()
+      .from(paymentInstructions)
+      .where(eq(paymentInstructions.id, stringValue(paymentLinkResult.paymentInstructionId)))
+      .limit(1);
+    const [paymentLinkApproval] = await db
+      .select()
+      .from(approvalRequests)
+      .where(eq(approvalRequests.id, stringValue(paymentLinkResult.approvalRequestId)))
+      .limit(1);
+    const [paymentLinkPacket] = await db
+      .select()
+      .from(evidencePackets)
+      .where(eq(evidencePackets.id, stringValue(paymentLinkResult.packetId)))
+      .limit(1);
+    const [paymentLinkView] = await db
+      .select()
+      .from(generatedViews)
+      .where(eq(generatedViews.id, stringValue(paymentLinkResult.paymentReviewViewId)))
+      .limit(1);
+    const [paymentLinkReceipt] = await db
+      .select()
+      .from(evidence)
+      .where(eq(evidence.id, stringValue(paymentLinkResult.adapterReceiptEvidenceId)))
+      .limit(1);
+
+    expect(paymentLinkRun?.mode).toBe("payment_link_preparation");
+    expect(objectValue(objectValue(paymentLinkRun?.data).input).command).toBe("payment_link.prepare");
+    expect(paymentLinkObject?.type).toBe("payment");
+    expect(paymentLinkObject?.state).toBe("approval_required");
+    expect(paymentLinkPayment?.state).toBe("approval_required");
+    expect(paymentLinkInstruction?.kind).toBe("revenue_payment_link");
+    expect(paymentLinkApproval?.kind).toBe("payment_link_approval");
+    expect(paymentLinkApproval?.state).toBe("pending");
+    expect(paymentLinkPacket?.kind).toBe("revenue_payment_link_packet");
+    expect(paymentLinkView?.key).toBe(`payment.approval.review.${paymentLinkResult.approvalRequestId}`);
+    expect(objectValue(objectValue(paymentLinkView?.data).latest).approvalRequestId).toBe(
+      paymentLinkResult.approvalRequestId,
+    );
+    expect(objectValue(objectValue(paymentLinkView?.data).latest).paymentInstructionId).toBe(
+      paymentLinkResult.paymentInstructionId,
+    );
+    expect(paymentLinkReceipt?.kind).toBe("receipt");
+    expect(objectValue(paymentLinkReceipt?.data).providerPaymentLinkCreation).toBe("blocked");
+
+    const paymentReadiness = await executeWorkerView({
+      view: "readiness",
+      target: {
+        role: "revenue_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+    });
+    const paymentReadinessData = objectValue(paymentReadiness.data.readiness);
+    const paymentReadinessChecks = Array.isArray(paymentReadinessData.checks)
+      ? paymentReadinessData.checks.map((check) => objectValue(check))
+      : [];
+    const paymentReadinessProof = objectValue(paymentReadinessData.proof);
+
+    expect(paymentReadiness.error).toBeNull();
+    expect(paymentReadinessProof.latestWorkerRunId).toBe(paymentLinkResult.workerRunId);
+    expect(paymentReadinessProof.latestWorkerRunMode).toBe("payment_link_preparation");
+    expect(paymentReadinessProof.paymentReviewViewId).toBe(paymentLinkResult.paymentReviewViewId);
+    expect(paymentReadinessProof.adapterReceiptEvidenceId).toBe(paymentLinkResult.adapterReceiptEvidenceId);
+    expect(paymentReadinessChecks.find((check) => check.key === "payment_review_view")?.state).toBe("ready");
+
     const run = await runRevenueWorker({
       idempotencyKey: `ci-worker-run-from-lead-read-${runId}`,
       tenantSlug: "continuous-demo",
@@ -6383,6 +6525,40 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(readinessProof.quoteApprovalViewId).toBe(quoteResult.quoteApprovalViewId);
     expect(readinessProof.adapterReceiptEvidenceId).toBe(quoteResult.adapterReceiptEvidenceId);
 
+    const paymentLink = await executeAppServerWorkerTool("continuous.worker.command", {
+      command: "payment_link.prepare",
+      worker: {
+        role: "revenue_operations",
+        tenantSlug: "continuous-demo",
+      },
+      idempotencyKey: `ci-app-server-payment-link-prepare-${runId}`,
+      config: {
+        invoiceObjectId: "33333333-3333-4333-8333-000000000006",
+        sourceRefs: {
+          quoteObjectId: "33333333-3333-4333-8333-000000000004",
+        },
+        policy: {
+          requireOwnerApproval: true,
+          providerPaymentLinkCreation: "blocked",
+          moneyMovement: "blocked",
+        },
+      },
+    });
+    const paymentLinkEnvelope = objectValue(paymentLink);
+    const paymentLinkResult = objectValue(paymentLinkEnvelope.result);
+    const paymentLinkOutput = objectValue(paymentLinkResult.output);
+
+    expect(paymentLinkEnvelope.command).toBe("payment_link.prepare");
+    expect(objectValue(paymentLinkEnvelope.worker)).toMatchObject({
+      role: "revenue_operations",
+      tenantSlug: "continuous-demo",
+    });
+    expect(paymentLinkResult.created).toBe(true);
+    expect(paymentLinkOutput.command).toBe("payment_link.prepare");
+    expect(paymentLinkOutput.externalExecution).toBe("blocked");
+    expect(paymentLinkOutput.providerPaymentLinkCreation).toBe("blocked");
+    expect(paymentLinkOutput.moneyMovement).toBe("blocked");
+
     const [readRun] = await db
       .select()
       .from(workerRuns)
@@ -6403,6 +6579,11 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .from(events)
       .where(eq(events.id, stringValue(quoteResult.eventId)))
       .limit(1);
+    const [paymentLinkRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(eq(workerRuns.id, stringValue(paymentLinkResult.workerRunId)))
+      .limit(1);
     const [approval] = await db
       .select()
       .from(approvalRequests)
@@ -6416,6 +6597,8 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(quoteRun?.mode).toBe("quote_preparation");
     expect(objectValue(objectValue(quoteRun?.data).input).command).toBe("quote.prepare");
     expect(quoteEvent?.type).toBe("worker.revenue_operations.quote_prepare.completed");
+    expect(paymentLinkRun?.mode).toBe("payment_link_preparation");
+    expect(objectValue(objectValue(paymentLinkRun?.data).input).command).toBe("payment_link.prepare");
     expect(approval?.state).toBe("pending");
     expect(approval?.kind).toBe("quote_approval");
   }, 120_000);

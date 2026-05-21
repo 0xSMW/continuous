@@ -165,7 +165,7 @@ describe("app-server worker tools", () => {
         }),
       ]),
     );
-    expect(revenueFollowUpCommands.map((command) => command.name)).toEqual(["payment_link.prepare"]);
+    expect(revenueFollowUpCommands.map((command) => command.name)).toEqual([]);
     expect(
       registry.plannedFutureWorkerCommands.some(
         (command) => command.role === "systems_operations",
@@ -215,10 +215,6 @@ describe("app-server worker tools", () => {
         }),
       ]),
     );
-    expect(
-      revenueFollowUpCommands.find((command) => command.name === "payment_link.prepare")?.configSchema.properties
-        ?.sourceRefs?.type,
-    ).toBe("object");
     expect(registry.commands.some((command) => command.name === "run")).toBe(true);
     expect(registry.commands.some((command) => command.name === "approval.decide")).toBe(true);
     expect(registry.commands.some((command) => command.name === "lead.classify")).toBe(true);
@@ -231,6 +227,24 @@ describe("app-server worker tools", () => {
           command.apiRoute === "/worker" &&
           command.idempotency === "required" &&
           command.externalExecution === "blocked",
+      ),
+    ).toBe(true);
+    expect(
+      registry.commands.some(
+        (command) =>
+          command.role === "revenue_operations" &&
+          command.name === "payment_link.prepare" &&
+          command.apiRoute === "/worker" &&
+          command.idempotency === "required" &&
+          command.externalExecution === "blocked" &&
+          JSON.stringify(command.configSchema?.oneRequiredPaths) ===
+            JSON.stringify([
+              ["invoiceId"],
+              ["invoiceObjectId"],
+              ["sourceRefs", "invoiceId"],
+              ["sourceRefs", "invoiceObjectId"],
+            ]) &&
+          command.configSchema?.properties?.sourceRefs?.type === "object",
       ),
     ).toBe(true);
     expect(
@@ -457,6 +471,12 @@ describe("app-server worker tools", () => {
 
   it("requires a clean canonical command envelope before dispatch", async () => {
     await expect(
+      executeAppServerWorkerTool("continuous.worker.schema", {
+        view: "snapshot",
+      }),
+    ).rejects.toThrow("continuous.worker.schema does not accept arguments.");
+
+    await expect(
       executeAppServerWorkerTool("continuous.worker.command", {
         command: "run",
         idempotencyKey: "app-server-missing-worker-test-001",
@@ -545,6 +565,35 @@ describe("app-server worker tools", () => {
       }),
     ).rejects.toThrow(
       "continuous.worker.command payload fields must be command, worker, idempotencyKey, and config. Move operation inputs into config. Unexpected fields: operatorEmail.",
+    );
+
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.command", {
+        command: "run",
+        view: "snapshot",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "app-server-command-view-contamination-001",
+        config: {},
+      }),
+    ).rejects.toThrow(
+      "continuous.worker.command payload fields must be command, worker, idempotencyKey, and config. Move operation inputs into config. Unexpected fields: view.",
+    );
+
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.view", {
+        view: "snapshot",
+        command: "run",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        config: {},
+      }),
+    ).rejects.toThrow(
+      "continuous.worker.view payload fields must be view, worker, and config. Move operation inputs into config. Unexpected fields: command.",
     );
 
     for (const command of [
@@ -1221,6 +1270,38 @@ describe("app-server worker tools", () => {
   });
 
   it("applies registry schemas to dispatch commands through the app-server envelope", async () => {
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.command", {
+        command: "payment_link.prepare",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "app-server-revenue-payment-link-schema",
+        config: {
+          sourceRefs: {},
+        },
+      }),
+    ).rejects.toThrow(
+      "config.invoiceId, config.invoiceObjectId, config.sourceRefs.invoiceId or config.sourceRefs.invoiceObjectId is required for payment_link.prepare.",
+    );
+
+    await expect(
+      executeAppServerWorkerTool("continuous.worker.command", {
+        command: "payment_link.prepare",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "app-server-revenue-payment-link-invoice-object-schema",
+        config: {
+          invoiceObjectId: "",
+        },
+      }),
+    ).rejects.toThrow(
+      "config.invoiceId, config.invoiceObjectId, config.sourceRefs.invoiceId or config.sourceRefs.invoiceObjectId is required for payment_link.prepare.",
+    );
+
     await expect(
       executeAppServerWorkerTool("continuous.worker.command", {
         command: "customer_update.draft",

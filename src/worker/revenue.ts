@@ -9,6 +9,7 @@ import {
   adapterRuns,
   approvalRequests,
   auditEvents,
+  bankAccounts,
   budgetAccounts,
   budgetAllocations,
   budgetPolicies,
@@ -24,9 +25,13 @@ import {
   events,
   generatedViews,
   inferences,
+  invoices,
   modelRoutes,
   objects,
+  objectLinks,
   objectVersions,
+  payments,
+  paymentInstructions,
   tasks,
   tenants,
   usageEvents,
@@ -50,6 +55,7 @@ const runUnits = 12000;
 const leadReadUnits = 1000;
 const leadClassifyUnits = 2000;
 const responseDraftUnits = 4000;
+const paymentLinkPrepareUnits = 3000;
 type RevenueRunCommand = "run" | "quote.prepare";
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -156,6 +162,7 @@ export type RevenueWorkerReadiness = {
     latestWorkerRunAt: string | null;
     workflowDefinitionId: string | null;
     quoteApprovalViewId: string | null;
+    paymentReviewViewId: string | null;
     adapterReceiptEvidenceId: string | null;
   };
 };
@@ -227,6 +234,34 @@ export type RevenueWorkerContinuationResult = {
   snapshot: RevenueWorkerSnapshot;
 };
 
+export type RevenuePaymentLinkPrepareResult = {
+  created: boolean;
+  idempotencyKey: string;
+  workerRunId: string | null;
+  taskId: string | null;
+  eventId: string | null;
+  paymentObjectId: string | null;
+  paymentId: string | null;
+  paymentInstructionId: string | null;
+  invoiceObjectId: string | null;
+  invoiceId: string | null;
+  quoteObjectId: string | null;
+  approvalRequestId: string | null;
+  adapterRunId: string | null;
+  adapterActionId: string | null;
+  adapterReceiptEvidenceId: string | null;
+  evidenceId: string | null;
+  draftEvidenceId: string | null;
+  packetId: string | null;
+  documentId: string | null;
+  workflowRunId: string | null;
+  workflowStepIds: string[];
+  paymentReviewViewId: string | null;
+  auditEventId: string | null;
+  output: JsonObject;
+  snapshot: RevenueWorkerSnapshot;
+};
+
 type TaskPriority = "low" | "normal" | "high" | "urgent";
 
 type WorkerContext = {
@@ -249,6 +284,7 @@ type WorkerContext = {
   leadClassifyCapabilityId: string | null;
   responseDraftCapabilityId: string | null;
   quoteCapabilityId: string | null;
+  paymentLinkCapabilityId: string | null;
   briefCapabilityId: string | null;
   budgetAccountId: string;
   connectionId: string;
@@ -272,6 +308,20 @@ function numberValue(value: unknown) {
   }
 
   return 0;
+}
+
+function optionalNumber(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string" && value.trim()) {
+    const number = Number(value);
+
+    return Number.isFinite(number) ? number : undefined;
+  }
+
+  return undefined;
 }
 
 function nextWorkerKpis(current: JsonObject, now: Date) {
@@ -355,6 +405,36 @@ function booleanValue(value: unknown) {
 function uuidValue(value: unknown) {
   const output = stringValue(value);
   return output && uuidPattern.test(output) ? output : "";
+}
+
+function optionalUuid(value: unknown, fieldName: string) {
+  const output = stringValue(value);
+
+  if (!output) {
+    return "";
+  }
+
+  if (!uuidPattern.test(output)) {
+    throw new RevenueWorkerUnavailableError(
+      "invalid_worker_command_config",
+      `${fieldName} must be a tenant-scoped Core id.`,
+      400,
+    );
+  }
+
+  return output;
+}
+
+function firstNumberValue(...values: unknown[]) {
+  for (const value of values) {
+    const number = optionalNumber(value);
+
+    if (number !== undefined) {
+      return number;
+    }
+  }
+
+  return undefined;
 }
 
 function normalizedUrgency(value: unknown) {
@@ -2278,6 +2358,12 @@ async function loadWorkerContext(db: Database, selector: RevenueWorkerSelector):
     .where(and(eq(capabilities.key, "quote.prepare"), eq(capabilities.active, true)))
     .limit(1);
 
+  const [paymentLinkCapability] = await db
+    .select({ id: capabilities.id })
+    .from(capabilities)
+    .where(and(eq(capabilities.key, "payment_link.prepare"), eq(capabilities.active, true)))
+    .limit(1);
+
   const [leadReadCapability] = await db
     .select({ id: capabilities.id })
     .from(capabilities)
@@ -2357,6 +2443,7 @@ async function loadWorkerContext(db: Database, selector: RevenueWorkerSelector):
     leadClassifyCapabilityId: leadClassifyCapability?.id ?? null,
     responseDraftCapabilityId: responseDraftCapability?.id ?? null,
     quoteCapabilityId: quoteCapability?.id ?? null,
+    paymentLinkCapabilityId: paymentLinkCapability?.id ?? null,
     briefCapabilityId: briefCapability?.id ?? null,
     budgetAccountId: budgetAccount.id,
     connectionId: connection.id,
@@ -2393,6 +2480,257 @@ async function loadOperator(
     email: operator.email,
     name: operator.name,
     actorRef: `user:${operator.id}`,
+  };
+}
+
+async function getTenantObject(db: Database, tenantId: string, id: string) {
+  if (!uuidPattern.test(id)) {
+    return null;
+  }
+
+  const [object] = await db
+    .select()
+    .from(objects)
+    .where(and(eq(objects.tenantId, tenantId), eq(objects.id, id)))
+    .limit(1);
+
+  return object ?? null;
+}
+
+async function loadRevenueInvoiceRef(db: Database, tenantId: string, ref: string) {
+  const [invoiceRow] = await db
+    .select()
+    .from(invoices)
+    .where(and(eq(invoices.tenantId, tenantId), eq(invoices.id, ref)))
+    .limit(1);
+  const invoiceObject = invoiceRow?.objectId
+    ? await getTenantObject(db, tenantId, invoiceRow.objectId)
+    : await getTenantObject(db, tenantId, ref);
+  const resolvedInvoice =
+    invoiceRow ??
+    (invoiceObject?.type === "invoice"
+      ? (
+          await db
+            .select()
+            .from(invoices)
+            .where(and(eq(invoices.tenantId, tenantId), eq(invoices.objectId, invoiceObject.id)))
+            .limit(1)
+        )[0]
+      : null);
+
+  if (!resolvedInvoice || !invoiceObject || invoiceObject.type !== "invoice") {
+    throw new RevenueWorkerUnavailableError(
+      "revenue_invoice_not_found",
+      "payment_link.prepare requires a tenant-scoped invoice id or invoice object id.",
+      404,
+    );
+  }
+
+  return {
+    invoice: resolvedInvoice,
+    invoiceObject,
+  };
+}
+
+async function loadRevenuePaymentRef(db: Database, tenantId: string, ref: string) {
+  const [paymentRow] = await db
+    .select()
+    .from(payments)
+    .where(and(eq(payments.tenantId, tenantId), eq(payments.id, ref)))
+    .limit(1);
+  const paymentObject = paymentRow?.objectId
+    ? await getTenantObject(db, tenantId, paymentRow.objectId)
+    : await getTenantObject(db, tenantId, ref);
+  const resolvedPayment =
+    paymentRow ??
+    (paymentObject?.type === "payment"
+      ? (
+          await db
+            .select()
+            .from(payments)
+            .where(and(eq(payments.tenantId, tenantId), eq(payments.objectId, paymentObject.id)))
+            .limit(1)
+        )[0]
+      : null);
+
+  if (!resolvedPayment && !paymentObject) {
+    throw new RevenueWorkerUnavailableError(
+      "revenue_payment_not_found",
+      "config.paymentId must reference a tenant-scoped payment row or payment object.",
+      404,
+    );
+  }
+
+  if (paymentObject && paymentObject.type !== "payment") {
+    throw new RevenueWorkerUnavailableError(
+      "revenue_payment_not_found",
+      "config.paymentId must reference a payment object when it references a Core object.",
+      404,
+    );
+  }
+
+  return {
+    payment: resolvedPayment ?? null,
+    paymentObject: paymentObject ?? null,
+  };
+}
+
+async function loadRevenuePaymentLinkRefs(db: Database, tenantId: string, config: JsonObject) {
+  const sourceRefs = objectValue(config.sourceRefs);
+  const invoiceRef = optionalUuid(
+    config.invoiceId ??
+      config.invoiceObjectId ??
+      sourceRefs.invoiceId ??
+      sourceRefs.invoiceObjectId,
+    "config.invoiceId or config.invoiceObjectId",
+  );
+
+  if (!invoiceRef) {
+    throw new RevenueWorkerUnavailableError(
+      "invalid_worker_command_config",
+      "config.invoiceId, config.invoiceObjectId, config.sourceRefs.invoiceId or config.sourceRefs.invoiceObjectId is required for payment_link.prepare.",
+      400,
+    );
+  }
+
+  const invoiceRefResult = await loadRevenueInvoiceRef(db, tenantId, invoiceRef);
+  const invoiceData = objectValue(invoiceRefResult.invoice.data);
+  const invoiceObjectData = objectValue(invoiceRefResult.invoiceObject.data);
+  const quoteRef = optionalUuid(
+    config.quoteObjectId ?? sourceRefs.quoteObjectId ?? invoiceData.quoteObjectId ?? invoiceObjectData.quoteObjectId,
+    "config.quoteObjectId",
+  );
+  const quoteObject = quoteRef ? await getTenantObject(db, tenantId, quoteRef) : null;
+
+  if (quoteRef && quoteObject?.type !== "quote") {
+    throw new RevenueWorkerUnavailableError(
+      "revenue_quote_not_found",
+      "config.quoteObjectId must reference a tenant-scoped quote object.",
+      404,
+    );
+  }
+
+  const paymentRef = optionalUuid(
+    config.paymentId ?? config.paymentObjectId ?? sourceRefs.paymentId ?? sourceRefs.paymentObjectId,
+    "config.paymentId",
+  );
+  const sourcePayment = paymentRef ? await loadRevenuePaymentRef(db, tenantId, paymentRef) : null;
+  const bankAccountRef = optionalUuid(
+    config.bankAccountId ?? sourceRefs.bankAccountId,
+    "config.bankAccountId",
+  );
+  const bankAccountConditions = [
+    eq(bankAccounts.tenantId, tenantId),
+    eq(bankAccounts.state, "verified"),
+  ];
+
+  if (bankAccountRef) {
+    bankAccountConditions.push(eq(bankAccounts.id, bankAccountRef));
+  }
+
+  const [bankAccount] = await db
+    .select({
+      id: bankAccounts.id,
+      name: bankAccounts.name,
+      state: bankAccounts.state,
+      data: bankAccounts.data,
+    })
+    .from(bankAccounts)
+    .where(and(...bankAccountConditions))
+    .orderBy(sql`case when ${bankAccounts.state} = 'verified' then 0 else 1 end`, bankAccounts.createdAt)
+    .limit(1);
+
+  if (bankAccountRef && !bankAccount) {
+    throw new RevenueWorkerUnavailableError(
+      "revenue_bank_account_not_found",
+      "config.bankAccountId must reference a verified tenant-scoped bank account.",
+      404,
+    );
+  }
+
+  const quoteData = objectValue(quoteObject?.data);
+  const paymentData = objectValue(sourcePayment?.payment?.data);
+  const paymentObjectData = objectValue(sourcePayment?.paymentObject?.data);
+  const amountCents =
+    firstNumberValue(
+      config.amountCents,
+      sourceRefs.amountCents,
+      invoiceData.totalCents,
+      invoiceData.total_cents,
+      invoiceData.amountCents,
+      invoiceData.amount_cents,
+      invoiceObjectData.totalCents,
+      invoiceObjectData.total_cents,
+      quoteData.totalCents,
+      quoteData.total_cents,
+      paymentData.amountCents,
+      paymentData.amount_cents,
+      paymentObjectData.amountCents,
+      paymentObjectData.amount_cents,
+    ) ?? 0;
+  const currency = firstStringValue(
+    config.currency,
+    sourceRefs.currency,
+    invoiceData.currency,
+    invoiceObjectData.currency,
+    quoteData.currency,
+    paymentData.currency,
+    paymentObjectData.currency,
+    "USD",
+  )
+    .toUpperCase()
+    .slice(0, 3);
+  const customerName = firstStringValue(
+    config.customerName,
+    sourceRefs.customerName,
+    invoiceData.customerName,
+    invoiceObjectData.customerName,
+    quoteData.customerName,
+    invoiceRefResult.invoiceObject.name,
+    "Customer",
+  );
+  const dueAt = firstStringValue(config.dueAt, sourceRefs.dueAt, invoiceData.dueAt, invoiceObjectData.dueAt);
+  const approvalRef = optionalUuid(
+    config.approvalRequestId ?? sourceRefs.approvalRequestId,
+    "config.approvalRequestId",
+  );
+  const [sourceApproval] = approvalRef
+    ? await db
+        .select({ id: approvalRequests.id, state: approvalRequests.state })
+        .from(approvalRequests)
+        .where(and(eq(approvalRequests.tenantId, tenantId), eq(approvalRequests.id, approvalRef)))
+        .limit(1)
+    : [];
+
+  if (approvalRef && !sourceApproval) {
+    throw new RevenueWorkerUnavailableError(
+      "revenue_approval_not_found",
+      "config.approvalRequestId must reference a tenant-scoped approval request.",
+      404,
+    );
+  }
+
+  const blockers = [
+    ...(amountCents > 0 ? [] : ["amount_missing"]),
+    ...(bankAccount ? [] : ["verified_bank_account_missing"]),
+    "provider_payment_link_creation_blocked",
+    "money_movement_blocked",
+  ];
+
+  return {
+    sourceRefs,
+    invoice: invoiceRefResult.invoice,
+    invoiceObject: invoiceRefResult.invoiceObject,
+    sourcePayment,
+    quoteObject,
+    sourceApproval: sourceApproval ?? null,
+    bankAccount: bankAccount ?? null,
+    amountCents,
+    currency: currency.length === 3 ? currency : "USD",
+    customerName,
+    dueAt: dueAt || null,
+    policy: objectValue(config.policy),
+    blockers,
   };
 }
 
@@ -2674,6 +3012,7 @@ const revenueReadinessCapabilityKeys = [
   "lead.classify",
   "response.draft",
   "quote.prepare",
+  "payment_link.prepare",
 ] as const;
 
 const revenueLiveCredentialGates: RevenueReadinessGate[] = [
@@ -2739,6 +3078,7 @@ function revenueReadinessFromChecks(input: {
       latestWorkerRunAt: input.proof?.latestWorkerRunAt ?? null,
       workflowDefinitionId: input.proof?.workflowDefinitionId ?? null,
       quoteApprovalViewId: input.proof?.quoteApprovalViewId ?? null,
+      paymentReviewViewId: input.proof?.paymentReviewViewId ?? null,
       adapterReceiptEvidenceId: input.proof?.adapterReceiptEvidenceId ?? null,
     },
   } satisfies RevenueWorkerReadiness;
@@ -2805,6 +3145,7 @@ export async function getRevenueReadiness(input: {
     workflowRows,
     latestDryRunRows,
     quoteApprovalViews,
+    paymentReviewViews,
   ] = await Promise.all([
     db
       .select({ id: capabilities.id, key: capabilities.key })
@@ -2868,7 +3209,7 @@ export async function getRevenueReadiness(input: {
           eq(workerRuns.tenantId, workerRow.tenantId),
           eq(workerRuns.workerId, workerRow.id),
           eq(workerRuns.state, "done"),
-          inArray(workerRuns.mode, ["simulation", "quote_preparation"]),
+          inArray(workerRuns.mode, ["simulation", "quote_preparation", "payment_link_preparation"]),
         ),
       )
       .orderBy(desc(workerRuns.startedAt), desc(workerRuns.id))
@@ -2880,6 +3221,18 @@ export async function getRevenueReadiness(input: {
         and(
           eq(generatedViews.tenantId, workerRow.tenantId),
           eq(generatedViews.key, "quote.approval.review"),
+          eq(generatedViews.active, true),
+        ),
+      )
+      .orderBy(desc(generatedViews.updatedAt), desc(generatedViews.id))
+      .limit(1),
+    db
+      .select({ id: generatedViews.id, key: generatedViews.key, active: generatedViews.active })
+      .from(generatedViews)
+      .where(
+        and(
+          eq(generatedViews.tenantId, workerRow.tenantId),
+          eq(generatedViews.key, "payment.approval.review"),
           eq(generatedViews.active, true),
         ),
       )
@@ -2923,6 +3276,12 @@ export async function getRevenueReadiness(input: {
     stringValue(latestRunOutput.quoteApprovalViewId) ||
     quoteApprovalViews[0]?.id ||
     null;
+  const paymentReviewViewId =
+    stringData(latestRunData, "paymentReviewViewId") ||
+    stringValue(latestRunOutput.paymentReviewViewId) ||
+    paymentReviewViews[0]?.id ||
+    null;
+  const latestRunMode = latestDryRun?.mode ?? null;
   const allocationCount = allocationRows[0]?.value ?? 0;
   const allocationUnits = numberValue(allocationRows[0]?.units);
   const budgetReady = Boolean(
@@ -2999,15 +3358,26 @@ export async function getRevenueReadiness(input: {
           viewId: quoteApprovalViewId,
         },
       }),
+      revenueReadinessCheck({
+        key: "payment_review_view",
+        label: "Payment review view published when payment-link proof is latest",
+        ready: latestRunMode === "payment_link_preparation" ? Boolean(paymentReviewViewId) : true,
+        details: {
+          key: "payment.approval.review",
+          viewId: paymentReviewViewId,
+          latestWorkerRunMode: latestRunMode,
+        },
+      }),
     ],
     proof: {
       latestWorkerRunId: latestDryRun?.id ?? null,
-      latestWorkerRunMode: latestDryRun?.mode ?? null,
+      latestWorkerRunMode: latestRunMode,
       latestWorkerRunState: latestDryRun?.state ?? null,
       latestWorkerRunIdempotencyKey: latestDryRun?.idempotencyKey ?? null,
       latestWorkerRunAt: latestDryRun?.startedAt.toISOString() ?? null,
       workflowDefinitionId: workflow?.id ?? null,
       quoteApprovalViewId,
+      paymentReviewViewId,
       adapterReceiptEvidenceId: adapterReceiptEvidenceId || null,
     },
   });
@@ -5837,6 +6207,1354 @@ export async function prepareRevenueQuote(input: {
     ...input,
     command: "quote.prepare",
   });
+}
+
+function replayedRevenuePaymentLinkResult(
+  run: typeof workerRuns.$inferSelect,
+  snapshot: RevenueWorkerSnapshot,
+): RevenuePaymentLinkPrepareResult {
+  const output = outputData(run.data);
+
+  return {
+    created: false,
+    idempotencyKey: run.idempotencyKey,
+    workerRunId: run.id,
+    taskId: stringData(run.data, "taskId") ?? run.taskId,
+    eventId: run.eventId ?? stringData(run.data, "eventId"),
+    paymentObjectId: stringData(run.data, "paymentObjectId"),
+    paymentId: stringData(run.data, "paymentId"),
+    paymentInstructionId: stringData(run.data, "paymentInstructionId"),
+    invoiceObjectId: stringData(run.data, "invoiceObjectId"),
+    invoiceId: stringData(run.data, "invoiceId"),
+    quoteObjectId: stringData(run.data, "quoteObjectId"),
+    approvalRequestId: stringData(run.data, "approvalRequestId"),
+    adapterRunId: stringData(run.data, "adapterRunId"),
+    adapterActionId: stringData(run.data, "adapterActionId"),
+    adapterReceiptEvidenceId: stringData(run.data, "adapterReceiptEvidenceId"),
+    evidenceId: stringData(run.data, "evidenceId"),
+    draftEvidenceId: stringData(run.data, "draftEvidenceId"),
+    packetId: stringData(run.data, "packetId"),
+    documentId: stringData(run.data, "documentId"),
+    workflowRunId: stringData(run.data, "workflowRunId"),
+    workflowStepIds: getWorkflowStepIds(run.data),
+    paymentReviewViewId: stringData(run.data, "paymentReviewViewId"),
+    auditEventId: stringData(run.data, "auditEventId"),
+    output,
+    snapshot,
+  };
+}
+
+export async function prepareRevenuePaymentLink(input: {
+  idempotencyKey: string;
+  operatorEmail: string;
+  tenantSlug?: string;
+  workerId?: string;
+  config?: JsonObject;
+  db?: Database;
+}): Promise<RevenuePaymentLinkPrepareResult> {
+  const db = input.db ?? defaultDb;
+  const requestConfig = input.config ?? {};
+  const requestSourceRefs = objectValue(requestConfig.sourceRefs);
+
+  if (
+    !stringValue(
+      requestConfig.invoiceId ??
+        requestConfig.invoiceObjectId ??
+        requestSourceRefs.invoiceId ??
+        requestSourceRefs.invoiceObjectId,
+    )
+  ) {
+    throw new RevenueWorkerUnavailableError(
+      "invalid_worker_command_config",
+      "config.invoiceId, config.invoiceObjectId, config.sourceRefs.invoiceId or config.sourceRefs.invoiceObjectId is required for payment_link.prepare.",
+      400,
+    );
+  }
+
+  const selector: RevenueWorkerSelector = {
+    tenantSlug: input.tenantSlug,
+    workerId: input.workerId,
+  };
+  const context = await loadWorkerContext(db, selector);
+  const operator = await loadOperator(db, context.worker.tenantId, input.operatorEmail);
+  const capabilityId = context.paymentLinkCapabilityId;
+
+  if (!capabilityId) {
+    throw new RevenueWorkerUnavailableError(
+      "worker_capability_missing",
+      "Revenue Worker requires the payment_link.prepare capability.",
+      409,
+    );
+  }
+
+  const refs = await loadRevenuePaymentLinkRefs(db, context.worker.tenantId, requestConfig);
+  const inputHash = hashObject({
+    schemaVersion: "worker.revenue_operations.payment_link_prepare.v1",
+    command: "payment_link.prepare",
+    idempotencyKey: input.idempotencyKey,
+    tenantId: context.worker.tenantId,
+    workerId: context.worker.id,
+    operatorUserId: operator.id,
+    requestConfig,
+    resolved: {
+      invoiceId: refs.invoice.id,
+      invoiceObjectId: refs.invoiceObject.id,
+      quoteObjectId: refs.quoteObject?.id ?? null,
+      sourcePaymentId: refs.sourcePayment?.payment?.id ?? null,
+      sourcePaymentObjectId: refs.sourcePayment?.paymentObject?.id ?? null,
+      bankAccountId: refs.bankAccount?.id ?? null,
+      amountCents: refs.amountCents,
+      currency: refs.currency,
+    },
+  });
+
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${source}:payment_link.prepare:${input.idempotencyKey}`}))`,
+    );
+
+    const [existingRun] = await tx
+      .select()
+      .from(workerRuns)
+      .where(
+        and(
+          eq(workerRuns.tenantId, context.worker.tenantId),
+          eq(workerRuns.source, source),
+          eq(workerRuns.idempotencyKey, input.idempotencyKey),
+        ),
+      )
+      .limit(1);
+
+    if (existingRun) {
+      const existingInput = objectValue(existingRun.data.input);
+      const existingHash = stringValue(existingInput.inputHash);
+
+      if (
+        existingRun.mode !== "payment_link_preparation" ||
+        stringValue(existingInput.command) !== "payment_link.prepare" ||
+        (existingHash && existingHash !== inputHash)
+      ) {
+        throw new RevenueWorkerUnavailableError(
+          "worker_idempotency_conflict",
+          "This idempotency key was already used with different worker input.",
+          409,
+        );
+      }
+
+      return {
+        created: false as const,
+        run: existingRun,
+      };
+    }
+
+    const now = new Date();
+    const state = refs.amountCents > 0 && refs.bankAccount ? "approval_required" : "blocked";
+    const paymentAmountCents = Math.max(0, Math.round(refs.amountCents));
+
+    await assertWorkerBudgetCapacity(tx, {
+      budgetAccountId: context.budgetAccountId,
+      units: paymentLinkPrepareUnits,
+      label: "payment_link.prepare",
+    });
+
+    const [grant] = await tx
+      .select({ id: capabilityGrants.id })
+      .from(capabilityGrants)
+      .innerJoin(capabilities, eq(capabilityGrants.capabilityId, capabilities.id))
+      .where(
+        and(
+          eq(capabilityGrants.tenantId, context.worker.tenantId),
+          eq(capabilityGrants.actorType, "worker"),
+          eq(capabilityGrants.actorId, context.worker.id),
+          eq(capabilityGrants.capabilityId, capabilityId),
+          eq(capabilityGrants.active, true),
+          eq(capabilities.active, true),
+          sql`(${capabilityGrants.startsAt} is null or ${capabilityGrants.startsAt} <= ${now})`,
+          sql`(${capabilityGrants.endsAt} is null or ${capabilityGrants.endsAt} > ${now})`,
+        ),
+      )
+      .limit(1);
+
+    if (!grant) {
+      throw new RevenueWorkerUnavailableError(
+        "worker_capability_not_granted",
+        "Revenue Worker is not actively granted payment_link.prepare.",
+        403,
+      );
+    }
+
+    const [workflowDefinition] = await tx
+      .select({
+        id: workflowDefinitions.id,
+        key: workflowDefinitions.key,
+        name: workflowDefinitions.name,
+      })
+      .from(workflowDefinitions)
+      .where(and(eq(workflowDefinitions.key, revenueWorkflowKey), eq(workflowDefinitions.active, true)))
+      .orderBy(workflowDefinitions.version)
+      .limit(1);
+
+    if (!workflowDefinition) {
+      throw new RevenueWorkerUnavailableError(
+        "worker_workflow_definition_missing",
+        "Revenue Worker requires the lead_to_cash workflow definition.",
+        409,
+      );
+    }
+
+    const paymentData = {
+      kind: "payment_link",
+      command: "payment_link.prepare",
+      inputHash,
+      invoiceId: refs.invoice.id,
+      invoiceObjectId: refs.invoiceObject.id,
+      quoteObjectId: refs.quoteObject?.id ?? null,
+      sourcePaymentId: refs.sourcePayment?.payment?.id ?? null,
+      sourcePaymentObjectId: refs.sourcePayment?.paymentObject?.id ?? null,
+      sourceApprovalRequestId: refs.sourceApproval?.id ?? null,
+      sourceApprovalState: refs.sourceApproval?.state ?? null,
+      sourceRefs: refs.sourceRefs,
+      bankAccountId: refs.bankAccount?.id ?? null,
+      bankAccountName: refs.bankAccount?.name ?? null,
+      amountCents: paymentAmountCents,
+      currency: refs.currency,
+      customerName: refs.customerName,
+      dueAt: refs.dueAt,
+      policy: refs.policy,
+      blockers: refs.blockers,
+      requiresApproval: true,
+      providerPaymentLink: "blocked",
+      providerPaymentLinkCreation: "blocked",
+      externalExecution: "blocked",
+      externalMutation: false,
+      externalSend: false,
+      moneyMovement: "blocked",
+      nextAction: state === "approval_required" ? "owner_review" : "resolve_blockers",
+    } satisfies JsonObject;
+
+    const [paymentObject] = await tx
+      .insert(objects)
+      .values({
+        tenantId: context.worker.tenantId,
+        type: "payment",
+        name: `Payment link draft for ${refs.customerName}`,
+        state,
+        source,
+        externalId: `revenue-payment-link:${input.idempotencyKey}`,
+        data: paymentData,
+        createdByUserId: operator.id,
+        createdByWorkerId: context.worker.id,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: objects.id });
+
+    await tx.insert(objectVersions).values({
+      tenantId: context.worker.tenantId,
+      objectId: paymentObject.id,
+      version: 1,
+      data: paymentData,
+      changedByType: "worker",
+      changedById: context.worker.id,
+      reason: "Revenue Worker prepared a blocked payment-link draft.",
+      createdAt: now,
+    });
+
+    const [payment] = await tx
+      .insert(payments)
+      .values({
+        tenantId: context.worker.tenantId,
+        objectId: paymentObject.id,
+        state,
+        externalId: `revenue-payment-link:${input.idempotencyKey}`,
+        data: paymentData,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: payments.id });
+
+    let paymentInstructionId: string | null = null;
+
+    if (refs.bankAccount) {
+      const [paymentInstruction] = await tx
+        .insert(paymentInstructions)
+        .values({
+          tenantId: context.worker.tenantId,
+          bankAccountId: refs.bankAccount.id,
+          objectId: paymentObject.id,
+          kind: "revenue_payment_link",
+          state,
+          amountCents: paymentAmountCents,
+          currency: refs.currency,
+          data: {
+            ...paymentData,
+            paymentId: payment.id,
+            paymentObjectId: paymentObject.id,
+          },
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning({ id: paymentInstructions.id });
+
+      paymentInstructionId = paymentInstruction.id;
+    }
+
+    const linkValues: Array<typeof objectLinks.$inferInsert> = [
+      {
+        tenantId: context.worker.tenantId,
+        fromId: paymentObject.id,
+        toId: refs.invoiceObject.id,
+        type: "for_invoice",
+        data: { source, command: "payment_link.prepare" },
+        effectiveAt: now,
+      },
+    ];
+
+    if (refs.quoteObject) {
+      linkValues.push({
+        tenantId: context.worker.tenantId,
+        fromId: paymentObject.id,
+        toId: refs.quoteObject.id,
+        type: "from_quote",
+        data: { source, command: "payment_link.prepare" },
+        effectiveAt: now,
+      });
+    }
+
+    if (refs.sourcePayment?.paymentObject) {
+      linkValues.push({
+        tenantId: context.worker.tenantId,
+        fromId: paymentObject.id,
+        toId: refs.sourcePayment.paymentObject.id,
+        type: "prepared_from_payment",
+        data: { source, command: "payment_link.prepare" },
+        effectiveAt: now,
+      });
+    }
+
+    await tx.insert(objectLinks).values(linkValues).onConflictDoNothing();
+
+    const [task] = await tx
+      .insert(tasks)
+      .values({
+        tenantId: context.worker.tenantId,
+        objectId: paymentObject.id,
+        capabilityId,
+        title: `Review payment link for ${refs.customerName}`,
+        state,
+        priority: "high",
+        ownerType: "worker",
+        ownerId: context.worker.id,
+        ownerRef: `worker:${context.worker.id}`,
+        reviewerUserId: operator.id,
+        evidence: {
+          required: ["invoice_draft", "payment_link_packet", "manager_approval"],
+          blockers: refs.blockers,
+          invoiceId: refs.invoice.id,
+          invoiceObjectId: refs.invoiceObject.id,
+        },
+        outcome: {
+          status: state === "approval_required" ? "payment_link_review_required" : "payment_link_blocked",
+          paymentObjectId: paymentObject.id,
+          paymentId: payment.id,
+          paymentInstructionId,
+          externalExecution: "blocked",
+          providerPaymentLinkCreation: "blocked",
+          moneyMovement: "blocked",
+        },
+        cost: { units: paymentLinkPrepareUnits },
+        kpi: { payment_links_prepared: 1 },
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: tasks.id });
+
+    const [workerRun] = await tx
+      .insert(workerRuns)
+      .values({
+        tenantId: context.worker.tenantId,
+        workerId: context.worker.id,
+        taskId: task.id,
+        capabilityId,
+        connectionId: context.connectionId,
+        budgetAccountId: context.budgetAccountId,
+        source,
+        idempotencyKey: input.idempotencyKey,
+        state: "running",
+        mode: "payment_link_preparation",
+        data: {
+          input: {
+            command: "payment_link.prepare",
+            inputHash,
+            config: requestConfig,
+            operator: {
+              userId: operator.id,
+              email: operator.email,
+            },
+            invoiceId: refs.invoice.id,
+            invoiceObjectId: refs.invoiceObject.id,
+            quoteObjectId: refs.quoteObject?.id ?? null,
+            sourcePaymentId: refs.sourcePayment?.payment?.id ?? null,
+            sourcePaymentObjectId: refs.sourcePayment?.paymentObject?.id ?? null,
+            paymentObjectId: paymentObject.id,
+            paymentId: payment.id,
+            paymentInstructionId,
+          },
+          output: {},
+        },
+        startedAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: workerRuns.id });
+
+    const [workflowRun] = await tx
+      .insert(workflowRuns)
+      .values({
+        tenantId: context.worker.tenantId,
+        definitionId: workflowDefinition.id,
+        objectId: paymentObject.id,
+        workerId: context.worker.id,
+        state,
+        idempotencyKey: input.idempotencyKey,
+        data: {
+          command: "payment_link.prepare",
+          workerRunId: workerRun.id,
+          paymentObjectId: paymentObject.id,
+          paymentId: payment.id,
+          paymentInstructionId,
+          invoiceId: refs.invoice.id,
+          invoiceObjectId: refs.invoiceObject.id,
+          inputHash,
+          externalExecution: "blocked",
+          providerPaymentLinkCreation: "blocked",
+          moneyMovement: "blocked",
+        },
+        blockers: { open: refs.blockers },
+        metrics: {
+          budgetUnits: paymentLinkPrepareUnits,
+          amountCents: paymentAmountCents,
+          blockerCount: refs.blockers.length,
+        },
+        startedAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: workflowRuns.id });
+
+    const [reservation] = await tx
+      .insert(budgetReservations)
+      .values({
+        tenantId: context.worker.tenantId,
+        accountId: context.budgetAccountId,
+        taskId: task.id,
+        units: paymentLinkPrepareUnits,
+        state: "used",
+        expiresAt: new Date(now.getTime() + 15 * 60 * 1000),
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: budgetReservations.id });
+
+    const [inference] = await tx
+      .insert(inferences)
+      .values({
+        tenantId: context.worker.tenantId,
+        routeId: context.routeId,
+        budgetAccountId: context.budgetAccountId,
+        taskId: task.id,
+        capabilityId,
+        actorType: "worker",
+        actorId: context.worker.id,
+        promptHash: traceHash(input.idempotencyKey, "payment_link.prepare"),
+        request: {
+          mode: "deterministic",
+          objective: "Prepare a manager-reviewable payment-link packet from a tenant-scoped invoice.",
+          invoiceId: refs.invoice.id,
+          invoiceObjectId: refs.invoiceObject.id,
+          quoteObjectId: refs.quoteObject?.id ?? null,
+          inputHash,
+        },
+        result: {
+          paymentObjectId: paymentObject.id,
+          paymentId: payment.id,
+          paymentInstructionId,
+          amountCents: paymentAmountCents,
+          currency: refs.currency,
+          blockers: refs.blockers,
+        },
+        safety: {
+          externalExecution: "blocked",
+          externalMutation: false,
+          externalSend: false,
+          providerPaymentLinkCreation: "blocked",
+          moneyMovement: "blocked",
+        },
+        promptTokens: 280,
+        completionTokens: 120,
+        units: paymentLinkPrepareUnits,
+        costUsd: "0.000000",
+        latencyMs: 90,
+        createdAt: now,
+      })
+      .returning({ id: inferences.id });
+
+    const [usage] = await tx
+      .insert(usageEvents)
+      .values({
+        tenantId: context.worker.tenantId,
+        accountId: context.budgetAccountId,
+        reservationId: reservation.id,
+        inferenceId: inference.id,
+        taskId: task.id,
+        capabilityId,
+        actorType: "worker",
+        actorId: context.worker.id,
+        units: paymentLinkPrepareUnits,
+        costUsd: "0.000000",
+        data: {
+          command: "payment_link.prepare",
+          workerRunId: workerRun.id,
+          workflowRunId: workflowRun.id,
+          paymentObjectId: paymentObject.id,
+          paymentId: payment.id,
+          paymentInstructionId,
+          externalExecution: "blocked",
+          providerPaymentLinkCreation: "blocked",
+          moneyMovement: "blocked",
+        },
+        createdAt: now,
+      })
+      .returning({ id: usageEvents.id });
+
+    const [event] = await tx
+      .insert(events)
+      .values({
+        tenantId: context.worker.tenantId,
+        type: "worker.revenue_operations.payment_link_prepare.completed",
+        source,
+        actorType: "worker",
+        actorId: context.worker.id,
+        actorRef: `worker:${context.worker.id}`,
+        objectId: paymentObject.id,
+        taskId: task.id,
+        capabilityId,
+        connectionId: context.connectionId,
+        idempotencyKey: `${input.idempotencyKey}:payment_link.prepare`,
+        data: {
+          command: "payment_link.prepare",
+          workerRunId: workerRun.id,
+          workflowRunId: workflowRun.id,
+          paymentObjectId: paymentObject.id,
+          paymentId: payment.id,
+          paymentInstructionId,
+          invoiceId: refs.invoice.id,
+          invoiceObjectId: refs.invoiceObject.id,
+          amountCents: paymentAmountCents,
+          currency: refs.currency,
+          blockers: refs.blockers,
+          inputHash,
+          externalExecution: "blocked",
+          providerPaymentLinkCreation: "blocked",
+          moneyMovement: "blocked",
+        },
+        occurredAt: now,
+        createdAt: now,
+      })
+      .returning({ id: events.id });
+
+    const [adapterRun] = await tx
+      .insert(adapterRuns)
+      .values({
+        tenantId: context.worker.tenantId,
+        connectionId: context.connectionId,
+        workerRunId: workerRun.id,
+        eventId: event.id,
+        mode: "dry_run",
+        operation: "prepare_payment_link",
+        idempotencyKey: `${input.idempotencyKey}:payment_link_adapter`,
+        state: "running",
+        attempt: 1,
+        maxAttempts: 3,
+        reconciliationState: "pending",
+        cursor: input.idempotencyKey,
+        readCount: 1,
+        writeCount: 0,
+        data: {
+          command: "payment_link.prepare",
+          workerRunId: workerRun.id,
+          workflowRunId: workflowRun.id,
+          paymentObjectId: paymentObject.id,
+          paymentId: payment.id,
+          paymentInstructionId,
+          invoiceId: refs.invoice.id,
+          invoiceObjectId: refs.invoiceObject.id,
+          inputHash,
+          externalMutation: false,
+          providerPaymentLinkCreation: "blocked",
+          dryRun: true,
+        },
+        startedAt: now,
+      })
+      .returning({ id: adapterRuns.id });
+
+    const [adapterAction] = await tx
+      .insert(adapterActions)
+      .values({
+        tenantId: context.worker.tenantId,
+        connectionId: context.connectionId,
+        adapterRunId: adapterRun.id,
+        capabilityId,
+        taskId: task.id,
+        eventId: event.id,
+        idempotencyKey: `${input.idempotencyKey}:payment_link_action`,
+        state: "done",
+        mode: "dry_run",
+        operation: "prepare_payment_link",
+        attempt: 1,
+        maxAttempts: 3,
+        reconciliationState: "matched",
+        request: {
+          command: "payment_link.prepare",
+          workerRunId: workerRun.id,
+          workflowRunId: workflowRun.id,
+          paymentObjectId: paymentObject.id,
+          paymentId: payment.id,
+          paymentInstructionId,
+          amountCents: paymentAmountCents,
+          currency: refs.currency,
+          dryRun: true,
+          externalMutation: false,
+          providerPaymentLinkCreation: "blocked",
+          moneyMovement: "blocked",
+        },
+        response: {
+          status: "prepared",
+          providerPaymentLinkCreation: "blocked",
+          externalMutation: false,
+          moneyMovement: "blocked",
+          reconciliation: "matched",
+          nextStep: "owner_approval",
+        },
+        receipt: {
+          mode: "dry_run",
+          receiptId: traceHash(input.idempotencyKey, "payment_link_adapter_receipt"),
+          adapterRunId: adapterRun.id,
+          workerRunId: workerRun.id,
+          command: "payment_link.prepare",
+          externalMutation: false,
+          providerPaymentLinkCreation: "blocked",
+          moneyMovement: "blocked",
+          reconciliationState: "matched",
+          checkedAt: now.toISOString(),
+        },
+      })
+      .returning({ id: adapterActions.id });
+
+    const [traceEvidence] = await tx
+      .insert(evidence)
+      .values({
+        tenantId: context.worker.tenantId,
+        kind: "trace",
+        name: "Revenue payment-link preparation trace",
+        objectId: paymentObject.id,
+        taskId: task.id,
+        eventId: event.id,
+        capabilityId,
+        actorType: "worker",
+        actorId: context.worker.id,
+        hash: inputHash,
+        data: {
+          command: "payment_link.prepare",
+          inputHash,
+          workerRunId: workerRun.id,
+          workflowRunId: workflowRun.id,
+          paymentObjectId: paymentObject.id,
+          paymentId: payment.id,
+          paymentInstructionId,
+          invoiceId: refs.invoice.id,
+          invoiceObjectId: refs.invoiceObject.id,
+          inferenceId: inference.id,
+          usageEventId: usage.id,
+          reservationId: reservation.id,
+          adapterRunId: adapterRun.id,
+          adapterActionId: adapterAction.id,
+          blockers: refs.blockers,
+          externalExecution: "blocked",
+          providerPaymentLinkCreation: "blocked",
+          moneyMovement: "blocked",
+        },
+        createdAt: now,
+      })
+      .returning({ id: evidence.id });
+
+    const [draftEvidence] = await tx
+      .insert(evidence)
+      .values({
+        tenantId: context.worker.tenantId,
+        kind: "draft",
+        name: "Revenue payment-link draft",
+        objectId: paymentObject.id,
+        taskId: task.id,
+        eventId: event.id,
+        capabilityId,
+        actorType: "worker",
+        actorId: context.worker.id,
+        hash: traceHash(input.idempotencyKey, "payment_link_draft"),
+        data: {
+          ...paymentData,
+          paymentObjectId: paymentObject.id,
+          paymentId: payment.id,
+          paymentInstructionId,
+        },
+        createdAt: now,
+      })
+      .returning({ id: evidence.id });
+
+    const [receiptEvidence] = await tx
+      .insert(evidence)
+      .values({
+        tenantId: context.worker.tenantId,
+        kind: "receipt",
+        name: "Payment-link adapter dry-run receipt",
+        objectId: paymentObject.id,
+        taskId: task.id,
+        eventId: event.id,
+        capabilityId,
+        actorType: "adapter",
+        actorId: context.connectionId,
+        hash: traceHash(input.idempotencyKey, "payment_link_adapter_receipt"),
+        data: {
+          mode: "dry_run",
+          command: "payment_link.prepare",
+          workerRunId: workerRun.id,
+          workflowRunId: workflowRun.id,
+          adapterRunId: adapterRun.id,
+          adapterActionId: adapterAction.id,
+          paymentObjectId: paymentObject.id,
+          paymentId: payment.id,
+          paymentInstructionId,
+          externalMutation: false,
+          providerPaymentLinkCreation: "blocked",
+          moneyMovement: "blocked",
+          reconciliationState: "matched",
+          checkedAt: now.toISOString(),
+        },
+        createdAt: now,
+      })
+      .returning({ id: evidence.id });
+
+    await tx
+      .update(adapterRuns)
+      .set({
+        state: "done",
+        reconciliationState: "matched",
+        receipt: {
+          mode: "dry_run",
+          receiptEvidenceId: receiptEvidence.id,
+          adapterActionId: adapterAction.id,
+          command: "payment_link.prepare",
+          externalMutation: false,
+          providerPaymentLinkCreation: "blocked",
+          moneyMovement: "blocked",
+          reconciliationState: "matched",
+          checkedAt: now.toISOString(),
+        },
+        endedAt: now,
+      })
+      .where(eq(adapterRuns.id, adapterRun.id));
+
+    const [document] = await tx
+      .insert(documents)
+      .values({
+        tenantId: context.worker.tenantId,
+        objectId: paymentObject.id,
+        workflowRunId: workflowRun.id,
+        kind: "revenue_payment_link_packet",
+        name: `Payment link packet for ${refs.customerName}`,
+        state,
+        sensitivity: "high",
+        hash: traceHash(input.idempotencyKey, "payment_link_document"),
+        data: {
+          ...paymentData,
+          paymentObjectId: paymentObject.id,
+          paymentId: payment.id,
+          paymentInstructionId,
+          traceEvidenceId: traceEvidence.id,
+          draftEvidenceId: draftEvidence.id,
+          adapterReceiptEvidenceId: receiptEvidence.id,
+        },
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: documents.id });
+
+    const [packet] = await tx
+      .insert(evidencePackets)
+      .values({
+        tenantId: context.worker.tenantId,
+        documentId: document.id,
+        objectId: paymentObject.id,
+        taskId: task.id,
+        workflowRunId: workflowRun.id,
+        eventId: event.id,
+        capabilityId,
+        kind: "revenue_payment_link_packet",
+        name: `Payment link packet for ${refs.customerName}`,
+        state,
+        sensitivity: "high",
+        evidenceIds: { ids: [traceEvidence.id, draftEvidence.id, receiptEvidence.id] },
+        documentIds: { ids: [document.id] },
+        data: {
+          command: "payment_link.prepare",
+          paymentObjectId: paymentObject.id,
+          paymentId: payment.id,
+          paymentInstructionId,
+          invoiceId: refs.invoice.id,
+          invoiceObjectId: refs.invoiceObject.id,
+          blockers: refs.blockers,
+          externalExecution: "blocked",
+          providerPaymentLinkCreation: "blocked",
+          moneyMovement: "blocked",
+        },
+        hash: traceHash(input.idempotencyKey, "payment_link_packet"),
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: evidencePackets.id });
+
+    const [approval] = await tx
+      .insert(approvalRequests)
+      .values({
+        tenantId: context.worker.tenantId,
+        taskId: task.id,
+        workerRunId: workerRun.id,
+        workflowRunId: workflowRun.id,
+        eventId: event.id,
+        objectId: paymentObject.id,
+        capabilityId,
+        requesterType: "worker",
+        requesterId: context.worker.id,
+        requesterRef: `worker:${context.worker.id}`,
+        reviewerUserId: operator.id,
+        kind: "payment_link_approval",
+        state: "pending",
+        priority: "high",
+        risk: "high",
+        title: `Approve payment link packet for ${refs.customerName}`,
+        summary: `Revenue Worker prepared a ${formatUsd(paymentAmountCents)} payment-link packet; provider creation and money movement remain blocked.`,
+        requestedAction: {
+          action: "review_payment_link_packet",
+          command: "payment_link.prepare",
+          paymentObjectId: paymentObject.id,
+          paymentId: payment.id,
+          paymentInstructionId,
+          invoiceId: refs.invoice.id,
+          invoiceObjectId: refs.invoiceObject.id,
+          amountCents: paymentAmountCents,
+          currency: refs.currency,
+          adapterRunId: adapterRun.id,
+          adapterActionId: adapterAction.id,
+          adapterReceiptEvidenceId: receiptEvidence.id,
+          externalExecution: "blocked",
+          providerPaymentLinkCreation: "blocked",
+          moneyMovement: "blocked",
+          currentMode: "dry_run",
+        },
+        evidence: {
+          eventId: event.id,
+          traceEvidenceId: traceEvidence.id,
+          draftEvidenceId: draftEvidence.id,
+          adapterReceiptEvidenceId: receiptEvidence.id,
+          documentId: document.id,
+          packetId: packet.id,
+          workflowRunId: workflowRun.id,
+        },
+        policy: {
+          providerPaymentLinkCreation: "approval_required_but_currently_blocked",
+          externalExecution: "blocked",
+          moneyMovement: "blocked",
+          capabilityGrantId: grant.id,
+        },
+        data: {
+          command: "payment_link.prepare",
+          inputHash,
+          paymentObjectId: paymentObject.id,
+          paymentId: payment.id,
+          paymentInstructionId,
+          invoiceId: refs.invoice.id,
+          invoiceObjectId: refs.invoiceObject.id,
+          workflowRunId: workflowRun.id,
+          adapterRunId: adapterRun.id,
+          adapterActionId: adapterAction.id,
+          adapterReceiptEvidenceId: receiptEvidence.id,
+        },
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: approvalRequests.id });
+
+    const paymentReviewViewKey = `payment.approval.review.${approval.id}`;
+    const paymentReviewViewVersion = "1.0.0";
+    const paymentReviewContract = {
+      schemaVersion: "continuous.ui.payment_approval.v1",
+      subject: {
+        type: "approval_request",
+        kind: "payment_link_approval",
+        approvalRequestId: approval.id,
+      },
+      sections: [
+        { key: "customer", title: "Customer", fields: ["customerName", "amountCents", "currency", "dueAt"] },
+        { key: "source", title: "Source", fields: ["invoiceId", "invoiceObjectId", "quoteObjectId"] },
+        { key: "policy", title: "Policy", fields: ["externalExecution", "providerPaymentLinkCreation", "moneyMovement"] },
+        { key: "evidence", title: "Evidence", refs: ["traceEvidenceId", "draftEvidenceId", "adapterReceiptEvidenceId", "packetId"] },
+        { key: "decision", title: "Decision", actions: ["approved", "revision_requested", "rejected"] },
+      ],
+      externalExecution: "blocked",
+      providerPaymentLinkCreation: "blocked",
+      moneyMovement: "blocked",
+    } as JsonObject;
+    const paymentReviewActions = {
+      decisionSurface: "/approval",
+      decisionCommand: "approval.decide",
+      valid: [
+        { action: "approved", label: "Approve", config: { action: "approved" } },
+        { action: "revision_requested", label: "Request revision", config: { action: "revision_requested" } },
+        { action: "rejected", label: "Reject", config: { action: "rejected" } },
+      ],
+      postDecisionSurface: "/worker",
+      postDecisionCommand: "continue",
+      externalExecution: "blocked",
+      providerPaymentLinkCreation: "blocked",
+      moneyMovement: "blocked",
+    } as JsonObject;
+    const paymentReviewData = {
+      bindings: {
+        approvalRequestId: "approval.id",
+        paymentObjectId: "approval.objectId",
+        workerRunId: "approval.workerRunId",
+        workflowRunId: "approval.workflowRunId",
+        evidenceRefs: "approval.evidenceRefs",
+      },
+      viewFamily: "payment.approval.review",
+      latest: {
+        command: "payment_link.prepare",
+        approvalRequestId: approval.id,
+        workerRunId: workerRun.id,
+        workflowRunId: workflowRun.id,
+        taskId: task.id,
+        paymentObjectId: paymentObject.id,
+        paymentId: payment.id,
+        paymentInstructionId,
+        invoiceId: refs.invoice.id,
+        invoiceObjectId: refs.invoiceObject.id,
+        quoteObjectId: refs.quoteObject?.id ?? null,
+        amountCents: paymentAmountCents,
+        currency: refs.currency,
+        customerName: refs.customerName,
+        blockers: refs.blockers,
+        traceEvidenceId: traceEvidence.id,
+        draftEvidenceId: draftEvidence.id,
+        adapterRunId: adapterRun.id,
+        adapterActionId: adapterAction.id,
+        adapterReceiptEvidenceId: receiptEvidence.id,
+        documentId: document.id,
+        packetId: packet.id,
+        externalExecution: "blocked",
+        providerPaymentLinkCreation: "blocked",
+        moneyMovement: "blocked",
+      },
+    } as JsonObject;
+    const paymentReviewViewValues = {
+      capabilityId,
+      key: paymentReviewViewKey,
+      version: paymentReviewViewVersion,
+      name: "Payment approval review",
+      purpose: "Let an owner review a prepared payment-link packet while provider creation and money movement stay blocked.",
+      surface: "web",
+      objectType: "payment",
+      taskState: state as "approval_required" | "blocked",
+      contract: paymentReviewContract,
+      actions: paymentReviewActions,
+      data: paymentReviewData,
+      mask: {
+        bankAccount: "masked",
+        customerContact: "redacted_by_default",
+        providerPaymentLinkCreation: "blocked",
+        moneyMovement: "blocked",
+      } as JsonObject,
+      active: true,
+      updatedAt: now,
+    };
+    const [existingPaymentReviewView] = await tx
+      .select({ id: generatedViews.id })
+      .from(generatedViews)
+      .where(
+        and(
+          eq(generatedViews.tenantId, context.worker.tenantId),
+          eq(generatedViews.key, paymentReviewViewKey),
+          eq(generatedViews.version, paymentReviewViewVersion),
+        ),
+      )
+      .limit(1);
+    const [paymentReviewView] = existingPaymentReviewView
+      ? await tx
+          .update(generatedViews)
+          .set(paymentReviewViewValues)
+          .where(eq(generatedViews.id, existingPaymentReviewView.id))
+          .returning({ id: generatedViews.id })
+      : await tx
+          .insert(generatedViews)
+          .values({
+            tenantId: context.worker.tenantId,
+            ...paymentReviewViewValues,
+            createdAt: now,
+          })
+          .returning({ id: generatedViews.id });
+
+    const [audit] = await tx
+      .insert(auditEvents)
+      .values({
+        tenantId: context.worker.tenantId,
+        type: "worker.revenue_operations.payment_link_prepare.completed",
+        source,
+        actorType: "worker",
+        actorId: context.worker.id,
+        actorRef: `worker:${context.worker.id}`,
+        targetType: "worker_run",
+        targetId: workerRun.id,
+        taskId: task.id,
+        workerRunId: workerRun.id,
+        approvalRequestId: approval.id,
+        eventId: event.id,
+        objectId: paymentObject.id,
+        capabilityId,
+        risk: "high",
+        idempotencyKey: `${input.idempotencyKey}:payment_link.prepare:completed`,
+        data: {
+          operatorEmail: operator.email,
+          command: "payment_link.prepare",
+          inputHash,
+          paymentObjectId: paymentObject.id,
+          paymentId: payment.id,
+          paymentInstructionId,
+          invoiceId: refs.invoice.id,
+          invoiceObjectId: refs.invoiceObject.id,
+          approvalRequestId: approval.id,
+          paymentReviewViewId: paymentReviewView.id,
+          traceEvidenceId: traceEvidence.id,
+          draftEvidenceId: draftEvidence.id,
+          adapterReceiptEvidenceId: receiptEvidence.id,
+          documentId: document.id,
+          packetId: packet.id,
+          workflowRunId: workflowRun.id,
+          externalExecution: "blocked",
+          providerPaymentLinkCreation: "blocked",
+          moneyMovement: "blocked",
+        },
+        createdAt: now,
+      })
+      .returning({ id: auditEvents.id });
+
+    const workflowStepRows = await tx
+      .insert(workflowSteps)
+      .values([
+        {
+          tenantId: context.worker.tenantId,
+          definitionId: workflowDefinition.id,
+          workflowRunId: workflowRun.id,
+          eventId: event.id,
+          taskId: task.id,
+          objectId: paymentObject.id,
+          workerId: context.worker.id,
+          capabilityId,
+          kind: "worker_transition",
+          name: "Revenue invoice resolved",
+          state: "done",
+          priority: "high",
+          risk: "high",
+          fromState: "received",
+          toState: "invoice_resolved",
+          attempt: 1,
+          maxAttempts: 1,
+          leaseOwner: `worker:${context.worker.id}`,
+          leasedUntil: now,
+          idempotencyKey: `${input.idempotencyKey}:invoice_resolved`,
+          input: { invoiceId: refs.invoice.id, invoiceObjectId: refs.invoiceObject.id },
+          output: { paymentObjectId: paymentObject.id, inputHash },
+          startedAt: now,
+          completedAt: now,
+          updatedAt: now,
+        },
+        {
+          tenantId: context.worker.tenantId,
+          definitionId: workflowDefinition.id,
+          workflowRunId: workflowRun.id,
+          eventId: event.id,
+          taskId: task.id,
+          objectId: paymentObject.id,
+          workerId: context.worker.id,
+          capabilityId,
+          kind: "worker_transition",
+          name: "Payment-link packet prepared",
+          state: "done",
+          priority: "high",
+          risk: "high",
+          fromState: "invoice_resolved",
+          toState: "packet_prepared",
+          attempt: 1,
+          maxAttempts: 1,
+          leaseOwner: `worker:${context.worker.id}`,
+          leasedUntil: now,
+          idempotencyKey: `${input.idempotencyKey}:packet_prepared`,
+          input: { paymentObjectId: paymentObject.id, paymentId: payment.id, paymentInstructionId },
+          output: { traceEvidenceId: traceEvidence.id, draftEvidenceId: draftEvidence.id, documentId: document.id, packetId: packet.id },
+          startedAt: now,
+          completedAt: now,
+          updatedAt: now,
+        },
+        {
+          tenantId: context.worker.tenantId,
+          definitionId: workflowDefinition.id,
+          workflowRunId: workflowRun.id,
+          eventId: event.id,
+          taskId: task.id,
+          objectId: paymentObject.id,
+          workerId: context.worker.id,
+          capabilityId,
+          kind: "adapter_dry_run",
+          name: "Provider payment-link dry run blocked",
+          state: "done",
+          priority: "high",
+          risk: "high",
+          fromState: "packet_prepared",
+          toState: "adapter_dry_run_recorded",
+          attempt: 1,
+          maxAttempts: 1,
+          leaseOwner: `worker:${context.worker.id}`,
+          leasedUntil: now,
+          idempotencyKey: `${input.idempotencyKey}:adapter_dry_run_recorded`,
+          input: { operation: "prepare_payment_link", mode: "dry_run" },
+          output: { adapterRunId: adapterRun.id, adapterActionId: adapterAction.id, adapterReceiptEvidenceId: receiptEvidence.id },
+          startedAt: now,
+          completedAt: now,
+          updatedAt: now,
+        },
+        {
+          tenantId: context.worker.tenantId,
+          definitionId: workflowDefinition.id,
+          workflowRunId: workflowRun.id,
+          eventId: event.id,
+          approvalRequestId: approval.id,
+          taskId: task.id,
+          objectId: paymentObject.id,
+          workerId: context.worker.id,
+          capabilityId,
+          kind: "approval_request",
+          name: "Payment-link owner approval requested",
+          state: "done",
+          priority: "high",
+          risk: "high",
+          fromState: "adapter_dry_run_recorded",
+          toState: "approval_requested",
+          attempt: 1,
+          maxAttempts: 1,
+          leaseOwner: `worker:${context.worker.id}`,
+          leasedUntil: now,
+          idempotencyKey: `${input.idempotencyKey}:approval_requested`,
+          input: { approvalRequestId: approval.id, paymentReviewViewId: paymentReviewView.id },
+          output: {
+            approvalRequestId: approval.id,
+            auditEventId: audit.id,
+            paymentReviewViewId: paymentReviewView.id,
+            externalExecution: "blocked",
+            providerPaymentLinkCreation: "blocked",
+            moneyMovement: "blocked",
+          },
+          startedAt: now,
+          completedAt: now,
+          updatedAt: now,
+        },
+      ])
+      .returning({ id: workflowSteps.id });
+    const workflowStepIds = workflowStepRows.map((step) => step.id);
+    const output = {
+      command: "payment_link.prepare",
+      worker: context.worker.name,
+      tenant: context.tenantName,
+      inputHash,
+      taskId: task.id,
+      eventId: event.id,
+      workerRunId: workerRun.id,
+      workflowRunId: workflowRun.id,
+      workflowStepIds,
+      paymentObjectId: paymentObject.id,
+      paymentId: payment.id,
+      paymentInstructionId,
+      invoiceId: refs.invoice.id,
+      invoiceObjectId: refs.invoiceObject.id,
+      quoteObjectId: refs.quoteObject?.id ?? null,
+      approvalRequestId: approval.id,
+      paymentReviewViewId: paymentReviewView.id,
+      adapterRunId: adapterRun.id,
+      adapterActionId: adapterAction.id,
+      adapterReceiptEvidenceId: receiptEvidence.id,
+      evidenceId: traceEvidence.id,
+      draftEvidenceId: draftEvidence.id,
+      documentId: document.id,
+      packetId: packet.id,
+      auditEventId: audit.id,
+      amountCents: paymentAmountCents,
+      currency: refs.currency,
+      customerName: refs.customerName,
+      dueAt: refs.dueAt,
+      blockers: refs.blockers,
+      budgetUnits: paymentLinkPrepareUnits,
+      requiresApproval: true,
+      externalExecution: "blocked",
+      externalMutation: false,
+      externalSend: false,
+      providerPaymentLinkCreation: "blocked",
+      moneyMovement: "blocked",
+    } satisfies JsonObject;
+
+    await tx
+      .update(workflowRuns)
+      .set({
+        state,
+        data: {
+          ...output,
+          adapterReceiptEvidenceId: receiptEvidence.id,
+        },
+        blockers: { open: refs.blockers },
+        metrics: {
+          budgetUnits: paymentLinkPrepareUnits,
+          amountCents: paymentAmountCents,
+          blockerCount: refs.blockers.length,
+        },
+        updatedAt: now,
+      })
+      .where(eq(workflowRuns.id, workflowRun.id));
+
+    await tx
+      .update(events)
+      .set({
+        data: output,
+      })
+      .where(eq(events.id, event.id));
+
+    await tx
+      .update(workerRuns)
+      .set({
+        eventId: event.id,
+        state: "done",
+        data: {
+          input: {
+            command: "payment_link.prepare",
+            inputHash,
+            config: requestConfig,
+            operator: {
+              userId: operator.id,
+              email: operator.email,
+            },
+            invoiceId: refs.invoice.id,
+            invoiceObjectId: refs.invoiceObject.id,
+            quoteObjectId: refs.quoteObject?.id ?? null,
+            paymentObjectId: paymentObject.id,
+            paymentId: payment.id,
+            paymentInstructionId,
+            workflowRunId: workflowRun.id,
+          },
+          output,
+          taskId: task.id,
+          eventId: event.id,
+          paymentObjectId: paymentObject.id,
+          paymentId: payment.id,
+          paymentInstructionId,
+          invoiceObjectId: refs.invoiceObject.id,
+          invoiceId: refs.invoice.id,
+          quoteObjectId: refs.quoteObject?.id ?? null,
+          approvalRequestId: approval.id,
+          adapterRunId: adapterRun.id,
+          adapterActionId: adapterAction.id,
+          adapterReceiptEvidenceId: receiptEvidence.id,
+          evidenceId: traceEvidence.id,
+          draftEvidenceId: draftEvidence.id,
+          packetId: packet.id,
+          documentId: document.id,
+          workflowRunId: workflowRun.id,
+          workflowStepIds,
+          paymentReviewViewId: paymentReviewView.id,
+          auditEventId: audit.id,
+        },
+        endedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(workerRuns.id, workerRun.id));
+
+    await tx
+      .update(workers)
+      .set({
+        state: "active",
+        kpis: sql`jsonb_set(
+          jsonb_set(
+            jsonb_set(
+              coalesce(${workers.kpis}, '{}'::jsonb),
+              '{lastPaymentLinkPreparedAt}',
+              to_jsonb(${now.toISOString()}::text),
+              true
+            ),
+            '{payment_links_prepared}',
+            to_jsonb((coalesce((${workers.kpis}->>'payment_links_prepared')::int, 0) + 1)),
+            true
+          ),
+          '{owner_review_packets}',
+          to_jsonb((coalesce((${workers.kpis}->>'owner_review_packets')::int, 0) + 1)),
+          true
+        )`,
+        updatedAt: now,
+      })
+      .where(eq(workers.id, context.worker.id));
+
+    return {
+      created: true as const,
+      workerRunId: workerRun.id,
+      taskId: task.id,
+      eventId: event.id,
+      paymentObjectId: paymentObject.id,
+      paymentId: payment.id,
+      paymentInstructionId,
+      invoiceObjectId: refs.invoiceObject.id,
+      invoiceId: refs.invoice.id,
+      quoteObjectId: refs.quoteObject?.id ?? null,
+      approvalRequestId: approval.id,
+      adapterRunId: adapterRun.id,
+      adapterActionId: adapterAction.id,
+      adapterReceiptEvidenceId: receiptEvidence.id,
+      evidenceId: traceEvidence.id,
+      draftEvidenceId: draftEvidence.id,
+      packetId: packet.id,
+      documentId: document.id,
+      workflowRunId: workflowRun.id,
+      workflowStepIds,
+      paymentReviewViewId: paymentReviewView.id,
+      auditEventId: audit.id,
+      output,
+    };
+  });
+  const snapshot = await getRevenueWorkerSnapshot(db, {
+    tenantSlug: input.tenantSlug,
+    workerId: context.worker.id,
+    role: revenueWorkerRole,
+  });
+
+  if (!result.created) {
+    return replayedRevenuePaymentLinkResult(result.run, snapshot);
+  }
+
+  return {
+    idempotencyKey: input.idempotencyKey,
+    ...result,
+    snapshot,
+  };
 }
 
 export async function continueRevenueWorker(input: {

@@ -14,6 +14,7 @@ raising autonomy or permitting external sends.
 | `worker.id` | No | Required when multiple Revenue Workers match |
 | `config.source` plus direct `config.records[]` / `config.record` or `config.reader` | Required for `lead.read` | Reads direct, connection-buffered, or read-only API-polled website-form, inbox, or CRM lead records into persisted Core source object/event/evidence rows |
 | `config.intake`, `config.leadPacket`, or `config.lead` | Required for `run`, `lead.classify`, `response.draft`, and `quote.prepare` | Prefer persisted Core lead source identity or object/event/evidence rows in `config.intake`; direct payloads are explicit operator/test fallbacks |
+| `config.invoiceId`, `config.invoiceObjectId`, or keyed `config.sourceRefs` | Required for `payment_link.prepare` | Tenant-scoped invoice row or invoice object anchor; payment-link prep writes a blocked payment packet, not a provider-side link |
 
 ## API Shape
 
@@ -40,6 +41,31 @@ proof refs, and live credential gates without adding a Revenue-specific URL.
     "tenantSlug": "continuous-demo"
   },
   "config": {}
+}
+```
+
+Prepare a blocked payment-link packet from a persisted invoice:
+
+```json
+{
+  "command": "payment_link.prepare",
+  "worker": {
+    "role": "revenue_operations",
+    "tenantSlug": "continuous-demo"
+  },
+  "idempotencyKey": "payment-link-001",
+  "config": {
+    "invoiceId": "44444444-4444-4444-8444-000000000006",
+    "sourceRefs": {
+      "invoiceObjectId": "33333333-3333-4333-8333-000000000006",
+      "quoteObjectId": "33333333-3333-4333-8333-000000000004"
+    },
+    "policy": {
+      "requireOwnerApproval": true,
+      "providerPaymentLinkCreation": "blocked",
+      "moneyMovement": "blocked"
+    }
+  }
 }
 ```
 
@@ -271,6 +297,7 @@ and local toolbox aliases resolve to the same handlers and validation rules.
 | `lead.classify` | `worker.command` | One of `config.intake`, `config.leadPacket`, or `config.lead` | Required | Classification worker run, budget/usage, inference, trace evidence, audit | Blocked |
 | `response.draft` | `worker.command` | One of `config.intake`, `config.leadPacket`, or `config.lead` | Required | Draft worker run, budget/usage, inference, draft evidence, audit | Blocked |
 | `quote.prepare` | `worker.command` | One of `config.intake`, `config.leadPacket`, or `config.lead` | Required | Quote-preparation worker run, budget/usage, inference, source evidence, dry-run adapter receipt, approval request, generated quote review view, audit | Blocked |
+| `payment_link.prepare` | `worker.command` | `config.invoiceId`, `config.invoiceObjectId`, or keyed `config.sourceRefs`; optional `config.quoteObjectId`, `config.bankAccountId`, `config.policy` | Required | Payment object, payment row, payment instruction when a bank account exists, payment-link packet, approval request, generated payment review view, dry-run adapter receipt, workflow, budget/usage, audit | Blocked |
 | `run` | `worker.command` | One of `config.intake`, `config.leadPacket`, or `config.lead` | Required | Internal records, budget, approval, dry-run adapter receipt | Blocked |
 | `continue` | `worker.command` | `config.approvalId`; optional `config.execution` for approved controlled-send receipt recording | Required | Approved execution packet, optional controlled-send receipt, revised approval packet, or rejected stop packet, workflow step, task outcome, audit/evidence | Approved only |
 | `approval.decide` | `worker.command` | `config.approvalId`, `config.action`, optional `config.note` | None | Approval/task/workflow evidence only | Blocked |
@@ -363,6 +390,21 @@ command response whose `result.output` contains worker-derived data:
 | `quote` | Deterministic quote with lines, total, currency, and blocked money movement policy |
 | `externalSend` | `false` for run and draft outputs; approved continuation may become `true` only when `config.execution` records a controlled-send receipt |
 | `workflowRunId` | Lead-to-cash workflow run tied to the worker run |
+
+`POST /worker` with `command=payment_link.prepare` returns a generic command
+response whose `result.output` contains a blocked payment-link packet:
+
+| Output | Required behavior |
+|---|---|
+| `paymentObjectId` / `paymentId` | Payment primitive and row prepared from the invoice |
+| `paymentInstructionId` | Present when a tenant-scoped bank account is available |
+| `invoiceId` / `invoiceObjectId` | Source invoice refs that drove the packet |
+| `approvalRequestId` | Owner approval for reviewing the packet |
+| `paymentReviewViewId` | Generated payment review view |
+| `adapterReceiptEvidenceId` | Dry-run receipt proving provider creation stayed blocked |
+| `providerPaymentLinkCreation` | Always `blocked` until live provider credentials, receipt, and rollback gates exist |
+| `moneyMovement` | Always `blocked` |
+| `externalExecution` / `externalMutation` | `blocked` and `false` |
 | `workflowStepIds` | Durable workflow steps for intake, packet, adapter dry-run, and approval request |
 | `inputHash` | Canonical hash binding idempotency key to the normalized input payload |
 
@@ -370,12 +412,12 @@ command response whose `result.output` contains worker-derived data:
 
 | Output | Required behavior |
 |---|---|
-| `status` | `ready` only when worker registration, capability grants, budget, workflow definition, latest dry-run proof, and quote approval view checks all pass |
+| `status` | `ready` only when worker registration, capability grants, budget, workflow definition, latest dry-run proof, quote approval view, and latest payment-review view checks pass |
 | `dryRunReady` | `true` when the persisted dry-run gates pass; live external execution can still be blocked |
 | `checks[]` | Named checks with `ready` or `blocked` state plus evidence details |
 | `blockers[]` | The subset of failed dry-run checks |
 | `liveCredentialGates[]` | Explicit blockers for production sender, receipt/rollback, and cash/payment handoff credentials until those gates are provisioned |
-| `proof` | Latest worker run, workflow definition, quote review view, and adapter receipt evidence ids |
+| `proof` | Latest worker run, workflow definition, quote review view, payment review view, and adapter receipt evidence ids |
 
 ## Preconditions
 
@@ -448,6 +490,6 @@ step, keeps the task blocked, and closes the workflow in `rejected`.
 ## Non-Goals
 
 - No autonomous customer sends.
-- No payment link creation or money movement.
+- No live provider payment-link creation or money movement.
 - No live CRM, inbox, calendar, quote, invoice, or payment adapter writes.
 - No autonomy increase beyond read, classify, draft, prepare, and request approval.

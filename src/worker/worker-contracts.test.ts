@@ -289,6 +289,7 @@ describe("future worker contracts", () => {
       "lead.classify",
       "response.draft",
       "quote.prepare",
+      "payment_link.prepare",
       "continue",
       "approval.decide",
       "adapters.reconcile",
@@ -317,15 +318,11 @@ describe("future worker contracts", () => {
     expect(workerContractForRole("revenue_operations")?.contractPath).toBe(
       "docs/revenue-operations-worker-v1-contract.md",
     );
-    expect(revenueFollowUps.map((command) => command.name)).toEqual(["payment_link.prepare"]);
+    expect(revenueFollowUps.map((command) => command.name)).toEqual([]);
     expect(new Set(revenueFollowUps.map((command) => command.apiRoute))).toEqual(
-      new Set([workerApiRoute]),
+      new Set(),
     );
     expect(new Set(revenueViews.map((view) => view.apiRoute))).toEqual(new Set([workerApiRoute]));
-    expect(
-      revenueFollowUps.find((command) => command.name === "payment_link.prepare")?.configSchema.properties?.sourceRefs
-        ?.type,
-    ).toBe("object");
     expect(revenueViews.map((view) => view.name)).toEqual(["quote_review"]);
     expect(workerContracts.every((contract) => contract.apiRoute === "/worker")).toBe(true);
     expect(revenueFollowUps.every((command) => command.apiRoute === "/worker")).toBe(true);
@@ -500,7 +497,7 @@ describe("future worker contracts", () => {
     }
 
     expect(readiness).toContain(
-      "Production connector credentials and live provider egress remain blocked; scheduler polling needs real connection coverage",
+      "Production connector credentials, live provider payment-link creation, money movement, and live provider egress remain blocked; scheduler polling needs real connection coverage",
     );
     expect(readiness).toContain("Every promotion must update this matrix, the Proof column");
     expect(readiness).toContain("deploy smoke in `.github/workflows/deploy.yml`");

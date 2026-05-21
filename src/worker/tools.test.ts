@@ -1537,6 +1537,52 @@ describe("worker tool contract", () => {
         config: {},
       }),
     ).rejects.toThrow("config.intake, leadPacket or lead is required for quote.prepare.");
+
+    await expect(
+      executeWorkerTool("worker.command", {
+        command: "payment_link.prepare",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "payment-link-empty-config-001",
+        config: {},
+      }),
+    ).rejects.toThrow(
+      "config.invoiceId, config.invoiceObjectId, config.sourceRefs.invoiceId or config.sourceRefs.invoiceObjectId is required for payment_link.prepare.",
+    );
+
+    await expect(
+      executeWorkerTool("worker.command", {
+        command: "payment_link.prepare",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "payment-link-empty-source-refs-001",
+        config: {
+          sourceRefs: {},
+        },
+      }),
+    ).rejects.toThrow(
+      "config.invoiceId, config.invoiceObjectId, config.sourceRefs.invoiceId or config.sourceRefs.invoiceObjectId is required for payment_link.prepare.",
+    );
+
+    await expect(
+      executeWorkerTool("worker.command", {
+        command: "payment_link.prepare",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "payment-link-empty-invoice-object-001",
+        config: {
+          invoiceObjectId: "",
+        },
+      }),
+    ).rejects.toThrow(
+      "config.invoiceId, config.invoiceObjectId, config.sourceRefs.invoiceId or config.sourceRefs.invoiceObjectId is required for payment_link.prepare.",
+    );
   });
 
   it("validates lead read idempotency before invoking the worker", async () => {
@@ -2021,6 +2067,29 @@ describe("worker tool contract", () => {
           tenantSlug: "continuous-demo",
         },
         config: "approval-id",
+      }),
+    ).rejects.toThrow("config is required and must be an object.");
+  });
+
+  it("rejects malformed view config instead of silently normalizing it", async () => {
+    await expect(
+      executeWorkerTool("worker.view", {
+        view: "snapshot",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+      }),
+    ).rejects.toThrow("config is required and must be an object.");
+
+    await expect(
+      executeWorkerTool("worker.view", {
+        view: "snapshot",
+        worker: {
+          role: "revenue_operations",
+          tenantSlug: "continuous-demo",
+        },
+        config: "ready",
       }),
     ).rejects.toThrow("config is required and must be an object.");
   });

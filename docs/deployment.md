@@ -329,7 +329,7 @@ Compliance follows the same rule: `filing.prepare` and Compliance views use
 and legal advice remain blocked until live credential scope, rule-source
 breadth, and receipt capture are proven.
 The deploy workflow smokes `lead.read`, the source-selector `run` path, a
-registered `quote.prepare` packet, a
+registered `quote.prepare` packet, a blocked `payment_link.prepare` packet, a
 Core-created active buffered connection, one-shot scheduler `lead.read -> run`
 handoff proof, adapter reconciliation, continuation, and `/core` task creation,
 task transition, approval request, capability grant, budget
@@ -372,6 +372,7 @@ Control-plane token catalog entries have this shape when provided directly via
       "worker:view.packet",
       "worker:lead.read",
       "worker:quote.prepare",
+      "worker:payment_link.prepare",
       "worker:run",
       "worker:hire.packet.prepare",
       "worker:payroll_input.prepare",
@@ -387,6 +388,7 @@ Control-plane token catalog entries have this shape when provided directly via
       "app_server:worker.view.obligations",
       "app_server:worker.view.packet",
       "app_server:worker.command.lead.read",
+      "app_server:worker.command.payment_link.prepare",
       "app_server:worker.command.filing.prepare",
       "workflow:view.overview",
       "approval:view.inbox"
@@ -594,6 +596,7 @@ and route-qualified command; unrelated commands remain closed.
       "worker:view.packet",
       "worker:lead.read",
       "worker:quote.prepare",
+      "worker:payment_link.prepare",
       "worker:run",
       "worker:hire.packet.prepare",
       "worker:payroll_input.prepare",
@@ -610,6 +613,7 @@ and route-qualified command; unrelated commands remain closed.
       "app_server:worker.view.obligations",
       "app_server:worker.view.packet",
       "app_server:worker.command.lead.read",
+      "app_server:worker.command.payment_link.prepare",
       "app_server:worker.command.filing.prepare",
       "workflow:view.overview",
       "workflow:steps.execute",

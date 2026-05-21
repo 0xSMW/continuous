@@ -272,17 +272,20 @@ const capIds = {
   payrollPreviewPrepare: "10000000-0000-4000-8000-000000000011",
   filingPrepare: "10000000-0000-4000-8000-000000000012",
   sensitiveReveal: "10000000-0000-4000-8000-000000000013",
-  achDraftPrepare: "10000000-0000-4000-8000-000000000014",
   workerRead: "10000000-0000-4000-8000-000000000015",
   exceptionRoute: "10000000-0000-4000-8000-000000000016",
   cashForecastGenerate: "10000000-0000-4000-8000-000000000017",
   permissionReview: "10000000-0000-4000-8000-000000000018",
   marginReviewPrepare: "10000000-0000-4000-8000-000000000019",
+  arFollowupDraft: "10000000-0000-4000-8000-000000000020",
+  paymentDraftPrepare: "10000000-0000-4000-8000-000000000021",
 };
 
 const revenueExcludedCapabilityIds = new Set([
   capIds.permissionReview,
   capIds.marginReviewPrepare,
+  capIds.arFollowupDraft,
+  capIds.paymentDraftPrepare,
 ]);
 const revenueCapabilityIds = Object.values(capIds).filter(
   (capabilityId) => !revenueExcludedCapabilityIds.has(capabilityId),
@@ -660,6 +663,18 @@ async function seed() {
         evidence: { required: ["invoice_draft", "manager_approval"] },
       },
       {
+        id: capIds.arFollowupDraft,
+        key: "ar_followup.draft",
+        name: "Draft AR follow-up",
+        class: "draft",
+        risk: "medium",
+        sideEffect: "internal",
+        description:
+          "Draft accounts-receivable follow-up messages from invoice evidence without sending messages or preparing payment links.",
+        rules: { approval_required: true, external_send: "blocked", payment_link_creation: "blocked" },
+        evidence: { required: ["invoice_snapshot", "ar_followup_draft", "approval_request"] },
+      },
+      {
         id: capIds.cashForecastGenerate,
         key: "cash_forecast.generate",
         name: "Generate cash forecast",
@@ -734,13 +749,13 @@ async function seed() {
         evidence: { required: ["request_reason", "policy_check", "access_receipt"] },
       },
       {
-        id: capIds.achDraftPrepare,
-        key: "ach_draft.prepare",
-        name: "Prepare ACH draft",
+        id: capIds.paymentDraftPrepare,
+        key: "payment_draft.prepare",
+        name: "Prepare payment draft",
         class: "money",
         risk: "critical",
         sideEffect: "financial",
-        description: "Prepare ACH or tax payment drafts without executing money movement.",
+        description: "Prepare vendor, tax, or other payment instructions without executing money movement.",
         rules: { dual_control: true, execution_blocked: true },
         evidence: { required: ["payment_instruction", "approval_packet"] },
       },
@@ -881,9 +896,9 @@ async function seed() {
     .values(
       [
         capIds.invoicePrepare,
-        capIds.paymentLinkPrepare,
+        capIds.arFollowupDraft,
         capIds.cashForecastGenerate,
-        capIds.achDraftPrepare,
+        capIds.paymentDraftPrepare,
         capIds.approvalRequest,
         capIds.documentPacketPrepare,
       ].map((capabilityId) => ({

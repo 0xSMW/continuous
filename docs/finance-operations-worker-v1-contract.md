@@ -167,8 +167,8 @@ Planned follow-up command:
 | Capability | Autonomy | Actor | Scope | Approval | External mutation |
 |---|---:|---|---|---|---|
 | `invoice.prepare` | 2 | Worker | Jobs, closeouts, customers | Required before send | Dry-run |
-| `payment_link.prepare` | 2 | Worker | Invoice draft only | Required | Blocked |
-| `ach_draft.prepare` | 2 | Worker | Bill/payment instruction drafts | Dual-control required | Blocked |
+| `ar_followup.draft` | 2 | Worker | Invoice evidence only | Required | Blocked |
+| `payment_draft.prepare` | 2 | Worker | Bill/payment instruction drafts | Dual-control required | Blocked |
 | `approval.request` | 2 | Worker | Invoices, bills, payment drafts | Yes | Blocked |
 
 ## Adapters
