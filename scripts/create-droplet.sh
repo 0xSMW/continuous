@@ -16,6 +16,11 @@ TAG="${TAG:-continuous}"
 SSH_KEYS="${SSH_KEYS:-}"
 SSH_CIDR="${SSH_CIDR:-}"
 FIREWALL_NAME="${FIREWALL_NAME:-continuous-fw}"
+ENABLE_MANAGED_BACKUPS="${ENABLE_MANAGED_BACKUPS:-true}"
+VERIFY_MANAGED_BACKUPS="${VERIFY_MANAGED_BACKUPS:-$ENABLE_MANAGED_BACKUPS}"
+BACKUP_POLICY_PLAN="${BACKUP_POLICY_PLAN:-}"
+BACKUP_POLICY_HOUR="${BACKUP_POLICY_HOUR:-}"
+BACKUP_POLICY_WEEKDAY="${BACKUP_POLICY_WEEKDAY:-}"
 
 if ! command -v doctl >/dev/null 2>&1; then
   echo "doctl is required. Install it and run: doctl auth init" >&2
@@ -40,6 +45,68 @@ if [ -z "$SSH_CIDR" ]; then
     exit 1
   fi
 fi
+
+enabled() {
+  case "${1:-}" in
+    true|1|yes|on) return 0 ;;
+    false|0|no|off|"") return 1 ;;
+    *)
+      echo "Expected a boolean value, got: $1" >&2
+      exit 1
+      ;;
+  esac
+}
+
+verify_managed_backups() {
+  local droplet_id="$1"
+  local features
+  local policy_summary backup_enabled backup_plan window_hours retention_days
+  local backup_images backup_count first_backup
+
+  features="$(
+    doctl compute droplet get "$droplet_id" --format ID,Name,Status,Features --no-header \
+      | awk '{print $4}' \
+      | tr -d '[:space:]'
+  )"
+
+  case ",$features," in
+    *,backups,*)
+      echo "DigitalOcean managed backups verified for droplet $droplet_id."
+      ;;
+    *)
+      echo "DigitalOcean managed backups are not enabled for droplet $droplet_id." >&2
+      echo "Droplet features: ${features:-none}" >&2
+      exit 1
+      ;;
+  esac
+
+  policy_summary="$(
+    doctl compute droplet backup-policies get "$droplet_id" \
+      --template '{{.BackupEnabled}} {{.BackupPolicy.Plan}} {{.BackupPolicy.WindowLengthHours}} {{.BackupPolicy.RetentionPeriodDays}}'
+  )"
+  read -r backup_enabled backup_plan window_hours retention_days <<<"$policy_summary"
+
+  if [ "$backup_enabled" != "true" ]; then
+    echo "DigitalOcean managed backup policy is not enabled for droplet $droplet_id." >&2
+    echo "Backup policy enabled: ${backup_enabled:-unknown}" >&2
+    exit 1
+  fi
+
+  echo "DigitalOcean managed backup policy verified for droplet $droplet_id: plan=${backup_plan:-unknown}, window=${window_hours:-unknown}h, retention=${retention_days:-unknown}d."
+
+  backup_images="$(
+    doctl compute droplet backups "$droplet_id" --format ID,Name,Type,Created --no-header
+  )"
+  backup_count="$(grep -cve '^[[:space:]]*$' <<<"$backup_images" || true)"
+
+  if [ "$backup_count" -gt 0 ]; then
+    first_backup="$(head -1 <<<"$backup_images")"
+    echo "Available DigitalOcean backup images: $backup_count"
+    echo "Latest DigitalOcean backup image: $first_backup"
+  else
+    echo "No DigitalOcean backup image is available yet; managed backup policy is active."
+  fi
+}
 
 project_id="$(
   doctl projects list --format ID,Name --no-header \
@@ -66,15 +133,35 @@ droplet_row="$(
 )"
 
 if [ -z "$droplet_row" ]; then
-  doctl compute droplet create "$NAME" \
-    --region "$REGION" \
-    --image "$IMAGE" \
-    --size "$SIZE" \
-    --ssh-keys "$SSH_KEYS" \
-    --tag-names "$TAG" \
-    --enable-monitoring \
-    --user-data-file infra/cloud-init.yaml \
+  create_args=(
+    "$NAME"
+    --region "$REGION"
+    --image "$IMAGE"
+    --size "$SIZE"
+    --ssh-keys "$SSH_KEYS"
+    --tag-names "$TAG"
+    --enable-monitoring
+    --user-data-file infra/cloud-init.yaml
     --wait
+  )
+
+  if enabled "$ENABLE_MANAGED_BACKUPS"; then
+    create_args+=(--enable-backups)
+
+    if [ -n "$BACKUP_POLICY_PLAN" ]; then
+      create_args+=(--backup-policy-plan "$BACKUP_POLICY_PLAN")
+    fi
+
+    if [ -n "$BACKUP_POLICY_HOUR" ]; then
+      create_args+=(--backup-policy-hour "$BACKUP_POLICY_HOUR")
+    fi
+
+    if [ -n "$BACKUP_POLICY_WEEKDAY" ]; then
+      create_args+=(--backup-policy-weekday "$BACKUP_POLICY_WEEKDAY")
+    fi
+  fi
+
+  doctl compute droplet create "${create_args[@]}"
 
   droplet_row="$(
     doctl compute droplet list --format ID,Name,PublicIPv4,Status --no-header \
@@ -86,6 +173,11 @@ else
 fi
 
 droplet_id="$(awk '{print $1}' <<<"$droplet_row")"
+
+if enabled "$VERIFY_MANAGED_BACKUPS"; then
+  verify_managed_backups "$droplet_id"
+fi
+
 doctl projects resources assign "$project_id" --resource "do:droplet:$droplet_id" >/dev/null
 
 firewall_id="$(

@@ -473,10 +473,11 @@ command-runner boundary outside workflow row locks, and then reacquires the
 claimed step lease to record the result on the workflow step, workflow run, and
 linked task outcome without adding worker-family routes.
 
-Live DigitalOcean state confirms DO-managed backups are enabled on
-`continuous-01` and available backup images exist. Provisioning still needs an
-explicit managed-backup verification step so newly created droplets do not rely
-on manual post-create state.
+Added DigitalOcean managed-backup verification to `scripts/create-droplet.sh`;
+newly created or reused droplets now verify DO-managed backup enablement,
+confirm the backup policy, and report available backup images before
+provisioning continues, so the first off-host recovery layer is checked
+explicitly instead of assumed.
 
 The app-server bridge now exposes Core tools through the same generic dynamic
 tool route as workers. `continuous.core.command`, `continuous.core.view`, and

@@ -15,12 +15,19 @@ This deploys one Ubuntu droplet on DigitalOcean running Docker Compose:
 SSH_KEYS=your-do-ssh-key-id-or-fingerprint ./scripts/create-droplet.sh
 ```
 
+The script enables DigitalOcean managed backups by default, verifies the
+Droplet backup policy after creation or reuse, and reports any available backup
+images. Set `ENABLE_MANAGED_BACKUPS=false` only for a throwaway environment; set
+`VERIFY_MANAGED_BACKUPS=false` only as a break-glass override.
+
 Defaults:
 
 - `NAME=continuous-01`
 - `REGION=nyc3`
 - `SIZE=s-2vcpu-4gb`
 - `IMAGE=ubuntu-24-04-x64`
+- `ENABLE_MANAGED_BACKUPS=true`
+- `VERIFY_MANAGED_BACKUPS=$ENABLE_MANAGED_BACKUPS`
 
 ## Deploy
 

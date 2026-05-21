@@ -46,6 +46,10 @@ same bearer token used by worker and workflow commands.
 WORKER_OPERATOR_EMAIL=owner@continuoushq.com HOST=45.55.53.92 ./scripts/deploy.sh
 ```
 
+The droplet creation script enables DigitalOcean managed droplet backups by
+default and verifies the backup policy plus any available backup images before
+provisioning continues.
+
 The deploy script waits for cloud-init, syncs the repo to `/opt/continuous`,
 creates a remote `.env` with a random Postgres credential, runs migrations, seeds
 bootstrap records, builds the app image on the host, starts the stack, and runs
@@ -760,7 +764,9 @@ failure when `ALERT_WEBHOOK_URL` is set.
 Postgres is the only production stateful service today. The `postgres_data`
 Docker volume must have an off-box backup before the droplet is used for real
 customer data. DigitalOcean managed droplet backups are enabled for
-`continuous-01` as the baseline off-host recovery layer.
+`continuous-01` as the baseline off-host recovery layer, and
+`scripts/create-droplet.sh` enables managed droplet backups by default and
+verifies the policy plus any available backup images during provisioning.
 
 Create a verified custom-format dump on the droplet and copy it to local
 `backups/postgres/`:

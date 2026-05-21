@@ -143,6 +143,9 @@ The production host is a DigitalOcean droplet. Deploy to the configured domains:
 HOST=45.55.53.92 ./scripts/deploy.sh
 ```
 
+`create-droplet.sh` enables DigitalOcean managed backups by default and verifies
+the backup policy plus any available backup images before provisioning continues.
+
 After DNS changes, refresh the Caddy site hosts without a full app deploy:
 
 ```sh

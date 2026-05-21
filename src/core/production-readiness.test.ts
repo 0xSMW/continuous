@@ -9,6 +9,22 @@ function read(path: string) {
 }
 
 describe("production readiness operations", () => {
+  it("creates DigitalOcean droplets with managed backups and verifies the billable backup state", () => {
+    const createDroplet = read("scripts/create-droplet.sh");
+    const deploymentDocs = read("docs/deployment.md");
+
+    expect(createDroplet).toContain("ENABLE_MANAGED_BACKUPS");
+    expect(createDroplet).toContain("VERIFY_MANAGED_BACKUPS");
+    expect(createDroplet).toContain("--enable-backups");
+    expect(createDroplet).toContain("verify_managed_backups");
+    expect(createDroplet).toContain("--format ID,Name,Status,Features");
+    expect(createDroplet).toContain("*,backups,*");
+    expect(createDroplet).toContain("doctl compute droplet backup-policies get");
+    expect(createDroplet).toContain("BackupEnabled");
+    expect(createDroplet).toContain("doctl compute droplet backups");
+    expect(deploymentDocs).toContain("managed droplet backups by default and verifies");
+  });
+
   it("keeps non-root deploy access as a live readiness check", () => {
     const readiness = read("scripts/check-production-readiness-on-host.sh");
     const attest = read("scripts/attest-non-root-access-on-host.sh");
