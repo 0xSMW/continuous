@@ -4,6 +4,7 @@ import { and, count, desc, eq, sql } from "drizzle-orm";
 
 import { PlatformUnavailableError } from "../core/errors";
 import { loadOperatorContext } from "../core/operators";
+import { completeCoreWorkerRun, startCoreWorkerRun } from "../core/worker-runs";
 import { db as defaultDb } from "../db/client";
 import {
   adapterActions,
@@ -34,9 +35,11 @@ type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 export const systemsWorkerRole = "systems_operations";
 
 const systemsSource = "continuous.worker";
+const coreWorkerRunSource = "continuous.core.worker_runs";
 const documentPacketCapabilityKey = "document_packet.prepare";
 const workerReadCapabilityKey = "worker.read";
 const approvalRequestCapabilityKey = "approval.request";
+const systemsCommandUnits = 1600;
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -206,7 +209,14 @@ function hashObject(value: unknown) {
 }
 
 function outputData(value: unknown) {
-  return objectValue(objectValue(value).output);
+  const data = objectValue(value);
+  const output = objectValue(data.output);
+
+  if (Object.keys(output).length > 0) {
+    return output;
+  }
+
+  return objectValue(objectValue(data.pendingCompletion).output);
 }
 
 function systemsWorkerWhere(selector: SystemsWorkerSelector) {
@@ -878,7 +888,7 @@ async function resultFromReplay(input: {
     idempotencyKey: input.workerRun.idempotencyKey,
     workerRunId: input.workerRun.id,
     taskId: input.workerRun.taskId,
-    eventId: input.workerRun.eventId,
+    eventId: optionalString(output.eventId) ?? input.workerRun.eventId,
     adapterRunId: optionalString(output.adapterRunId) ?? null,
     adapterActionId: optionalString(output.adapterActionId) ?? null,
     evidenceId: optionalString(output.evidenceId) ?? null,
@@ -952,10 +962,56 @@ async function prepareSystemsCommand(input: {
     connectionId: connection?.id ?? null,
     grantId: grant?.id ?? null,
   });
+  const coreRun = await startCoreWorkerRun({
+    operatorEmail: input.operatorEmail,
+    tenantSlug: context.worker.tenantSlug,
+    idempotencyKey: input.idempotencyKey,
+    worker: {
+      id: context.worker.id,
+      role: systemsWorkerRole,
+    },
+    command: input.command,
+    mode: summary.externalExecution === "dry_run" ? "dry_run" : "simulation",
+    connectionId: connection?.id,
+    capabilityId: context.capabilityId,
+    budgetAccountId: context.budgetAccountId,
+    units: systemsCommandUnits,
+    input: {
+      inputHash,
+      config,
+      connectionId: connection?.id ?? null,
+      grantId: grant?.id ?? null,
+    },
+    policy: {
+      ...objectValue(config.policy),
+      externalExecution: summary.externalExecution,
+      liveMutation: "blocked",
+      externalMutation: false,
+    },
+    evidence: {
+      command: input.command,
+      connectionId: connection?.id ?? null,
+      grantId: grant?.id ?? null,
+      externalExecution: summary.externalExecution,
+      externalMutation: false,
+      approvalRequired: input.command !== "connector.health.scan",
+    },
+    db,
+  });
+  const coreBudget = objectValue(coreRun.budget);
+  const coreReservationId = optionalString(coreBudget.reservationId);
+
+  if (!coreReservationId) {
+    throw new PlatformUnavailableError(
+      "worker_run_budget_reservation_missing",
+      "Core worker.run.start did not return a Systems Operations budget reservation.",
+      409,
+    );
+  }
 
   const result = await db.transaction(async (tx) => {
     await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${systemsSource}:${input.idempotencyKey}`}))`,
+      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${coreWorkerRunSource}:systems:${input.command}:${input.idempotencyKey}`}))`,
     );
 
     const [existingRun] = await tx
@@ -964,24 +1020,32 @@ async function prepareSystemsCommand(input: {
       .where(
         and(
           eq(workerRuns.tenantId, context.worker.tenantId),
-          eq(workerRuns.source, systemsSource),
-          eq(workerRuns.idempotencyKey, input.idempotencyKey),
+          eq(workerRuns.id, coreRun.workerRunId),
         ),
       )
       .limit(1);
 
-    if (existingRun) {
-      const existingInput = objectValue(objectValue(existingRun.data).input);
-      const existingHash = optionalString(existingInput.inputHash);
+    if (!existingRun) {
+      throw new PlatformUnavailableError(
+        "worker_run_missing",
+        "Core worker.run.start did not return a persisted Systems Operations worker run.",
+        409,
+      );
+    }
 
-      if (existingHash && existingHash !== inputHash) {
-        throw new PlatformUnavailableError(
-          "worker_idempotency_conflict",
-          "A Systems Operations run already exists for this idempotency key with different input.",
-          409,
-        );
-      }
+    const existingInput = objectValue(objectValue(existingRun.data).input);
+    const existingRequest = objectValue(existingInput.request);
+    const existingHash = optionalString(existingRequest.inputHash) ?? optionalString(existingInput.inputHash);
 
+    if (existingHash && existingHash !== inputHash) {
+      throw new PlatformUnavailableError(
+        "worker_idempotency_conflict",
+        "A Systems Operations run already exists for this idempotency key with different input.",
+        409,
+      );
+    }
+
+    if (optionalString(outputData(existingRun.data).workerRunId)) {
       return { replay: existingRun };
     }
 
@@ -1013,32 +1077,6 @@ async function prepareSystemsCommand(input: {
         ...(approvalRequired ? {} : { doneAt: now }),
       })
       .returning({ id: tasks.id });
-
-    const [run] = await tx
-      .insert(workerRuns)
-      .values({
-        tenantId: context.worker.tenantId,
-        workerId: context.worker.id,
-        taskId: task.id,
-        capabilityId: context.capabilityId,
-        connectionId: connection?.id ?? null,
-        budgetAccountId: context.budgetAccountId,
-        source: systemsSource,
-        idempotencyKey: input.idempotencyKey,
-        state: "running",
-        mode: summary.externalExecution === "dry_run" ? "dry_run" : "simulation",
-        data: {
-          input: {
-            command: input.command,
-            inputHash,
-            config,
-          },
-        },
-        startedAt: now,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning({ id: workerRuns.id });
 
     const [event] = await tx
       .insert(events)
@@ -1076,7 +1114,7 @@ async function prepareSystemsCommand(input: {
         .values({
           tenantId: context.worker.tenantId,
           connectionId: connection.id,
-          workerRunId: run.id,
+          workerRunId: coreRun.workerRunId,
           eventId: event.id,
           mode: summary.externalExecution === "dry_run" ? "dry_run" : "read",
           operation: input.command,
@@ -1230,7 +1268,7 @@ async function prepareSystemsCommand(input: {
         .values({
           tenantId: context.worker.tenantId,
           taskId: task.id,
-          workerRunId: run.id,
+          workerRunId: coreRun.workerRunId,
           eventId: event.id,
           capabilityId: context.approvalCapabilityId ?? context.capabilityId,
           requesterType: "worker",
@@ -1290,7 +1328,7 @@ async function prepareSystemsCommand(input: {
       },
       data: {
         ...commandOutput,
-        workerRunId: run.id,
+        workerRunId: coreRun.workerRunId,
         taskId: task.id,
         eventId: event.id,
         packetId: packet.id,
@@ -1306,7 +1344,7 @@ async function prepareSystemsCommand(input: {
     const permissionReviewId = input.command === "permission.review" ? generatedViewId : null;
     const output = {
       ...commandOutput,
-      workerRunId: run.id,
+      workerRunId: coreRun.workerRunId,
       taskId: task.id,
       eventId: event.id,
       adapterRunId,
@@ -1320,6 +1358,7 @@ async function prepareSystemsCommand(input: {
       viewId: generatedViewId,
       repairPlanId,
       permissionReviewId,
+      budgetReservationId: coreReservationId,
       summary: summaryText,
     } satisfies JsonObject;
 
@@ -1329,19 +1368,26 @@ async function prepareSystemsCommand(input: {
         eventId: event.id,
         taskId: task.id,
         connectionId: connection?.id ?? null,
-        state: "done",
         data: {
-          input: {
-            command: input.command,
-            inputHash,
-            config,
-          },
+          ...objectValue(existingRun.data),
+          businessEventId: event.id,
+          taskId: task.id,
+          adapterRunId,
+          adapterActionId,
+          evidenceId: traceEvidence.id,
+          receiptEvidenceId,
+          documentId: document.id,
+          packetId: packet.id,
+          approvalRequestId,
+          generatedViewId,
+          viewId: generatedViewId,
+          repairPlanId,
+          permissionReviewId,
           output,
         },
-        endedAt: now,
         updatedAt: now,
       })
-      .where(eq(workerRuns.id, run.id));
+      .where(eq(workerRuns.id, coreRun.workerRunId));
 
     await tx.insert(auditEvents).values({
       tenantId: context.worker.tenantId,
@@ -1351,9 +1397,9 @@ async function prepareSystemsCommand(input: {
       actorId: context.worker.id,
       actorRef: `worker:${context.worker.id}`,
       targetType: "worker_run",
-      targetId: run.id,
+      targetId: coreRun.workerRunId,
       taskId: task.id,
-      workerRunId: run.id,
+      workerRunId: coreRun.workerRunId,
       approvalRequestId,
       eventId: event.id,
       capabilityId: context.capabilityId,
@@ -1365,7 +1411,7 @@ async function prepareSystemsCommand(input: {
 
     return {
       created: true as const,
-      workerRunId: run.id,
+      workerRunId: coreRun.workerRunId,
       taskId: task.id,
       eventId: event.id,
       adapterRunId,
@@ -1386,6 +1432,77 @@ async function prepareSystemsCommand(input: {
   });
 
   if ("replay" in result && result.replay) {
+    const replayOutput = outputData(result.replay.data);
+
+    if (result.replay.state === "running" && optionalString(replayOutput.workerRunId)) {
+      const completion = await completeCoreWorkerRun({
+        operatorEmail: input.operatorEmail,
+        tenantSlug: context.worker.tenantSlug,
+        idempotencyKey: input.idempotencyKey,
+        worker: {
+          id: context.worker.id,
+          role: systemsWorkerRole,
+        },
+        workerRunId: coreRun.workerRunId,
+        state: "done",
+        reason: "Systems Operations Worker prepared connector, permission, repair, or automation proof with live external mutation blocked.",
+        output: replayOutput,
+        costUsd: 0,
+        evidence: {
+          command: input.command,
+          eventId: optionalString(replayOutput.eventId) ?? null,
+          evidenceId: optionalString(replayOutput.evidenceId) ?? null,
+          receiptEvidenceId: optionalString(replayOutput.receiptEvidenceId) ?? null,
+          packetId: optionalString(replayOutput.packetId) ?? null,
+          documentId: optionalString(replayOutput.documentId) ?? null,
+          approvalRequestId: optionalString(replayOutput.approvalRequestId) ?? null,
+          generatedViewId: optionalString(replayOutput.generatedViewId) ?? null,
+          adapterRunId: optionalString(replayOutput.adapterRunId) ?? null,
+          adapterActionId: optionalString(replayOutput.adapterActionId) ?? null,
+          externalExecution: summary.externalExecution,
+          externalMutation: false,
+        },
+        db,
+      });
+      const settledOutput = {
+        ...replayOutput,
+        budgetReservationId:
+          optionalString(objectValue(completion.budget).reservationId) ?? optionalString(replayOutput.budgetReservationId),
+        usageEventId: optionalString(objectValue(completion.budget).usageEventId) ?? optionalString(replayOutput.usageEventId),
+      } satisfies JsonObject;
+      const [completedReplay] = await db
+        .select({ data: workerRuns.data })
+        .from(workerRuns)
+        .where(eq(workerRuns.id, coreRun.workerRunId))
+        .limit(1);
+
+      await db
+        .update(workerRuns)
+        .set({
+          data: {
+            ...objectValue(completedReplay?.data),
+            output: settledOutput,
+            budgetReservationId: optionalString(settledOutput.budgetReservationId) ?? null,
+            usageEventId: optionalString(settledOutput.usageEventId) ?? null,
+          },
+          updatedAt: new Date(),
+        })
+        .where(eq(workerRuns.id, coreRun.workerRunId));
+
+      return resultFromReplay({
+        db,
+        workerId: context.worker.id,
+        workerRun: {
+          ...result.replay,
+          data: {
+            ...objectValue(result.replay.data),
+            output: settledOutput,
+          },
+        },
+        created: false,
+      });
+    }
+
     return resultFromReplay({
       db,
       workerId: context.worker.id,
@@ -1393,6 +1510,60 @@ async function prepareSystemsCommand(input: {
       created: false,
     });
   }
+
+  const completion = await completeCoreWorkerRun({
+    operatorEmail: input.operatorEmail,
+    tenantSlug: context.worker.tenantSlug,
+    idempotencyKey: input.idempotencyKey,
+    worker: {
+      id: context.worker.id,
+      role: systemsWorkerRole,
+    },
+    workerRunId: coreRun.workerRunId,
+    state: "done",
+    reason: "Systems Operations Worker prepared connector, permission, repair, or automation proof with live external mutation blocked.",
+    output: result.output,
+    costUsd: 0,
+    evidence: {
+      command: input.command,
+      eventId: result.eventId,
+      evidenceId: result.evidenceId,
+      receiptEvidenceId: result.receiptEvidenceId,
+      packetId: result.packetId,
+      documentId: result.documentId,
+      approvalRequestId: result.approvalRequestId,
+      generatedViewId: result.generatedViewId,
+      adapterRunId: result.adapterRunId,
+      adapterActionId: result.adapterActionId,
+      externalExecution: summary.externalExecution,
+      externalMutation: false,
+    },
+    db,
+  });
+  const settledOutput = {
+    ...result.output,
+    budgetReservationId:
+      optionalString(objectValue(completion.budget).reservationId) ?? optionalString(result.output.budgetReservationId),
+    usageEventId: optionalString(objectValue(completion.budget).usageEventId) ?? optionalString(result.output.usageEventId),
+  } satisfies JsonObject;
+  const [completedRun] = await db
+    .select({ data: workerRuns.data })
+    .from(workerRuns)
+    .where(eq(workerRuns.id, coreRun.workerRunId))
+    .limit(1);
+
+  await db
+    .update(workerRuns)
+    .set({
+      data: {
+        ...objectValue(completedRun?.data),
+        output: settledOutput,
+        budgetReservationId: optionalString(settledOutput.budgetReservationId) ?? null,
+        usageEventId: optionalString(settledOutput.usageEventId) ?? null,
+      },
+      updatedAt: new Date(),
+    })
+    .where(eq(workerRuns.id, coreRun.workerRunId));
 
   const snapshot = await snapshotForWorker(db, await loadSystemsWorker(db, { workerId: context.worker.id }));
 
@@ -1415,7 +1586,7 @@ async function prepareSystemsCommand(input: {
     permissionReviewId: result.permissionReviewId,
     summary: result.summary,
     externalExecution: result.externalExecution,
-    output: result.output,
+    output: settledOutput,
     snapshot,
   };
 }

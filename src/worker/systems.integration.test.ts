@@ -1,9 +1,11 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 
+import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { pool } from "../db/client";
+import { db, pool } from "../db/client";
+import { budgetReservations, usageEvents, workerRuns } from "../db/schema";
 import { executeAppServerWorkerTool } from "./app-server-tools";
 import { executeWorkerCommand, executeWorkerView } from "./registry";
 
@@ -159,6 +161,45 @@ maybeDescribe("Systems Operations Worker integration", () => {
     expect(objectValue(output.repairPlan).liveMutation).toBe(false);
     expect(objectValue(objectValue(output.repairPlan).rollback).required).toBe(true);
 
+    const [workerRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(eq(workerRuns.id, stringValue(result.workerRunId)))
+      .limit(1);
+    const workerRunData = objectValue(workerRun?.data);
+    const completion = objectValue(workerRunData.completion);
+    const completionBudget = objectValue(completion.budget);
+    const [reservation] = await db
+      .select()
+      .from(budgetReservations)
+      .where(eq(budgetReservations.id, stringValue(output.budgetReservationId)))
+      .limit(1);
+    const [usage] = await db
+      .select()
+      .from(usageEvents)
+      .where(eq(usageEvents.id, stringValue(output.usageEventId)))
+      .limit(1);
+    const [localRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(
+        and(
+          eq(workerRuns.source, "continuous.worker"),
+          eq(workerRuns.idempotencyKey, idempotencyKey),
+        ),
+      )
+      .limit(1);
+
+    expect(workerRun?.source).toBe("continuous.core.worker_runs");
+    expect(objectValue(workerRunData.input).command).toBe("sync.repair.plan");
+    expect(completionBudget.state).toBe("used");
+    expect(completionBudget.reservationId).toBe(output.budgetReservationId);
+    expect(completionBudget.usageEventId).toBe(output.usageEventId);
+    expect(reservation?.state).toBe("used");
+    expect(usage?.reservationId).toBe(output.budgetReservationId);
+    expect(usage?.taskId).toBe(result.taskId);
+    expect(localRun).toBeUndefined();
+
     const replayResponse = await executeWorkerCommand({
       command: "sync.repair.plan",
       target: systemsWorker,
@@ -253,6 +294,44 @@ maybeDescribe("Systems Operations Worker integration", () => {
       expect.arrayContaining(["payment.write", "admin.full_access"]),
     );
     expect(arrayValue(output.expectedScopes)).toEqual(["lead.read"]);
+
+    const [workerRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(eq(workerRuns.id, stringValue(result.workerRunId)))
+      .limit(1);
+    const workerRunData = objectValue(workerRun?.data);
+    const completionBudget = objectValue(objectValue(workerRunData.completion).budget);
+    const [reservation] = await db
+      .select()
+      .from(budgetReservations)
+      .where(eq(budgetReservations.id, stringValue(output.budgetReservationId)))
+      .limit(1);
+    const [usage] = await db
+      .select()
+      .from(usageEvents)
+      .where(eq(usageEvents.id, stringValue(output.usageEventId)))
+      .limit(1);
+    const [localRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(
+        and(
+          eq(workerRuns.source, "continuous.worker"),
+          eq(workerRuns.idempotencyKey, idempotencyKey),
+        ),
+      )
+      .limit(1);
+
+    expect(workerRun?.source).toBe("continuous.core.worker_runs");
+    expect(objectValue(workerRunData.input).command).toBe("permission.review");
+    expect(completionBudget.state).toBe("used");
+    expect(completionBudget.reservationId).toBe(output.budgetReservationId);
+    expect(completionBudget.usageEventId).toBe(output.usageEventId);
+    expect(reservation?.state).toBe("used");
+    expect(usage?.reservationId).toBe(output.budgetReservationId);
+    expect(usage?.taskId).toBe(result.taskId);
+    expect(localRun).toBeUndefined();
 
     const replayResponse = await executeAppServerWorkerTool("continuous.worker.command", {
       command: "permission.review",
