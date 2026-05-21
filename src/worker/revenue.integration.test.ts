@@ -4666,9 +4666,8 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(replay.created).toBe(false);
     expect(replay.workerRunId).toBe(controlledContinuation.workerRunId);
 
-    let corruptedReplayError: unknown;
-    try {
-      await continueRevenueWorker({
+    await expect(
+      continueRevenueWorker({
         approvalId: first.approvalRequestId ?? "",
         idempotencyKey: `ci-worker-controlled-send-continue-${runId}`,
         tenantSlug: "continuous-demo",
@@ -4704,8 +4703,9 @@ maybeDescribe("Revenue Worker integration eval", () => {
       })
       .where(eq(workerRuns.id, controlledContinuation.workerRunId ?? ""));
 
-    await expect(
-      continueRevenueWorker({
+    let corruptedReplayError: unknown;
+    try {
+      await continueRevenueWorker({
         approvalId: first.approvalRequestId ?? "",
         idempotencyKey: `ci-worker-controlled-send-continue-${runId}`,
         tenantSlug: "continuous-demo",
