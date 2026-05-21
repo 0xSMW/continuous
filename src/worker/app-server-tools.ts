@@ -1,4 +1,6 @@
 import type { JsonObject } from "../db/schema";
+import type { DynamicToolCallParams } from "../../generated/app-server/ts/v2/DynamicToolCallParams";
+import type { DynamicToolCallResponse } from "../../generated/app-server/ts/v2/DynamicToolCallResponse";
 import { executeWorkerCommand, executeWorkerView, type WorkerTargetInput } from "./registry";
 import {
   assertTrustedLocalWorkerMutation,
@@ -38,27 +40,8 @@ export type AppServerWorkerTransportContext =
       source: "trusted_local";
     };
 
-export type AppServerDynamicToolCallParams = {
-  tool: string;
-  arguments: unknown;
-  callId: string;
-  threadId: string;
-  turnId: string;
-};
-
-export type AppServerDynamicToolCallResponse = {
-  success: boolean;
-  contentItems: Array<
-    | {
-        type: "inputText";
-        text: string;
-      }
-    | {
-        type: "inputImage";
-        imageUrl: string;
-      }
-  >;
-};
+export type AppServerDynamicToolCallParams = DynamicToolCallParams;
+export type AppServerDynamicToolCallResponse = DynamicToolCallResponse;
 
 export const appServerWorkerTools = [
   {
