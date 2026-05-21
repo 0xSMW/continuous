@@ -3561,6 +3561,280 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(objectValue(approvedReplay.output).status).toBe("approved_execution_blocked");
   }, 120_000);
 
+  it("records approved controlled-send receipts through config.execution on the generic worker command", async () => {
+    const runId = randomUUID();
+    const [seedConnection] = await db.select({ tenantId: connections.tenantId }).from(connections).limit(1);
+
+    expect(seedConnection?.tenantId).toBeTruthy();
+
+    const [sendAdapter] = await db
+      .insert(adapters)
+      .values({
+        key: `customer_message_${runId}`,
+        name: `Customer message ${runId}`,
+        kind: "customer_message",
+        auth: "managed",
+        capabilities: {
+          write: ["customer_message.send"],
+          receipts: ["delivery"],
+        },
+      })
+      .returning();
+    const [sendConnection] = await db
+      .insert(connections)
+      .values({
+        tenantId: seedConnection.tenantId,
+        adapterId: sendAdapter.id,
+        name: `Customer message send ${runId}`,
+        state: "active",
+        externalAccountId: `customer-message-${runId}`,
+        scopes: { writes: ["customer_message.send"] },
+        config: {
+          executable: false,
+          credentialRef: "managed:customer-message-sender",
+          writer: {
+            provider: "postmark",
+            channel: "email",
+          },
+        },
+      })
+      .returning();
+    const [noCredentialConnection] = await db
+      .insert(connections)
+      .values({
+        tenantId: seedConnection.tenantId,
+        adapterId: sendAdapter.id,
+        name: `Customer message no credential ${runId}`,
+        state: "active",
+        externalAccountId: `customer-message-no-credential-${runId}`,
+        scopes: { writes: ["customer_message.send"] },
+        config: {
+          executable: false,
+        },
+      })
+      .returning();
+
+    const first = await runRevenueWorker({
+      idempotencyKey: `ci-worker-controlled-send-${runId}`,
+      tenantSlug: "continuous-demo",
+      operatorEmail: "owner@continuoushq.com",
+      config: {
+        leadPacket: {
+          source: "controlled_send_test",
+          sourceEventId: `controlled-send-test:${runId}`,
+          customerName: "Controlled Send Roofing",
+          customerIntent: "roof leak inspection",
+          serviceArea: "roofing",
+          urgency: "high",
+          missingFacts: ["preferred_time_window"],
+        },
+      },
+      db,
+    });
+
+    await decideApproval({
+      approvalId: first.approvalRequestId ?? "",
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      action: "approved",
+      note: "Approve controlled send receipt recording.",
+      subject: "worker",
+      db,
+    });
+
+    const baseExecution = {
+      connectionId: sendConnection.id,
+      credentialRef: "managed:customer-message-sender",
+      requiredScopes: ["customer_message.send"],
+      channel: "email",
+      recipient: "buyer@example.com",
+      receipt: {
+        receiptId: `receipt:${runId}`,
+        providerMessageId: `message:${runId}`,
+        sentAt: "2026-05-19T09:30:00.000Z",
+      },
+      rollback: {
+        strategy: "send_followup_correction",
+        escalationOwner: "owner@continuoushq.com",
+        steps: ["send correction email", "open owner review task"],
+      },
+    };
+    const baseExecutionWithoutCredential = {
+      connectionId: baseExecution.connectionId,
+      requiredScopes: baseExecution.requiredScopes,
+      channel: baseExecution.channel,
+      recipient: baseExecution.recipient,
+      receipt: baseExecution.receipt,
+      rollback: baseExecution.rollback,
+    };
+
+    await expect(
+      continueRevenueWorker({
+        approvalId: first.approvalRequestId ?? "",
+        idempotencyKey: `ci-worker-controlled-send-no-credential-${runId}`,
+        tenantSlug: "continuous-demo",
+        operatorEmail: "owner@continuoushq.com",
+        config: {
+          approvalId: first.approvalRequestId ?? "",
+          execution: {
+            ...baseExecutionWithoutCredential,
+            connectionId: noCredentialConnection.id,
+          },
+        },
+        db,
+      }),
+    ).rejects.toMatchObject({ code: "worker_controlled_send_credential_required" });
+
+    await expect(
+      continueRevenueWorker({
+        approvalId: first.approvalRequestId ?? "",
+        idempotencyKey: `ci-worker-controlled-send-missing-scope-${runId}`,
+        tenantSlug: "continuous-demo",
+        operatorEmail: "owner@continuoushq.com",
+        config: {
+          approvalId: first.approvalRequestId ?? "",
+          execution: {
+            ...baseExecution,
+            requiredScopes: ["message.send"],
+          },
+        },
+        db,
+      }),
+    ).rejects.toMatchObject({ code: "worker_controlled_send_scope_missing" });
+
+    await expect(
+      continueRevenueWorker({
+        approvalId: first.approvalRequestId ?? "",
+        idempotencyKey: `ci-worker-controlled-send-missing-rollback-${runId}`,
+        tenantSlug: "continuous-demo",
+        operatorEmail: "owner@continuoushq.com",
+        config: {
+          approvalId: first.approvalRequestId ?? "",
+          execution: {
+            ...baseExecution,
+            rollback: {},
+          },
+        },
+        db,
+      }),
+    ).rejects.toMatchObject({ code: "worker_controlled_send_rollback_required" });
+
+    await expect(
+      continueRevenueWorker({
+        approvalId: first.approvalRequestId ?? "",
+        idempotencyKey: `ci-worker-controlled-send-alias-${runId}`,
+        tenantSlug: "continuous-demo",
+        operatorEmail: "owner@continuoushq.com",
+        config: {
+          approvalId: first.approvalRequestId ?? "",
+          controlledSend: baseExecution,
+        },
+        db,
+      }),
+    ).rejects.toMatchObject({ code: "worker_controlled_send_config_alias" });
+
+    const controlledContinuation = await continueRevenueWorker({
+      approvalId: first.approvalRequestId ?? "",
+      idempotencyKey: `ci-worker-controlled-send-continue-${runId}`,
+      tenantSlug: "continuous-demo",
+      operatorEmail: "owner@continuoushq.com",
+      config: {
+        approvalId: first.approvalRequestId ?? "",
+        execution: baseExecution,
+      },
+      db,
+    });
+    const output = objectValue(controlledContinuation.output);
+    const controlledReceipt = objectValue(output.controlledSendReceipt);
+    const credential = objectValue(controlledReceipt.credential);
+    const receipt = objectValue(controlledReceipt.receipt);
+    const rollback = objectValue(controlledReceipt.rollback);
+    const outputJson = JSON.stringify(output);
+
+    expect(controlledContinuation.created).toBe(true);
+    expect(output.status).toBe("approved_execution_recorded");
+    expect(output.nextAction).toBe("reconcile_controlled_send_receipt");
+    expect(output.externalExecution).toBe("recorded");
+    expect(output.externalSend).toBe(true);
+    expect(controlledReceipt.connectionId).toBe(sendConnection.id);
+    expect(controlledReceipt.operation).toBe("customer_message.send");
+    expect(controlledReceipt.recipient).toBe("buyer@example.com");
+    expect(credential.kind).toBe("managed");
+    expect(credential.hash).toBeTruthy();
+    expect(receipt.providerMessageId).toBe(`message:${runId}`);
+    expect(rollback.strategy).toBe("send_followup_correction");
+    expect(rollback.escalationOwner).toBe("owner@continuoushq.com");
+    expect(outputJson).not.toContain("managed:customer-message-sender");
+
+    const [workflowRun] = await db
+      .select()
+      .from(workflowRuns)
+      .where(eq(workflowRuns.id, first.workflowRunId ?? ""))
+      .limit(1);
+    const [task] = await db
+      .select()
+      .from(tasks)
+      .where(eq(tasks.id, controlledContinuation.taskId ?? ""))
+      .limit(1);
+    const [adapterAction] = await db
+      .select()
+      .from(adapterActions)
+      .where(eq(adapterActions.id, first.adapterActionId ?? ""))
+      .limit(1);
+    const [adapterRun] = await db
+      .select()
+      .from(adapterRuns)
+      .where(eq(adapterRuns.id, first.adapterRunId ?? ""))
+      .limit(1);
+
+    expect(workflowRun?.state).toBe("execution_recorded");
+    expect(objectValue(workflowRun?.blockers).open).toEqual([]);
+    expect(task?.state).toBe("done");
+    expect(adapterAction?.connectionId).toBe(sendConnection.id);
+    expect(adapterAction?.mode).toBe("controlled_record");
+    expect(adapterAction?.operation).toBe("customer_message.send");
+    expect(adapterAction?.reconciliationState).toBe("matched");
+    expect(objectValue(adapterAction?.receipt).externalSend).toBe(true);
+    expect(adapterRun?.connectionId).toBe(sendConnection.id);
+    expect(adapterRun?.writeCount).toBe(1);
+    expect(objectValue(adapterRun?.receipt).externalSend).toBe(true);
+
+    const replay = await continueRevenueWorker({
+      approvalId: first.approvalRequestId ?? "",
+      idempotencyKey: `ci-worker-controlled-send-continue-${runId}`,
+      tenantSlug: "continuous-demo",
+      operatorEmail: "owner@continuoushq.com",
+      config: {
+        approvalId: first.approvalRequestId ?? "",
+        execution: baseExecution,
+      },
+      db,
+    });
+
+    expect(replay.created).toBe(false);
+    expect(replay.workerRunId).toBe(controlledContinuation.workerRunId);
+
+    await expect(
+      continueRevenueWorker({
+        approvalId: first.approvalRequestId ?? "",
+        idempotencyKey: `ci-worker-controlled-send-continue-${runId}`,
+        tenantSlug: "continuous-demo",
+        operatorEmail: "owner@continuoushq.com",
+        config: {
+          approvalId: first.approvalRequestId ?? "",
+          execution: {
+            ...baseExecution,
+            receipt: {
+              ...baseExecution.receipt,
+              providerMessageId: `changed:${runId}`,
+            },
+          },
+        },
+        db,
+      }),
+    ).rejects.toMatchObject({ code: "worker_continuation_idempotency_conflict" });
+  }, 120_000);
+
   it("claims, executes, and retries queued workflow steps", async () => {
     const runId = randomUUID();
     const start = await startWorkflowRun({

@@ -169,6 +169,10 @@ Approval decisions use the same route:
 
 Worker continuations also stay on the same route. The command consumes persisted
 approval state; the URL does not encode the worker family or continuation type.
+For an approved controlled send, execution data stays under `config.execution`
+and must include scoped connection, managed credential reference, receipt, and
+rollback/escalation proof. No continuation uses a worker-family API route or
+top-level operation fields.
 
 ```json
 {
@@ -179,7 +183,22 @@ approval state; the URL does not encode the worker family or continuation type.
   },
   "idempotencyKey": "worker-continue-001",
   "config": {
-    "approvalId": "approval_uuid"
+    "approvalId": "approval_uuid",
+    "execution": {
+      "connectionId": "connection_uuid",
+      "credentialRef": "managed:customer-message-sender",
+      "requiredScopes": ["customer_message.send"],
+      "channel": "email",
+      "recipient": "buyer@example.com",
+      "receipt": {
+        "receiptId": "provider_receipt_id",
+        "providerMessageId": "provider_message_id"
+      },
+      "rollback": {
+        "strategy": "send_followup_correction",
+        "escalationOwner": "owner@continuoushq.com"
+      }
+    }
   }
 }
 ```
@@ -237,7 +256,7 @@ and local toolbox aliases resolve to the same handlers and validation rules.
 | `response.draft` | `worker.command` | One of `config.intake`, `config.leadPacket`, or `config.lead` | Required | Draft worker run, budget/usage, inference, draft evidence, audit | Blocked |
 | `quote.prepare` | `worker.command` | One of `config.intake`, `config.leadPacket`, or `config.lead` | Required | Quote-preparation worker run, budget/usage, inference, source evidence, dry-run adapter receipt, approval request, generated quote review view, audit | Blocked |
 | `run` | `worker.command` | One of `config.intake`, `config.leadPacket`, or `config.lead` | Required | Internal records, budget, approval, dry-run adapter receipt | Blocked |
-| `continue` | `worker.command` | `config.approvalId` | Required | Approved execution packet, revised approval packet, or rejected stop packet, workflow step, task outcome, audit/evidence | Blocked |
+| `continue` | `worker.command` | `config.approvalId`; optional `config.execution` for approved controlled-send receipt recording | Required | Approved execution packet, optional controlled-send receipt, revised approval packet, or rejected stop packet, workflow step, task outcome, audit/evidence | Approved only |
 | `approval.decide` | `worker.command` | `config.approvalId`, `config.action`, optional `config.note` | None | Approval/task/workflow evidence only | Blocked |
 | `adapters.reconcile` | `worker.command` | Tenant-scoped `worker.tenantSlug`, optional integer `config.limit` | None | Adapter reconciliation audit/evidence plus retry/review system tasks | Blocked |
 | `adapters.retry` | `worker.command` | Tenant-scoped `worker.tenantSlug`, optional integer `config.limit` | None | Executes due dry-run retry rows, closes retry tasks, and writes blocked receipt evidence with live-credential readiness and rollback proof | Blocked |
@@ -283,8 +302,12 @@ also send `config.leadPacket` or `config.lead`. Mixed authoritative sources are
 rejected with `worker_intake_conflict`; direct payloads are fallback-only when
 no Core intake selector is present.
 
-`config.externalSend=true` or `config.leadPacket.externalSend=true` is rejected.
-The first runtime only prepares owner-review packets.
+`config.externalSend=true` or `config.leadPacket.externalSend=true` is rejected
+for `run`, `quote.prepare`, and split draft/classification commands. Approved
+external-send continuation is only accepted as `config.execution` on
+`command=continue`, after approval, and only with scoped connection proof,
+managed credential reference, provider receipt, rollback strategy, and
+escalation owner.
 
 ## Run Output
 
@@ -322,7 +345,7 @@ command response whose `result.output` contains worker-derived data:
 | `classification` | Derived from lead urgency and missing facts |
 | `draftResponse` | Owner-review draft; not externally sent |
 | `quote` | Deterministic quote with lines, total, currency, and blocked money movement policy |
-| `externalSend` | Always `false` in this runtime |
+| `externalSend` | `false` for run and draft outputs; approved continuation may become `true` only when `config.execution` records a controlled-send receipt |
 | `workflowRunId` | Lead-to-cash workflow run tied to the worker run |
 | `workflowStepIds` | Durable workflow steps for intake, packet, adapter dry-run, and approval request |
 | `inputHash` | Canonical hash binding idempotency key to the normalized input payload |
@@ -349,12 +372,12 @@ command response whose `result.output` contains worker-derived data:
 | `workflow_runs` | Owns the lead-to-cash state machine for the prepared worker action |
 | `workflow_steps` | Records intake resolved, packet prepared, adapter dry-run recorded, approval requested, approval decision transitions, worker continuations, and adapter reconciliation transitions |
 | `budget_reservations` | Reserves and marks deterministic simulation units as used |
-| `adapter_runs` | Records dry-run adapter execution, attempt metadata, retry execution, receipt state, and reconciliation state |
+| `adapter_runs` | Records dry-run adapter execution, approved controlled-send receipt recording, attempt metadata, retry execution, receipt state, and reconciliation state |
 | `inferences` | Stores prompt/result/safety trace |
 | `usage_events` | Attributes units to budget, task, capability, and worker |
 | `events` | Emits source lead and worker lifecycle records with linked output ids |
 | `evidence` | Stores source snapshots, trace, adapter receipt, and later approval decision evidence |
-| `adapter_actions` | Links to the adapter run and drafts customer-response intent with `externalSend=false` |
+| `adapter_actions` | Links to the adapter run and drafts customer-response intent with `externalSend=false`; approved continuation may update the row to `mode=controlled_record`, `operation=customer_message.send`, `externalSend=true`, and a redacted controlled-send receipt |
 | `approval_requests` | Creates pending operator approval for the prepared action |
 | `audit_events` | Records run request, approval request, and approval decision |
 | `tasks` | Moves active work to `approval_required`; decision later moves to `waiting`, `active`, or `blocked`; reconciliation creates retry/review system tasks and retry execution closes due retry tasks |
@@ -373,7 +396,12 @@ execution blocked.
 entry. V1 supports `approved`, `revision_requested`, and `rejected` approvals.
 Approved continuation prepares a no-send execution packet, stores
 evidence/document packet records, moves the workflow to `execution_blocked`,
-leaves the task in `waiting`, and keeps adapter execution blocked. Revision
+leaves the task in `waiting`, and keeps adapter execution blocked when
+`config.execution` is absent. Approved continuation with `config.execution`
+records a controlled customer-message receipt, hashes the managed credential
+reference instead of storing it, requires write scope plus rollback/escalation
+proof, moves the workflow to `execution_recorded`, and rejects replay when the
+same idempotency key is reused with changed execution config. Revision
 continuation prepares a revised no-send quote packet, stores the revised packet
 evidence/document packet, creates a fresh pending `quote_revision_approval`,
 moves the workflow back to `approval_requested`, updates the task back to
@@ -385,7 +413,7 @@ step, keeps the task blocked, and closes the workflow in `rejected`.
 
 | Action | Approval state | Task state | Workflow state | External behavior |
 |---|---|---|---|---|
-| `approved` | `approved` | `waiting`; after `command=continue`, still `waiting` on live execution prerequisites | `approved`; after `command=continue`, `execution_blocked` | `command=continue` prepares an approved no-send execution packet and blocks on scoped live credentials/rollback readiness |
+| `approved` | `approved` | `waiting` without `config.execution`; `done` after controlled receipt recording | `approved`; after `command=continue`, `execution_blocked` without execution config or `execution_recorded` with controlled receipt config | `command=continue` prepares an approved no-send execution packet by default; with `config.execution`, it records an approved controlled-send receipt with scoped credential, receipt, rollback, and replay-conflict proof |
 | `revision_requested` | `revision_requested`; after `command=continue`, a new `quote_revision_approval` is `pending` | `approval_required` after the revised packet is prepared | `approval_requested` after the revised packet is prepared | `command=continue` prepares a revised no-send packet and requests owner approval again |
 | `rejected` | `rejected` | `blocked`; after `command=continue`, still `blocked` with a rejected stop packet | `rejected`; after `command=continue`, remains `rejected` with a terminal continuation step | `command=continue` stores a closed no-send rejected packet and stops the prepared action |
 

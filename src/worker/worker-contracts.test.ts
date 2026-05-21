@@ -434,7 +434,7 @@ describe("future worker contracts", () => {
     }
 
     expect(readiness).toContain(
-      "Production connector credentials and approved external send remain blocked; scheduler polling needs real connection coverage",
+      "Production connector credentials and live provider egress remain blocked; scheduler polling needs real connection coverage",
     );
     expect(readiness).toContain("Every promotion must update this matrix, the Proof column");
     expect(readiness).toContain("deploy smoke in `.github/workflows/deploy.yml`");

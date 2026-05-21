@@ -31,16 +31,17 @@ work from one worker family to the next.
 |---|---|
 | Lead source intake | `lead.read` persists website-form, authenticated-inbox, and CRM-style source records as Core object/event/evidence rows and returns stable selectors for `run` |
 | Lead-to-cash simulation | Run creates task, worker run, workflow run/steps, budget reservation, inference, usage, adapter dry-run, approval, audit, evidence, object version |
-| Approval execution | Approval decision uses shared approval service, advances the allowed workflow state, and leaves external execution blocked |
-| Adapter hardening | Reconciliation writes audit/evidence records and retry/review system tasks; due dry-run retries execute with blocked receipts, live-credential readiness checks, and rollback plans; live execution remains gated |
+| Approval execution | Approval decision uses shared approval service, advances the allowed workflow state, and approved continuation can record controlled-send receipts from `config.execution` without changing the `/worker` envelope |
+| Adapter hardening | Reconciliation writes audit/evidence records and retry/review system tasks; due dry-run retries execute with blocked receipts, live-credential readiness checks, and rollback plans; production provider execution remains gated |
 | Eval harness | CI-enforced lead-to-quote cases prove classification, approval, budget, adapter receipt, and idempotency replay |
 | First controlled send | Approved external message sends through adapter with receipt and rollback/escalation evidence |
 
 ### Revenue Completion Gate
 
 Revenue is the first worker proof only when these gates are all live in the
-same deploy. Until then, Revenue remains a strong Level 2 worker with external
-execution blocked.
+same deploy. The controlled receipt-recording path now exists under
+`config.execution`; production provider sends still require real scoped
+credentials and rollback playbooks before customer-data use.
 
 | Gate | Required evidence |
 |---|---|

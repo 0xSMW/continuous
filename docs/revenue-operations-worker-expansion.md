@@ -1,10 +1,11 @@
 # Revenue Operations Worker Expansion
 
-The current Revenue Worker is a deterministic persisted simulation. It proves
+The current Revenue Worker is a deterministic persisted runtime. It proves
 worker identity, capability grants, task ownership, budget reservation, usage,
 inference logging, worker run lifecycle, event emission, evidence capture,
 adapter receipts, approval requests, audit events, operator decisions, approval
-state, workflow state, and object versioning without external sends or money movement.
+state, workflow state, object versioning, and approved controlled-send receipt
+recording without storing live credential material or moving money.
 
 ## Current Runtime
 
@@ -18,7 +19,7 @@ state, workflow state, and object versioning without external sends or money mov
 | Split classify/draft commands | `POST /worker` with payload `command: "lead.classify"` or `command: "response.draft"`; both accept `config.intake` selectors or direct fallback `config.leadPacket`, write worker run/event/evidence/audit/budget records, and keep external sends blocked |
 | Quote prepare command | `POST /worker` with payload `command: "quote.prepare"`; accepts the same `config.intake` selectors or direct fallback `config.leadPacket`, writes quote packet, approval, generated view, event/evidence/audit/budget records, and keeps external sends blocked |
 | Run command | `POST /worker` with payload `command: "run"` and `config.intake` source selectors or Core references; direct `config.leadPacket` remains an operator/test fallback |
-| Continuation command | `POST /worker` with payload `command: "continue"`, `idempotencyKey`, and `config.approvalId`; V1 turns `approved` decisions into blocked no-send execution packets, `revision_requested` decisions into revised packets plus fresh pending owner approval, and `rejected` decisions into closed no-send stop packets |
+| Continuation command | `POST /worker` with payload `command: "continue"`, `idempotencyKey`, and `config.approvalId`; approved decisions default to blocked no-send execution packets, or record an approved controlled-send receipt when scoped details are supplied under `config.execution`; `revision_requested` decisions create revised packets plus fresh pending owner approval, and `rejected` decisions create closed no-send stop packets |
 | Adapter reconciliation commands | `POST /worker` with payload `command: "adapters.reconcile"` or `command: "adapters.retry"`, tenant-scoped and bearer-token required |
 | Scheduled internal drain | `worker-scheduler` posts `/workflow` `steps.execute`, `/worker` `lead.read` for pollable active connections, `/worker` `run` for returned intake selectors, `/worker` `adapters.retry`, and `/worker` `adapters.reconcile` on the internal Compose network with the same command envelopes |
 | Workflow packet execution | Queued `packet_prepare` steps can prepare Core packets through `/workflow` execution, carrying packet content under `workflow_steps.input.packet` and writing packet/document/event/audit/evidence/task proof |
@@ -26,7 +27,7 @@ state, workflow state, and object versioning without external sends or money mov
 | Quote approval UI | Revenue runs bind the shared `quote.approval.review` generated view contract to the latest quote approval request, including approval actions, evidence refs, and blocked continuation hints |
 | Operator run | `bun run worker:tool worker.command` or `continuous.worker.command` with the same worker/config payload |
 | Command registry | `/worker`, `worker.command` / `worker.view`, and app-server worker commands share role, config, idempotency, tenant, and external-execution validation |
-| External execution | Disabled; source readers normalize supplied read-only records with credential references only, and adapter runtime records dry-run receipts, reconciliation states, retry execution receipts, retry/review system tasks, and workflow-level retry/review/post-retry steps only |
+| External execution | Blocked by default; source readers normalize supplied read-only records with credential references only, and adapter runtime records dry-run receipts, controlled-send receipts, reconciliation states, retry execution receipts, retry/review system tasks, and workflow-level retry/review/post-retry steps only |
 
 `/worker` is the forward API. Worker role, tenant, operation config, and
 idempotency belong in payload fields for mutation commands, not in

@@ -19,7 +19,7 @@ new worker family.
 
 | Order | Worker | First outcome | Launch gate |
 |---:|---|---|---|
-| 1 | Revenue Operations Worker | Turn leads into quotes, bookings, invoices, collections, and reviews | Stable lead-to-cash simulation plus approval-backed dry-run adapters |
+| 1 | Revenue Operations Worker | Turn leads into quotes, bookings, invoices, collections, and reviews | Stable lead-to-cash simulation plus approved controlled-send receipt recording through `config.execution` |
 | 2 | Owner Chief-of-Staff Worker | Daily decision queue, anomalies, cash/capacity brief, and task routing | Read-only cross-system summary with evidence links and no external mutation |
 | 3 | Dispatch/Ops Worker | Schedule jobs, update customers, close out work, and reduce handoff misses | `schedule.propose`, `customer_update.draft`, `closeout.prepare`, and `exception.route` are runtime; launch still needs live credential gates |
 | 4 | Finance Worker | Draft invoices, AR follow-ups, cash forecasts, and blocked payment drafts | Accounting/payment adapters in draft mode, cash evidence packet, dual-control proof, no money movement |

@@ -939,16 +939,32 @@ const revenueDefinition: WorkerDefinition = {
     },
     continue: {
       name: "continue",
-      description: "Continue a worker-owned approval outcome without executing external actions.",
+      description:
+        "Continue a worker-owned approval outcome. Optional approved execution details live under config.execution.",
       idempotency: "required",
-      sideEffects: "internal",
-      externalExecution: "blocked",
+      sideEffects: "approved_only",
+      externalExecution: "approved_only",
       requiresTenant: true,
       configSchema: {
         type: "object",
         required: ["approvalId"],
         properties: {
           approvalId: { type: "string" },
+          execution: {
+            type: "object",
+            description:
+              "Optional approved controlled-send receipt config: connectionId, credentialRef, requiredScopes, recipient, receipt, and rollback.",
+            properties: {
+              connectionId: { type: "string" },
+              credentialRef: { type: "string" },
+              requiredScopes: { type: "array", items: { type: "string" } },
+              channel: { type: "string" },
+              recipient: { type: "string" },
+              receipt: { type: "object", additionalProperties: true },
+              rollback: { type: "object", additionalProperties: true },
+            },
+            additionalProperties: true,
+          },
         },
         additionalProperties: true,
       },
@@ -977,6 +993,7 @@ const revenueDefinition: WorkerDefinition = {
           tenantSlug: context.target.tenantSlug,
           workerId: context.target.workerId,
           operatorEmail: context.operatorEmail,
+          config: context.config,
         });
       },
     },

@@ -508,7 +508,19 @@ describe("worker tool contract", () => {
           name: "continue",
           idempotency: "required",
           requiresTenant: true,
-          externalExecution: "blocked",
+          externalExecution: "approved_only",
+          configSchema: expect.objectContaining({
+            properties: expect.objectContaining({
+              approvalId: expect.objectContaining({ type: "string" }),
+              execution: expect.objectContaining({
+                type: "object",
+                properties: expect.objectContaining({
+                  receipt: expect.objectContaining({ type: "object" }),
+                  rollback: expect.objectContaining({ type: "object" }),
+                }),
+              }),
+            }),
+          }),
         }),
         expect.objectContaining({
           role: "revenue_operations",

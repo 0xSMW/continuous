@@ -1398,6 +1398,320 @@ function stringTokenList(...values: unknown[]) {
   );
 }
 
+function stringListOrSingle(value: unknown) {
+  const items = stringList(value);
+  const single = stringValue(value);
+
+  return items.length > 0 ? items : single ? [single] : [];
+}
+
+function controlledExecutionConfig(config: JsonObject) {
+  if (Object.prototype.hasOwnProperty.call(config, "controlledSend")) {
+    throw new RevenueWorkerUnavailableError(
+      "worker_controlled_send_config_alias",
+      "Controlled send receipt recording only accepts execution details under config.execution.",
+      400,
+    );
+  }
+
+  if (Object.prototype.hasOwnProperty.call(config, "externalAction")) {
+    throw new RevenueWorkerUnavailableError(
+      "worker_controlled_send_config_alias",
+      "Controlled send receipt recording only accepts execution details under config.execution.",
+      400,
+    );
+  }
+
+  const execution = objectValue(config.execution);
+
+  return Object.keys(execution).length > 0 ? execution : null;
+}
+
+function assertNoInlineCredentialMaterial(value: unknown, path = "config.execution") {
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => assertNoInlineCredentialMaterial(item, `${path}[${index}]`));
+    return;
+  }
+
+  if (!value || typeof value !== "object") {
+    return;
+  }
+
+  for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+    const normalized = key.toLowerCase().replace(/[^a-z0-9]+/g, "");
+    const isReference =
+      normalized.endsWith("ref") ||
+      normalized.endsWith("reference") ||
+      normalized.includes("credentialref") ||
+      normalized.includes("secretref") ||
+      normalized.includes("tokenref") ||
+      normalized.includes("vaultref");
+    const secretish =
+      normalized.includes("secret") ||
+      normalized.includes("password") ||
+      normalized.includes("token") ||
+      normalized.includes("apikey") ||
+      normalized.includes("authorization") ||
+      normalized.includes("bearer") ||
+      normalized.includes("privatekey");
+
+    if (secretish && !isReference && typeof nested === "string" && nested.trim()) {
+      throw new RevenueWorkerUnavailableError(
+        "worker_controlled_send_secret_material",
+        `${path}.${key} looks like inline credential material. Use a managed credential reference such as env:NAME or vault:PATH.`,
+        400,
+      );
+    }
+
+    assertNoInlineCredentialMaterial(nested, `${path}.${key}`);
+  }
+}
+
+function managedCredentialRef(value: unknown) {
+  const ref = stringValue(value);
+
+  if (!ref) {
+    return "";
+  }
+
+  const allowedPrefixes = ["env:", "vault:", "managed:", "secret:", "doppler:", "do:", "aws:", "gcp:", "azure:"];
+
+  return allowedPrefixes.some((prefix) => ref.toLowerCase().startsWith(prefix)) ? ref : "";
+}
+
+function credentialRefKind(ref: string) {
+  return ref.split(":", 1)[0] || "managed";
+}
+
+function credentialRefHash(ref: string) {
+  return hashObject({ credentialRef: ref });
+}
+
+function grantedWriteScopes(scopes: JsonObject) {
+  return Array.from(
+    new Set([
+      ...stringListOrSingle(scopes.write),
+      ...stringListOrSingle(scopes.writes),
+      ...stringListOrSingle(scopes.send),
+      ...stringListOrSingle(scopes.sends),
+      ...stringListOrSingle(scopes.execute),
+      ...stringListOrSingle(scopes.executes),
+      ...stringListOrSingle(scopes.actions),
+      ...stringListOrSingle(scopes.live),
+    ]),
+  );
+}
+
+function hasScope(granted: string[], required: string) {
+  return granted.includes("*") || granted.includes(required);
+}
+
+async function controlledSendReceiptFor(input: {
+  tx: Transaction;
+  tenantId: string;
+  config: JsonObject;
+  fallbackConnectionId: string;
+  adapterRunId: string;
+  adapterActionId: string;
+  now: Date;
+}) {
+  const execution = controlledExecutionConfig(input.config);
+
+  if (!execution) {
+    return null;
+  }
+
+  assertNoInlineCredentialMaterial(execution);
+  const connectionId = uuidValue(
+    execution.connectionId ?? objectValue(execution.connection).id ?? input.fallbackConnectionId,
+  );
+
+  if (!connectionId) {
+    throw new RevenueWorkerUnavailableError(
+      "worker_controlled_send_connection_required",
+      "config.execution.connectionId is required for controlled send receipt recording.",
+      400,
+    );
+  }
+
+  const [connection] = await input.tx
+    .select({
+      id: connections.id,
+      state: connections.state,
+      externalAccountId: connections.externalAccountId,
+      scopes: connections.scopes,
+      config: connections.config,
+    })
+    .from(connections)
+    .where(and(eq(connections.tenantId, input.tenantId), eq(connections.id, connectionId)))
+    .limit(1);
+
+  if (!connection) {
+    throw new RevenueWorkerUnavailableError(
+      "worker_controlled_send_connection_not_found",
+      "config.execution.connectionId does not match a connection in this tenant.",
+      404,
+    );
+  }
+
+  if (connection.state !== "active") {
+    throw new RevenueWorkerUnavailableError(
+      "worker_controlled_send_connection_not_ready",
+      "Controlled send receipt recording requires an active connection.",
+      409,
+    );
+  }
+
+  const connectionConfig = objectValue(connection.config);
+  assertNoInlineCredentialMaterial(connectionConfig, "connection.config");
+  const writerConfig = objectValue(connectionConfig.writer ?? connectionConfig.sender ?? connectionConfig.execution);
+  const credentialRef = managedCredentialRef(
+    firstStringValue(
+      execution.credentialRef,
+      objectValue(execution.credential).ref,
+      objectValue(execution.credentials).ref,
+      connectionConfig.credentialRef,
+      connectionConfig.secretRef,
+      connectionConfig.tokenRef,
+      connectionConfig.vaultRef,
+      writerConfig.credentialRef,
+      writerConfig.secretRef,
+      writerConfig.tokenRef,
+      writerConfig.vaultRef,
+    ),
+  );
+
+  if (!credentialRef) {
+    throw new RevenueWorkerUnavailableError(
+      "worker_controlled_send_credential_required",
+      "Controlled send receipt recording requires a managed credential reference such as config.execution.credentialRef=env:NAME.",
+      409,
+    );
+  }
+
+  const requiredScopes = Array.from(
+    new Set(
+      [
+        ...stringListOrSingle(execution.requiredScopes),
+        ...stringListOrSingle(execution.scopes),
+        ...stringListOrSingle(execution.requiredLiveScopes),
+      ].filter(Boolean),
+    ),
+  );
+  const effectiveRequiredScopes = requiredScopes.length > 0 ? requiredScopes : ["customer_message.send"];
+  const writeScopes = grantedWriteScopes(objectValue(connection.scopes));
+  const missingScopes = effectiveRequiredScopes.filter((scope) => !hasScope(writeScopes, scope));
+
+  if (missingScopes.length > 0) {
+    throw new RevenueWorkerUnavailableError(
+      "worker_controlled_send_scope_missing",
+      `Controlled send receipt recording requires connection write scope(s): ${missingScopes.join(", ")}.`,
+      409,
+    );
+  }
+
+  const receipt = objectValue(execution.receipt ?? execution.deliveryReceipt ?? execution.providerReceipt);
+  const receiptId = firstStringValue(
+    receipt.receiptId,
+    receipt.id,
+    receipt.providerMessageId,
+    receipt.messageId,
+    execution.receiptId,
+    execution.providerMessageId,
+    execution.messageId,
+  );
+
+  if (!receiptId) {
+    throw new RevenueWorkerUnavailableError(
+      "worker_controlled_send_receipt_required",
+      "Controlled send receipt recording requires config.execution.receipt.receiptId or providerMessageId.",
+      400,
+    );
+  }
+
+  const rollback = objectValue(execution.rollback ?? execution.rollbackPlan);
+  const rollbackStrategy = firstStringValue(rollback.strategy, rollback.mode);
+  const escalationOwner = firstStringValue(
+    rollback.escalationOwner,
+    rollback.owner,
+    rollback.ownerEmail,
+    execution.escalationOwner,
+  );
+
+  if (!rollbackStrategy || !escalationOwner) {
+    throw new RevenueWorkerUnavailableError(
+      "worker_controlled_send_rollback_required",
+      "Controlled send receipt recording requires config.execution.rollback.strategy and escalationOwner.",
+      400,
+    );
+  }
+
+  const message = objectValue(execution.message);
+  const customer = objectValue(execution.customer);
+  const recipient = firstStringValue(
+    execution.recipient,
+    execution.to,
+    message.to,
+    message.recipient,
+    customer.email,
+    customer.ref,
+  );
+
+  if (!recipient) {
+    throw new RevenueWorkerUnavailableError(
+      "worker_controlled_send_recipient_required",
+      "Controlled send receipt recording requires config.execution.recipient.",
+      400,
+    );
+  }
+
+  const channel = firstStringValue(execution.channel, message.channel, "email");
+  const operation = firstStringValue(execution.operation, "customer_message.send");
+
+  return {
+    schemaVersion: "worker.controlled_send_receipt.v1",
+    status: "recorded",
+    mode: "receipt_recorded",
+    operation,
+    channel,
+    recipient,
+    connectionId: connection.id,
+    externalAccountId: connection.externalAccountId ?? null,
+    adapterRunId: input.adapterRunId || null,
+    adapterActionId: input.adapterActionId || null,
+    requiredScopes: effectiveRequiredScopes,
+    grantedScopes: writeScopes,
+    credential: {
+      kind: credentialRefKind(credentialRef),
+      hash: credentialRefHash(credentialRef),
+    },
+    receipt: {
+      ...receipt,
+      receiptId,
+    },
+    rollback: {
+      ...rollback,
+      state: "ready",
+      strategy: rollbackStrategy,
+      escalationOwner,
+      required: true,
+      evidenceRequired: Array.from(
+        new Set([
+          ...stringListOrSingle(rollback.evidenceRequired),
+          "adapter_receipt",
+          "rollback_plan",
+          "escalation_owner",
+        ]),
+      ),
+    },
+    externalExecution: "recorded",
+    externalMutation: true,
+    externalSend: true,
+    continuousExecuted: false,
+    recordedAt: input.now.toISOString(),
+  } satisfies JsonObject;
+}
+
 function tokensMatch(left: string, right: string) {
   return left === right || left.startsWith(`${right}_`) || right.startsWith(`${left}_`);
 }
@@ -1696,6 +2010,7 @@ function approvedExecutionPacketFromOriginal(params: {
   originalWorkerRunId: string;
   workerRunId: string;
   workflowRunId: string;
+  controlledSendReceipt?: JsonObject | null;
 }) {
   const approvedPacket = objectValue(params.originalOutput.revisedPacket);
   const basePacket = Object.keys(approvedPacket).length > 0 ? approvedPacket : params.originalOutput;
@@ -1705,10 +2020,37 @@ function approvedExecutionPacketFromOriginal(params: {
     "Approved customer response is ready, but external execution is disabled.",
   );
   const approvedAt = params.now.toISOString();
+  const controlledSendReceipt = objectValue(params.controlledSendReceipt);
+  const hasControlledSendReceipt = Object.keys(controlledSendReceipt).length > 0;
+  const status = hasControlledSendReceipt
+    ? "approved_execution_recorded"
+    : "approved_execution_blocked";
+  const externalExecution = hasControlledSendReceipt ? "recorded" : "blocked";
+  const externalSend = hasControlledSendReceipt;
+  const nextAction = hasControlledSendReceipt
+    ? "reconcile_controlled_send_receipt"
+    : "enable_scoped_adapter_execution";
+  const adapterMode = hasControlledSendReceipt ? "controlled_record" : "dry_run";
+  const classification = hasControlledSendReceipt
+    ? "approved_quote_controlled_send_recorded"
+    : "approved_quote_ready_for_blocked_execution";
+  const guardrails = hasControlledSendReceipt
+    ? [
+        "owner_approval_recorded",
+        "scoped_credential_reference_required",
+        "adapter_receipt_recorded",
+        "rollback_plan_attached",
+      ]
+    : [
+        "no_external_send",
+        "no_money_movement",
+        "scoped_live_credentials_required",
+        "rollback_plan_required",
+      ];
 
   return {
     schemaVersion: "worker.revenue_operations.approved_execution_packet.v1",
-    status: "approved_execution_blocked",
+    status,
     approval: {
       approvalRequestId: params.approvalRequestId,
       note: params.approvalNote,
@@ -1719,29 +2061,26 @@ function approvedExecutionPacketFromOriginal(params: {
     workflowRunId: params.workflowRunId,
     source: stringValue(basePacket.source ?? params.originalOutput.source, "unknown"),
     sourceEventId: stringValue(basePacket.sourceEventId ?? params.originalOutput.sourceEventId) || null,
-    classification: "approved_quote_ready_for_blocked_execution",
+    classification,
     draftResponse,
     quote: {
       ...quote,
       policy: {
         ...objectValue(quote.policy),
         approvalRequired: false,
-        externalSend: false,
+        externalSend,
         moneyMovement: "blocked",
       },
     },
     preparedAction: stringValue(basePacket.expectedAction ?? params.originalOutput.expectedAction, "draft_customer_response"),
-    adapterMode: "dry_run",
-    guardrails: [
-      "no_external_send",
-      "no_money_movement",
-      "scoped_live_credentials_required",
-      "rollback_plan_required",
-    ],
-    externalExecution: "blocked",
-    externalSend: false,
+    adapterMode,
+    guardrails,
+    ...(hasControlledSendReceipt ? { controlledSendReceipt } : {}),
+    externalExecution,
+    externalSend,
+    continuousExecuted: false,
     requiresApproval: false,
-    nextAction: "enable_scoped_adapter_execution",
+    nextAction,
   } satisfies JsonObject;
 }
 
@@ -5062,10 +5401,12 @@ export async function continueRevenueWorker(input: {
   tenantSlug?: string;
   workerId?: string;
   operatorEmail: string;
+  config?: JsonObject;
   db?: Database;
 }): Promise<RevenueWorkerContinuationResult> {
   const db = input.db ?? defaultDb;
   const approvalId = uuidValue(input.approvalId);
+  const commandConfig = objectValue(input.config);
 
   if (!approvalId) {
     throw new RevenueWorkerUnavailableError(
@@ -5083,6 +5424,10 @@ export async function continueRevenueWorker(input: {
   const context = await loadWorkerContext(db, selector);
   const operator = await loadOperator(db, context.worker.tenantId, input.operatorEmail);
   const now = new Date();
+  const inputHash = hashObject({
+    approvalId,
+    config: commandConfig,
+  });
 
   const result = await db.transaction(async (tx) => {
     await tx.execute(
@@ -5117,6 +5462,17 @@ export async function continueRevenueWorker(input: {
         throw new RevenueWorkerUnavailableError(
           "worker_continuation_idempotency_conflict",
           "Idempotency key already belongs to a different worker operation.",
+          409,
+        );
+      }
+
+      const existingInput = objectValue(existingRun.data.input);
+      const existingHash = stringValue(existingInput.inputHash);
+
+      if (existingHash && existingHash !== inputHash) {
+        throw new RevenueWorkerUnavailableError(
+          "worker_continuation_idempotency_conflict",
+          "Idempotency key already belongs to a different worker continuation payload.",
           409,
         );
       }
@@ -5218,6 +5574,15 @@ export async function continueRevenueWorker(input: {
     const approvalDecision = objectValue(approval.decision);
     const approvalContinuation = objectValue(approvalDecision.continuation);
     const originalOutput = outputData(originalRun.data);
+    const requestedExecution = controlledExecutionConfig(commandConfig);
+
+    if (requestedExecution && approval.state !== "approved") {
+      throw new RevenueWorkerUnavailableError(
+        "worker_controlled_send_approval_required",
+        "config.execution can only be used when the approval state is approved.",
+        409,
+      );
+    }
 
     if (approval.state === "approved") {
       const approvalNote = stringValue(approvalDecision.note, "Approved by operator.");
@@ -5249,6 +5614,8 @@ export async function continueRevenueWorker(input: {
           data: {
             input: {
               idempotencyKey: input.idempotencyKey,
+              inputHash,
+              config: commandConfig,
               ...continuationInput,
               operator: {
                 userId: operator.id,
@@ -5261,6 +5628,49 @@ export async function continueRevenueWorker(input: {
           updatedAt: now,
         })
         .returning({ id: workerRuns.id });
+      const adapterRunId = uuidValue(approvalContinuation.adapterRunId ?? originalOutput.adapterRunId);
+      const adapterActionId = uuidValue(
+        approvalContinuation.adapterActionId ?? originalOutput.adapterActionId,
+      );
+      const adapterReceiptEvidenceId = uuidValue(
+        approvalContinuation.adapterReceiptEvidenceId ?? originalOutput.adapterReceiptEvidenceId,
+      );
+      const controlledSendReceipt = await controlledSendReceiptFor({
+        tx,
+        tenantId: context.worker.tenantId,
+        config: commandConfig,
+        fallbackConnectionId: originalRun.connectionId ?? context.connectionId,
+        adapterRunId,
+        adapterActionId,
+        now,
+      });
+      const executionRecorded = Boolean(controlledSendReceipt);
+      const controlledConnectionId = uuidValue(objectValue(controlledSendReceipt).connectionId);
+      const executionStatus = executionRecorded
+        ? "approved_execution_recorded"
+        : "approved_execution_blocked";
+      const executionEventType = executionRecorded
+        ? "worker.revenue_operations.approved_execution.recorded"
+        : "worker.revenue_operations.approved_execution.blocked";
+      const executionAuditSuffix = executionRecorded
+        ? "approved_execution_recorded"
+        : "approved_execution_blocked";
+      const nextAction = executionRecorded
+        ? "reconcile_controlled_send_receipt"
+        : "enable_scoped_adapter_execution";
+      const externalExecution = executionRecorded ? "recorded" : "blocked";
+      const externalSend = executionRecorded;
+      const workflowToState = executionRecorded ? "execution_recorded" : "execution_blocked";
+      const workflowStepName = executionRecorded
+        ? `${workflow.definition.key}:approved_execution_recorded`
+        : `${workflow.definition.key}:approved_execution_blocked`;
+      const workflowStepKey = executionRecorded ? "execution_recorded" : "execution_blocked";
+      const workflowBlockers = executionRecorded
+        ? []
+        : ["external_execution_blocked", "scoped_live_credentials_required"];
+      const taskState = executionRecorded ? "done" : "waiting";
+      const artifactState = executionRecorded ? "recorded" : "blocked";
+      const adapterMode = executionRecorded ? "controlled_record" : "dry_run";
       const approvedExecutionPacket = approvedExecutionPacketFromOriginal({
         originalOutput,
         approvalNote,
@@ -5269,21 +5679,15 @@ export async function continueRevenueWorker(input: {
         originalWorkerRunId: originalRun.id,
         workerRunId: workerRun.id,
         workflowRunId: workflow.run.id,
+        controlledSendReceipt,
       });
       const approvedExecutionHash = hashObject(approvedExecutionPacket);
-      const adapterRunId = uuidValue(approvalContinuation.adapterRunId ?? originalOutput.adapterRunId);
-      const adapterActionId = uuidValue(
-        approvalContinuation.adapterActionId ?? originalOutput.adapterActionId,
-      );
-      const adapterReceiptEvidenceId = uuidValue(
-        approvalContinuation.adapterReceiptEvidenceId ?? originalOutput.adapterReceiptEvidenceId,
-      );
 
       const [event] = await tx
         .insert(events)
         .values({
           tenantId: context.worker.tenantId,
-          type: "worker.revenue_operations.approved_execution.blocked",
+          type: executionEventType,
           source,
           actorType: "worker",
           actorId: context.worker.id,
@@ -5299,16 +5703,17 @@ export async function continueRevenueWorker(input: {
             workerRunId: workerRun.id,
             workflowRunId: workflow.run.id,
             action: "approved",
-            status: "approved_execution_blocked",
+            status: executionStatus,
             note: approvalNote,
             adapterRunId: adapterRunId || null,
             adapterActionId: adapterActionId || null,
             adapterReceiptEvidenceId: adapterReceiptEvidenceId || null,
             approvedExecutionPacket,
             approvedExecutionHash,
-            nextAction: "enable_scoped_adapter_execution",
-            externalExecution: "blocked",
-            externalSend: false,
+            controlledSendReceipt,
+            nextAction,
+            externalExecution,
+            externalSend,
             requiresApproval: false,
           },
           occurredAt: now,
@@ -5332,22 +5737,23 @@ export async function continueRevenueWorker(input: {
           objectId: approval.objectId,
           capabilityId: approval.capabilityId,
           risk: approval.risk,
-          idempotencyKey: `${input.idempotencyKey}:approved_execution_blocked`,
+          idempotencyKey: `${input.idempotencyKey}:${executionAuditSuffix}`,
           data: {
             approvalRequestId: approval.id,
             originalWorkerRunId: originalRun.id,
             workflowRunId: workflow.run.id,
             workflowState: workflow.run.state,
             action: "approved",
-            status: "approved_execution_blocked",
-            nextAction: "enable_scoped_adapter_execution",
+            status: executionStatus,
+            nextAction,
             adapterRunId: adapterRunId || null,
             adapterActionId: adapterActionId || null,
             adapterReceiptEvidenceId: adapterReceiptEvidenceId || null,
             approvedExecutionPacket,
             approvedExecutionHash,
-            externalExecution: "blocked",
-            externalSend: false,
+            controlledSendReceipt,
+            externalExecution,
+            externalSend,
             requiresApproval: false,
           },
         })
@@ -5380,9 +5786,10 @@ export async function continueRevenueWorker(input: {
             adapterReceiptEvidenceId: adapterReceiptEvidenceId || null,
             approvedExecutionPacket,
             approvedExecutionHash,
-            nextAction: "enable_scoped_adapter_execution",
-            externalExecution: "blocked",
-            externalSend: false,
+            controlledSendReceipt,
+            nextAction,
+            externalExecution,
+            externalSend,
             requiresApproval: false,
           },
         })
@@ -5410,8 +5817,9 @@ export async function continueRevenueWorker(input: {
             note: approvalNote,
             approvedExecutionPacket,
             approvedExecutionHash,
-            externalExecution: "blocked",
-            externalSend: false,
+            controlledSendReceipt,
+            externalExecution,
+            externalSend,
             requiresApproval: false,
           },
         })
@@ -5424,7 +5832,7 @@ export async function continueRevenueWorker(input: {
           workflowRunId: workflow.run.id,
           kind: "revenue_quote_approved_execution_packet",
           name: "Revenue quote approved execution packet",
-          state: "blocked",
+          state: artifactState,
           sensitivity: approval.risk,
           hash: approvedExecutionHash,
           data: {
@@ -5437,8 +5845,9 @@ export async function continueRevenueWorker(input: {
             approvedExecutionEvidenceId: approvedExecutionEvidence.id,
             approvedExecutionPacket,
             approvedExecutionHash,
-            externalExecution: "blocked",
-            externalSend: false,
+            controlledSendReceipt,
+            externalExecution,
+            externalSend,
             requiresApproval: false,
           },
           createdAt: now,
@@ -5457,7 +5866,7 @@ export async function continueRevenueWorker(input: {
           capabilityId: approval.capabilityId,
           kind: "revenue_quote_approved_execution_packet",
           name: "Revenue quote approved execution packet",
-          state: "blocked",
+          state: artifactState,
           sensitivity: approval.risk,
           evidenceIds: { ids: [trace.id, approvedExecutionEvidence.id] },
           documentIds: { ids: [approvedExecutionDocument.id] },
@@ -5469,8 +5878,9 @@ export async function continueRevenueWorker(input: {
             eventId: event.id,
             approvedExecutionPacket,
             approvedExecutionHash,
-            externalExecution: "blocked",
-            externalSend: false,
+            controlledSendReceipt,
+            externalExecution,
+            externalSend,
             requiresApproval: false,
           },
           hash: approvedExecutionHash,
@@ -5497,17 +5907,17 @@ export async function continueRevenueWorker(input: {
           workerId: context.worker.id,
           capabilityId: approval.capabilityId,
           kind: "worker_continuation",
-          name: `${workflow.definition.key}:approved_execution_blocked`,
+          name: workflowStepName,
           state: "done",
           priority: approval.priority,
           risk: approval.risk,
           fromState: workflow.run.state,
-          toState: "execution_blocked",
+          toState: workflowToState,
           attempt: 1,
           maxAttempts: 1,
           leaseOwner: `worker:${context.worker.id}`,
           leasedUntil: now,
-          idempotencyKey: `${input.idempotencyKey}:execution_blocked`,
+          idempotencyKey: `${input.idempotencyKey}:${workflowStepKey}`,
           input: continuationInput,
           output: {
             approvalRequestId: approval.id,
@@ -5521,9 +5931,10 @@ export async function continueRevenueWorker(input: {
             adapterReceiptEvidenceId: adapterReceiptEvidenceId || null,
             ...continuationLinks,
             approvedExecutionPacket,
-            nextAction: "enable_scoped_adapter_execution",
-            externalExecution: "blocked",
-            externalSend: false,
+            controlledSendReceipt,
+            nextAction,
+            externalExecution,
+            externalSend,
             requiresApproval: false,
           },
           startedAt: now,
@@ -5533,7 +5944,7 @@ export async function continueRevenueWorker(input: {
         .returning({ id: workflowSteps.id });
 
       const output = {
-        status: "approved_execution_blocked",
+        status: executionStatus,
         approvalRequestId: approval.id,
         originalApprovalRequestId: approval.id,
         originalWorkerRunId: originalRun.id,
@@ -5549,9 +5960,10 @@ export async function continueRevenueWorker(input: {
         ...continuationLinks,
         approvedExecutionPacket,
         approvedExecutionHash,
-        nextAction: "enable_scoped_adapter_execution",
-        externalExecution: "blocked",
-        externalSend: false,
+        controlledSendReceipt,
+        nextAction,
+        externalExecution,
+        externalSend,
         requiresApproval: false,
       };
       const workflowData = objectValue(workflow.run.data);
@@ -5565,7 +5977,7 @@ export async function continueRevenueWorker(input: {
       await tx
         .update(workflowRuns)
         .set({
-          state: "execution_blocked",
+          state: workflowToState,
           data: {
             ...workflowData,
             approvedExecutionContinuation,
@@ -5574,9 +5986,9 @@ export async function continueRevenueWorker(input: {
           },
           blockers: {
             ...objectValue(workflow.run.blockers),
-            open: ["external_execution_blocked", "scoped_live_credentials_required"],
+            open: workflowBlockers,
           },
-          completedAt: null,
+          completedAt: executionRecorded ? now : null,
           updatedAt: now,
         })
         .where(eq(workflowRuns.id, workflow.run.id));
@@ -5591,16 +6003,17 @@ export async function continueRevenueWorker(input: {
         await tx
           .update(tasks)
           .set({
-            state: "waiting",
+            state: taskState,
             outcome: {
               ...objectValue(task?.outcome),
-              status: "approved_execution_blocked",
+              status: executionStatus,
               approvalRequestId: approval.id,
               approvedExecutionContinuation,
               ...continuationLinks,
               approvedExecutionPacket,
-              externalExecution: "blocked",
-              externalSend: false,
+              controlledSendReceipt,
+              externalExecution,
+              externalSend,
             },
             updatedAt: now,
           })
@@ -5617,8 +6030,9 @@ export async function continueRevenueWorker(input: {
               approvedExecutionContinuation,
               ...continuationLinks,
               approvedExecutionPacket,
-              externalExecution: "blocked",
-              externalSend: false,
+              controlledSendReceipt,
+              externalExecution,
+              externalSend,
             },
             lastWorkerContinuation: approvedExecutionContinuation,
           },
@@ -5640,18 +6054,29 @@ export async function continueRevenueWorker(input: {
           await tx
             .update(adapterActions)
             .set({
+              ...(executionRecorded
+                ? {
+                    state: "done" as const,
+                    connectionId: controlledConnectionId,
+                    mode: adapterMode,
+                    operation: "customer_message.send",
+                    reconciliationState: "matched",
+                  }
+                : {}),
               response: {
                 ...adapterAction.response,
                 approvedExecutionContinuation,
                 approvedExecutionPacket,
-                externalExecution: "blocked",
-                externalSend: false,
+                controlledSendReceipt,
+                externalExecution,
+                externalSend,
               },
               receipt: {
                 ...adapterAction.receipt,
                 approvedExecutionContinuation,
-                externalMutation: false,
-                externalSend: false,
+                controlledSendReceipt,
+                externalMutation: executionRecorded,
+                externalSend,
               },
             })
             .where(eq(adapterActions.id, adapterActionId));
@@ -5672,17 +6097,29 @@ export async function continueRevenueWorker(input: {
           await tx
             .update(adapterRuns)
             .set({
+              ...(executionRecorded
+                ? {
+                    state: "done" as const,
+                    connectionId: controlledConnectionId,
+                    mode: adapterMode,
+                    operation: "customer_message.send",
+                    reconciliationState: "matched",
+                    writeCount: 1,
+                  }
+                : {}),
               data: {
                 ...adapterRun.data,
                 approvedExecutionContinuation,
-                externalExecution: "blocked",
-                externalSend: false,
+                controlledSendReceipt,
+                externalExecution,
+                externalSend,
               },
               receipt: {
                 ...adapterRun.receipt,
                 approvedExecutionContinuation,
-                externalMutation: false,
-                externalSend: false,
+                controlledSendReceipt,
+                externalMutation: executionRecorded,
+                externalSend,
               },
             })
             .where(eq(adapterRuns.id, adapterRunId));
@@ -5699,6 +6136,8 @@ export async function continueRevenueWorker(input: {
           data: {
             input: {
               idempotencyKey: input.idempotencyKey,
+              inputHash,
+              config: commandConfig,
               ...continuationInput,
               operator: {
                 userId: operator.id,
@@ -5755,6 +6194,8 @@ export async function continueRevenueWorker(input: {
           data: {
             input: {
               idempotencyKey: input.idempotencyKey,
+              inputHash,
+              config: commandConfig,
               ...continuationInput,
               operator: {
                 userId: operator.id,
@@ -6205,6 +6646,8 @@ export async function continueRevenueWorker(input: {
           data: {
             input: {
               idempotencyKey: input.idempotencyKey,
+              inputHash,
+              config: commandConfig,
               ...continuationInput,
               operator: {
                 userId: operator.id,
@@ -6260,6 +6703,8 @@ export async function continueRevenueWorker(input: {
         data: {
           input: {
             idempotencyKey: input.idempotencyKey,
+            inputHash,
+            config: commandConfig,
             ...continuationInput,
             operator: {
               userId: operator.id,
@@ -6889,6 +7334,8 @@ export async function continueRevenueWorker(input: {
         data: {
           input: {
             idempotencyKey: input.idempotencyKey,
+            inputHash,
+            config: commandConfig,
             ...continuationInput,
             operator: {
               userId: operator.id,
