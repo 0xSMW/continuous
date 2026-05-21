@@ -9926,7 +9926,8 @@ maybeDescribe("Revenue Worker integration eval", () => {
           from: "2026-05-19T00:00:00.000Z",
           to: "2026-05-20T00:00:00.000Z",
         },
-        scopes: ["tasks"],
+        scopes: ["tasks", "approvals", "cash", "capacity", "obligations", "workers"],
+        includeEvidence: true,
       },
     });
     const replayResult = replay.result as Awaited<ReturnType<typeof import("./owner").generateOwnerBrief>>;
