@@ -156,8 +156,8 @@ Status: first runtime slice is registered on the generic `/worker` envelope for
 `worker`; filing requirement, period, source refs, and validation options stay
 under `config`. The slice prepares source-backed filing draft packets and
 review views while agency submission and legal advice remain blocked. Remaining
-Compliance work is obligation scan, notice response, license renewal, evidence
-binder export, live agency credentials, broader rule sources, and
+Compliance work is notice response, license renewal, evidence binder export,
+live agency credentials, broader rule sources, and
 receipt/rejection capture.
 
 | Dependency | Implementation target |

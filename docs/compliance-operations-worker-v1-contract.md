@@ -49,19 +49,22 @@ Runtime entries:
 | `view: "snapshot"` payload | `worker.view` | `worker.role`, `config` | None | Read-only | Blocked |
 | `view: "obligations"` payload | `worker.view` | `worker.role`, optional `config.state`, optional `config.limit` | None | Read-only | Blocked |
 | `view: "packet"` payload | `worker.view` | `worker.role`, optional `config.packetId`, optional `config.filingDraftId` | None | Read-only | Blocked |
+| `obligation.scan` | `core.command` | `config.scope`, `config.jurisdiction`, optional `config.rulePackId`, optional `config.filingRequirementId`, optional `config.taskId` | Required | Obligation proposals, task evidence, audit, and trace evidence | Blocked |
 | `filing.prepare` | `worker.command` | `config.filingRequirementId`, `config.period.from`, `config.period.to` | Required | Filing draft packet | Blocked |
 
 Follow-up metadata, not runtime handlers yet:
 
 | Command or view | Tool surface | Required config | Idempotency | Side effects | External execution |
 |---|---|---|---|---|---|
-| `obligation.scan` | `worker.command` | `config.scope`, `config.jurisdiction` | Required | Obligation proposals and evidence | Blocked |
 | `notice.response.prepare` | `worker.command` | `config.noticeId` | Required | Response draft, packet, approval request | Blocked |
 | `license.renewal.prepare` | `worker.command` | `config.licenseId` | Required | Renewal packet and blocker tasks | Blocked |
 | `evidence_binder.export` | `worker.command` | `config.objectIds[]`, `config.purpose` | Required | Export document and audit evidence | Blocked |
 
-Compliance approvals are created by the runtime slice and decided through the
-shared `/approval` surface; that path does not submit to an agency.
+Compliance obligation intake is a Core command because obligations are shared
+business primitives consumed by Compliance, Owner, Workforce, and future
+packaged workers. Compliance approvals are created by the runtime slice and
+decided through the shared `/approval` surface; that path does not submit to an
+agency.
 
 ## Core Object Map
 

@@ -82,6 +82,7 @@ describe("production readiness operations", () => {
     expect(deployWorkflow).toContain(
       'require_production_readiness=true requires the remote deploy session to run as non-root.',
     );
+    expect(deployWorkflow).toContain("DEPLOY_USER: ${{ secrets.DEPLOY_USER || 'continuous-deploy' }}");
     expect(deployWorkflow).toContain('remote_uid="$(\n              ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "id -u"');
     expect(deployWorkflow).toContain('if [[ "$remote_uid" == "0" ]]; then');
     expect(deployWorkflow).toContain("Preflight production readiness gate");
@@ -96,7 +97,8 @@ describe("production readiness operations", () => {
     );
 
     expect(deploymentDocs).toContain("HOST=45.55.53.92 ./scripts/install-non-root-access.sh");
-    expect(deploymentDocs).toContain("SSH_USER=continuous-deploy ./scripts/deploy.sh");
+    expect(deploymentDocs).toContain("HOST=45.55.53.92 ./scripts/deploy.sh");
+    expect(deploymentDocs).toContain("deploy workflow defaults to `continuous-deploy`");
     expect(deploymentDocs).toContain("scripts/attest-recovery-drill.sh");
     expect(deploymentDocs).toContain("strict readiness gate re-checks the report artifact and checksum");
     expect(deploymentDocs).toContain("delegates ownership of that");

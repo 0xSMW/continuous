@@ -44,7 +44,7 @@ Then open `http://localhost:3000`.
   `worker.upsert`, `worker.transition`, `worker.run.start`, `worker.run.complete`,
   `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`,
   `document.packet.prepare`, `decision.record`, `approval.request`,
-  `adapter.intent.record`, `rule.change.record`, `capability.grant`,
+  `adapter.intent.record`, `rule.change.record`, `obligation.scan`, `capability.grant`,
   `budget.reserve`, `budget.charge`, `budget.release`, `ai.infer`,
   `object.link`, `view.publish`, `customer_signal.record`,
   `payroll.preview.record`, `payroll.preview.packet.prepare`,

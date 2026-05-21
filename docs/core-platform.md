@@ -179,7 +179,7 @@ registered behind one shared worker surface:
 
 | Surface | Behavior |
 |---|---|
-| `POST /core` | Canonical Core command and read surface. Commands include `task.create`, `task.transition`, `object.upsert`, `adapter.upsert`, `connection.upsert`, `connection.health.record`, `entity.setup.record`, `worker.upsert`, `worker.transition`, `worker.run.start`, `worker.run.complete`, `object.link`, `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`, `document.packet.prepare`, `decision.record`, `approval.request`, `adapter.intent.record`, `rule.change.record`, `external_action.record`, `capability.grant`, `budget.reserve`, `budget.charge`, `budget.release`, `ai.infer`, `view.publish`, `customer_signal.record`, `payroll.preview.record`, `payroll.preview.packet.prepare`, `control_plane.token_rotation.attest`, `control_plane.credential.upsert`, `control_plane.credential.revoke`, and `control_plane.session.review`; read payloads use `view`, `core`, and `config`, with `view: "summary"` returning active tasks, recent events, approvals, workers, capabilities, graph counts, and ledger counts. Invalid credentials fail before body reads, payload bodies are capped at 1 MiB, tenant selection and operation inputs live in structured `core` and `config` payloads, and no other top-level operation fields are accepted |
+| `POST /core` | Canonical Core command and read surface. Commands include `task.create`, `task.transition`, `object.upsert`, `adapter.upsert`, `connection.upsert`, `connection.health.record`, `entity.setup.record`, `worker.upsert`, `worker.transition`, `worker.run.start`, `worker.run.complete`, `object.link`, `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`, `document.packet.prepare`, `decision.record`, `approval.request`, `adapter.intent.record`, `rule.change.record`, `obligation.scan`, `external_action.record`, `capability.grant`, `budget.reserve`, `budget.charge`, `budget.release`, `ai.infer`, `view.publish`, `customer_signal.record`, `payroll.preview.record`, `payroll.preview.packet.prepare`, `control_plane.token_rotation.attest`, `control_plane.credential.upsert`, `control_plane.credential.revoke`, and `control_plane.session.review`; read payloads use `view`, `core`, and `config`, with `view: "summary"` returning active tasks, recent events, approvals, workers, capabilities, graph counts, and ledger counts. Invalid credentials fail before body reads, payload bodies are capped at 1 MiB, tenant selection and operation inputs live in structured `core` and `config` payloads, and no other top-level operation fields are accepted |
 | `GET /core?tenantSlug=...` | Compatibility Core summary read; new callers should use the `POST /core` view envelope |
 | `POST /worker` with payload `view: "snapshot"` | Operator-only snapshot of worker state, active tasks, controls, budget usage, and recent events |
 | `POST /worker` with payload `view: "approvals"` | Operator-only approval queue for worker decisions |
@@ -260,6 +260,9 @@ allowing managed credential refs for read-only polling. `adapter.intent.record` 
 with event, audit, and trace proof while external mutation remains blocked;
 `rule.change.record` writes a rule-change object, object version, decision,
 event, audit, and trace evidence before rule packs or obligations are changed.
+`obligation.scan` turns active rule packs and filing requirements into
+obligation objects, review tasks, events, audit rows, and trace evidence while
+external agency action remains blocked.
 `ai.infer` is the Core AI gateway boundary: it selects an active model route,
 redacts configured request fields, reserves and charges budget, writes the
 inference and usage rows, and records event, audit, and trace evidence. V1 uses
@@ -270,10 +273,11 @@ testimonial, and review records as typed customer signals. `payroll.preview.reco
 writes pay statements, payroll lines, liabilities, calculation traces, audit
 events, and trace evidence without submission or money movement.
 Queued workflow execution can also prepare durable Core packets from
-`adapter_intent_record`, `rule_change_record`, `packet_prepare`,
-`document_packet_prepare`, or `evidence_packet_prepare` steps, linking the
-adapter intent or rule change plus packet, document, event, audit, trace
-evidence, workflow output, and task outcome through the same workflow ledger.
+`adapter_intent_record`, `rule_change_record`, `obligation_scan`,
+`packet_prepare`, `document_packet_prepare`, or `evidence_packet_prepare` steps,
+linking the adapter intent, rule change, obligation scan, packet, document,
+event, audit, trace evidence, workflow output, and task outcome through the same
+workflow ledger.
 `payroll.preview.packet.prepare` turns those preview artifacts into variance
 reports, pay statement documents, an approval packet, approval request, and
 blocked funding/tax handoff drafts. A shared approval decision applies the

@@ -20,6 +20,7 @@ import {
 import { RevenueWorkerUnavailableError } from "../worker/revenue";
 import { executeWorkerCommand, type WorkerCommandResult } from "../worker/registry";
 import { PlatformUnavailableError } from "./errors";
+import { scanObligationsForOperator } from "./obligations";
 import { loadOperatorContext } from "./operators";
 import {
   prepareCorePacketForOperator,
@@ -336,6 +337,7 @@ const executableWorkflowStepKinds = new Set([
   "approval_request",
   "adapter_intent_record",
   "rule_change_record",
+  "obligation_scan",
   "packet_prepare",
   "document_packet_prepare",
   "evidence_packet_prepare",
@@ -876,6 +878,8 @@ async function completeWorkflowStep(input: {
       null;
     let ruleChangeRecord: Awaited<ReturnType<typeof recordRuleChangeForOperator>> | null =
       null;
+    let obligationScanRecord: Awaited<ReturnType<typeof scanObligationsForOperator>> | null =
+      null;
     let workerCommand: WorkerCommandResult | null = null;
     let workerCommandData: JsonObject | null = null;
 
@@ -1044,6 +1048,80 @@ async function completeWorkflowStep(input: {
               updatedAt: input.now,
             })
             .where(and(eq(tasks.tenantId, input.operator.tenantId), eq(tasks.id, ruleTask.id)));
+        }
+      }
+    }
+
+    if (step.kind === "obligation_scan") {
+      const obligationInput = jsonObject(step.input.obligationScan ?? step.input.obligation ?? {});
+      const obligationTaskId = stringValue(obligationInput.taskId) ?? step.taskId ?? undefined;
+
+      obligationScanRecord = await scanObligationsForOperator(tx, input.operator, {
+        idempotencyKey: `${step.id}:obligation_scan`,
+        scope: jsonObject(obligationInput.scope),
+        jurisdiction: stringValue(obligationInput.jurisdiction),
+        asOf: stringValue(obligationInput.asOf),
+        dueAt: stringValue(obligationInput.dueAt),
+        rulePackId: stringValue(obligationInput.rulePackId),
+        filingRequirementId: stringValue(obligationInput.filingRequirementId),
+        workflowRunId: stringValue(obligationInput.workflowRunId) ?? run.id,
+        taskId: obligationTaskId,
+        facts: jsonObject(obligationInput.facts),
+        data: {
+          ...jsonObject(obligationInput.data),
+          workflowRunId: run.id,
+          workflowStepId: step.id,
+          workflowKey: definition.key,
+          workflowEventId: event.id,
+          source,
+          externalExecution: "blocked",
+        },
+      });
+
+      await tx
+        .update(workflowRuns)
+        .set({
+          data: {
+            ...run.data,
+            lastExecutedStep: {
+              ...lastExecutedStep,
+              obligationScanRecord,
+            },
+            lastObligationScan: {
+              ...obligationScanRecord,
+              workflowStepId: step.id,
+              recordedAt: input.now.toISOString(),
+              externalExecution: "blocked",
+            },
+          },
+          updatedAt: input.now,
+        })
+        .where(eq(workflowRuns.id, run.id));
+
+      if (obligationTaskId) {
+        const [obligationTask] = await tx
+          .select()
+          .from(tasks)
+          .where(and(eq(tasks.tenantId, input.operator.tenantId), eq(tasks.id, obligationTaskId)))
+          .limit(1);
+
+        if (obligationTask) {
+          await tx
+            .update(tasks)
+            .set({
+              outcome: {
+                ...obligationTask.outcome,
+                lastWorkflowObligationScan: {
+                  ...obligationScanRecord,
+                  workflowRunId: run.id,
+                  workflowStepId: step.id,
+                  recordedAt: input.now.toISOString(),
+                  externalExecution: "blocked",
+                },
+              },
+              updatedAt: input.now,
+            })
+            .where(and(eq(tasks.tenantId, input.operator.tenantId), eq(tasks.id, obligationTask.id)));
         }
       }
     }
@@ -1427,6 +1505,14 @@ async function completeWorkflowStep(input: {
         ? {
             ruleChangeRecord: {
               ...ruleChangeRecord,
+              externalExecution: "blocked",
+            },
+          }
+        : {}),
+      ...(obligationScanRecord
+        ? {
+            obligationScanRecord: {
+              ...obligationScanRecord,
               externalExecution: "blocked",
             },
           }

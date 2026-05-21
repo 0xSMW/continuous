@@ -1040,17 +1040,6 @@ export const workerContracts: PlannedWorkerContractMetadata[] = [
     commands: [
       {
         role: "compliance_operations",
-        name: "obligation.scan",
-        toolAlias: "worker.command",
-        description: "Scan source refs and rule packs into obligation proposals with evidence.",
-        idempotency: "required",
-        sideEffects: "internal",
-        externalExecution: "blocked",
-        requiresTenant: true,
-        requiredConfig: ["scope", "jurisdiction"],
-      },
-      {
-        role: "compliance_operations",
         name: "notice.response.prepare",
         toolAlias: "worker.command",
         description: "Prepare a notice response draft, source packet, validation trace, and approval request.",

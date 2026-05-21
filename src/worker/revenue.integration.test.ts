@@ -62,7 +62,9 @@ import {
   evidence,
   evidencePackets,
   filingDrafts,
+  filingRequirements,
   jobs,
+  obligations,
   objects,
   objectLinks,
   objectVersions,
@@ -110,6 +112,10 @@ const bunExecutable = process.env.BUN_EXECUTABLE ?? "bun";
 
 function objectValue(value: unknown): JsonObject {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonObject) : {};
+}
+
+function arrayValue(value: unknown) {
+  return Array.isArray(value) ? value : [];
 }
 
 function stringList(value: unknown) {
@@ -5260,9 +5266,14 @@ maybeDescribe("Revenue Worker integration eval", () => {
 
     const [workflowConnection] = await db.select({ id: connections.id }).from(connections).limit(1);
     const [workflowRulePack] = await db.select({ id: rulePacks.id }).from(rulePacks).limit(1);
+    const [workflowFilingRequirement] = await db
+      .select({ id: filingRequirements.id })
+      .from(filingRequirements)
+      .limit(1);
 
     expect(workflowConnection?.id).toBeTruthy();
     expect(workflowRulePack?.id).toBeTruthy();
+    expect(workflowFilingRequirement?.id).toBeTruthy();
 
     const [adapterIntentStep] = await db
       .insert(workflowSteps)
@@ -5428,6 +5439,86 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(objectValue(workflowRuleChangeObject?.data).workflowStepId).toBe(ruleChangeStep.id);
     expect(workflowRuleChangeDecision?.decision).toBe("owner_review_required");
     expect(ruleChangeTaskOutcome.objectId).toBe(workflowRuleChange.objectId);
+
+    const [obligationScanStep] = await db
+      .insert(workflowSteps)
+      .values({
+        tenantId: packetRun?.tenantId ?? "",
+        definitionId: packetRun?.definitionId ?? "",
+        workflowRunId: packetStart.run.id,
+        taskId: packetTask.taskId,
+        capabilityId: quoteCapabilityId,
+        kind: "obligation_scan",
+        name: "CI scan obligations from workflow",
+        state: "queued",
+        priority: "urgent",
+        risk: "high",
+        fromState: "awaiting_approval",
+        toState: "awaiting_approval",
+        attempt: 1,
+        maxAttempts: 2,
+        idempotencyKey: `ci-workflow-obligation-scan-step-${runId}`,
+        input: {
+          obligationScan: {
+            scope: {
+              domain: "payroll",
+            },
+            jurisdiction: "US",
+            rulePackId: workflowRulePack?.id,
+            filingRequirementId: workflowFilingRequirement?.id,
+            facts: {
+              blockers: ["workflow_source_review_required"],
+            },
+            data: {
+              source: "workflow_obligation_scan_ci",
+            },
+          },
+        },
+      })
+      .returning();
+
+    const obligationScanExecution = await executeWorkflowSteps({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      limit: 1,
+      leaseOwner: `ci-workflow-obligation-scan:${runId}`,
+      db,
+    });
+    const [obligationScanResult] = obligationScanExecution.results;
+    const [executedObligationScanStep] = await db
+      .select()
+      .from(workflowSteps)
+      .where(eq(workflowSteps.id, obligationScanStep.id))
+      .limit(1);
+    const obligationScanOutput = objectValue(executedObligationScanStep?.output);
+    const workflowObligationScan = objectValue(obligationScanOutput.obligationScanRecord);
+    const [workflowObligation] = await db
+      .select()
+      .from(obligations)
+      .where(eq(obligations.id, String(arrayValue(workflowObligationScan.obligationIds)[0] ?? "")))
+      .limit(1);
+    const [obligationScanTask] = await db
+      .select()
+      .from(tasks)
+      .where(eq(tasks.id, packetTask.taskId))
+      .limit(1);
+    const obligationScanTaskOutcome = objectValue(obligationScanTask?.outcome);
+    const workflowObligationScanOutcome = objectValue(
+      obligationScanTaskOutcome.lastWorkflowObligationScan,
+    );
+
+    expect(obligationScanExecution.processed).toBe(1);
+    expect(obligationScanExecution.completed).toBe(1);
+    expect(obligationScanResult?.stepId).toBe(obligationScanStep.id);
+    expect(executedObligationScanStep?.state).toBe("done");
+    expect(workflowObligationScan.externalExecution).toBe("blocked");
+    expect(workflowObligationScan.workflowRunId).toBe(packetStart.run.id);
+    expect(arrayValue(workflowObligationScan.obligationIds).length).toBeGreaterThan(0);
+    expect(workflowObligation?.state).toBe("blocked");
+    expect(obligationScanTaskOutcome.lastWorkflowRuleChange).toBeTruthy();
+    expect(obligationScanTaskOutcome.obligationState).toBe("blocked");
+    expect(workflowObligationScanOutcome.workflowStepId).toBe(obligationScanStep.id);
+    expect(workflowObligationScanOutcome.externalExecution).toBe("blocked");
 
     const [workerCommandStep] = await db
       .insert(workflowSteps)

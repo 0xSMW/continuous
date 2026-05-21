@@ -419,7 +419,6 @@ describe("app-server worker tools", () => {
         .filter((command) => command.role === "compliance_operations")
         .map((command) => command.name),
     ).toEqual([
-      "obligation.scan",
       "notice.response.prepare",
       "license.renewal.prepare",
       "evidence_binder.export",

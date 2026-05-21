@@ -31,9 +31,9 @@ supports `task.create`, `task.transition`, `object.upsert`, `object.link`,
 `adapter.upsert`, `connection.upsert`, `connection.health.record`, `entity.setup.record`,
 `worker.upsert`, `worker.transition`, `worker.run.start`, `worker.run.complete`,
 `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`, `document.packet.prepare`,
-`decision.record`, `approval.request`, `capability.grant`, `budget.reserve`,
-`budget.charge`, `budget.release`, `ai.infer`, `view.publish`, `adapter.intent.record`,
-`rule.change.record`, `external_action.record`, `customer_signal.record`,
+`decision.record`, `approval.request`, `adapter.intent.record`, `rule.change.record`,
+`obligation.scan`, `external_action.record`, `capability.grant`, `budget.reserve`,
+`budget.charge`, `budget.release`, `ai.infer`, `view.publish`, `customer_signal.record`,
 `payroll.preview.record`, `payroll.preview.packet.prepare`,
 `control_plane.token_rotation.attest`, `control_plane.credential.upsert`,
 `control_plane.credential.revoke`, and `control_plane.session.review`, all with the
@@ -386,6 +386,7 @@ Control-plane token catalog entries have this shape when provided directly via
       "core:worker.transition",
       "core:worker.run.start",
       "core:worker.run.complete",
+      "core:obligation.scan",
       "worker:view.snapshot",
       "worker:view.readiness",
       "worker:view.health",
@@ -427,6 +428,7 @@ Control-plane token catalog entries have this shape when provided directly via
       "app_server:core.schema",
       "app_server:core.view.summary",
       "app_server:core.command.task.create",
+      "app_server:core.command.obligation.scan",
       "workflow:view.overview",
       "approval:view.inbox"
     ],
@@ -500,15 +502,16 @@ HOST=45.55.53.92 \
   ./scripts/install-non-root-access.sh
 ```
 
-After that, normal deploy commands can use the same app path with the non-root
-SSH account:
+After that, normal deploy commands default to the same app path with the
+non-root SSH account:
 
 ```sh
-HOST=45.55.53.92 SSH_USER=continuous-deploy ./scripts/deploy.sh
+HOST=45.55.53.92 ./scripts/deploy.sh
 ```
 
-For GitHub Actions, set the production `DEPLOY_USER` secret to
-`continuous-deploy` after confirming the workflow deploy succeeds once with
+For GitHub Actions, the deploy workflow defaults to `continuous-deploy` when no
+production `DEPLOY_USER` secret is set. Keep `DEPLOY_USER` unset or set it to
+the dedicated account after confirming the workflow deploy succeeds once with
 that account. When `require_production_readiness=true`, the workflow now
 rejects `DEPLOY_USER=root` before opening a customer-data deploy and verifies
 `id -u` is non-zero before repository sync. The strict readiness gate re-runs a
@@ -634,6 +637,7 @@ and route-qualified command; unrelated commands remain closed.
       "core:worker.transition",
       "core:worker.run.start",
       "core:worker.run.complete",
+      "core:obligation.scan",
       "worker:view.snapshot",
       "worker:view.readiness",
       "worker:view.health",
@@ -676,6 +680,7 @@ and route-qualified command; unrelated commands remain closed.
       "app_server:core.schema",
       "app_server:core.view.summary",
       "app_server:core.command.task.create",
+      "app_server:core.command.obligation.scan",
       "workflow:view.overview",
       "workflow:steps.execute",
       "workflow:approval.decide",
@@ -726,10 +731,10 @@ fingerprints only:
 ```
 
 You can also make the manual deploy workflow enforce the same strict gate by
-dispatching it with `require_production_readiness=true`. That mode requires the
-production `DEPLOY_USER` secret to be a non-root account such as
-`continuous-deploy`; bootstrap and break-glass root deploys should leave the
-flag `false` while backup credentials, alerting, drill evidence, token
+dispatching it with `require_production_readiness=true`. That mode requires
+`DEPLOY_USER` to resolve to a non-root account such as `continuous-deploy`;
+bootstrap and break-glass root deploys must explicitly set `DEPLOY_USER=root`
+and leave the flag `false` while backup credentials, alerting, drill evidence, token
 rotation, credential inventory, session review, and non-root host access are
 still being provisioned.
 
@@ -931,9 +936,9 @@ strict readiness gate re-checks the report artifact and checksum on every run.
 - Install `scripts/install-observability-timer.sh` with `ALERT_WEBHOOK_URL`
   after choosing an alert destination; deploy smoke already verifies the same
   host checks without requiring a webhook.
-- Run `scripts/install-non-root-access.sh`, verify one deploy with
-  `SSH_USER=continuous-deploy`, then set the GitHub production `DEPLOY_USER`
-  secret to the dedicated account.
+- Run `scripts/install-non-root-access.sh`, then verify one deploy with the
+  default non-root account before setting any production `DEPLOY_USER`
+  override.
 - Run `scripts/check-production-readiness.sh` successfully, or dispatch the
   deploy workflow with `require_production_readiness=true`, before treating the
   droplet as customer-data ready.

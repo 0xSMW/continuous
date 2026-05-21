@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   upsertCoreWorker: vi.fn(),
   getCoreSummarySafe: vi.fn(),
   getHealth: vi.fn(),
+  scanObligations: vi.fn(),
 }));
 
 vi.mock("./tasks", () => ({
@@ -22,6 +23,10 @@ vi.mock("./summary", () => ({
 
 vi.mock("./health", () => ({
   getHealth: mocks.getHealth,
+}));
+
+vi.mock("./obligations", () => ({
+  scanObligations: mocks.scanObligations,
 }));
 
 vi.mock("./worker-runs", () => ({
@@ -77,6 +82,11 @@ beforeEach(() => {
   });
   mocks.getHealth.mockReturnValue({
     status: "ok",
+  });
+  mocks.scanObligations.mockResolvedValue({
+    created: true,
+    obligationIds: ["obligation-1"],
+    externalExecution: "blocked",
   });
 });
 
@@ -142,6 +152,11 @@ describe("app-server Core tools", () => {
           name: "worker.run.complete",
           apiRoute: "/core",
         }),
+        expect.objectContaining({
+          name: "obligation.scan",
+          apiRoute: "/core",
+          tool: "continuous.core.command",
+        }),
       ]),
     );
     expect(schema.registry.views).toEqual([
@@ -199,6 +214,69 @@ describe("app-server Core tools", () => {
         priority: "high",
       }),
     );
+  });
+
+  it("dispatches Core obligation scans through the app-server command envelope", async () => {
+    const result = await executeAppServerCoreTool(
+      "continuous.core.command",
+      {
+        command: "obligation.scan",
+        core: {
+          tenantSlug: "continuous-demo",
+        },
+        idempotencyKey: "core-app-server-obligation-scan-001",
+        config: {
+          jurisdiction: "US",
+          rulePackId: "55555555-5555-4555-8555-000000000008",
+          filingRequirementId: "55555555-5555-4555-8555-000000000010",
+          scope: {
+            domain: "payroll",
+          },
+          facts: {
+            period: "2026-Q2",
+          },
+        },
+      },
+      {
+        operatorEmail: "owner@continuoushq.com",
+        source: "control_plane",
+        allowedAccess: ["write"],
+        allowedCommands: ["core:obligation.scan"],
+        allowedTenants: ["continuous-demo"],
+        allowedWorkerRoles: ["*"],
+      },
+    );
+
+    expect(result).toEqual({
+      command: "obligation.scan",
+      core: {
+        tenantSlug: "continuous-demo",
+      },
+      result: {
+        created: true,
+        obligationIds: ["obligation-1"],
+        externalExecution: "blocked",
+      },
+    });
+    expect(mocks.scanObligations).toHaveBeenCalledWith({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: "core-app-server-obligation-scan-001",
+      scope: {
+        domain: "payroll",
+      },
+      jurisdiction: "US",
+      asOf: undefined,
+      dueAt: undefined,
+      rulePackId: "55555555-5555-4555-8555-000000000008",
+      filingRequirementId: "55555555-5555-4555-8555-000000000010",
+      workflowRunId: undefined,
+      taskId: undefined,
+      facts: {
+        period: "2026-Q2",
+      },
+      data: {},
+    });
   });
 
   it("dispatches Core worker identity lifecycle through the app-server command envelope", async () => {

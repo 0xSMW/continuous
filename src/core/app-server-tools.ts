@@ -5,6 +5,7 @@ import { reserveBudget, chargeBudget, releaseBudget } from "./budgets";
 import { grantCapability } from "./capabilities";
 import { recordEntitySetup } from "./entity";
 import { getHealth } from "./health";
+import { scanObligations } from "./obligations";
 import { preparePayrollPreviewPacket, recordPayrollPreview } from "./payroll";
 import {
   attachCoreEvidence,
@@ -101,6 +102,7 @@ export const appServerCoreCommandNames = [
   "approval.request",
   "adapter.intent.record",
   "rule.change.record",
+  "obligation.scan",
   "external_action.record",
   "capability.grant",
   "budget.reserve",
@@ -955,6 +957,24 @@ async function executeCoreCommand(input: {
       impact: jsonObject(config.impact),
       data: jsonObject(config.data),
       effectiveAt: optionalString(config.effectiveAt),
+    });
+  }
+
+  if (command === "obligation.scan") {
+    return scanObligations({
+      operatorEmail,
+      idempotencyKey,
+      tenantSlug,
+      scope: jsonObject(config.scope),
+      jurisdiction: optionalString(config.jurisdiction),
+      asOf: optionalString(config.asOf),
+      dueAt: optionalString(config.dueAt),
+      rulePackId: optionalString(config.rulePackId),
+      filingRequirementId: optionalString(config.filingRequirementId),
+      workflowRunId: optionalString(config.workflowRunId),
+      taskId: optionalString(config.taskId),
+      facts: jsonObject(config.facts),
+      data: jsonObject(config.data),
     });
   }
 

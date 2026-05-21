@@ -617,3 +617,19 @@ as scheduler provenance and blocked `externalSend`. Remaining API-shape work is
 not route naming; it is making readiness and execution metadata more
 machine-readable so clients can distinguish quote controlled-send approval from
 payment-provider execution, which remains blocked.
+
+## 2026-05-22
+
+Core obligation scanning now lives on the generic `POST /core` command envelope
+as `command=obligation.scan`, with `scope`, `jurisdiction`, rule/filing
+selectors, workflow refs, and scan facts under `config`. The scan creates or
+updates tenant obligations, source objects, review tasks, events, audit proof,
+and trace evidence while keeping agency submission blocked. The Compliance
+worker consumes those Core primitives instead of owning an
+`obligation.scan` worker command, so future worker packages can share the same
+obligation ledger without adding worker-family URLs.
+
+The app-server bridge exposes the same Core operation as
+`continuous.core.command` with `command=obligation.scan`; the dynamic-tool
+payload still keeps operation inputs under `arguments.config`, matching `/core`
+instead of creating a Compliance-specific tool.

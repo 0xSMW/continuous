@@ -40,7 +40,7 @@ Useful app surfaces for worker development:
 | `/` | Static public landing page; operational dashboard data stays behind authenticated control-plane routes |
 | `/health` | Redacted machine health check |
 | `/core` | Operator-gated, tenant-scoped persisted primitive summary |
-| `POST /core` | Canonical Core command surface with `command`, `core`, `config`, and `idempotencyKey` payload fields for tasks, task transitions, workers, entity setup, approvals, capability grants, budget ledger operations, objects, object links, events, evidence, documents, packets, decisions, generated views, adapter intents, rule changes, customer signals, and payroll preview artifacts |
+| `POST /core` | Canonical Core command surface with `command`, `core`, `config`, and `idempotencyKey` payload fields for tasks, task transitions, workers, entity setup, approvals, capability grants, budget ledger operations, objects, object links, events, evidence, documents, packets, decisions, generated views, adapter intents, rule changes, obligation scans, customer signals, and payroll preview artifacts |
 | `/approval?view=inbox` | Shared operator-gated approval inbox across Core, workflow, and worker subjects |
 | `POST /approval` | Shared approval decision surface with `command`, top-level `idempotencyKey`, explicit `approval.subject`, and `config` payload fields |
 | `POST /worker` with `view`, `worker`, and `config` | Canonical operator-gated worker read surface |
@@ -185,7 +185,7 @@ Other supported Core commands are `task.transition`, `object.link`,
 `worker.upsert`, `worker.transition`, `worker.run.start`, `worker.run.complete`,
 `event.ingest`, `evidence.attach`, `document.create`, `packet.prepare`, `document.packet.prepare`,
 `decision.record`, `approval.request`, `adapter.intent.record`,
-`rule.change.record`, `capability.grant`, `budget.reserve`, `budget.charge`,
+`rule.change.record`, `obligation.scan`, `capability.grant`, `budget.reserve`, `budget.charge`,
 `budget.release`, `ai.infer`, `view.publish`, `customer_signal.record`, `payroll.preview.record`, and
 `payroll.preview.packet.prepare`.
 

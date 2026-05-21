@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   grantCapability: vi.fn(),
   ingestCoreEvent: vi.fn(),
   linkCoreObjects: vi.fn(),
+  scanObligations: vi.fn(),
   preparePayrollPreviewPacket: vi.fn(),
   recordPayrollPreview: vi.fn(),
   recordAdapterIntent: vi.fn(),
@@ -63,6 +64,10 @@ vi.mock("../../src/core/capabilities", () => ({
 
 vi.mock("../../src/core/health", () => ({
   getHealth: mocks.getHealth,
+}));
+
+vi.mock("../../src/core/obligations", () => ({
+  scanObligations: mocks.scanObligations,
 }));
 
 vi.mock("../../src/core/payroll", () => ({
@@ -143,6 +148,7 @@ const exactCoreRouteCommands = [
   "core:approval.request",
   "core:adapter.intent.record",
   "core:rule.change.record",
+  "core:obligation.scan",
   "core:external_action.record",
   "core:capability.grant",
   "core:budget.reserve",
@@ -3392,6 +3398,80 @@ describe("POST /core", () => {
       },
       data: {},
       effectiveAt: undefined,
+    });
+  });
+
+  it("dispatches obligation.scan with rule and filing scope payload", async () => {
+    mocks.scanObligations.mockResolvedValue({
+      created: true,
+      obligationIds: ["55555555-5555-4555-8555-000000000009"],
+      taskIds: ["dddddddd-dddd-4ddd-8ddd-000000000001"],
+      eventId: "event-1",
+      auditEventId: "audit-1",
+      evidenceId: "evidence-1",
+      externalExecution: "blocked",
+    });
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/core", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          command: "obligation.scan",
+          core: {
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: "obligation-scan-route-test-001",
+          config: {
+            jurisdiction: "US",
+            asOf: "2026-05-22T00:00:00.000Z",
+            dueAt: "2026-06-30T00:00:00.000Z",
+            rulePackId: "55555555-5555-4555-8555-000000000008",
+            filingRequirementId: "55555555-5555-4555-8555-000000000010",
+            workflowRunId: "66666666-6666-4666-8666-000000000006",
+            scope: {
+              domain: "payroll",
+            },
+            facts: {
+              period: "2026-Q2",
+            },
+            data: {
+              source: "route-test",
+            },
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.command).toBe("obligation.scan");
+    expect(body.data.result.obligationIds).toEqual(["55555555-5555-4555-8555-000000000009"]);
+    expect(body.data.result.externalExecution).toBe("blocked");
+    expect(mocks.scanObligations).toHaveBeenCalledWith({
+      operatorEmail: "operator@example.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: "obligation-scan-route-test-001",
+      scope: {
+        domain: "payroll",
+      },
+      jurisdiction: "US",
+      asOf: "2026-05-22T00:00:00.000Z",
+      dueAt: "2026-06-30T00:00:00.000Z",
+      rulePackId: "55555555-5555-4555-8555-000000000008",
+      filingRequirementId: "55555555-5555-4555-8555-000000000010",
+      workflowRunId: "66666666-6666-4666-8666-000000000006",
+      taskId: undefined,
+      facts: {
+        period: "2026-Q2",
+      },
+      data: {
+        source: "route-test",
+      },
     });
   });
 

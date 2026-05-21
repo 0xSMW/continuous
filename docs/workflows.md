@@ -242,6 +242,10 @@ outcome without giving the workflow executor a worker-specific URL.
 creating the rule-change object/version, decision, event, audit event, trace
 evidence, workflow step output, workflow run marker, and task outcome before any
 rule pack, obligation, filing, or external submission is changed.
+`obligation_scan` steps derive obligations from `input.obligationScan` or
+`input.obligation`, creating Core obligation objects, review tasks, events,
+audit events, trace evidence, workflow step output, workflow run markers, and
+task outcomes while agency submission stays blocked.
 `worker_command` steps invoke the registered worker runtime from queued
 workflow data, not from a worker-specific URL. The step input carries
 `input.workerCommand.command`, `input.workerCommand.worker.role`, optional

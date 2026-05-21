@@ -5,6 +5,7 @@ import { reserveBudget, chargeBudget, releaseBudget } from "../../src/core/budge
 import { grantCapability } from "../../src/core/capabilities";
 import { recordEntitySetup } from "../../src/core/entity";
 import { getHealth } from "../../src/core/health";
+import { scanObligations } from "../../src/core/obligations";
 import { preparePayrollPreviewPacket, recordPayrollPreview } from "../../src/core/payroll";
 import { getCoreSummarySafe } from "../../src/core/summary";
 import { transitionCoreWorker, upsertCoreWorker } from "../../src/core/workers";
@@ -2023,6 +2024,59 @@ export async function POST(request: Request) {
     }
   }
 
+  if (command === "obligation.scan") {
+    const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
+
+    if (!idempotency.ok) {
+      return errorResponse(
+        {
+          code: "invalid_idempotency_key",
+          message: idempotency.message,
+        },
+        400,
+      );
+    }
+
+    try {
+      const result = await scanObligations({
+        operatorEmail: auth.operatorEmail,
+        idempotencyKey: idempotency.key,
+        tenantSlug,
+        scope: jsonObject(config.scope),
+        jurisdiction: optionalString(config.jurisdiction),
+        asOf: optionalString(config.asOf),
+        dueAt: optionalString(config.dueAt),
+        rulePackId: optionalString(config.rulePackId),
+        filingRequirementId: optionalString(config.filingRequirementId),
+        workflowRunId: optionalString(config.workflowRunId),
+        taskId: optionalString(config.taskId),
+        facts: jsonObject(config.facts),
+        data: jsonObject(config.data),
+      });
+
+      return Response.json(
+        {
+          api: apiVersion,
+          data: {
+            command,
+            core: {
+              tenantSlug: tenantSlug ?? null,
+            },
+            result,
+          },
+          error: null,
+        },
+        {
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    } catch (error) {
+      return coreErrorResponse(error, "core_obligation_scan_failed");
+    }
+  }
+
   if (command === "capability.grant") {
     const idempotency = normalizeIdempotencyKey(body.idempotencyKey);
 
@@ -2705,7 +2759,7 @@ export async function POST(request: Request) {
     {
       code: "core_command_unsupported",
       message:
-        "Core command must be task.create, task.transition, object.upsert, adapter.upsert, connection.upsert, connection.health.record, entity.setup.record, worker.upsert, worker.transition, worker.run.start, worker.run.complete, object.link, event.ingest, evidence.attach, document.create, packet.prepare, document.packet.prepare, decision.record, approval.request, adapter.intent.record, rule.change.record, external_action.record, capability.grant, budget.reserve, budget.charge, budget.release, ai.infer, view.publish, customer_signal.record, payroll.preview.record, or payroll.preview.packet.prepare.",
+        "Core command must be task.create, task.transition, object.upsert, adapter.upsert, connection.upsert, connection.health.record, entity.setup.record, worker.upsert, worker.transition, worker.run.start, worker.run.complete, object.link, event.ingest, evidence.attach, document.create, packet.prepare, document.packet.prepare, decision.record, approval.request, adapter.intent.record, rule.change.record, obligation.scan, external_action.record, capability.grant, budget.reserve, budget.charge, budget.release, ai.infer, view.publish, customer_signal.record, payroll.preview.record, or payroll.preview.packet.prepare.",
     },
     400,
   );
