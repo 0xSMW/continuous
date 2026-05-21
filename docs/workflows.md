@@ -269,9 +269,11 @@ URL. The same service posts `/worker` envelopes for scheduled lead source reads,
 hands returned selectors to the Revenue `run` command, and drains adapter
 commands; source-specific inputs stay in `config`, while route names stay
 generic.
-`GET /workflow` returns active definitions, runs, and the recent step ledger;
-`POST /workflow` returns the result for the requested command. Do not add
-workflow-specific URL paths for individual business processes.
+`POST /workflow` returns active definitions, runs, and the recent step ledger
+when the payload carries `view: "overview"`, `workflow`, and `config`; the same
+route returns command results when the payload carries `command`, `workflow`,
+`idempotencyKey`, and `config`. Do not add workflow-specific URL paths or query
+reads for individual business processes.
 
 Workflow approvals use the same platform approval ledger as worker approvals:
 
@@ -290,7 +292,7 @@ Workflow approvals use the same platform approval ledger as worker approvals:
 }
 ```
 
-`GET /workflow?view=approvals` lists workflow-scoped approvals only. A workflow
+`POST /workflow` with `view: "approvals"` lists workflow-scoped approvals only. A workflow
 approval decision writes approval evidence and an audit event; matching retries
 return the stored decision proof, changed retries fail, and when the definition
 allows `awaiting_approval -> approved`, an approved decision advances the run to

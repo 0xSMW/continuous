@@ -51,17 +51,16 @@ Then open `http://localhost:3000`.
   `external_action.record`, `control_plane.token_rotation.attest`,
   `control_plane.credential.upsert`, `control_plane.credential.revoke`, and
   `control_plane.session.review`. Core read views use `POST /core` with
-  `view`, `core`, and `config`; the summary view is also available through
-  `GET /core?tenantSlug=...` for compatibility. Core mutation requests accept
-  only `command`, `core`, `idempotencyKey`, and `config` as top-level fields.
+  `view`, `core`, and `config`. Core mutation requests accept only `command`,
+  `core`, `idempotencyKey`, and `config` as top-level fields.
   `ai.infer` is the deterministic Core AI gateway: route selection, redaction,
   budget reservation/charge, inference, usage, audit, and evidence are written
   through one reusable command while live provider execution remains blocked.
-- `/approval` is the shared approval control-plane API. Use
-  `GET /approval?view=inbox&tenantSlug=continuous-demo&subject=all`, or
-  `POST /approval` with `command: "approval.decide"`, structured `approval`, and
-  `config` fields. Approval mutation requests accept only `command`,
-  `approval`, `idempotencyKey`, and `config` as top-level fields.
+- `/approval` is the shared approval control-plane API. Use `POST /approval`
+  with `view`, `approval`, and `config` for inbox reads; use `POST /approval`
+  with `command: "approval.decide"`, structured `approval`, top-level
+  `idempotencyKey`, and `config` for decisions. Approval requests accept only
+  the read or command envelope fields as top-level fields.
 - `/worker` is the canonical worker control-plane API. Use `POST /worker` with
   `view`, `worker`, and `config` for read views; use `POST /worker` with
   `command`, `worker`, `idempotencyKey` when required, and `config` for
@@ -91,15 +90,13 @@ Then open `http://localhost:3000`.
   `command: "schedule.propose"`, handoff ids in `config.sourceRefs`, and
   schedule requirements in `config.constraints`; the first slice writes only
   dry-run calendar receipts and approval records.
-- `/workflow` is the canonical workflow control-plane API. Use `GET /workflow`
-  for definitions/runs/steps, `GET /workflow?view=approvals` for workflow
-  approvals, and `POST /workflow` with `command: "start"`,
-  `command: "transition"`, `command: "steps.execute"`, or
-  `command: "approval.decide"`. Queued workflow
+- `/workflow` is the canonical workflow control-plane API. Use `POST /workflow`
+  with `view`, `workflow`, and `config` for overview and approval reads; use
+  `POST /workflow` with `command: "start"`, `command: "transition"`,
+  `command: "steps.execute"`, or `command: "approval.decide"`. Queued workflow
   execution can now prepare durable Core packets from packet-backed step kinds
   without adding packet-specific business-process routes. Workflow mutation
-  requests accept only `command`, `workflow`, `idempotencyKey`, and `config` as
-  top-level fields.
+  requests accept only the read or command envelope fields as top-level fields.
 - `worker-scheduler` is the internal production drain for queued platform work.
   It posts the same `/workflow` `steps.execute` envelope, polls active lead
   source connections with `POST /worker` payloads using `command: "lead.read"`,

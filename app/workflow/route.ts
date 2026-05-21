@@ -28,6 +28,7 @@ export const dynamic = "force-dynamic";
 
 const apiVersion = "continuous.workflow.v1";
 const workflowCommandEnvelopeFields = new Set(["command", "workflow", "idempotencyKey", "config"]);
+const workflowViewEnvelopeFields = new Set(["view", "workflow", "config"]);
 function optionalString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
@@ -38,7 +39,7 @@ function bodyObject(value: unknown) {
     : {};
 }
 
-function configObject(value: unknown) {
+function configObject(value: unknown, errorCode = "invalid_workflow_command_config") {
   if (value === undefined || value === null) {
     return { ok: true as const, value: {} as Record<string, unknown> };
   }
@@ -50,7 +51,7 @@ function configObject(value: unknown) {
   return {
     ok: false as const,
     error: {
-      code: "invalid_workflow_command_config",
+      code: errorCode,
       message: "config must be an object when provided.",
     },
   };
@@ -225,10 +226,160 @@ function unexpectedWorkflowPayloadFields(body: Record<string, unknown>) {
   return Object.keys(body).filter((field) => !workflowCommandEnvelopeFields.has(field));
 }
 
-export async function GET(request: Request) {
-  const url = new URL(request.url);
-  const view = optionalString(url.searchParams.get("view")) ?? "overview";
-  const tenantSlug = optionalString(url.searchParams.get("tenantSlug"));
+function unexpectedWorkflowViewPayloadFields(body: Record<string, unknown>) {
+  return Object.keys(body).filter((field) => !workflowViewEnvelopeFields.has(field));
+}
+
+function hasOwnField(body: Record<string, unknown>, field: string) {
+  return Object.prototype.hasOwnProperty.call(body, field);
+}
+
+function workflowPayloadKind(body: Record<string, unknown>) {
+  const hasCommand = hasOwnField(body, "command");
+  const hasView = hasOwnField(body, "view");
+
+  if (hasCommand && hasView) {
+    return "mixed";
+  }
+
+  if (hasCommand) {
+    return "command";
+  }
+
+  if (hasView) {
+    return "view";
+  }
+
+  return "missing";
+}
+
+export async function GET() {
+  return errorResponse(
+    {
+      code: "workflow_view_payload_required",
+      message:
+        "Workflow reads use POST /workflow with a JSON payload containing view, workflow, and config. Put read filters under config.",
+    },
+    405,
+  );
+}
+
+export async function POST(request: Request) {
+  const writePreAuth = authorizeControlPlaneAccess({
+    enabled: env.WORKER_RUN_ENABLED,
+    appEnv: env.APP_ENV,
+    expectedToken: env.WORKER_RUN_TOKEN,
+    operatorEmail: env.WORKER_OPERATOR_EMAIL,
+    authorization: request.headers.get("authorization"),
+    allowedTenants: env.CONTROL_PLANE_ALLOWED_TENANTS,
+    allowedWorkerRoles: env.CONTROL_PLANE_ALLOWED_WORKER_ROLES,
+    tokenCatalogJson: env.CONTROL_PLANE_TOKENS_JSON,
+    tokenCatalogB64: env.CONTROL_PLANE_TOKEN_CATALOG_B64,
+    route: "workflow",
+    access: "write",
+  });
+  const readPreAuth = writePreAuth.ok
+    ? writePreAuth
+    : authorizeControlPlaneAccess({
+        appEnv: env.APP_ENV,
+        expectedToken: env.WORKER_RUN_TOKEN,
+        operatorEmail: env.WORKER_OPERATOR_EMAIL,
+        authorization: request.headers.get("authorization"),
+        allowedTenants: env.CONTROL_PLANE_ALLOWED_TENANTS,
+        allowedWorkerRoles: env.CONTROL_PLANE_ALLOWED_WORKER_ROLES,
+        tokenCatalogJson: env.CONTROL_PLANE_TOKENS_JSON,
+        tokenCatalogB64: env.CONTROL_PLANE_TOKEN_CATALOG_B64,
+        route: "workflow",
+        access: "read",
+      });
+
+  if (!writePreAuth.ok && !readPreAuth.ok) {
+    await recordControlPlaneAuthAttempt({
+      request,
+      route: "workflow",
+      access: "write",
+      auth: writePreAuth,
+    });
+    return guardErrorResponse(writePreAuth);
+  }
+
+  const bodyResult = await readBody(request);
+
+  if (!bodyResult.ok) {
+    await recordControlPlaneAuthAttempt({
+      request,
+      route: "workflow",
+      access: "write",
+      auth: writePreAuth.ok ? writePreAuth : readPreAuth,
+    });
+    return errorResponse(bodyResult.error, bodyResult.status);
+  }
+
+  const body = bodyResult.value;
+  const payloadKind = workflowPayloadKind(body);
+
+  if (payloadKind === "mixed") {
+    return errorResponse(
+      {
+        code: "invalid_workflow_payload_envelope",
+        message: "Workflow payload must contain either command or view, not both.",
+      },
+      400,
+    );
+  }
+
+  if (payloadKind === "missing") {
+    return errorResponse(
+      {
+        code: "invalid_workflow_payload_envelope",
+        message: "Workflow payload requires a non-empty command or view string.",
+      },
+      400,
+    );
+  }
+
+  if (payloadKind === "view") {
+    return handleWorkflowView(request, body);
+  }
+
+  return handleWorkflowCommand(request, body);
+}
+
+async function handleWorkflowView(
+  request: Request,
+  body: Record<string, unknown>,
+) {
+  const unexpectedFields = unexpectedWorkflowViewPayloadFields(body);
+  const view = optionalString(body.view);
+  const workflow = bodyObject(body.workflow);
+  const configResult = configObject(body.config, "invalid_workflow_view_config");
+  const config = configResult.ok ? configResult.value : {};
+  const tenantSlug = optionalString(workflow.tenantSlug);
+
+  if (unexpectedFields.length > 0) {
+    return errorResponse(
+      {
+        code: "invalid_workflow_view_envelope",
+        message: `Workflow view payload fields must be view, workflow, and config. Move read filters into config. Unexpected fields: ${unexpectedFields.join(", ")}.`,
+      },
+      400,
+    );
+  }
+
+  if (!view) {
+    return errorResponse(
+      {
+        code: "invalid_workflow_view_envelope",
+        message: "Workflow view payload requires a non-empty view string.",
+      },
+      400,
+    );
+  }
+
+  if (!configResult.ok) {
+    return errorResponse(configResult.error, 400);
+  }
+
   const auth = authorizeControlPlaneAccess({
     appEnv: env.APP_ENV,
     expectedToken: env.WORKER_RUN_TOKEN,
@@ -313,7 +464,7 @@ export async function GET(request: Request) {
       const approvals = await listApprovals({
         operatorEmail: auth.operatorEmail,
         tenantSlug,
-        state: optionalString(url.searchParams.get("state")),
+        state: optionalString(config.state),
         subject: "workflow",
       });
 
@@ -322,6 +473,9 @@ export async function GET(request: Request) {
           api: apiVersion,
           data: {
             view,
+            workflow: {
+              tenantSlug: tenantSlug ?? null,
+            },
             approvals,
           },
           error: null,
@@ -347,13 +501,19 @@ export async function GET(request: Request) {
     const data = await listWorkflows({
       operatorEmail: auth.operatorEmail,
       tenantSlug,
-      state: optionalString(url.searchParams.get("state")),
+      state: optionalString(config.state),
     });
 
     return Response.json(
       {
         api: apiVersion,
-        data,
+        data: {
+          view,
+          workflow: {
+            tenantSlug: tenantSlug ?? null,
+          },
+          result: data,
+        },
         error: null,
       },
       {
@@ -367,44 +527,10 @@ export async function GET(request: Request) {
   }
 }
 
-export async function POST(request: Request) {
-  const preAuth = authorizeControlPlaneAccess({
-    enabled: env.WORKER_RUN_ENABLED,
-    appEnv: env.APP_ENV,
-    expectedToken: env.WORKER_RUN_TOKEN,
-    operatorEmail: env.WORKER_OPERATOR_EMAIL,
-    authorization: request.headers.get("authorization"),
-    allowedTenants: env.CONTROL_PLANE_ALLOWED_TENANTS,
-    allowedWorkerRoles: env.CONTROL_PLANE_ALLOWED_WORKER_ROLES,
-    tokenCatalogJson: env.CONTROL_PLANE_TOKENS_JSON,
-    tokenCatalogB64: env.CONTROL_PLANE_TOKEN_CATALOG_B64,
-    route: "workflow",
-    access: "write",
-  });
-
-  if (!preAuth.ok) {
-    await recordControlPlaneAuthAttempt({
-      request,
-      route: "workflow",
-      access: "write",
-      auth: preAuth,
-    });
-    return guardErrorResponse(preAuth);
-  }
-
-  const bodyResult = await readBody(request);
-
-  if (!bodyResult.ok) {
-    await recordControlPlaneAuthAttempt({
-      request,
-      route: "workflow",
-      access: "write",
-      auth: preAuth,
-    });
-    return errorResponse(bodyResult.error, bodyResult.status);
-  }
-
-  const body = bodyResult.value;
+async function handleWorkflowCommand(
+  request: Request,
+  body: Record<string, unknown>,
+) {
   const unexpectedFields = unexpectedWorkflowPayloadFields(body);
   const workflow = bodyObject(body.workflow);
   const configResult = configObject(body.config);

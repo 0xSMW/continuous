@@ -113,7 +113,8 @@ source, provider, reader, and credential refs inside `config`; inline access
 tokens and passwords are rejected.
 
 The shared approval inbox is `/approvals` in the browser and `/approval` for
-operator-gated JSON. Decisions use `POST /approval` with `command`, top-level
+operator-gated JSON. Inbox reads use `POST /approval` with `view`, `approval`,
+and `config`; decisions use `POST /approval` with `command`, top-level
 `idempotencyKey`, `approval`, and `config` payload fields.
 
 The repo also includes `.mcp.json` for the Next.js MCP bridge. With `bun run dev`
@@ -318,8 +319,14 @@ curl -X POST http://localhost:3000/worker \
 Workflow approvals use the shared approval ledger:
 
 ```sh
-curl "http://localhost:3000/workflow?view=approvals&tenantSlug=continuous-demo" \
-  -H "authorization: Bearer $CONTROL_PLANE_OPERATOR_TOKEN"
+curl -X POST http://localhost:3000/workflow \
+  -H "authorization: Bearer $CONTROL_PLANE_OPERATOR_TOKEN" \
+  -H "content-type: application/json" \
+  -d '{
+    "view": "approvals",
+    "workflow": {"tenantSlug": "continuous-demo"},
+    "config": {}
+  }'
 
 curl -X POST http://localhost:3000/workflow \
   -H "authorization: Bearer $CONTROL_PLANE_OPERATOR_TOKEN" \

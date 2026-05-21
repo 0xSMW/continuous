@@ -118,6 +118,7 @@
 | Added shared approval inbox | `/approval` and `/approvals` expose a token-gated, subject-neutral approval inbox and decision surface on top of the shared `approval_requests`, `audit_events`, and evidence records |
 | Expanded shared approval inbox detail | `/approval` now supports priority, risk, kind, state, and subject filters; approval records include evidence references and subject-aware continuation hints for worker, workflow, task, and Core decisions |
 | Guarded canonical worker API surface | Contract tests now fail if worker-family-specific or `/api/*` control-plane route files appear; worker families must extend `/worker` through registered commands, `worker` selectors, `idempotencyKey`, and `config` payloads |
+| Added approval and workflow read envelopes | `/approval` and `/workflow` now use POST read payloads with `view`, route subject selectors, and `config`, so approval/workflow filters live in payloads instead of training query-shaped control-plane APIs |
 | Added planned-worker config schemas | `worker:tool schema` and `continuous.worker.schema` now expose non-executable `configSchema` metadata for follow-up commands and future Compliance commands before runtime handlers are added |
 | Added customer-signal primitives | Satisfaction, feedback, complaint, testimonial, and review records persist as `CustomerSignal.type` rows, and `POST /core` `command=customer_signal.record` writes them with object links, note evidence, events, and audit proof |
 | Added payroll preview kernel | Pay statements, payroll lines, payroll liabilities, and payroll calculation traces now persist as first-class Core tables; `POST /core` `command=payroll.preview.record` records preview artifacts with event, audit, and trace evidence while external execution stays blocked |
@@ -322,8 +323,8 @@ workflow output and task outcome.
 Packet-backed steps now prepare durable Core packets from queued workflow work,
 linking the resulting document, evidence packet, event, audit, trace evidence,
 workflow output, and task `lastWorkflowPacket` outcome without a new API route.
-Workflow approvals are listed with `GET /workflow?view=approvals` and decided
-with `POST /workflow` using `command=approval.decide`.
+Workflow approvals are listed with `POST /workflow` using `view=approvals` and
+decided with `POST /workflow` using `command=approval.decide`.
 Production deploys also run the internal `worker-scheduler` sidecar. It calls
 `/workflow` with `command=steps.execute`, then `/worker` with
 `command=lead.read`, `command=adapters.retry`, and

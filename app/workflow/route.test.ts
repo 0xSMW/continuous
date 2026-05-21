@@ -93,15 +93,35 @@ describe("/workflow route scope", () => {
     vi.resetAllMocks();
   });
 
+  it("rejects query-shaped workflow reads", async () => {
+    const { GET } = await import("./route");
+    const response = await GET();
+    const body = await response.json();
+
+    expect(response.status).toBe(405);
+    expect(body.error).toEqual({
+      code: "workflow_view_payload_required",
+      message:
+        "Workflow reads use POST /workflow with a JSON payload containing view, workflow, and config. Put read filters under config.",
+    });
+  });
+
   it("rejects scoped reads without a tenant before listing workflows", async () => {
     mocks.env.CONTROL_PLANE_ALLOWED_TENANTS = "continuous-demo";
 
-    const { GET } = await import("./route");
-    const response = await GET(
-      new Request("http://localhost/workflow?view=overview", {
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/workflow", {
+        method: "POST",
         headers: {
           authorization: "Bearer test-token",
+          "content-type": "application/json",
         },
+        body: JSON.stringify({
+          view: "overview",
+          workflow: {},
+          config: {},
+        }),
       }),
     );
     const body = await response.json();
@@ -228,12 +248,21 @@ describe("/workflow route scope", () => {
       workflows: [],
     });
 
-    const { GET } = await import("./route");
-    const response = await GET(
-      new Request("http://localhost/workflow?tenantSlug=continuous-demo", {
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/workflow", {
+        method: "POST",
         headers: {
           authorization: "Bearer test-token",
+          "content-type": "application/json",
         },
+        body: JSON.stringify({
+          view: "overview",
+          workflow: {
+            tenantSlug: "continuous-demo",
+          },
+          config: {},
+        }),
       }),
     );
 
@@ -252,6 +281,38 @@ describe("/workflow route scope", () => {
       tenantSlug: "continuous-demo",
       state: undefined,
     });
+  });
+
+  it("rejects top-level workflow read filters outside the view envelope", async () => {
+    mocks.env.CONTROL_PLANE_ALLOWED_TENANTS = "continuous-demo";
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/workflow", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          view: "overview",
+          workflow: {
+            tenantSlug: "continuous-demo",
+          },
+          state: "active",
+          config: {},
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toEqual({
+      code: "invalid_workflow_view_envelope",
+      message:
+        "Workflow view payload fields must be view, workflow, and config. Move read filters into config. Unexpected fields: state.",
+    });
+    expect(mocks.listWorkflows).not.toHaveBeenCalled();
   });
 
   it("transitions workflows through the canonical command envelope", async () => {
@@ -799,19 +860,37 @@ describe("/workflow route scope", () => {
       ),
     );
 
-    const { GET, POST } = await import("./route");
-    const overview = await GET(
-      new Request("http://localhost/workflow?view=overview&tenantSlug=continuous-demo", {
+    const { POST } = await import("./route");
+    const overview = await POST(
+      new Request("http://localhost/workflow", {
+        method: "POST",
         headers: {
           authorization: "Bearer test-token",
+          "content-type": "application/json",
         },
+        body: JSON.stringify({
+          view: "overview",
+          workflow: {
+            tenantSlug: "continuous-demo",
+          },
+          config: {},
+        }),
       }),
     );
-    const approvals = await GET(
-      new Request("http://localhost/workflow?view=approvals&tenantSlug=continuous-demo", {
+    const approvals = await POST(
+      new Request("http://localhost/workflow", {
+        method: "POST",
         headers: {
           authorization: "Bearer test-token",
+          "content-type": "application/json",
         },
+        body: JSON.stringify({
+          view: "approvals",
+          workflow: {
+            tenantSlug: "continuous-demo",
+          },
+          config: {},
+        }),
       }),
     );
     const start = await POST(
@@ -948,12 +1027,21 @@ describe("/workflow route scope", () => {
     mocks.env.CONTROL_PLANE_ALLOWED_TENANTS = "continuous-demo";
     mocks.listWorkflows.mockRejectedValue(new Error("workflow secret dsn postgres://internal"));
 
-    const { GET } = await import("./route");
-    const response = await GET(
-      new Request("http://localhost/workflow?view=overview&tenantSlug=continuous-demo", {
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/workflow", {
+        method: "POST",
         headers: {
           authorization: "Bearer test-token",
+          "content-type": "application/json",
         },
+        body: JSON.stringify({
+          view: "overview",
+          workflow: {
+            tenantSlug: "continuous-demo",
+          },
+          config: {},
+        }),
       }),
     );
     const body = await response.json();

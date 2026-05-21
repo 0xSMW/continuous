@@ -21,6 +21,7 @@ export const dynamic = "force-dynamic";
 
 const apiVersion = "continuous.approval.v1";
 const approvalCommandEnvelopeFields = new Set(["command", "approval", "idempotencyKey", "config"]);
+const approvalViewEnvelopeFields = new Set(["view", "approval", "config"]);
 const approvalSubjects = new Set<ApprovalSubject>(["all", "core", "worker", "workflow", "task"]);
 function optionalString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
@@ -32,7 +33,7 @@ function bodyObject(value: unknown) {
     : {};
 }
 
-function configObject(value: unknown) {
+function configObject(value: unknown, errorCode = "invalid_approval_command_config") {
   if (value === undefined || value === null) {
     return { ok: true as const, value: {} as Record<string, unknown> };
   }
@@ -44,7 +45,7 @@ function configObject(value: unknown) {
   return {
     ok: false as const,
     error: {
-      code: "invalid_approval_command_config",
+      code: errorCode,
       message: "config must be an object when provided.",
     },
   };
@@ -90,7 +91,7 @@ function parseSubject(
   return approvalSubjects.has(subject as ApprovalSubject) ? (subject as ApprovalSubject) : null;
 }
 
-function optionalFilter(value: string | null) {
+function optionalFilter(value: unknown) {
   const filter = optionalString(value);
 
   return filter && filter !== "all" ? filter : undefined;
@@ -166,11 +167,161 @@ function unexpectedApprovalPayloadFields(body: Record<string, unknown>) {
   return Object.keys(body).filter((field) => !approvalCommandEnvelopeFields.has(field));
 }
 
-export async function GET(request: Request) {
-  const url = new URL(request.url);
-  const view = optionalString(url.searchParams.get("view")) ?? "inbox";
-  const tenantSlug = optionalString(url.searchParams.get("tenantSlug"));
-  const subject = parseSubject(url.searchParams.get("subject"));
+function unexpectedApprovalViewPayloadFields(body: Record<string, unknown>) {
+  return Object.keys(body).filter((field) => !approvalViewEnvelopeFields.has(field));
+}
+
+function hasOwnField(body: Record<string, unknown>, field: string) {
+  return Object.prototype.hasOwnProperty.call(body, field);
+}
+
+function approvalPayloadKind(body: Record<string, unknown>) {
+  const hasCommand = hasOwnField(body, "command");
+  const hasView = hasOwnField(body, "view");
+
+  if (hasCommand && hasView) {
+    return "mixed";
+  }
+
+  if (hasCommand) {
+    return "command";
+  }
+
+  if (hasView) {
+    return "view";
+  }
+
+  return "missing";
+}
+
+export async function GET() {
+  return errorResponse(
+    {
+      code: "approval_view_payload_required",
+      message:
+        "Approval reads use POST /approval with a JSON payload containing view, approval, and config. Put read filters under config.",
+    },
+    405,
+  );
+}
+
+export async function POST(request: Request) {
+  const writePreAuth = authorizeControlPlaneAccess({
+    enabled: env.WORKER_RUN_ENABLED,
+    appEnv: env.APP_ENV,
+    expectedToken: env.WORKER_RUN_TOKEN,
+    operatorEmail: env.WORKER_OPERATOR_EMAIL,
+    authorization: request.headers.get("authorization"),
+    allowedTenants: env.CONTROL_PLANE_ALLOWED_TENANTS,
+    allowedWorkerRoles: env.CONTROL_PLANE_ALLOWED_WORKER_ROLES,
+    tokenCatalogJson: env.CONTROL_PLANE_TOKENS_JSON,
+    tokenCatalogB64: env.CONTROL_PLANE_TOKEN_CATALOG_B64,
+    route: "approval",
+    access: "write",
+  });
+  const readPreAuth = writePreAuth.ok
+    ? writePreAuth
+    : authorizeControlPlaneAccess({
+        appEnv: env.APP_ENV,
+        expectedToken: env.WORKER_RUN_TOKEN,
+        operatorEmail: env.WORKER_OPERATOR_EMAIL,
+        authorization: request.headers.get("authorization"),
+        allowedTenants: env.CONTROL_PLANE_ALLOWED_TENANTS,
+        allowedWorkerRoles: env.CONTROL_PLANE_ALLOWED_WORKER_ROLES,
+        tokenCatalogJson: env.CONTROL_PLANE_TOKENS_JSON,
+        tokenCatalogB64: env.CONTROL_PLANE_TOKEN_CATALOG_B64,
+        route: "approval",
+        access: "read",
+      });
+
+  if (!writePreAuth.ok && !readPreAuth.ok) {
+    await recordControlPlaneAuthAttempt({
+      request,
+      route: "approval",
+      access: "write",
+      auth: writePreAuth,
+    });
+    return guardErrorResponse(writePreAuth);
+  }
+
+  const bodyResult = await readBody(request);
+
+  if (!bodyResult.ok) {
+    await recordControlPlaneAuthAttempt({
+      request,
+      route: "approval",
+      access: "write",
+      auth: writePreAuth.ok ? writePreAuth : readPreAuth,
+    });
+    return errorResponse(bodyResult.error, bodyResult.status);
+  }
+
+  const body = bodyResult.value;
+  const payloadKind = approvalPayloadKind(body);
+
+  if (payloadKind === "mixed") {
+    return errorResponse(
+      {
+        code: "invalid_approval_payload_envelope",
+        message: "Approval payload must contain either command or view, not both.",
+      },
+      400,
+    );
+  }
+
+  if (payloadKind === "missing") {
+    return errorResponse(
+      {
+        code: "invalid_approval_payload_envelope",
+        message: "Approval payload requires a non-empty command or view string.",
+      },
+      400,
+    );
+  }
+
+  if (payloadKind === "view") {
+    return handleApprovalView(request, body);
+  }
+
+  return handleApprovalCommand(request, body);
+}
+
+async function handleApprovalView(
+  request: Request,
+  body: Record<string, unknown>,
+) {
+  const unexpectedFields = unexpectedApprovalViewPayloadFields(body);
+  const view = optionalString(body.view);
+  const approval = bodyObject(body.approval);
+  const configResult = configObject(body.config, "invalid_approval_view_config");
+  const config = configResult.ok ? configResult.value : {};
+  const tenantSlug = optionalString(approval.tenantSlug);
+  const subject = parseSubject(approval.subject);
+
+  if (unexpectedFields.length > 0) {
+    return errorResponse(
+      {
+        code: "invalid_approval_view_envelope",
+        message: `Approval view payload fields must be view, approval, and config. Move read filters into config. Unexpected fields: ${unexpectedFields.join(", ")}.`,
+      },
+      400,
+    );
+  }
+
+  if (!view) {
+    return errorResponse(
+      {
+        code: "invalid_approval_view_envelope",
+        message: "Approval view payload requires a non-empty view string.",
+      },
+      400,
+    );
+  }
+
+  if (!configResult.ok) {
+    return errorResponse(configResult.error, 400);
+  }
+
   const auth = authorizeControlPlaneAccess({
     appEnv: env.APP_ENV,
     expectedToken: env.WORKER_RUN_TOKEN,
@@ -274,11 +425,11 @@ export async function GET(request: Request) {
     const approvals = await listApprovals({
       operatorEmail: auth.operatorEmail,
       tenantSlug,
-      state: optionalFilter(url.searchParams.get("state")),
+      state: optionalFilter(config.state),
       subject,
-      priority: optionalFilter(url.searchParams.get("priority")),
-      risk: optionalFilter(url.searchParams.get("risk")),
-      kind: optionalFilter(url.searchParams.get("kind")),
+      priority: optionalFilter(config.priority),
+      risk: optionalFilter(config.risk),
+      kind: optionalFilter(config.kind),
     });
 
     return Response.json(
@@ -286,6 +437,10 @@ export async function GET(request: Request) {
         api: apiVersion,
         data: {
           view,
+          approval: {
+            tenantSlug: tenantSlug ?? null,
+            subject,
+          },
           approvals,
         },
         error: null,
@@ -301,44 +456,10 @@ export async function GET(request: Request) {
   }
 }
 
-export async function POST(request: Request) {
-  const preAuth = authorizeControlPlaneAccess({
-    enabled: env.WORKER_RUN_ENABLED,
-    appEnv: env.APP_ENV,
-    expectedToken: env.WORKER_RUN_TOKEN,
-    operatorEmail: env.WORKER_OPERATOR_EMAIL,
-    authorization: request.headers.get("authorization"),
-    allowedTenants: env.CONTROL_PLANE_ALLOWED_TENANTS,
-    allowedWorkerRoles: env.CONTROL_PLANE_ALLOWED_WORKER_ROLES,
-    tokenCatalogJson: env.CONTROL_PLANE_TOKENS_JSON,
-    tokenCatalogB64: env.CONTROL_PLANE_TOKEN_CATALOG_B64,
-    route: "approval",
-    access: "write",
-  });
-
-  if (!preAuth.ok) {
-    await recordControlPlaneAuthAttempt({
-      request,
-      route: "approval",
-      access: "write",
-      auth: preAuth,
-    });
-    return guardErrorResponse(preAuth);
-  }
-
-  const bodyResult = await readBody(request);
-
-  if (!bodyResult.ok) {
-    await recordControlPlaneAuthAttempt({
-      request,
-      route: "approval",
-      access: "write",
-      auth: preAuth,
-    });
-    return errorResponse(bodyResult.error, bodyResult.status);
-  }
-
-  const body = bodyResult.value;
+async function handleApprovalCommand(
+  request: Request,
+  body: Record<string, unknown>,
+) {
   const unexpectedFields = unexpectedApprovalPayloadFields(body);
   const command = optionalString(body.command);
   const approval = bodyObject(body.approval);

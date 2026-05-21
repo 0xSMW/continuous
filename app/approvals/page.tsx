@@ -21,7 +21,7 @@ export default function ApprovalsPage() {
             <ArrowLeft aria-hidden="true" size={14} />
             Core
           </Link>
-          <a href="/approval?view=inbox&tenantSlug=continuous-demo">
+          <a href="/approval">
             <ShieldCheck aria-hidden="true" size={14} />
             API
           </a>

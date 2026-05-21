@@ -67,15 +67,35 @@ describe("/approval route", () => {
     vi.resetAllMocks();
   });
 
+  it("rejects query-shaped approval reads", async () => {
+    const { GET } = await import("./route");
+    const response = await GET();
+    const body = await response.json();
+
+    expect(response.status).toBe(405);
+    expect(body.error).toEqual({
+      code: "approval_view_payload_required",
+      message:
+        "Approval reads use POST /approval with a JSON payload containing view, approval, and config. Put read filters under config.",
+    });
+  });
+
   it("rejects scoped approval reads without a tenant before listing approvals", async () => {
     mocks.env.CONTROL_PLANE_ALLOWED_TENANTS = "continuous-demo";
 
-    const { GET } = await import("./route");
-    const response = await GET(
-      new Request("http://localhost/approval?view=inbox", {
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/approval", {
+        method: "POST",
         headers: {
           authorization: "Bearer test-token",
+          "content-type": "application/json",
         },
+        body: JSON.stringify({
+          view: "inbox",
+          approval: {},
+          config: {},
+        }),
       }),
     );
     const body = await response.json();
@@ -98,12 +118,24 @@ describe("/approval route", () => {
       approvals: [],
     });
 
-    const { GET } = await import("./route");
-    const response = await GET(
-      new Request("http://localhost/approval?tenantSlug=continuous-demo&state=pending&subject=worker", {
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/approval", {
+        method: "POST",
         headers: {
           authorization: "Bearer test-token",
+          "content-type": "application/json",
         },
+        body: JSON.stringify({
+          view: "inbox",
+          approval: {
+            tenantSlug: "continuous-demo",
+            subject: "worker",
+          },
+          config: {
+            state: "pending",
+          },
+        }),
       }),
     );
     const body = await response.json();
@@ -196,16 +228,28 @@ describe("/approval route", () => {
       approvals: [],
     });
 
-    const { GET } = await import("./route");
-    const response = await GET(
-      new Request(
-        "http://localhost/approval?tenantSlug=continuous-demo&state=all&subject=workflow&priority=urgent&risk=high&kind=payroll_preview_approval",
-        {
-          headers: {
-            authorization: "Bearer test-token",
-          },
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/approval", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
         },
-      ),
+        body: JSON.stringify({
+          view: "inbox",
+          approval: {
+            tenantSlug: "continuous-demo",
+            subject: "workflow",
+          },
+          config: {
+            state: "all",
+            priority: "urgent",
+            risk: "high",
+            kind: "payroll_preview_approval",
+          },
+        }),
+      }),
     );
 
     expect(response.status).toBe(200);
@@ -220,13 +264,54 @@ describe("/approval route", () => {
     });
   });
 
-  it("rejects unsupported approval subjects instead of widening scope", async () => {
-    const { GET } = await import("./route");
-    const response = await GET(
-      new Request("http://localhost/approval?tenantSlug=continuous-demo&subject=everything", {
+  it("rejects top-level approval read filters outside the view envelope", async () => {
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/approval", {
+        method: "POST",
         headers: {
           authorization: "Bearer test-token",
+          "content-type": "application/json",
         },
+        body: JSON.stringify({
+          view: "inbox",
+          approval: {
+            tenantSlug: "continuous-demo",
+            subject: "worker",
+          },
+          state: "pending",
+          config: {},
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toEqual({
+      code: "invalid_approval_view_envelope",
+      message:
+        "Approval view payload fields must be view, approval, and config. Move read filters into config. Unexpected fields: state.",
+    });
+    expect(mocks.listApprovals).not.toHaveBeenCalled();
+  });
+
+  it("rejects unsupported approval subjects instead of widening scope", async () => {
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/approval", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          view: "inbox",
+          approval: {
+            tenantSlug: "continuous-demo",
+            subject: "everything",
+          },
+          config: {},
+        }),
       }),
     );
     const body = await response.json();
@@ -791,12 +876,22 @@ describe("/approval route", () => {
   it("sanitizes unexpected approval failures", async () => {
     mocks.listApprovals.mockRejectedValue(new Error("approval db password postgres://internal"));
 
-    const { GET } = await import("./route");
-    const response = await GET(
-      new Request("http://localhost/approval?tenantSlug=continuous-demo&subject=worker", {
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/approval", {
+        method: "POST",
         headers: {
           authorization: "Bearer test-token",
+          "content-type": "application/json",
         },
+        body: JSON.stringify({
+          view: "inbox",
+          approval: {
+            tenantSlug: "continuous-demo",
+            subject: "worker",
+          },
+          config: {},
+        }),
       }),
     );
     const body = await response.json();

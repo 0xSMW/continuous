@@ -155,24 +155,27 @@ export function ApprovalConsole() {
     }
 
     setError(null);
-    const params = new URLSearchParams({
-      view: "inbox",
-      tenantSlug,
-      state,
-      subject,
-      priority,
-      risk,
-    });
     const trimmedKind = kind.trim();
 
-    if (trimmedKind) {
-      params.set("kind", trimmedKind);
-    }
-
-    const response = await fetch(`/approval?${params.toString()}`, {
+    const response = await fetch("/approval", {
+      method: "POST",
       headers: {
         authorization: `Bearer ${token}`,
+        "content-type": "application/json",
       },
+      body: JSON.stringify({
+        view: "inbox",
+        approval: {
+          tenantSlug,
+          subject,
+        },
+        config: {
+          state,
+          priority,
+          risk,
+          ...(trimmedKind ? { kind: trimmedKind } : {}),
+        },
+      }),
     });
     const body = (await response.json()) as ApprovalInboxResponse;
 
