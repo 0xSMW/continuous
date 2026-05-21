@@ -386,7 +386,7 @@ jobs:
               printf 'WORKER_RUN_TOKEN=%s\n' "$(openssl rand -hex 32)"
               printf 'WORKER_OPERATOR_EMAIL=%s\n' "$WORKER_OPERATOR_EMAIL"
               printf 'CONTROL_PLANE_ALLOWED_TENANTS=continuous-demo\n'
-              printf 'CONTROL_PLANE_ALLOWED_WORKER_ROLES=revenue_operations,owner_chief_of_staff,dispatch_operations,finance_operations,workforce_operations,compliance_operations,systems_operations,offer_pricing_operations\n'
+              printf 'CONTROL_PLANE_ALLOWED_WORKER_ROLES=revenue_operations,owner_chief_of_staff,dispatch_operations,finance_operations,workforce_operations,compliance_operations,systems_operations,offer_pricing_operations,customer_experience_operations\n'
               printf 'WORKER_SCHEDULER_ENABLED=true\n'
               printf 'WORKER_SCHEDULER_BASE_URL=http://app:3000\n'
               printf 'WORKER_SCHEDULER_TENANT_SLUG=continuous-demo\n'
@@ -549,7 +549,7 @@ jobs:
           set_env ACME_EMAIL "$ACME_EMAIL"
           set_env WORKER_OPERATOR_EMAIL "$WORKER_OPERATOR_EMAIL"
           set_env CONTROL_PLANE_ALLOWED_TENANTS "continuous-demo"
-          set_env CONTROL_PLANE_ALLOWED_WORKER_ROLES "revenue_operations,owner_chief_of_staff,dispatch_operations,finance_operations,workforce_operations,compliance_operations,systems_operations,offer_pricing_operations"
+          set_env CONTROL_PLANE_ALLOWED_WORKER_ROLES "revenue_operations,owner_chief_of_staff,dispatch_operations,finance_operations,workforce_operations,compliance_operations,systems_operations,offer_pricing_operations,customer_experience_operations"
           set_env WORKER_SCHEDULER_ENABLED true
           set_env WORKER_SCHEDULER_BASE_URL "http://app:3000"
           set_env WORKER_SCHEDULER_TENANT_SLUG "continuous-demo"
@@ -762,8 +762,9 @@ jobs:
 
           PAYROLL_APPROVAL_ID="$(echo "$PAYROLL_PACKET_RESPONSE" | /usr/bin/jq -r '.data.result.approvalRequestId')"
           PAYROLL_APPROVAL_DECISION_PAYLOAD="$(
-            /usr/bin/jq -nc --arg approvalId "$PAYROLL_APPROVAL_ID" '{
+            /usr/bin/jq -nc --arg approvalId "$PAYROLL_APPROVAL_ID" --arg key "deploy-payroll-approval-decision-$PAYROLL_APPROVAL_ID" '{
               command: "approval.decide",
+              idempotencyKey: $key,
               approval: {
                 id: $approvalId,
                 tenantSlug: "continuous-demo",
