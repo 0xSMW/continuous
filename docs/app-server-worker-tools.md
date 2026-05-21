@@ -114,6 +114,9 @@ The app-server worker tools are intentionally narrow:
   list without changing the `/worker` route shape.
 - Caller supplies either `view`, `worker`, and `config` for reads, or
   `command`, `worker`, `idempotencyKey`, and `config` for commands.
+- `worker.role` is a lower_snake_case role selector, such as
+  `revenue_operations`. Do not send hyphenated family names, `api/*-worker`
+  route fragments, or `*_worker` suffixes.
 - Operator identity and scope must be supplied by authenticated transport
   context or, for local CLI use, by the trusted local transport through
   `WORKER_OPERATOR_EMAIL`; there is no fallback operator and identity is never

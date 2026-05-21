@@ -66,6 +66,7 @@ import {
   scanSystemsConnectorHealth,
   systemsWorkerRole,
 } from "./systems";
+import { isWorkerRoleIdentifier, workerRoleDescription } from "./envelope";
 import { plannedWorkerContractForRole, workerApiRoute } from "./planned-workers";
 import { normalizeIdempotencyKey } from "./security";
 
@@ -2455,6 +2456,14 @@ export function resolveWorkerTarget(target: WorkerTargetInput = {}): WorkerTarge
     throw new PlatformUnavailableError(
       "invalid_worker_target",
       "worker.role is required.",
+      400,
+    );
+  }
+
+  if (!isWorkerRoleIdentifier(role)) {
+    throw new PlatformUnavailableError(
+      "invalid_worker_target",
+      workerRoleDescription,
       400,
     );
   }

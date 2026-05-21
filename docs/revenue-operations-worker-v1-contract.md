@@ -9,7 +9,7 @@ raising autonomy or permitting external sends.
 |---|---:|---|
 | `idempotencyKey` | Yes | Stable per operator-triggered run |
 | Operator identity | Yes | Resolved from the authenticated control-plane credential or trusted local `WORKER_OPERATOR_EMAIL`; it is not part of the command payload |
-| `worker.role` | Yes | Explicit worker family selector; no default role is assumed |
+| `worker.role` | Yes | Explicit lower_snake_case role selector such as `revenue_operations`; no default role is assumed, and hyphenated family names, `api/*-worker` route fragments, or `*_worker` suffixes are invalid |
 | `worker.tenantSlug` | No | Required when an operator email spans tenants |
 | `worker.id` | No | Required when multiple Revenue Workers match |
 | `config.source` plus direct `config.records[]` / `config.record` or `config.reader` | Required for `lead.read` | Reads direct, connection-buffered, or read-only API-polled website-form, inbox, or CRM lead records into persisted Core source object/event/evidence rows |

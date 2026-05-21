@@ -23,6 +23,8 @@ import {
   workerCommandEnvelopeDescription,
   workerCommandEnvelopeFieldSet,
   workerEnvelopeFieldError,
+  workerRoleDescription,
+  workerRolePattern,
   workerViewEnvelopeDescription,
   workerViewEnvelopeFieldSet,
 } from "./envelope";
@@ -30,7 +32,11 @@ import {
 export const workerTargetInputSchema = {
   type: "object",
   properties: {
-    role: { type: "string" },
+    role: {
+      type: "string",
+      pattern: workerRolePattern.source,
+      description: workerRoleDescription,
+    },
     id: { type: "string" },
     tenantSlug: { type: "string" },
   },

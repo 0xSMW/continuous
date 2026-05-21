@@ -1004,6 +1004,46 @@ describe("/worker route", () => {
     expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
   });
 
+  it("rejects route-like or family-worker role names before registry dispatch", async () => {
+    const { POST } = await import("./route");
+    const apiFamilyRole = ["api", "domain-worker"].join("/");
+
+    for (const role of ["domain-worker", "domain_worker", apiFamilyRole, "worker/domain"]) {
+      const response = await POST(
+        new Request("http://localhost/worker", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer test-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            command: "run",
+            worker: {
+              role,
+              tenantSlug: "continuous-demo",
+            },
+            idempotencyKey: `bad-worker-role-${role.replaceAll(/[^a-z0-9]+/g, "-")}`,
+            config: {
+              intake: {
+                source: "website_form",
+                sourceEventId: "bad-worker-role-form-001",
+              },
+            },
+          }),
+        }),
+      );
+      const body = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(body.error).toEqual({
+        code: "invalid_worker_target",
+        message:
+          "worker.role must be a lower_snake_case role identifier such as revenue_operations; do not use route names, family-worker names, or URL fragments.",
+      });
+    }
+    expect(mocks.executeWorkerCommand).not.toHaveBeenCalled();
+  });
+
   it("rejects malformed optional worker selectors before registry dispatch", async () => {
     const { POST } = await import("./route");
 

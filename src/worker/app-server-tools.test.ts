@@ -394,6 +394,29 @@ describe("app-server worker tools", () => {
       }),
     ).rejects.toThrow("worker.role is required.");
 
+    const apiFamilyRole = ["api", "domain-worker"].join("/");
+
+    for (const role of ["domain-worker", "domain_worker", apiFamilyRole, "worker/domain"]) {
+      await expect(
+        executeAppServerWorkerTool("continuous.worker.command", {
+          command: "run",
+          worker: {
+            role,
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: `app-server-bad-worker-role-${role.replaceAll(/[^a-z0-9]+/g, "-")}`,
+          config: {
+            intake: {
+              source: "website_form",
+              sourceEventId: "app-server-bad-worker-role-form-001",
+            },
+          },
+        }),
+      ).rejects.toThrow(
+        "worker.role must be a lower_snake_case role identifier such as revenue_operations; do not use route names, family-worker names, or URL fragments.",
+      );
+    }
+
     await expect(
       executeAppServerWorkerTool("continuous.worker.command", {
         command: "run",

@@ -1,6 +1,15 @@
 export const workerCommandEnvelopeFields = ["command", "worker", "idempotencyKey", "config"] as const;
 export const workerViewEnvelopeFields = ["view", "worker", "config"] as const;
 export const workerTargetEnvelopeFields = ["role", "id", "tenantSlug"] as const;
+export const workerRolePattern = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/;
+export const workerRoleDescription =
+  "worker.role must be a lower_snake_case role identifier such as revenue_operations; do not use route names, family-worker names, or URL fragments.";
+
+export function isWorkerRoleIdentifier(value: string) {
+  const role = value.trim();
+
+  return workerRolePattern.test(role) && !role.endsWith("_worker");
+}
 
 export const workerCommandEnvelopeFieldSet = new Set<string>(workerCommandEnvelopeFields);
 export const workerViewEnvelopeFieldSet = new Set<string>(workerViewEnvelopeFields);
@@ -69,6 +78,13 @@ export function validateWorkerTargetEnvelope(value: unknown):
     return {
       ok: false,
       message: "worker.role is required.",
+    };
+  }
+
+  if (!isWorkerRoleIdentifier(role)) {
+    return {
+      ok: false,
+      message: workerRoleDescription,
     };
   }
 

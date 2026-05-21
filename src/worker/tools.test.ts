@@ -8,7 +8,7 @@ import {
   executeAppServerWorkerTool,
 } from "./app-server-tools";
 import { executeWorkerTool, workerToolSchema, workerTools } from "./tools";
-import { registeredWorkerCommands, registeredWorkerViews } from "./registry";
+import { executeWorkerCommand, registeredWorkerCommands, registeredWorkerViews } from "./registry";
 import {
   plannedWorkerCommands,
   plannedWorkerContracts,
@@ -264,6 +264,29 @@ describe("worker tool contract", () => {
         config: {},
       }),
     ).rejects.toThrow("worker.role is required.");
+
+    const apiFamilyRole = ["api", "domain-worker"].join("/");
+
+    for (const role of ["domain-worker", "domain_worker", apiFamilyRole, "worker/domain"]) {
+      await expect(
+        executeWorkerTool("worker.command", {
+          command: "run",
+          worker: {
+            role,
+            tenantSlug: "continuous-demo",
+          },
+          idempotencyKey: `local-bad-worker-role-${role.replaceAll(/[^a-z0-9]+/g, "-")}`,
+          config: {
+            intake: {
+              source: "website_form",
+              sourceEventId: "local-bad-worker-role-form-001",
+            },
+          },
+        }),
+      ).rejects.toThrow(
+        "worker.role must be a lower_snake_case role identifier such as revenue_operations; do not use route names, family-worker names, or URL fragments.",
+      );
+    }
 
     await expect(
       executeWorkerTool("worker.command", {
@@ -846,6 +869,13 @@ describe("worker tool contract", () => {
       ]),
     );
     expect(workerToolSchema.$defs.workerTarget.properties.tenantSlug.type).toBe("string");
+    expect(workerToolSchema.$defs.workerTarget.properties.role).toEqual(
+      expect.objectContaining({
+        type: "string",
+        pattern: "^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$",
+        description: expect.stringContaining("do not use route names"),
+      }),
+    );
     expect(workerToolSchema.$defs.workerTarget.required).toEqual(["role"]);
     for (const tool of workerTools) {
       expect(tool.description.length).toBeGreaterThan(0);
@@ -860,6 +890,30 @@ describe("worker tool contract", () => {
         worker: {},
       }),
     ).rejects.toThrow("worker.role is required.");
+  });
+
+  it("keeps direct registry calls on canonical worker role identifiers", async () => {
+    await expect(
+      executeWorkerCommand({
+        command: "run",
+        target: {
+          role: "domain-worker",
+          tenantSlug: "continuous-demo",
+        },
+        operatorEmail: "owner@continuoushq.com",
+        idempotencyKey: "direct-bad-worker-role-001",
+        config: {
+          intake: {
+            source: "website_form",
+            sourceEventId: "direct-bad-worker-role-form-001",
+          },
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "invalid_worker_target",
+      message:
+        "worker.role must be a lower_snake_case role identifier such as revenue_operations; do not use route names, family-worker names, or URL fragments.",
+    });
   });
 
   it("rejects unsupported worker roles before runtime work", async () => {
