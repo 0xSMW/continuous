@@ -611,7 +611,7 @@ documented as packaged catalog bundles with no executable runtime handler yet;
 `runtime` stays reserved for registered executable worker families.
 
 The API naming audit did not find live `/api/*-worker`, `/worker/<role>`,
-`revenue_worker`, or route-shaped worker payload drift. Revenue command config
+family-worker identifiers, or route-shaped worker payload drift. Revenue command config
 schemas now reject unknown top-level fields while preserving named controls such
 as scheduler provenance and blocked `externalSend`. Remaining API-shape work is
 not route naming; it is making readiness and execution metadata more

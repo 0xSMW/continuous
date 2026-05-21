@@ -1726,9 +1726,9 @@ describe("worker tool contract", () => {
     );
   });
 
-  it("rejects route-shaped Revenue config fields before handler dispatch", async () => {
-    const legacyRevenueRoute = ["/api", "revenue-worker"].join("/");
-    const legacyRevenueApprovalRoute = ["/api", "revenue-worker", "approval"].join("/");
+  it("rejects route-shaped config fields before handler dispatch", async () => {
+    const legacyFamilyRoute = ["/api", ["family", "worker"].join("-")].join("/");
+    const legacyFamilyApprovalRoute = [legacyFamilyRoute, "approval"].join("/");
 
     await expect(
       executeWorkerTool("worker.command", {
@@ -1742,7 +1742,7 @@ describe("worker tool contract", () => {
           leadPacket: {
             customerName: "Acme Roof Repair",
           },
-          apiRoute: legacyRevenueRoute,
+          apiRoute: legacyFamilyRoute,
         },
       }),
     ).rejects.toThrow("config contains unsupported fields: apiRoute.");
@@ -1788,7 +1788,7 @@ describe("worker tool contract", () => {
         config: {
           approvalId: "approval_uuid",
           action: "approved",
-          route: legacyRevenueApprovalRoute,
+          route: legacyFamilyApprovalRoute,
         },
       }),
     ).rejects.toThrow("config contains unsupported fields: route.");

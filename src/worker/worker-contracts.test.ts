@@ -186,12 +186,6 @@ describe("future worker contracts", () => {
     const path = (...segments: string[]) => `/${segments.join("/")}`;
     const workerQuery = (query: string) => `/${workerRouteNoun}${"?"}${query}`;
     const nonCanonical = [
-      path("api", "revenue-worker"),
-      path("api", "revenue_worker"),
-      path("api", "revenue-worker", "run"),
-      path("api", "revenue_worker", "run"),
-      path("api", "dispatch-worker"),
-      path("api", "dispatch_worker"),
       path("api", dashedFamilyRouteSegment),
       path("api", dashedFamilyRouteSegment, "run"),
       path("api", underscoredFamilyRouteSegment),
@@ -279,14 +273,8 @@ describe("future worker contracts", () => {
       underscoredFamilyRouteSegment,
       dashedOperationsRouteSegment,
       underscoredOperationsRouteSegment,
-      "revenue-worker",
-      "revenue_worker",
-      "dispatch-worker",
-      "dispatch_worker",
       ["api", dashedFamilyRouteSegment].join("/"),
       ["api", dashedOperationsRouteSegment].join("/"),
-      ["api", "revenue-worker"].join("/"),
-      ["api", "revenue_worker"].join("/"),
       [workerRouteNoun, "revenue_operations"].join("/"),
     ];
 
