@@ -520,7 +520,7 @@ describe("future worker contracts", () => {
     expect(roadmap).toContain("New worker families extend `/worker`");
     expect(roadmap).toContain("Revenue Completion Gate");
     expect(roadmap).toContain("Controlled send");
-    expect(roadmap).toContain("Phase 8+: Post-Systems Worker Waves");
+    expect(roadmap).toContain("Phase 9+: Packaged Worker Waves");
     expect(roadmap).toContain("Offer and Pricing Worker");
     expect(roadmap).toContain("Vertical packaged workers");
     expect(roadmap).toContain("keep operation inputs under `config`");
@@ -546,6 +546,15 @@ describe("future worker contracts", () => {
     for (const gate of gateNames) {
       expect(readiness).toContain(`| ${gate} |`);
     }
+
+    expect(readiness).toContain("Runtime requests use the generic `/worker` envelope.");
+    expect(readiness).toContain("## Generic Request Payload");
+    expect(readiness).toContain("| `command` or `view` |");
+    expect(readiness).toContain("| `worker` |");
+    expect(readiness).toContain("| `config` |");
+    expect(readiness).toContain("package-specific routes");
+    expect(readiness).toContain("Every operation is addressed through `/worker`");
+    expect(readiness).not.toMatch(/\/api\/[a-z0-9_-]+[-_]worker/);
 
     for (const role of [
       "Revenue Operations",

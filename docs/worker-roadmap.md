@@ -19,7 +19,7 @@ work from one worker family to the next.
 | Gate | Required proof |
 |---|---|
 | Contract | V1 contract doc defines API payloads, object fields, workflows, capabilities, adapters, evidence, views, evals, and security boundaries |
-| API surface | Runtime entry points use only `/core`, `/worker`, `/workflow`, `/approval`, and `/app-server`; roles, commands, views, selectors, and operation inputs stay in payloads |
+| API surface | Runtime entry points use only `/core`, `/worker`, `/workflow`, `/approval`, and `/app-server`; roles, commands, views, selectors, and operation inputs stay in request payloads, with operation config under `config` |
 | Command registry | Worker commands and generic local worker tools are registered with role, config validation, idempotency, tenant requirements, and external-execution status |
 | Object map | Canonical records exist for the worker's operating flow |
 | Workflow | Definition, seeded run, seeded step, approval policy, and evidence packet are persisted |
@@ -40,7 +40,7 @@ worker is considered launched, even when runtime slices already exist.
 | Step | Exit condition |
 |---|---|
 | Core API spine | `/core` can create and update tenants, connections, object/event/evidence rows, budget accounts, capability grants, and audit records with idempotency and tenant checks |
-| Worker envelope | `/worker` accepts role, command, view, selector, config, idempotency, and dry-run fields without role-specific HTTP paths |
+| Worker envelope | `/worker` accepts `command` or `view`, `worker`, `idempotencyKey` for mutations, and `config` for selectors, package keys, policy, and dry-run inputs without role-specific HTTP paths |
 | Workflow and approval spine | `/workflow` and `/approval` persist definitions, runs, steps, policies, decisions, and evidence refs and expose continuation hooks outside long-held workflow locks |
 | App-server controls | `/app-server` exposes generated views and dynamic controls that call `/worker`, `/workflow`, and `/approval` envelopes |
 | Security and evals | Capability checks, tenant isolation, idempotency replay rejection, adapter receipt capture, rollback evidence, and golden evals pass in CI and production smoke |
