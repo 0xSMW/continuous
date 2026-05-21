@@ -3,9 +3,15 @@
 ## User
 
 - Decide whether `www.continuoushq.com` and `www.getcontinuous.app` should serve the app; if yes, add those hostnames to `SITE_HOSTS` and rerun the domain deploy.
+- Confirm whether to enable billable DigitalOcean managed droplet backups in provisioning by default; current app-level backups are covered separately.
 
 ## Agent
 
+- Add a canonical Core worker-run start/complete primitive so worker execution policy, grants, budget, evidence, and blocked external execution are enforced in one reusable Core gate before more worker families multiply.
+- Add a queued `worker_command` workflow step kind that invokes the registered `/worker` command runtime from `/workflow steps.execute` without adding worker-specific routes.
+- Promote Growth only after the first `growth_operations campaign.draft` slice can consume Customer Experience signal refs, write blocked campaign/draft/approval/view proof, and keep publish/send/spend/tracking mutation blocked.
+- Add DigitalOcean managed-backup enablement or verification to `scripts/create-droplet.sh`, defaulting to verify-only unless billable backup enablement is explicitly approved.
+- Sanitize unexpected 500 responses across Core, Workflow, Approval, and Worker routes so unhandled internal errors do not echo raw provider, DB, or config messages to clients.
 - Continue canonical workforce/filing/payment object coverage beyond the current Revenue runtime; `payment_link.prepare` now runs through `/worker` with invoice refs in `config` and blocked provider/money movement proof, entity setup now has a `locations` table plus Core `entity.setup.record`, worker identity/state now uses Core `worker.upsert` and `worker.transition`, payroll preview now has persisted statements, lines, liabilities, traces, Core record/packet commands, blocked payment/filing drafts, and Core `external_action.record` outcome proof, and AI-ops now has a deterministic Core `ai.infer` gateway with route, redaction, budget, inference, usage, audit, and evidence proof.
 - Extend approved payroll handoffs beyond fail-closed internal application into scoped live credential checks, rollback paths, and dual-control execution workers before any submission or money movement.
 - Extend customer-signal workflows, generated views, and eval fixtures beyond the seeded SatisfactionSignal, FeedbackItem, Complaint, Testimonial, and Review primitives; `customer_experience_operations` now has a first runtime `recovery.draft` slice plus `signals` view, and the remaining gates are escalation routing, promise follow-up, review-response drafting, approved send credentials, rollback proof, and receipt capture.

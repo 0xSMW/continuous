@@ -51,6 +51,7 @@ type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 const revenueWorkerRole = "revenue_operations";
 const revenueWorkflowKey = "lead_to_cash";
 const source = "continuous.worker";
+const connectionHealthSource = "continuous.core.connection_health";
 const runUnits = 12000;
 const leadReadUnits = 1000;
 const leadClassifyUnits = 2000;
@@ -141,19 +142,22 @@ export type RevenueReadinessCheck = {
 
 export type RevenueReadinessGate = {
   key: string;
-  state: "blocked";
+  state: RevenueReadinessCheckState;
   label: string;
   reason: string;
   requiredFor: string;
+  details: JsonObject;
 };
 
 export type RevenueWorkerReadiness = {
   worker: RevenueWorkerSnapshot["worker"];
   status: RevenueReadinessCheckState;
   dryRunReady: boolean;
+  launchStatus: RevenueReadinessCheckState;
+  launchReady: boolean;
   checks: RevenueReadinessCheck[];
   blockers: RevenueReadinessCheck[];
-  liveCredentialGates: RevenueReadinessGate[];
+  launchGates: RevenueReadinessGate[];
   proof: {
     latestWorkerRunId: string | null;
     latestWorkerRunMode: string | null;
@@ -3015,33 +3019,6 @@ const revenueReadinessCapabilityKeys = [
   "payment_link.prepare",
 ] as const;
 
-const revenueLiveCredentialGates: RevenueReadinessGate[] = [
-  {
-    key: "controlled_customer_send_credentials",
-    state: "blocked",
-    label: "Controlled customer send credentials",
-    reason:
-      "Production sender and CRM managed credential references must be provisioned before external customer communication can execute.",
-    requiredFor: "live_external_send",
-  },
-  {
-    key: "controlled_send_receipt_and_rollback",
-    state: "blocked",
-    label: "Controlled-send receipt and rollback proof",
-    reason:
-      "A first controlled send needs provider receipt capture plus rollback or escalation evidence before live execution is unblocked.",
-    requiredFor: "live_external_send",
-  },
-  {
-    key: "cash_and_payment_handoff_credentials",
-    state: "blocked",
-    label: "Cash and payment handoff credentials",
-    reason:
-      "Accounting, payment, and bank credentials remain explicit handoff gates; Revenue may prepare packets but cannot move money.",
-    requiredFor: "cash_handoff",
-  },
-];
-
 function revenueReadinessCheck(input: {
   key: string;
   label: string;
@@ -3056,20 +3033,328 @@ function revenueReadinessCheck(input: {
   };
 }
 
+function revenueReadinessGate(input: {
+  key: string;
+  label: string;
+  ready?: boolean;
+  reason: string;
+  requiredFor: string;
+  details?: JsonObject;
+}): RevenueReadinessGate {
+  return {
+    key: input.key,
+    state: input.ready ? "ready" : "blocked",
+    label: input.label,
+    reason: input.reason,
+    requiredFor: input.requiredFor,
+    details: input.details ?? {},
+  };
+}
+
+function revenueExecutionCredentialGates(): RevenueReadinessGate[] {
+  return [
+    revenueReadinessGate({
+      key: "controlled_customer_send_credentials",
+      label: "Controlled customer send credentials",
+      reason:
+        "Production sender and CRM managed credential references must be provisioned before external customer communication can execute.",
+      requiredFor: "live_external_send",
+    }),
+    revenueReadinessGate({
+      key: "controlled_send_receipt_and_rollback",
+      label: "Controlled-send receipt and rollback proof",
+      reason:
+        "A first controlled send needs provider receipt capture plus rollback or escalation evidence before live execution is unblocked.",
+      requiredFor: "live_external_send",
+    }),
+    revenueReadinessGate({
+      key: "cash_and_payment_handoff_credentials",
+      label: "Cash and payment handoff credentials",
+      reason:
+        "Accounting, payment, and bank credentials remain explicit handoff gates; Revenue may prepare packets but cannot move money.",
+      requiredFor: "cash_handoff",
+    }),
+  ];
+}
+
+function sourcePollingConfig(config: JsonObject) {
+  return objectValue(config.polling ?? config.liveRead ?? config.apiRead);
+}
+
+function pollingMode(config: JsonObject) {
+  const polling = sourcePollingConfig(config);
+
+  return firstStringValue(polling.mode, polling.sourceMode, polling.strategy).toLowerCase();
+}
+
+function connectionUsesBufferedPolling(config: JsonObject) {
+  return ["buffer", "buffered", "connection_buffer"].includes(pollingMode(config));
+}
+
+function connectionReadScopes(scopes: JsonObject) {
+  return Array.from(
+    new Set([
+      ...stringList(scopes.read),
+      ...stringList(scopes.reads),
+      ...stringList(scopes.lead),
+      ...stringList(scopes.leads),
+    ]),
+  );
+}
+
+function connectionCredentialRef(config: JsonObject) {
+  const polling = sourcePollingConfig(config);
+  const auth = objectValue(config.auth);
+
+  return firstStringValue(
+    polling.credentialRef,
+    polling.accessTokenRef,
+    auth.credentialRef,
+    auth.accessTokenRef,
+    config.credentialRef,
+    config.accessTokenRef,
+  );
+}
+
+function connectionCredentialKind(ref: string) {
+  if (!ref) {
+    return null;
+  }
+
+  return ref.includes(":") ? ref.split(":")[0] : "unknown";
+}
+
+function connectionConfiguredSource(input: {
+  adapterKey: string;
+  config: JsonObject;
+}) {
+  const polling = sourcePollingConfig(input.config);
+
+  return firstStringValue(
+    polling.source,
+    stringList(input.config.sources)[0],
+    stringList(input.config.supportedSources)[0],
+    input.config.source,
+    input.adapterKey,
+  );
+}
+
+function connectionConfiguredProvider(input: {
+  adapterKey: string;
+  config: JsonObject;
+}) {
+  const polling = sourcePollingConfig(input.config);
+
+  return firstStringValue(
+    polling.provider,
+    stringList(input.config.providers)[0],
+    stringList(input.config.supportedProviders)[0],
+    input.config.provider,
+    input.adapterKey,
+  );
+}
+
+function lastLeadReadAt(config: JsonObject) {
+  return stringValue(objectValue(config.lastLeadRead).readAt);
+}
+
+function connectionHasSchedulerCursor(input: {
+  connection: typeof connections.$inferSelect;
+  config: JsonObject;
+}) {
+  return Boolean(input.connection.lastSyncAt || lastLeadReadAt(input.config));
+}
+
+function latestConnectionHealthStatus(data: JsonObject) {
+  return stringValue(objectValue(data.report).status);
+}
+
+async function revenueLeadSourceReadinessGates(input: {
+  db: Database;
+  tenantId: string;
+}): Promise<RevenueReadinessGate[]> {
+  const rows = await input.db
+    .select({
+      connection: connections,
+      adapterKey: adapters.key,
+      adapterKind: adapters.kind,
+      adapterCapabilities: adapters.capabilities,
+    })
+    .from(connections)
+    .innerJoin(adapters, eq(connections.adapterId, adapters.id))
+    .where(
+      and(
+        eq(connections.tenantId, input.tenantId),
+        eq(connections.state, "active"),
+      ),
+    )
+    .orderBy(desc(connections.updatedAt), desc(connections.createdAt));
+  const connectionSummaries = rows.flatMap((row) => {
+    const config = objectValue(row.connection.config);
+    const scopes = objectValue(row.connection.scopes);
+    const adapterCapabilities = objectValue(row.adapterCapabilities);
+    const polling = sourcePollingConfig(config);
+    const pollingEnabled = polling.enabled === true;
+    const buffered = connectionUsesBufferedPolling(config);
+    const credentialRef = connectionCredentialRef(config);
+    const sourceName = connectionConfiguredSource({
+      adapterKey: row.adapterKey,
+      config,
+    });
+    const provider = connectionConfiguredProvider({
+      adapterKey: row.adapterKey,
+      config,
+    });
+    const readScopes = connectionReadScopes(scopes);
+    const adapterReadCapabilities = stringList(adapterCapabilities.read);
+    const leadSourceConnection =
+      row.adapterKind === "lead_source" ||
+      adapterReadCapabilities.includes("lead.read") ||
+      readScopes.includes("lead") ||
+      readScopes.includes("lead.read");
+
+    if (!leadSourceConnection) {
+      return [];
+    }
+
+    const pollable =
+      pollingEnabled &&
+      Boolean(sourceName && provider) &&
+      readScopes.length > 0 &&
+      (buffered || credentialRef.toLowerCase().startsWith("env:"));
+
+    return {
+      id: row.connection.id,
+      name: row.connection.name,
+      adapterKey: row.adapterKey,
+      adapterKind: row.adapterKind,
+      source: sourceName || null,
+      provider: provider || null,
+      pollingEnabled,
+      pollingMode: buffered ? "connection_buffer" : pollingMode(config) || null,
+      pollable,
+      schedulerCursor: connectionHasSchedulerCursor({
+        connection: row.connection,
+        config,
+      }),
+      lastSyncAt: row.connection.lastSyncAt?.toISOString() ?? null,
+      lastLeadReadAt: lastLeadReadAt(config) || null,
+      readScopes,
+      credentialRefKind: connectionCredentialKind(credentialRef),
+    };
+  });
+  const pollableConnectionIds = connectionSummaries
+    .filter((connection) => connection.pollable)
+    .map((connection) => connection.id);
+  const latestHealth = new Map<string, JsonObject>();
+
+  if (pollableConnectionIds.length > 0) {
+    const healthRows = await input.db
+      .select({
+        targetId: auditEvents.targetId,
+        data: auditEvents.data,
+      })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.tenantId, input.tenantId),
+          eq(auditEvents.source, connectionHealthSource),
+          eq(auditEvents.targetType, "connection"),
+          inArray(auditEvents.targetId, pollableConnectionIds),
+        ),
+      )
+      .orderBy(desc(auditEvents.createdAt), desc(auditEvents.id));
+
+    for (const row of healthRows) {
+      if (row.targetId && !latestHealth.has(row.targetId)) {
+        latestHealth.set(row.targetId, objectValue(row.data));
+      }
+    }
+  }
+
+  const pollableConnections = connectionSummaries.filter((connection) => connection.pollable);
+  const healthReadyConnections = pollableConnections.filter((connection) => {
+    const status = latestConnectionHealthStatus(latestHealth.get(connection.id) ?? {});
+
+    return status === "ready";
+  });
+  const schedulerReadyConnections = pollableConnections.filter((connection) => connection.schedulerCursor);
+
+  return [
+    revenueReadinessGate({
+      key: "lead_source_connection",
+      label: "Live lead source connection configured",
+      ready: pollableConnections.length > 0,
+      reason:
+        pollableConnections.length > 0
+          ? "At least one active lead-source connection is pollable through a read-only source-reader shape."
+          : "Provision an active inbox or CRM lead-source connection with source, provider, read scopes, and an env-backed credential or buffered polling mode.",
+      requiredFor: "live_source_coverage",
+      details: {
+        activeLeadSourceConnections: connectionSummaries.length,
+        pollableConnections: pollableConnections.length,
+        connections: connectionSummaries,
+      },
+    }),
+    revenueReadinessGate({
+      key: "lead_source_connection_health",
+      label: "Lead source connection health recorded",
+      ready: healthReadyConnections.length > 0,
+      reason:
+        healthReadyConnections.length > 0
+          ? "At least one pollable lead-source connection has a ready connection.health.record report."
+          : "Run /core command=connection.health.record for a pollable lead-source connection and keep the report ready before customer-data launch.",
+      requiredFor: "live_source_coverage",
+      details: {
+        readyConnectionIds: healthReadyConnections.map((connection) => connection.id),
+        latestHealth: Object.fromEntries(
+          pollableConnections.map((connection) => [
+            connection.id,
+            latestConnectionHealthStatus(latestHealth.get(connection.id) ?? {}) || null,
+          ]),
+        ),
+      },
+    }),
+    revenueReadinessGate({
+      key: "scheduler_lead_read_cursor",
+      label: "Scheduler lead-read cursor proof",
+      ready: schedulerReadyConnections.length > 0,
+      reason:
+        schedulerReadyConnections.length > 0
+          ? "At least one pollable lead-source connection has scheduler cursor proof from connection-backed lead.read."
+          : "Let the scheduler complete connection-backed lead.read and write lastLeadRead/lastSyncAt proof before customer-data launch.",
+      requiredFor: "live_source_coverage",
+      details: {
+        readyConnectionIds: schedulerReadyConnections.map((connection) => connection.id),
+        pollableConnections: pollableConnections.map((connection) => ({
+          id: connection.id,
+          lastSyncAt: connection.lastSyncAt,
+          lastLeadReadAt: connection.lastLeadReadAt,
+        })),
+      },
+    }),
+  ];
+}
+
 function revenueReadinessFromChecks(input: {
   worker: RevenueWorkerSnapshot["worker"];
   checks: RevenueReadinessCheck[];
+  launchGates?: RevenueReadinessGate[];
   proof?: Partial<RevenueWorkerReadiness["proof"]>;
 }) {
   const blockers = input.checks.filter((check) => check.state === "blocked");
+  const launchGates = input.launchGates ?? revenueExecutionCredentialGates();
+  const launchBlockers = launchGates.filter((gate) => gate.state === "blocked");
 
   return {
     worker: input.worker,
     status: blockers.length === 0 ? "ready" : "blocked",
     dryRunReady: blockers.length === 0,
+    launchStatus: launchBlockers.length === 0 && blockers.length === 0 ? "ready" : "blocked",
+    launchReady: blockers.length === 0 && launchBlockers.length === 0,
     checks: input.checks,
     blockers,
-    liveCredentialGates: revenueLiveCredentialGates,
+    launchGates,
     proof: {
       latestWorkerRunId: input.proof?.latestWorkerRunId ?? null,
       latestWorkerRunMode: input.proof?.latestWorkerRunMode ?? null,
@@ -3282,6 +3567,10 @@ export async function getRevenueReadiness(input: {
     paymentReviewViews[0]?.id ||
     null;
   const latestRunMode = latestDryRun?.mode ?? null;
+  const leadSourceGates = await revenueLeadSourceReadinessGates({
+    db,
+    tenantId: workerRow.tenantId,
+  });
   const allocationCount = allocationRows[0]?.value ?? 0;
   const allocationUnits = numberValue(allocationRows[0]?.units);
   const budgetReady = Boolean(
@@ -3368,6 +3657,10 @@ export async function getRevenueReadiness(input: {
           latestWorkerRunMode: latestRunMode,
         },
       }),
+    ],
+    launchGates: [
+      ...leadSourceGates,
+      ...revenueExecutionCredentialGates(),
     ],
     proof: {
       latestWorkerRunId: latestDryRun?.id ?? null,

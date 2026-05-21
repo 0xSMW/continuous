@@ -511,6 +511,7 @@ describe("future worker contracts", () => {
     expect(readiness).toContain(
       "Production connector credentials, live provider payment-link creation, money movement, and live provider egress remain blocked; scheduler polling needs real connection coverage",
     );
+    expect(readiness).toContain("`launchStatus`, `launchReady`, and generic launch gates");
     expect(readiness).toContain("Every promotion must update this matrix, the Proof column");
     expect(readiness).toContain("deploy smoke in `.github/workflows/deploy.yml`");
   });

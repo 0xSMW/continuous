@@ -30,8 +30,8 @@ The `worker` object is a strict selector; it accepts only `role`, `id`, and
 shape.
 
 Read views use the same route with `view`, `worker`, and `config` as the only
-top-level fields. `view: "readiness"` reports dry-run launch checks, latest
-proof refs, and live credential gates without adding a Revenue-specific URL.
+top-level fields. `view: "readiness"` reports dry-run checks, latest proof refs,
+and generic launch gates without adding a Revenue-specific URL.
 
 ```json
 {
@@ -96,8 +96,9 @@ Read inbound lead source records before running the worker:
 ```
 
 The command returns `result.selectors[]`; pass one selector's
-`intake.source` and `intake.sourceEventId` to `command=lead.classify`,
-`command=response.draft`, `command=quote.prepare`, or the full `command=run`:
+`intake.source` and `intake.sourceEventId` to `command: "lead.classify"`,
+`command: "response.draft"`, `command: "quote.prepare"`, or the full
+`command: "run"`:
 
 ```json
 {
@@ -292,7 +293,7 @@ and local toolbox aliases resolve to the same handlers and validation rules.
 |---|---|---|---|---|---|
 | `view: "snapshot"` payload | `worker.view` | `worker.role`, `config` | None | Read-only | Blocked |
 | `view: "approvals"` payload | `worker.view` | `worker.role`, optional `config.state` | None | Read-only | Blocked |
-| `view: "readiness"` payload | `worker.view` | `worker.role`, empty `config` | None | Read-only Revenue dry-run proof, launch blockers, live credential gates, and latest proof refs | Blocked |
+| `view: "readiness"` payload | `worker.view` | `worker.role`, empty `config` | None | Read-only Revenue dry-run proof, launch blockers, launch gates, and latest proof refs | Blocked |
 | `lead.read` | `worker.command` | `config.source`, direct `config.records[]` / `config.record`, or `config.reader` referencing an active connection | Required | Core lead object/event/evidence, worker run, budget/usage, connection cursor proof, audit | Blocked |
 | `lead.classify` | `worker.command` | One of `config.intake`, `config.leadPacket`, or `config.lead` | Required | Classification worker run, budget/usage, inference, trace evidence, audit | Blocked |
 | `response.draft` | `worker.command` | One of `config.intake`, `config.leadPacket`, or `config.lead` | Required | Draft worker run, budget/usage, inference, draft evidence, audit | Blocked |
@@ -309,7 +310,7 @@ and local toolbox aliases resolve to the same handlers and validation rules.
 `config` is the command payload envelope. The route does not encode a worker
 family, operation target, customer, source system, or draft type in the URL.
 
-For `command=lead.read`, use:
+For `command: "lead.read"`, use:
 
 | Field | Required | Notes |
 |---|---:|---|
@@ -348,13 +349,13 @@ no Core intake selector is present.
 `config.externalSend=true` or `config.leadPacket.externalSend=true` is rejected
 for `run`, `quote.prepare`, and split draft/classification commands. Approved
 external-send continuation is only accepted as `config.execution` on
-`command=continue`, after approval, and only with scoped connection proof,
+`command: "continue"`, after approval, and only with scoped connection proof,
 managed credential reference, provider receipt, rollback strategy, and
 escalation owner.
 
 ## Run Output
 
-`POST /worker` with `command=lead.read` returns a generic command response
+`POST /worker` with `command: "lead.read"` returns a generic command response
 whose `result.output.selectors[]` contains:
 
 | Output | Required behavior |
@@ -365,7 +366,7 @@ whose `result.output.selectors[]` contains:
 | `objectId` | Core lead object row persisted from the source record |
 | `eventId` | Core `lead.received` event row persisted or reused for the source record |
 | `evidenceId` | Source snapshot evidence row |
-| `intake` | Minimal `{source, sourceEventId}` payload for a later `command=run` |
+| `intake` | Minimal `{source, sourceEventId}` payload for a later `command: "run"` |
 
 When records are read from a connection, `result.output.connectionId` and
 `result.output.cursor` are set. Buffered reads report `sourceMode:
@@ -375,7 +376,7 @@ receives `lastLeadRead` metadata with the worker run id, source mode, cursor,
 optional provider cursor, read count, timestamp, redacted polling receipt, and
 blocked external-execution posture.
 
-`POST /worker` with `command=quote.prepare` or `command=run` returns a generic
+`POST /worker` with `command: "quote.prepare"` or `command: "run"` returns a generic
 command response whose `result.output` contains worker-derived data:
 
 | Output | Required behavior |
@@ -391,7 +392,7 @@ command response whose `result.output` contains worker-derived data:
 | `externalSend` | `false` for run and draft outputs; approved continuation may become `true` only when `config.execution` records a controlled-send receipt |
 | `workflowRunId` | Lead-to-cash workflow run tied to the worker run |
 
-`POST /worker` with `command=payment_link.prepare` returns a generic command
+`POST /worker` with `command: "payment_link.prepare"` returns a generic command
 response whose `result.output` contains a blocked payment-link packet:
 
 | Output | Required behavior |
@@ -414,9 +415,11 @@ response whose `result.output` contains a blocked payment-link packet:
 |---|---|
 | `status` | `ready` only when worker registration, capability grants, budget, workflow definition, latest dry-run proof, quote approval view, and latest payment-review view checks pass |
 | `dryRunReady` | `true` when the persisted dry-run gates pass; live external execution can still be blocked |
+| `launchStatus` | `ready` only when dry-run checks and every launch gate pass |
+| `launchReady` | `true` only when Revenue is ready for customer-data launch, not merely dry-run operation |
 | `checks[]` | Named checks with `ready` or `blocked` state plus evidence details |
 | `blockers[]` | The subset of failed dry-run checks |
-| `liveCredentialGates[]` | Explicit blockers for production sender, receipt/rollback, and cash/payment handoff credentials until those gates are provisioned |
+| `launchGates[]` | Explicit source-coverage, connection-health, scheduler-cursor, production sender, receipt/rollback, and cash/payment handoff gates until those gates are proven |
 | `proof` | Latest worker run, workflow definition, quote review view, payment review view, and adapter receipt evidence ids |
 
 ## Preconditions

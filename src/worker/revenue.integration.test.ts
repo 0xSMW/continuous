@@ -2374,6 +2374,9 @@ maybeDescribe("Revenue Worker integration eval", () => {
   it("upserts adapters and pollable read-only connections through headless core primitives", async () => {
     const runId = randomUUID();
     const adapterKey = `google_workspace_ci_${runId}`;
+    const leadSourceCredentialEnv = "GOOGLE_WORKSPACE_CONNECTOR_REF";
+    const leadSourceCredentialRef = `env:${leadSourceCredentialEnv}`;
+    const fixtureCredentialValue = "configured-fixture";
     const adapterResult = await upsertCoreAdapter({
       operatorEmail: "owner@continuoushq.com",
       tenantSlug: "continuous-demo",
@@ -2409,7 +2412,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
           enabled: true,
           source: "google_workspace_inbox",
           provider: "google_workspace",
-          credentialRef: "env:GOOGLE_WORKSPACE_TOKEN",
+          credentialRef: leadSourceCredentialRef,
         },
         externalExecution: "blocked",
       },
@@ -2454,7 +2457,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
           enabled: true,
           source: "google_workspace_inbox",
           provider: "google_workspace",
-          credentialRef: "env:GOOGLE_WORKSPACE_TOKEN",
+          credentialRef: leadSourceCredentialRef,
         },
         externalExecution: "blocked",
       },
@@ -2475,7 +2478,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
         "polling",
       ],
       env: {
-        GOOGLE_WORKSPACE_TOKEN: "raw-ci-token-value",
+        [leadSourceCredentialEnv]: fixtureCredentialValue,
       },
       db,
     });
@@ -2514,7 +2517,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(connection?.state).toBe("active");
     expect(connection?.adapterId).toBe(adapterResult.adapterId);
     expect(objectValue(connection?.scopes).reads).toEqual(["lead.read"]);
-    expect(polling.credentialRef).toBe("env:GOOGLE_WORKSPACE_TOKEN");
+    expect(polling.credentialRef).toBe(leadSourceCredentialRef);
     expect(connectionReplay.created).toBe(false);
     expect(connectionReplay.connectionId).toBe(connectionResult.connectionId);
     expect(healthResult.created).toBe(true);
@@ -2526,7 +2529,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
       credentialRefKind: "env",
       envConfigured: true,
     });
-    expect(JSON.stringify(healthReport)).not.toContain("raw-ci-token-value");
+    expect(JSON.stringify(healthReport)).not.toContain(fixtureCredentialValue);
     expect(healthReplay.created).toBe(false);
     expect(healthReplay.status).toBe("ready");
 
@@ -2603,7 +2606,7 @@ maybeDescribe("Revenue Worker integration eval", () => {
         key: `${adapterKey}_secret`,
         name: "Unsafe adapter",
         kind: "inbox",
-        auth: "env:GOOGLE_WORKSPACE_TOKEN",
+        auth: leadSourceCredentialRef,
         db,
       }),
     ).rejects.toMatchObject({
@@ -6425,8 +6428,8 @@ maybeDescribe("Revenue Worker integration eval", () => {
     const checks = Array.isArray(readinessData.checks)
       ? readinessData.checks.map((check) => objectValue(check))
       : [];
-    const liveCredentialGates = Array.isArray(readinessData.liveCredentialGates)
-      ? readinessData.liveCredentialGates.map((gate) => objectValue(gate))
+    const launchGates = Array.isArray(readinessData.launchGates)
+      ? readinessData.launchGates.map((gate) => objectValue(gate))
       : [];
     const readinessProof = objectValue(readinessData.proof);
 
@@ -6434,12 +6437,22 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(readiness.data.view).toBe("readiness");
     expect(readinessData.status).toBe("ready");
     expect(readinessData.dryRunReady).toBe(true);
+    expect(readinessData.launchStatus).toBe("blocked");
+    expect(readinessData.launchReady).toBe(false);
     expect(checks.find((check) => check.key === "latest_dry_run_proof")?.state).toBe("ready");
     expect(checks.find((check) => check.key === "quote_approval_view")?.state).toBe("ready");
     expect(readinessProof.latestWorkerRunId).toBe(quoteResult.workerRunId);
     expect(readinessProof.quoteApprovalViewId).toBe(quoteResult.quoteApprovalViewId);
     expect(readinessProof.adapterReceiptEvidenceId).toBe(quoteResult.adapterReceiptEvidenceId);
-    expect(liveCredentialGates.every((gate) => gate.state === "blocked")).toBe(true);
+    expect(launchGates.every((gate) => gate.state === "blocked")).toBe(true);
+    expect(launchGates.map((gate) => gate.key)).toEqual([
+      "lead_source_connection",
+      "lead_source_connection_health",
+      "scheduler_lead_read_cursor",
+      "controlled_customer_send_credentials",
+      "controlled_send_receipt_and_rollback",
+      "cash_and_payment_handoff_credentials",
+    ]);
 
     const paymentLink = await executeWorkerCommand({
       command: "payment_link.prepare",
@@ -6948,6 +6961,12 @@ maybeDescribe("Revenue Worker integration eval", () => {
           sources: ["google_workspace_inbox"],
           providers: ["google_workspace"],
           readerKinds: ["inbox"],
+          polling: {
+            enabled: true,
+            mode: "connection_buffer",
+            source: "google_workspace_inbox",
+            provider: "google_workspace",
+          },
         },
       })
       .returning();
@@ -6958,6 +6977,15 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .set({
         config: {
           executable: false,
+          sources: ["google_workspace_inbox"],
+          providers: ["google_workspace"],
+          readerKinds: ["inbox"],
+          polling: {
+            enabled: true,
+            mode: "connection_buffer",
+            source: "google_workspace_inbox",
+            provider: "google_workspace",
+          },
           inbox: {
             messages: [
               {
@@ -7020,6 +7048,38 @@ maybeDescribe("Revenue Worker integration eval", () => {
       cursor: bufferedMessageId,
       externalExecution: "blocked",
     });
+
+    const readinessHealth = await recordCoreConnectionHealth({
+      operatorEmail: "owner@continuoushq.com",
+      tenantSlug: "continuous-demo",
+      idempotencyKey: `ci-worker-buffered-readiness-health-${runId}`,
+      connectionId: connection.id,
+      env: {},
+      db,
+    });
+    const launchReadiness = await executeWorkerView({
+      view: "readiness",
+      target: {
+        role: "revenue_operations",
+        tenantSlug: "continuous-demo",
+      },
+      operatorEmail: "owner@continuoushq.com",
+    });
+    const launchReadinessData = objectValue(launchReadiness.data.readiness);
+    const launchGates = Array.isArray(launchReadinessData.launchGates)
+      ? launchReadinessData.launchGates.map((gate) => objectValue(gate))
+      : [];
+
+    expect(readinessHealth.status).toBe("ready");
+    expect(launchReadinessData.status).toBe("ready");
+    expect(launchReadinessData.dryRunReady).toBe(true);
+    expect(launchReadinessData.launchStatus).toBe("blocked");
+    expect(launchReadinessData.launchReady).toBe(false);
+    expect(launchGates.find((gate) => gate.key === "lead_source_connection")?.state).toBe("ready");
+    expect(launchGates.find((gate) => gate.key === "lead_source_connection_health")?.state).toBe("ready");
+    expect(launchGates.find((gate) => gate.key === "scheduler_lead_read_cursor")?.state).toBe("ready");
+    expect(launchGates.find((gate) => gate.key === "controlled_customer_send_credentials")?.state).toBe("blocked");
+    expect(JSON.stringify(launchReadinessData)).not.toContain("configured-fixture");
 
     await expect(
       executeWorkerCommand({

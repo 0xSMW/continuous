@@ -1409,7 +1409,7 @@ const revenueDefinition: WorkerDefinition = {
     },
     readiness: {
       name: "readiness",
-      description: "Read Revenue dry-run proof, launch blockers, and live credential gates.",
+      description: "Read Revenue dry-run proof, launch blockers, launch gates, and latest proof refs.",
       configSchema: emptyViewConfig,
       async handle(context) {
         const result = await getRevenueReadinessSafe({

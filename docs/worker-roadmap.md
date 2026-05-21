@@ -34,7 +34,7 @@ work from one worker family to the next.
 | Approval execution | Approval decision uses shared approval service, advances the allowed workflow state, and approved continuation can record controlled-send receipts from `config.execution` without changing the `/worker` envelope |
 | Adapter hardening | Reconciliation writes audit/evidence records and retry/review system tasks; due dry-run retries execute with blocked receipts, live-credential readiness checks, and rollback plans; production provider execution remains gated |
 | Payment-link preparation | `payment_link.prepare` writes a blocked payment packet, payment instruction when possible, owner approval, generated review view, dry-run adapter receipt, workflow, budget, and audit proof from persisted invoice refs |
-| Readiness view | `POST /worker` with `view: "readiness"` reports the worker, capability, budget, workflow, dry-run receipt, quote-review view, payment-review view when payment-link proof is latest, and live credential gates |
+| Readiness view | `POST /worker` with `view: "readiness"` reports the worker, capability, budget, workflow, dry-run receipt, quote-review view, payment-review view when payment-link proof is latest, and generic launch gates |
 | Eval harness | CI-enforced lead-to-quote cases prove classification, approval, budget, adapter receipt, and idempotency replay |
 | First controlled send | Approved external message sends through adapter with receipt and rollback/escalation evidence |
 
@@ -102,10 +102,10 @@ calendar/send credentials.
 
 ## Phase 4: Finance Worker
 
-Runtime slices are registered as `/worker command=invoice.prepare`,
-`/worker command=ar_followup.draft`, `/worker command=cash_forecast.generate`,
-and `/worker command=payment_draft.prepare` for
-`worker.role=finance_operations`.
+Runtime slices are registered on `POST /worker` with
+`command: "invoice.prepare"`, `command: "ar_followup.draft"`,
+`command: "cash_forecast.generate"`, and `command: "payment_draft.prepare"`
+for `worker.role: "finance_operations"`.
 Invoice preparation consumes Dispatch closeout refs from `config.sourceRefs`,
 creates an invoice draft, cash packet, approval request, and accounting dry-run
 receipt. AR follow-up consumes persisted invoice refs from `config.invoiceId`,

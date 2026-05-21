@@ -118,6 +118,8 @@
 | Added payroll approval handoff | Shared approval decisions for `payroll_preview_approval` now transition the payroll run plus funding, tax, filing, packet, audit, and evidence handoff records while keeping external execution, submission, and money movement blocked |
 | Added Core AI gateway | `POST /core` now supports `command=ai.infer`, selecting an active model route, redacting configured request fields, reserving and charging budget, storing replay fingerprints, and writing inference, usage, event, audit, and evidence proof while live provider execution remains blocked |
 | Hardened Core AI replay | `ai.infer` now stores a replay fingerprint over route selector, budget, actor/task/object/capability refs, raw input, redaction, and evaluation config, and rejects idempotency-key reuse with changed AI input |
+| Clarified Revenue readiness semantics | `/worker` `view=readiness` now separates dry-run readiness from `launchReady`, and returns generic `launchGates` for live source coverage, connection health, scheduler cursor proof, controlled send credentials, receipt/rollback, and cash/payment handoff proof |
+| Fixed Core worker command guard | `/core` now permits the canonical `worker.upsert` and `worker.transition` command namespace while still rejecting route-shaped and family-worker operation names |
 | Agent build path uses app-server protocol tooling plus Next.js MCP | The installed Codex app-server CLI exposes protocol generation/help commands; `.mcp.json` keeps the Next.js 16 MCP bridge for route/runtime diagnostics |
 | Added app-server worker command control | `continuous.worker.schema` exposes the registry, and `continuous.worker.command` invokes registered worker commands through the same `command`, `worker`, `idempotencyKey`, and `config` envelope without loading production tokens |
 | Added app-server worker view control | `continuous.worker.view` reads registered worker views through the same `view`, `worker`, and `config` envelope as local worker tooling, so app-server can inspect snapshots and readiness without worker-family URLs |
@@ -353,8 +355,8 @@ workflow.
 
 Revenue Operations now exposes a generic `/worker` `view: "readiness"` read
 surface. It reports worker registration, capability, budget, workflow, latest
-dry-run proof, quote-review view refs, and live credential gates without adding
-Revenue-specific URLs or app-server tool names.
+dry-run proof, quote-review view refs, launch status, and source/credential
+launch gates without adding Revenue-specific URLs or app-server tool names.
 
 Offer and Pricing is now a runtime worker family, not just a planned catalog
 candidate. Its first slice is `worker.role=offer_pricing_operations`,

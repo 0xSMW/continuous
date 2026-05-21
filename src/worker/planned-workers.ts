@@ -607,7 +607,7 @@ export const workerContracts: PlannedWorkerContractMetadata[] = [
         role: "revenue_operations",
         name: "readiness",
         toolAlias: "worker.view",
-        description: "Read Revenue dry-run proof checks, latest launch refs, and live credential gates.",
+        description: "Read Revenue dry-run proof checks, latest launch refs, and launch gates.",
         idempotency: "none",
         sideEffects: "none",
         externalExecution: "blocked",
