@@ -4684,10 +4684,13 @@ maybeDescribe("Revenue Worker integration eval", () => {
         },
         db,
       }),
-    ).rejects.toMatchObject({ code: "worker_continuation_idempotency_conflict" });
+    ).rejects.toMatchObject({ code: "core_command_idempotency_conflict" });
 
     const storedContinuationData = objectValue(continuationRun?.data);
     const storedContinuationInput = objectValue(storedContinuationData.input);
+    const storedContinuationRequest = objectValue(storedContinuationInput.request);
+    delete storedContinuationRequest.inputHash;
+    storedContinuationInput.request = storedContinuationRequest;
     delete storedContinuationInput.inputHash;
     await db
       .update(workerRuns)
