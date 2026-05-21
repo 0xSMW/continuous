@@ -447,6 +447,7 @@ describe("future worker contracts", () => {
     const compose = read("docker-compose.yml");
     const deployScript = read("scripts/deploy.sh");
     const deployWorkflow = read(".github/workflows/deploy.yml");
+    const productionSmokeScript = read("scripts/smoke-production-on-host.sh");
     const readinessScript = read("scripts/check-production-readiness-on-host.sh");
     const observabilityScript = read("scripts/check-observability-on-host.sh");
     const attestationScript = read("scripts/attest-control-plane-on-host.sh");
@@ -466,6 +467,7 @@ describe("future worker contracts", () => {
     expect(deployment).toContain("CONTROL_PLANE_CREDENTIAL_REVOCATION_AUDIT_ID");
     expect(deployment).toContain("CONTROL_PLANE_SESSION_REVIEW_VIEW_ID");
     expect(deployment).toContain("control-plane auth requires a catalog");
+    expect(productionSmokeScript).toContain("</dev/null");
     expect(compose).not.toContain("REVENUE_WORKER_");
     expect(readinessScript).toContain("TOKEN_ROTATION_ATTESTATION_ID");
     expect(readinessScript).toContain("CONTROL_PLANE_AUTH_AUDIT_ATTESTED_AT");

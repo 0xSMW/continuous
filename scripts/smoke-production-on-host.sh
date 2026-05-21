@@ -92,7 +92,8 @@ version_num="$(
   docker compose exec -T db psql -At -v ON_ERROR_STOP=1 \
     -U "$POSTGRES_USER" \
     -d "$POSTGRES_DB" \
-    -c "select current_setting('server_version_num');"
+    -c "select current_setting('server_version_num');" \
+    </dev/null
 )"
 actual_major="$((version_num / 10000))"
 
