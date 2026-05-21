@@ -1575,6 +1575,37 @@ async function seed() {
     .onConflictDoNothing();
 
   await db
+    .update(objects)
+    .set({
+      state: "approval_required",
+      data: {
+        total_cents: 24900,
+        totalCents: 24900,
+        currency: "USD",
+        policy: "standard_inspection",
+        externalSend: false,
+        priceBookId: ids.priceBookObject,
+        quoteLines: [
+          {
+            quoteLineId: ids.quoteLineObject,
+            offerObjectId: ids.offerObject,
+            priceBookId: ids.priceBookObject,
+            marginRuleId: ids.marginRuleObject,
+            discountPolicyId: ids.discountPolicyObject,
+            description: "Roof leak inspection",
+            quantity: 1,
+            unitPriceCents: 24900,
+            totalCents: 24900,
+            costBasisCents: 14900,
+            discountPercent: 0,
+          },
+        ],
+      },
+      updatedAt: now,
+    })
+    .where(eq(objects.id, ids.quoteObject));
+
+  await db
     .insert(legalEntities)
     .values({
       id: ids.legalEntity,
