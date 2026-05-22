@@ -1354,6 +1354,7 @@ async function seed() {
   const now = new Date();
   const nextMonth = new Date(now);
   nextMonth.setMonth(nextMonth.getMonth() + 1);
+  const rulePackEffectiveAt = new Date("2026-01-01T00:00:00.000Z");
   const idFor = (key: string) => {
     const id = ids[key as keyof typeof ids];
 
@@ -2105,7 +2106,7 @@ async function seed() {
       version: "0.1.0",
       sourceRefs: { placeholder: "authoritative_sources_required_before_execution" },
       rules: { filing_941: "draft_only", deposits: "prepare_only" },
-      effectiveAt: now,
+      effectiveAt: rulePackEffectiveAt,
     })
     .onConflictDoNothing();
 
