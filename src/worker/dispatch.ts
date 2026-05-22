@@ -282,6 +282,47 @@ function getWorkflowStepIds(data: JsonObject) {
   return outputSteps.length > 0 ? outputSteps : stringList(data.workflowStepIds);
 }
 
+async function persistSettledDispatchOutput(
+  db: Database,
+  workerRunId: string,
+  output: JsonObject,
+  completionBudget: JsonObject,
+) {
+  const settledReservationId =
+    optionalString(completionBudget.reservationId) ??
+    optionalString(output.budgetReservationId) ??
+    optionalString(output.reservationId) ??
+    null;
+  const settledUsageEventId = optionalString(completionBudget.usageEventId) ?? optionalString(output.usageEventId) ?? null;
+  const settledOutput = {
+    ...output,
+    budgetReservationId: settledReservationId,
+    reservationId: settledReservationId,
+    usageEventId: settledUsageEventId,
+  } satisfies JsonObject;
+  const [completedRun] = await db
+    .select({ data: workerRuns.data })
+    .from(workerRuns)
+    .where(eq(workerRuns.id, workerRunId))
+    .limit(1);
+
+  await db
+    .update(workerRuns)
+    .set({
+      data: {
+        ...objectValue(completedRun?.data),
+        output: settledOutput,
+        budgetReservationId: settledReservationId,
+        reservationId: settledReservationId,
+        usageEventId: settledUsageEventId,
+      },
+      updatedAt: new Date(),
+    })
+    .where(eq(workerRuns.id, workerRunId));
+
+  return settledOutput;
+}
+
 function emptySnapshot(): DispatchWorkerSnapshot {
   return {
     worker: null,
@@ -873,7 +914,12 @@ async function replayedCustomerUpdateDraft(
     idempotencyKey: run.idempotencyKey,
     workerRunId: run.id,
     taskId: run.taskId,
-    eventId: run.eventId ?? optionalString(data.eventId) ?? null,
+    eventId:
+      optionalString(output.eventId) ??
+      optionalString(data.businessEventId) ??
+      run.eventId ??
+      optionalString(data.eventId) ??
+      null,
     customerUpdateObjectId: optionalString(output.customerUpdateObjectId) ?? null,
     approvalRequestId: optionalString(data.approvalRequestId) ?? optionalString(output.approvalRequestId) ?? null,
     evidenceId: optionalString(data.evidenceId) ?? optionalString(output.evidenceId) ?? null,
@@ -2225,39 +2271,7 @@ export async function proposeDispatchSchedule(input: {
     output: JsonObject,
     completionBudget: JsonObject,
   ) => {
-    const settledReservationId =
-      optionalString(completionBudget.reservationId) ??
-      optionalString(output.budgetReservationId) ??
-      optionalString(output.reservationId) ??
-      null;
-    const settledUsageEventId = optionalString(completionBudget.usageEventId) ?? optionalString(output.usageEventId) ?? null;
-    const settledOutput = {
-      ...output,
-      budgetReservationId: settledReservationId,
-      reservationId: settledReservationId,
-      usageEventId: settledUsageEventId,
-    } satisfies JsonObject;
-    const [completedRun] = await db
-      .select({ data: workerRuns.data })
-      .from(workerRuns)
-      .where(eq(workerRuns.id, workerRunId))
-      .limit(1);
-
-    await db
-      .update(workerRuns)
-      .set({
-        data: {
-          ...objectValue(completedRun?.data),
-          output: settledOutput,
-          budgetReservationId: settledReservationId,
-          reservationId: settledReservationId,
-          usageEventId: settledUsageEventId,
-        },
-        updatedAt: new Date(),
-      })
-      .where(eq(workerRuns.id, workerRunId));
-
-    return settledOutput;
+    return persistSettledDispatchOutput(db, workerRunId, output, completionBudget);
   };
 
   const settleScheduleCoreRun = async (workerRunId: string, output: JsonObject) => {
@@ -2380,10 +2394,67 @@ export async function draftDispatchCustomerUpdate(input: {
     updateKind: handoff.updateKind,
   });
   const now = new Date();
+  const coreRun = await startCoreWorkerRun({
+    operatorEmail: input.operatorEmail,
+    tenantSlug: context.worker.tenantSlug,
+    idempotencyKey: input.idempotencyKey,
+    worker: {
+      id: context.worker.id,
+      role: dispatchWorkerRole,
+    },
+    command: "customer_update.draft",
+    mode: "simulation",
+    capabilityId: context.capabilityId,
+    budgetAccountId: context.budgetAccountId,
+    units: customerUpdateDraftUnits,
+    input: {
+      command: "customer_update.draft",
+      inputHash,
+      config,
+      messageContext,
+      sourceRefs: handoff.sourceRefs,
+      jobObjectId: handoff.jobObject.id,
+      customerObjectId: handoff.customerObject?.id ?? null,
+      quoteObjectId: handoff.quoteObject?.id ?? null,
+      appointmentObjectId: handoff.appointmentObject?.id ?? null,
+      updateKind: handoff.updateKind,
+      channel,
+    },
+    policy: {
+      ...objectValue(config.policy),
+      externalExecution: "blocked",
+      externalMutation: false,
+      externalSend: false,
+      customerSend: "blocked",
+    },
+    evidence: {
+      command: "customer_update.draft",
+      jobObjectId: handoff.jobObject.id,
+      customerObjectId: handoff.customerObject?.id ?? null,
+      quoteObjectId: handoff.quoteObject?.id ?? null,
+      appointmentObjectId: handoff.appointmentObject?.id ?? null,
+      updateKind: handoff.updateKind,
+      channel,
+      externalExecution: "blocked",
+      externalMutation: false,
+      externalSend: false,
+    },
+    db,
+  });
+  const coreBudget = objectValue(coreRun.budget);
+  const coreReservationId = optionalString(coreBudget.reservationId);
+
+  if (!coreReservationId) {
+    throw new PlatformUnavailableError(
+      "worker_run_budget_reservation_missing",
+      "Core worker.run.start did not return a Dispatch customer update budget reservation.",
+      409,
+    );
+  }
 
   const result = await db.transaction(async (tx) => {
     await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${dispatchSource}:${input.idempotencyKey}`}))`,
+      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${coreWorkerRunSource}:dispatch:customer_update.draft:${input.idempotencyKey}`}))`,
     );
 
     const [existingRun] = await tx
@@ -2392,24 +2463,32 @@ export async function draftDispatchCustomerUpdate(input: {
       .where(
         and(
           eq(workerRuns.tenantId, context.worker.tenantId),
-          eq(workerRuns.source, dispatchSource),
-          eq(workerRuns.idempotencyKey, input.idempotencyKey),
+          eq(workerRuns.id, coreRun.workerRunId),
         ),
       )
       .limit(1);
 
-    if (existingRun) {
-      const existingInput = objectValue(objectValue(existingRun.data).input);
-      const existingHash = optionalString(existingInput.inputHash);
+    if (!existingRun) {
+      throw new PlatformUnavailableError(
+        "worker_run_missing",
+        "Core worker.run.start did not return a persisted Dispatch customer update worker run.",
+        409,
+      );
+    }
 
-      if (existingHash && existingHash !== inputHash) {
-        throw new PlatformUnavailableError(
-          "worker_idempotency_conflict",
-          "A Dispatch customer update draft already exists for this idempotency key with different input.",
-          409,
-        );
-      }
+    const existingInput = objectValue(objectValue(existingRun.data).input);
+    const existingRequest = objectValue(existingInput.request);
+    const existingHash = optionalString(existingRequest.inputHash) ?? optionalString(existingInput.inputHash);
 
+    if (existingHash && existingHash !== inputHash) {
+      throw new PlatformUnavailableError(
+        "worker_idempotency_conflict",
+        "A Dispatch customer update draft already exists for this idempotency key with different input.",
+        409,
+      );
+    }
+
+    if (optionalString(outputData(existingRun.data).workerRunId)) {
       return { replay: existingRun };
     }
 
@@ -2456,33 +2535,16 @@ export async function draftDispatchCustomerUpdate(input: {
       command: "customer_update.draft",
       inputHash,
       config,
+      sourceRefs: handoff.sourceRefs,
       jobObjectId: handoff.jobObject.id,
       customerObjectId: handoff.customerObject?.id ?? null,
       quoteObjectId: handoff.quoteObject?.id ?? null,
       appointmentObjectId: handoff.appointmentObject?.id ?? null,
       updateKind: handoff.updateKind,
+      channel,
     } satisfies JsonObject;
 
-    const [workerRun] = await tx
-      .insert(workerRuns)
-      .values({
-        tenantId: context.worker.tenantId,
-        workerId: context.worker.id,
-        taskId: task.id,
-        capabilityId: context.capabilityId,
-        budgetAccountId: context.budgetAccountId,
-        source: dispatchSource,
-        idempotencyKey: input.idempotencyKey,
-        state: "running",
-        mode: "simulation",
-        data: {
-          input: runInput,
-          output: {},
-        },
-        startedAt: now,
-        updatedAt: now,
-      })
-      .returning({ id: workerRuns.id });
+    const workerRunId = coreRun.workerRunId;
 
     const customerUpdateData = {
       jobObjectId: handoff.jobObject.id,
@@ -2580,7 +2642,7 @@ export async function draftDispatchCustomerUpdate(input: {
         state: "approval_pending",
         idempotencyKey: input.idempotencyKey,
         data: {
-          workerRunId: workerRun.id,
+          workerRunId,
           customerUpdateObjectId: customerUpdate.id,
           jobObjectId: handoff.jobObject.id,
           sourceRefs: handoff.sourceRefs,
@@ -2593,20 +2655,6 @@ export async function draftDispatchCustomerUpdate(input: {
         updatedAt: now,
       })
       .returning({ id: workflowRuns.id });
-
-    const [reservation] = await tx
-      .insert(budgetReservations)
-      .values({
-        tenantId: context.worker.tenantId,
-        accountId: context.budgetAccountId,
-        taskId: task.id,
-        units: customerUpdateDraftUnits,
-        state: "used",
-        expiresAt: new Date(now.getTime() + 15 * 60 * 1000),
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning({ id: budgetReservations.id });
 
     const [inference] = await tx
       .insert(inferences)
@@ -2646,29 +2694,6 @@ export async function draftDispatchCustomerUpdate(input: {
       })
       .returning({ id: inferences.id });
 
-    const [usage] = await tx
-      .insert(usageEvents)
-      .values({
-        tenantId: context.worker.tenantId,
-        accountId: context.budgetAccountId,
-        reservationId: reservation.id,
-        inferenceId: inference.id,
-        taskId: task.id,
-        capabilityId: context.capabilityId,
-        actorType: "worker",
-        actorId: context.worker.id,
-        units: customerUpdateDraftUnits,
-        costUsd: "0.000000",
-        data: {
-          mode: "deterministic",
-          workerRunId: workerRun.id,
-          workflowRunId: workflowRun.id,
-          customerUpdateObjectId: customerUpdate.id,
-        },
-        createdAt: now,
-      })
-      .returning({ id: usageEvents.id });
-
     const [event] = await tx
       .insert(events)
       .values({
@@ -2683,7 +2708,7 @@ export async function draftDispatchCustomerUpdate(input: {
         capabilityId: context.capabilityId,
         idempotencyKey: input.idempotencyKey,
         data: {
-          workerRunId: workerRun.id,
+          workerRunId,
           workflowRunId: workflowRun.id,
           jobObjectId: handoff.jobObject.id,
           customerUpdateObjectId: customerUpdate.id,
@@ -2701,8 +2726,8 @@ export async function draftDispatchCustomerUpdate(input: {
 
     await tx
       .update(workerRuns)
-      .set({ eventId: event.id, updatedAt: now })
-      .where(eq(workerRuns.id, workerRun.id));
+      .set({ eventId: event.id, taskId: task.id, updatedAt: now })
+      .where(eq(workerRuns.id, workerRunId));
 
     const [traceEvidence] = await tx
       .insert(evidence)
@@ -2816,7 +2841,7 @@ export async function draftDispatchCustomerUpdate(input: {
       .values({
         tenantId: context.worker.tenantId,
         taskId: task.id,
-        workerRunId: workerRun.id,
+        workerRunId,
         workflowRunId: workflowRun.id,
         eventId: event.id,
         objectId: customerUpdate.id,
@@ -2851,7 +2876,7 @@ export async function draftDispatchCustomerUpdate(input: {
           externalExecution: "blocked",
         },
         data: {
-          workerRunId: workerRun.id,
+          workerRunId,
           workflowRunId: workflowRun.id,
           customerUpdateObjectId: customerUpdate.id,
         },
@@ -2953,7 +2978,7 @@ export async function draftDispatchCustomerUpdate(input: {
       data: {
         latest: {
           approvalRequestId: approval.id,
-          workerRunId: workerRun.id,
+          workerRunId,
           workflowRunId: workflowRun.id,
           taskId: task.id,
           jobObjectId: handoff.jobObject.id,
@@ -3019,7 +3044,7 @@ export async function draftDispatchCustomerUpdate(input: {
         key: viewKey,
         version: viewVersion,
         viewId: view.id,
-        workerRunId: workerRun.id,
+        workerRunId,
         workflowRunId: workflowRun.id,
       },
       occurredAt: now,
@@ -3034,9 +3059,9 @@ export async function draftDispatchCustomerUpdate(input: {
       actorId: context.worker.id,
       actorRef: `worker:${context.worker.id}`,
       targetType: "worker_run",
-      targetId: workerRun.id,
+      targetId: workerRunId,
       taskId: task.id,
-      workerRunId: workerRun.id,
+      workerRunId,
       approvalRequestId: approval.id,
       eventId: event.id,
       objectId: customerUpdate.id,
@@ -3054,6 +3079,10 @@ export async function draftDispatchCustomerUpdate(input: {
     });
 
     const output = {
+      command: "customer_update.draft",
+      workerRunId,
+      taskId: task.id,
+      eventId: event.id,
       jobObjectId: handoff.jobObject.id,
       customerObjectId: handoff.customerObject?.id ?? null,
       quoteObjectId: handoff.quoteObject?.id ?? null,
@@ -3067,6 +3096,10 @@ export async function draftDispatchCustomerUpdate(input: {
       workflowRunId: workflowRun.id,
       workflowStepIds,
       dispatchCustomerUpdateViewId: view.id,
+      budgetReservationId: coreReservationId,
+      reservationId: coreReservationId,
+      usageEventId: null,
+      inferenceId: inference.id,
       updateKind: handoff.updateKind,
       channel,
       draft: draftMessage,
@@ -3080,11 +3113,16 @@ export async function draftDispatchCustomerUpdate(input: {
     await tx
       .update(workerRuns)
       .set({
-        state: "done",
         eventId: event.id,
+        taskId: task.id,
         data: {
-          input: runInput,
+          ...objectValue(existingRun.data),
+          input: {
+            ...existingInput,
+            request: runInput,
+          },
           output,
+          businessEventId: event.id,
           eventId: event.id,
           taskId: task.id,
           customerUpdateObjectId: customerUpdate.id,
@@ -3096,14 +3134,12 @@ export async function draftDispatchCustomerUpdate(input: {
           workflowRunId: workflowRun.id,
           workflowStepIds,
           dispatchCustomerUpdateViewId: view.id,
-          reservationId: reservation.id,
+          reservationId: coreReservationId,
           inferenceId: inference.id,
-          usageEventId: usage.id,
         },
-        endedAt: now,
         updatedAt: now,
       })
-      .where(eq(workerRuns.id, workerRun.id));
+      .where(eq(workerRuns.id, workerRunId));
 
     await tx
       .update(workers)
@@ -3118,7 +3154,7 @@ export async function draftDispatchCustomerUpdate(input: {
 
     return {
       replay: null,
-      workerRunId: workerRun.id,
+      workerRunId,
       taskId: task.id,
       eventId: event.id,
       customerUpdateObjectId: customerUpdate.id,
@@ -3134,9 +3170,59 @@ export async function draftDispatchCustomerUpdate(input: {
     };
   });
 
+  const settleCustomerUpdateCoreRun = async (workerRunId: string, output: JsonObject) => {
+    const completion = await completeCoreWorkerRun({
+      operatorEmail: input.operatorEmail,
+      tenantSlug: context.worker.tenantSlug,
+      idempotencyKey: input.idempotencyKey,
+      worker: {
+        id: context.worker.id,
+        role: dispatchWorkerRole,
+      },
+      workerRunId,
+      state: "done",
+      reason:
+        "Dispatch Operations Worker drafted a customer update with external customer sends blocked.",
+      output,
+      costUsd: 0,
+      evidence: {
+        command: "customer_update.draft",
+        eventId: optionalString(output.eventId) ?? null,
+        evidenceId: optionalString(output.evidenceId) ?? null,
+        draftEvidenceId: optionalString(output.draftEvidenceId) ?? null,
+        packetId: optionalString(output.packetId) ?? null,
+        documentId: optionalString(output.documentId) ?? null,
+        approvalRequestId: optionalString(output.approvalRequestId) ?? null,
+        workflowRunId: optionalString(output.workflowRunId) ?? null,
+        dispatchCustomerUpdateViewId: optionalString(output.dispatchCustomerUpdateViewId) ?? null,
+        inferenceId: optionalString(output.inferenceId) ?? null,
+        externalExecution: "blocked",
+        externalMutation: false,
+        externalSend: false,
+      },
+      db,
+    });
+
+    return persistSettledDispatchOutput(db, workerRunId, output, objectValue(completion.budget));
+  };
+
   if (result.replay) {
-    return replayedCustomerUpdateDraft(db, context, result.replay);
+    const replayData = objectValue(result.replay.data);
+    const replayOutput = outputData(replayData);
+    const replayCompletionBudget = objectValue(objectValue(replayData.completion).budget);
+
+    if (result.replay.state === "running" && optionalString(replayOutput.workerRunId)) {
+      await settleCustomerUpdateCoreRun(coreRun.workerRunId, replayOutput);
+    } else {
+      await persistSettledDispatchOutput(db, coreRun.workerRunId, replayOutput, replayCompletionBudget);
+    }
+
+    const [settledReplay] = await db.select().from(workerRuns).where(eq(workerRuns.id, coreRun.workerRunId)).limit(1);
+
+    return replayedCustomerUpdateDraft(db, context, settledReplay ?? result.replay);
   }
+
+  const settledOutput = await settleCustomerUpdateCoreRun(result.workerRunId, result.output);
 
   return {
     created: true,
@@ -3153,7 +3239,7 @@ export async function draftDispatchCustomerUpdate(input: {
     workflowRunId: result.workflowRunId,
     workflowStepIds: result.workflowStepIds,
     dispatchCustomerUpdateViewId: result.dispatchCustomerUpdateViewId,
-    output: result.output,
+    output: settledOutput,
     snapshot: await getDispatchWorkerSnapshot(db, {
       role: dispatchWorkerRole,
       tenantSlug: context.worker.tenantSlug,

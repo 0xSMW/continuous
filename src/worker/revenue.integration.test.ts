@@ -11099,6 +11099,39 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .from(workerRuns)
       .where(eq(workerRuns.id, customerUpdateResult.workerRunId))
       .limit(1);
+    const customerUpdateRunData = objectValue(customerUpdateRun?.data);
+    const customerUpdateCompletionBudget = objectValue(objectValue(customerUpdateRunData.completion).budget);
+    const [customerUpdateReservation] = await db
+      .select()
+      .from(budgetReservations)
+      .where(eq(budgetReservations.id, stringValue(customerUpdateOutput.budgetReservationId)))
+      .limit(1);
+    const [customerUpdateUsage] = await db
+      .select()
+      .from(usageEvents)
+      .where(eq(usageEvents.id, stringValue(customerUpdateOutput.usageEventId)))
+      .limit(1);
+    const [customerUpdateLocalRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(
+        and(
+          eq(workerRuns.tenantId, tenantId),
+          eq(workerRuns.source, "continuous.worker"),
+          eq(workerRuns.idempotencyKey, `ci-dispatch-customer-update-${runId}`),
+        ),
+      )
+      .limit(1);
+    const [customerUpdateWorkflowRun] = await db
+      .select()
+      .from(workflowRuns)
+      .where(eq(workflowRuns.id, customerUpdateResult.workflowRunId ?? ""))
+      .limit(1);
+    const customerUpdateWorkflowSteps = await db
+      .select()
+      .from(workflowSteps)
+      .where(inArray(workflowSteps.id, customerUpdateResult.workflowStepIds));
+    const customerUpdateStepsByKind = new Map(customerUpdateWorkflowSteps.map((step) => [step.kind, step]));
     const [customerUpdateObject] = await db
       .select()
       .from(objects)
@@ -11123,14 +11156,43 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(customerUpdateResponse.command).toBe("customer_update.draft");
     expect(customerUpdateResponse.worker.role).toBe("dispatch_operations");
     expect(customerUpdateResult.created).toBe(true);
+    expect(customerUpdateResult.workflowRunId).toBeTruthy();
     expect(customerUpdateResult.workflowStepIds).toHaveLength(3);
+    expect(customerUpdateOutput.command).toBe("customer_update.draft");
+    expect(customerUpdateOutput.workerRunId).toBe(customerUpdateResult.workerRunId);
     expect(customerUpdateOutput.externalExecution).toBe("blocked");
     expect(customerUpdateOutput.externalSend).toBe(false);
     expect(customerUpdateOutput.jobObjectId).toBe(jobObjectId);
     expect(customerUpdateOutput.customerUpdateObjectId).toBe(customerUpdateResult.customerUpdateObjectId);
     expect(objectValue(customerUpdateOutput.draft).body).toContain("proposed service window");
-    expect(customerUpdateRun?.source).toBe("continuous.worker");
+    expect(customerUpdateRun?.source).toBe("continuous.core.worker_runs");
     expect(customerUpdateRun?.state).toBe("done");
+    expect(customerUpdateRun?.mode).toBe("simulation");
+    expect(objectValue(customerUpdateRunData.input).command).toBe("customer_update.draft");
+    expect(objectValue(customerUpdateRunData.output).command).toBe("customer_update.draft");
+    expect(objectValue(customerUpdateRunData.output).customerUpdateObjectId).toBe(
+      customerUpdateResult.customerUpdateObjectId,
+    );
+    expect(objectValue(customerUpdateRunData.output).workflowRunId).toBe(customerUpdateResult.workflowRunId);
+    expect(objectValue(customerUpdateRunData.output).externalExecution).toBe("blocked");
+    expect(customerUpdateCompletionBudget.state).toBe("used");
+    expect(customerUpdateCompletionBudget.reservationId).toBe(customerUpdateOutput.budgetReservationId);
+    expect(customerUpdateCompletionBudget.usageEventId).toBe(customerUpdateOutput.usageEventId);
+    expect(customerUpdateReservation?.state).toBe("used");
+    expect(customerUpdateUsage?.reservationId).toBe(customerUpdateOutput.budgetReservationId);
+    expect(customerUpdateUsage?.taskId).toBe(customerUpdateResult.taskId);
+    expect(customerUpdateLocalRun).toBeUndefined();
+    expect(customerUpdateWorkflowRun?.state).toBe("approval_pending");
+    expect(objectValue(customerUpdateWorkflowRun?.data).workerRunId).toBe(customerUpdateResult.workerRunId);
+    expect(objectValue(customerUpdateWorkflowRun?.data).customerUpdateObjectId).toBe(
+      customerUpdateResult.customerUpdateObjectId,
+    );
+    expect(stringList(objectValue(customerUpdateWorkflowRun?.blockers).open)).toEqual(
+      expect.arrayContaining(["customer_update_approval_required", "external_send_blocked"]),
+    );
+    expect(customerUpdateStepsByKind.get("handoff")?.toState).toBe("ready_to_update_customer");
+    expect(customerUpdateStepsByKind.get("worker_action")?.toState).toBe("customer_update_drafted");
+    expect(customerUpdateStepsByKind.get("approval_request")?.toState).toBe("approval_pending");
     expect(customerUpdateObject?.type).toBe("customer_update");
     expect(customerUpdateObject?.state).toBe("approval_required");
     expect(objectValue(customerUpdateObject?.data).externalSend).toBe(false);
@@ -11168,6 +11230,10 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(customerUpdateReplayResult.created).toBe(false);
     expect(customerUpdateReplayResult.workerRunId).toBe(customerUpdateResult.workerRunId);
     expect(customerUpdateReplayResult.customerUpdateObjectId).toBe(customerUpdateResult.customerUpdateObjectId);
+    expect(objectValue(customerUpdateReplayResult.output).budgetReservationId).toBe(
+      customerUpdateOutput.budgetReservationId,
+    );
+    expect(objectValue(customerUpdateReplayResult.output).usageEventId).toBe(customerUpdateOutput.usageEventId);
 
     const closeoutResponse = await executeWorkerCommand({
       command: "closeout.prepare",

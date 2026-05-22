@@ -1495,10 +1495,26 @@ jobs:
               -d "$DISPATCH_CUSTOMER_UPDATE_PAYLOAD"
           )"
 
-          echo "$DISPATCH_CUSTOMER_UPDATE_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,customerUpdateObjectId:.data.result.customerUpdateObjectId,approvalRequestId:.data.result.approvalRequestId,packetId:.data.result.packetId,viewId:.data.result.dispatchCustomerUpdateViewId,externalExecution:.data.result.output.externalExecution,externalSend:.data.result.output.externalSend}}'
+          echo "$DISPATCH_CUSTOMER_UPDATE_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,workerRunId:.data.result.workerRunId,customerUpdateObjectId:.data.result.customerUpdateObjectId,approvalRequestId:.data.result.approvalRequestId,packetId:.data.result.packetId,viewId:.data.result.dispatchCustomerUpdateViewId,budgetReservationId:.data.result.output.budgetReservationId,usageEventId:.data.result.output.usageEventId,externalExecution:.data.result.output.externalExecution,externalMutation:.data.result.output.externalMutation,externalSend:.data.result.output.externalSend}}'
           echo "$DISPATCH_CUSTOMER_UPDATE_RESPONSE" | /usr/bin/jq -e \
-            '.error == null and .data.command == "customer_update.draft" and .data.worker.role == "dispatch_operations" and (.data.result.customerUpdateObjectId | length > 0) and (.data.result.approvalRequestId | length > 0) and (.data.result.packetId | length > 0) and (.data.result.dispatchCustomerUpdateViewId | length > 0) and .data.result.output.externalExecution == "blocked" and .data.result.output.externalSend == false' \
+            '.error == null and .data.command == "customer_update.draft" and .data.worker.role == "dispatch_operations" and .data.result.created == true and (.data.result.workerRunId | length > 0) and (.data.result.customerUpdateObjectId | length > 0) and (.data.result.approvalRequestId | length > 0) and (.data.result.packetId | length > 0) and (.data.result.dispatchCustomerUpdateViewId | length > 0) and (.data.result.output.budgetReservationId | length > 0) and (.data.result.output.usageEventId | length > 0) and .data.result.output.command == "customer_update.draft" and .data.result.output.externalExecution == "blocked" and .data.result.output.externalMutation == false and .data.result.output.externalSend == false' \
             >/dev/null
+
+          DISPATCH_CUSTOMER_UPDATE_WORKER_RUN_ID="$(echo "$DISPATCH_CUSTOMER_UPDATE_RESPONSE" | /usr/bin/jq -r '.data.result.workerRunId')"
+          DISPATCH_CUSTOMER_UPDATE_RESERVATION_ID="$(echo "$DISPATCH_CUSTOMER_UPDATE_RESPONSE" | /usr/bin/jq -r '.data.result.output.budgetReservationId')"
+          DISPATCH_CUSTOMER_UPDATE_USAGE_ID="$(echo "$DISPATCH_CUSTOMER_UPDATE_RESPONSE" | /usr/bin/jq -r '.data.result.output.usageEventId')"
+          DISPATCH_CUSTOMER_UPDATE_RUN_ROW="$(
+            psql_db -Atc "select coalesce(source,'') || '|' || coalesce(state::text,'') || '|' || coalesce(mode,'') || '|' || coalesce(data->'input'->>'command','') || '|' || coalesce(data->'output'->>'command','') || '|' || coalesce(data->'output'->>'externalExecution','') || '|' || coalesce(data->'output'->>'externalMutation','') || '|' || coalesce(data->'output'->>'externalSend','') || '|' || coalesce(data->'completion'->'budget'->>'state','') || '|' || coalesce(data->'completion'->'budget'->>'reservationId','') || '|' || coalesce(data->'completion'->'budget'->>'usageEventId','') from worker_runs where id = '$DISPATCH_CUSTOMER_UPDATE_WORKER_RUN_ID'::uuid;"
+          )"
+          if [ "$DISPATCH_CUSTOMER_UPDATE_RUN_ROW" != "continuous.core.worker_runs|done|simulation|customer_update.draft|customer_update.draft|blocked|false|false|used|$DISPATCH_CUSTOMER_UPDATE_RESERVATION_ID|$DISPATCH_CUSTOMER_UPDATE_USAGE_ID" ]; then
+            echo "Unexpected Dispatch customer update worker run row: $DISPATCH_CUSTOMER_UPDATE_RUN_ROW" >&2
+            exit 1
+          fi
+          DISPATCH_CUSTOMER_UPDATE_LEGACY_RUN_COUNT="$(psql_db -Atc "select count(*) from worker_runs where source = 'continuous.worker' and idempotency_key = '$DISPATCH_CUSTOMER_UPDATE_KEY';")"
+          if [ "$DISPATCH_CUSTOMER_UPDATE_LEGACY_RUN_COUNT" != "0" ]; then
+            echo "Dispatch customer update wrote legacy continuous.worker run rows: $DISPATCH_CUSTOMER_UPDATE_LEGACY_RUN_COUNT" >&2
+            exit 1
+          fi
 
           DISPATCH_CUSTOMER_UPDATE_OBJECT_ID="$(echo "$DISPATCH_CUSTOMER_UPDATE_RESPONSE" | /usr/bin/jq -r '.data.result.customerUpdateObjectId')"
           DISPATCH_CLOSEOUT_KEY="deploy-dispatch-closeout-smoke-$SMOKE_RUN_ID"

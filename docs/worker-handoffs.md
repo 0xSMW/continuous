@@ -67,9 +67,9 @@ codes, and expected consumer output before a consuming worker writes records.
 
 Before a planned worker becomes executable, add at least one fixture for its
 incoming handoff. Dispatch/Ops now has executable fixtures through `POST /worker`
-payloads with `command: "schedule.propose"` plus Core worker-run settlement, blocked
-`command: "customer_update.draft"`, blocked `command: "closeout.prepare"`, and
-blocked `command: "exception.route"`. Finance now consumes
+payloads with `command: "schedule.propose"` and
+`command: "customer_update.draft"` plus Core worker-run settlement, blocked
+`command: "closeout.prepare"`, and blocked `command: "exception.route"`. Finance now consumes
 `dispatch.closeout_to_finance` through `command: "invoice.prepare"` with Core
 worker-run source, terminal state, and budget settlement proof, consumes
 persisted invoice evidence through `command: "ar_followup.draft"`,

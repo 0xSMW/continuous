@@ -67,9 +67,9 @@ Owner `brief.generate`, Dispatch `schedule.propose`, Finance
 `payment_draft.prepare`, and Compliance `filing.prepare` commands, proving the
 app-server boundary writes the same worker run, approval, evidence, budget,
 event, adapter dry-run, generated view, and workflow records as `/worker`.
-Dispatch schedule proposals and Compliance filings also prove the Core
-worker-run row and Core budget settlement while external calendar writes,
-submission, and legal advice remain blocked.
+Dispatch schedule proposals, Dispatch customer updates, and Compliance filings
+also prove the Core worker-run row and Core budget settlement while external
+calendar writes, customer sends, submission, and legal advice remain blocked.
 The Revenue payment-link command can be executed through
 `continuous.worker.command` or `worker:tool`, but it only prepares an internal
 packet through the Core worker-run lifecycle; live provider payment-link
