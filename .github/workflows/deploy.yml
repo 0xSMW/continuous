@@ -1644,10 +1644,26 @@ jobs:
               -d "$FINANCE_AR_FOLLOWUP_PAYLOAD"
           )"
 
-          echo "$FINANCE_AR_FOLLOWUP_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,arFollowupObjectId:.data.result.arFollowupObjectId,invoiceId:.data.result.invoiceId,approvalRequestId:.data.result.approvalRequestId,packetId:.data.result.packetId,viewId:.data.result.financeArFollowupViewId,externalExecution:.data.result.output.externalExecution,externalSend:.data.result.output.externalSend,paymentLink:.data.result.output.paymentLink,moneyMovement:.data.result.output.moneyMovement}}'
+          echo "$FINANCE_AR_FOLLOWUP_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,workerRunId:.data.result.workerRunId,reservationId:.data.result.reservationId,usageEventId:.data.result.usageEventId,arFollowupObjectId:.data.result.arFollowupObjectId,invoiceId:.data.result.invoiceId,approvalRequestId:.data.result.approvalRequestId,packetId:.data.result.packetId,viewId:.data.result.financeArFollowupViewId,externalExecution:.data.result.output.externalExecution,externalSend:.data.result.output.externalSend,paymentLink:.data.result.output.paymentLink,moneyMovement:.data.result.output.moneyMovement}}'
           echo "$FINANCE_AR_FOLLOWUP_RESPONSE" | /usr/bin/jq -e \
-            '.error == null and .data.command == "ar_followup.draft" and .data.worker.role == "finance_operations" and (.data.result.arFollowupObjectId | length > 0) and (.data.result.invoiceId | length > 0) and (.data.result.approvalRequestId | length > 0) and (.data.result.packetId | length > 0) and (.data.result.financeArFollowupViewId | length > 0) and .data.result.output.externalExecution == "blocked" and .data.result.output.externalSend == false and .data.result.output.paymentLink == "blocked" and .data.result.output.moneyMovement == "blocked"' \
+            '.error == null and .data.command == "ar_followup.draft" and .data.worker.role == "finance_operations" and (.data.result.workerRunId | length > 0) and (.data.result.reservationId | length > 0) and (.data.result.usageEventId | length > 0) and (.data.result.arFollowupObjectId | length > 0) and (.data.result.invoiceId | length > 0) and (.data.result.approvalRequestId | length > 0) and (.data.result.packetId | length > 0) and (.data.result.financeArFollowupViewId | length > 0) and .data.result.output.command == "ar_followup.draft" and .data.result.output.externalExecution == "blocked" and .data.result.output.externalSend == false and .data.result.output.paymentLink == "blocked" and .data.result.output.moneyMovement == "blocked"' \
             >/dev/null
+
+          FINANCE_AR_FOLLOWUP_WORKER_RUN_ID="$(echo "$FINANCE_AR_FOLLOWUP_RESPONSE" | /usr/bin/jq -r '.data.result.workerRunId')"
+          FINANCE_AR_FOLLOWUP_RESERVATION_ID="$(echo "$FINANCE_AR_FOLLOWUP_RESPONSE" | /usr/bin/jq -r '.data.result.reservationId')"
+          FINANCE_AR_FOLLOWUP_USAGE_ID="$(echo "$FINANCE_AR_FOLLOWUP_RESPONSE" | /usr/bin/jq -r '.data.result.usageEventId')"
+          FINANCE_AR_FOLLOWUP_RUN_ROW="$(
+            psql_db -Atc "select coalesce(source,'') || '|' || coalesce(state::text,'') || '|' || coalesce(mode,'') || '|' || coalesce(data->'input'->>'command','') || '|' || coalesce(data->'output'->>'command','') || '|' || coalesce(data->'output'->>'externalExecution','') || '|' || coalesce(data->'output'->>'externalSend','') || '|' || coalesce(data->'output'->>'paymentLink','') || '|' || coalesce(data->'output'->>'moneyMovement','') || '|' || coalesce(data->'completion'->'budget'->>'state','') || '|' || coalesce(data->'completion'->'budget'->>'reservationId','') || '|' || coalesce(data->'completion'->'budget'->>'usageEventId','') from worker_runs where id = '$FINANCE_AR_FOLLOWUP_WORKER_RUN_ID'::uuid;"
+          )"
+          if [ "$FINANCE_AR_FOLLOWUP_RUN_ROW" != "continuous.core.worker_runs|done|simulation|ar_followup.draft|ar_followup.draft|blocked|false|blocked|blocked|used|$FINANCE_AR_FOLLOWUP_RESERVATION_ID|$FINANCE_AR_FOLLOWUP_USAGE_ID" ]; then
+            echo "Finance AR follow-up worker run did not use the Core lifecycle: $FINANCE_AR_FOLLOWUP_RUN_ROW" >&2
+            exit 1
+          fi
+          FINANCE_AR_FOLLOWUP_LEGACY_RUN_COUNT="$(psql_db -Atc "select count(*) from worker_runs where source = 'continuous.worker' and idempotency_key = '$FINANCE_AR_FOLLOWUP_KEY';")"
+          if [ "$FINANCE_AR_FOLLOWUP_LEGACY_RUN_COUNT" != "0" ]; then
+            echo "Finance AR follow-up smoke created a legacy worker run: $FINANCE_AR_FOLLOWUP_LEGACY_RUN_COUNT" >&2
+            exit 1
+          fi
 
           FINANCE_CASH_FORECAST_KEY="deploy-finance-cash-forecast-smoke-$SMOKE_RUN_ID"
           FINANCE_CASH_FORECAST_PAYLOAD="$(
@@ -1676,10 +1692,69 @@ jobs:
               -d "$FINANCE_CASH_FORECAST_PAYLOAD"
           )"
 
-          echo "$FINANCE_CASH_FORECAST_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,cashForecastObjectId:.data.result.cashForecastObjectId,approvalRequestId:.data.result.approvalRequestId,packetId:.data.result.packetId,viewId:.data.result.financeCashViewId,endingBalanceCents:.data.result.output.endingBalanceCents,confidence:.data.result.output.confidence,externalExecution:.data.result.output.externalExecution,externalSend:.data.result.output.externalSend,moneyMovement:.data.result.output.moneyMovement}}'
+          echo "$FINANCE_CASH_FORECAST_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,workerRunId:.data.result.workerRunId,reservationId:.data.result.reservationId,usageEventId:.data.result.usageEventId,cashForecastObjectId:.data.result.cashForecastObjectId,approvalRequestId:.data.result.approvalRequestId,packetId:.data.result.packetId,viewId:.data.result.financeCashViewId,endingBalanceCents:.data.result.output.endingBalanceCents,confidence:.data.result.output.confidence,externalExecution:.data.result.output.externalExecution,externalSend:.data.result.output.externalSend,moneyMovement:.data.result.output.moneyMovement}}'
           echo "$FINANCE_CASH_FORECAST_RESPONSE" | /usr/bin/jq -e \
-            '.error == null and .data.command == "cash_forecast.generate" and .data.worker.role == "finance_operations" and (.data.result.cashForecastObjectId | length > 0) and (.data.result.approvalRequestId | length > 0) and (.data.result.packetId | length > 0) and (.data.result.financeCashViewId | length > 0) and .data.result.output.externalExecution == "blocked" and .data.result.output.externalSend == false and .data.result.output.moneyMovement == "blocked" and .data.result.output.requiresApproval == true' \
+            '.error == null and .data.command == "cash_forecast.generate" and .data.worker.role == "finance_operations" and (.data.result.workerRunId | length > 0) and (.data.result.reservationId | length > 0) and (.data.result.usageEventId | length > 0) and (.data.result.cashForecastObjectId | length > 0) and (.data.result.approvalRequestId | length > 0) and (.data.result.packetId | length > 0) and (.data.result.financeCashViewId | length > 0) and .data.result.output.command == "cash_forecast.generate" and .data.result.output.externalExecution == "blocked" and .data.result.output.externalSend == false and .data.result.output.moneyMovement == "blocked" and .data.result.output.requiresApproval == true' \
             >/dev/null
+
+          FINANCE_CASH_FORECAST_WORKER_RUN_ID="$(echo "$FINANCE_CASH_FORECAST_RESPONSE" | /usr/bin/jq -r '.data.result.workerRunId')"
+          FINANCE_CASH_FORECAST_RESERVATION_ID="$(echo "$FINANCE_CASH_FORECAST_RESPONSE" | /usr/bin/jq -r '.data.result.reservationId')"
+          FINANCE_CASH_FORECAST_USAGE_ID="$(echo "$FINANCE_CASH_FORECAST_RESPONSE" | /usr/bin/jq -r '.data.result.usageEventId')"
+          FINANCE_CASH_FORECAST_RUN_ROW="$(
+            psql_db -Atc "select coalesce(source,'') || '|' || coalesce(state::text,'') || '|' || coalesce(mode,'') || '|' || coalesce(data->'input'->>'command','') || '|' || coalesce(data->'output'->>'command','') || '|' || coalesce(data->'output'->>'externalExecution','') || '|' || coalesce(data->'output'->>'externalSend','') || '|' || coalesce(data->'output'->>'moneyMovement','') || '|' || coalesce(data->'completion'->'budget'->>'state','') || '|' || coalesce(data->'completion'->'budget'->>'reservationId','') || '|' || coalesce(data->'completion'->'budget'->>'usageEventId','') from worker_runs where id = '$FINANCE_CASH_FORECAST_WORKER_RUN_ID'::uuid;"
+          )"
+          if [ "$FINANCE_CASH_FORECAST_RUN_ROW" != "continuous.core.worker_runs|done|simulation|cash_forecast.generate|cash_forecast.generate|blocked|false|blocked|used|$FINANCE_CASH_FORECAST_RESERVATION_ID|$FINANCE_CASH_FORECAST_USAGE_ID" ]; then
+            echo "Finance cash forecast worker run did not use the Core lifecycle: $FINANCE_CASH_FORECAST_RUN_ROW" >&2
+            exit 1
+          fi
+          FINANCE_CASH_FORECAST_LEGACY_RUN_COUNT="$(psql_db -Atc "select count(*) from worker_runs where source = 'continuous.worker' and idempotency_key = '$FINANCE_CASH_FORECAST_KEY';")"
+          if [ "$FINANCE_CASH_FORECAST_LEGACY_RUN_COUNT" != "0" ]; then
+            echo "Finance cash forecast smoke created a legacy worker run: $FINANCE_CASH_FORECAST_LEGACY_RUN_COUNT" >&2
+            exit 1
+          fi
+
+          FINANCE_PAYMENT_DRAFT_KEY="deploy-finance-payment-draft-smoke-$SMOKE_RUN_ID"
+          FINANCE_PAYMENT_DRAFT_PAYLOAD="$(
+            /usr/bin/jq -nc --arg key "$FINANCE_PAYMENT_DRAFT_KEY" '{
+              command: "payment_draft.prepare",
+              worker: {role: "finance_operations", tenantSlug: "continuous-demo"},
+              idempotencyKey: $key,
+              config: {
+                sourceRefs: {paymentId: "44444444-4444-4444-8444-000000000007"},
+                payee: "Acme Roofing Supplies",
+                method: "ach",
+                policy: {requireOwnerApproval: true, requireDualControl: true, moneyMovement: "blocked"}
+              }
+            }'
+          )"
+          FINANCE_PAYMENT_DRAFT_RESPONSE="$(
+            curl -fsS --resolve continuoushq.com:443:127.0.0.1 \
+              -X POST https://continuoushq.com/worker \
+              -H "authorization: Bearer $WORKER_TOKEN" \
+              -H "content-type: application/json" \
+              -d "$FINANCE_PAYMENT_DRAFT_PAYLOAD"
+          )"
+
+          echo "$FINANCE_PAYMENT_DRAFT_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,workerRunId:.data.result.workerRunId,reservationId:.data.result.reservationId,usageEventId:.data.result.usageEventId,paymentObjectId:.data.result.paymentObjectId,paymentId:.data.result.paymentId,paymentInstructionId:.data.result.paymentInstructionId,approvalRequestId:.data.result.approvalRequestId,packetId:.data.result.packetId,viewId:.data.result.financePaymentViewId,externalExecution:.data.result.output.externalExecution,externalSend:.data.result.output.externalSend,paymentLink:.data.result.output.paymentLink,moneyMovement:.data.result.output.moneyMovement,requiresDualControl:.data.result.output.requiresDualControl}}'
+          echo "$FINANCE_PAYMENT_DRAFT_RESPONSE" | /usr/bin/jq -e \
+            '.error == null and .data.command == "payment_draft.prepare" and .data.worker.role == "finance_operations" and (.data.result.workerRunId | length > 0) and (.data.result.reservationId | length > 0) and (.data.result.usageEventId | length > 0) and (.data.result.paymentObjectId | length > 0) and (.data.result.paymentId | length > 0) and (.data.result.paymentInstructionId | length > 0) and (.data.result.approvalRequestId | length > 0) and (.data.result.packetId | length > 0) and (.data.result.financePaymentViewId | length > 0) and .data.result.output.command == "payment_draft.prepare" and .data.result.output.externalExecution == "blocked" and .data.result.output.externalSend == false and .data.result.output.paymentLink == "blocked" and .data.result.output.moneyMovement == "blocked" and .data.result.output.requiresDualControl == true' \
+            >/dev/null
+
+          FINANCE_PAYMENT_DRAFT_WORKER_RUN_ID="$(echo "$FINANCE_PAYMENT_DRAFT_RESPONSE" | /usr/bin/jq -r '.data.result.workerRunId')"
+          FINANCE_PAYMENT_DRAFT_RESERVATION_ID="$(echo "$FINANCE_PAYMENT_DRAFT_RESPONSE" | /usr/bin/jq -r '.data.result.reservationId')"
+          FINANCE_PAYMENT_DRAFT_USAGE_ID="$(echo "$FINANCE_PAYMENT_DRAFT_RESPONSE" | /usr/bin/jq -r '.data.result.usageEventId')"
+          FINANCE_PAYMENT_DRAFT_RUN_ROW="$(
+            psql_db -Atc "select coalesce(source,'') || '|' || coalesce(state::text,'') || '|' || coalesce(mode,'') || '|' || coalesce(data->'input'->>'command','') || '|' || coalesce(data->'output'->>'command','') || '|' || coalesce(data->'output'->>'externalExecution','') || '|' || coalesce(data->'output'->>'externalSend','') || '|' || coalesce(data->'output'->>'paymentLink','') || '|' || coalesce(data->'output'->>'moneyMovement','') || '|' || coalesce(data->'completion'->'budget'->>'state','') || '|' || coalesce(data->'completion'->'budget'->>'reservationId','') || '|' || coalesce(data->'completion'->'budget'->>'usageEventId','') from worker_runs where id = '$FINANCE_PAYMENT_DRAFT_WORKER_RUN_ID'::uuid;"
+          )"
+          if [ "$FINANCE_PAYMENT_DRAFT_RUN_ROW" != "continuous.core.worker_runs|done|simulation|payment_draft.prepare|payment_draft.prepare|blocked|false|blocked|blocked|used|$FINANCE_PAYMENT_DRAFT_RESERVATION_ID|$FINANCE_PAYMENT_DRAFT_USAGE_ID" ]; then
+            echo "Finance payment draft worker run did not use the Core lifecycle: $FINANCE_PAYMENT_DRAFT_RUN_ROW" >&2
+            exit 1
+          fi
+          FINANCE_PAYMENT_DRAFT_LEGACY_RUN_COUNT="$(psql_db -Atc "select count(*) from worker_runs where source = 'continuous.worker' and idempotency_key = '$FINANCE_PAYMENT_DRAFT_KEY';")"
+          if [ "$FINANCE_PAYMENT_DRAFT_LEGACY_RUN_COUNT" != "0" ]; then
+            echo "Finance payment draft smoke created a legacy worker run: $FINANCE_PAYMENT_DRAFT_LEGACY_RUN_COUNT" >&2
+            exit 1
+          fi
 
           DISPATCH_EXCEPTION_KEY="deploy-dispatch-exception-smoke-$SMOKE_RUN_ID"
           DISPATCH_EXCEPTION_PAYLOAD="$(

@@ -132,6 +132,8 @@ export type FinanceArFollowupDraftResult = {
   workflowRunId: string | null;
   workflowStepIds: string[];
   financeArFollowupViewId: string | null;
+  reservationId: string | null;
+  usageEventId: string | null;
   output: JsonObject;
   snapshot: FinanceWorkerSnapshot;
 };
@@ -151,6 +153,8 @@ export type FinanceCashForecastGenerateResult = {
   workflowRunId: string | null;
   workflowStepIds: string[];
   financeCashViewId: string | null;
+  reservationId: string | null;
+  usageEventId: string | null;
   output: JsonObject;
   snapshot: FinanceWorkerSnapshot;
 };
@@ -175,6 +179,8 @@ export type FinancePaymentDraftPrepareResult = {
   workflowRunId: string | null;
   workflowStepIds: string[];
   financePaymentViewId: string | null;
+  reservationId: string | null;
+  usageEventId: string | null;
   output: JsonObject;
   snapshot: FinanceWorkerSnapshot;
 };
@@ -310,6 +316,78 @@ function getWorkflowStepIds(data: JsonObject) {
   const fromOutput = stringList(output.workflowStepIds);
 
   return fromOutput.length > 0 ? fromOutput : fromData;
+}
+
+async function persistCoreSettledFinanceOutput(
+  db: Database,
+  workerRunId: string,
+  output: JsonObject,
+  completionBudget: JsonObject,
+) {
+  const reservationId = optionalString(completionBudget.reservationId) ?? optionalString(output.reservationId) ?? null;
+  const usageEventId = optionalString(completionBudget.usageEventId) ?? optionalString(output.usageEventId) ?? null;
+  const inferenceId = optionalString(output.inferenceId);
+  const settledOutput = {
+    ...output,
+    reservationId,
+    usageEventId,
+  } satisfies JsonObject;
+  const [completedRun] = await db
+    .select({ data: workerRuns.data })
+    .from(workerRuns)
+    .where(eq(workerRuns.id, workerRunId))
+    .limit(1);
+
+  await db
+    .update(workerRuns)
+    .set({
+      data: {
+        ...objectValue(completedRun?.data),
+        output: settledOutput,
+        reservationId,
+        usageEventId,
+        ...(inferenceId ? { inferenceId } : {}),
+      },
+      updatedAt: new Date(),
+    })
+    .where(eq(workerRuns.id, workerRunId));
+
+  return settledOutput;
+}
+
+async function settleFinanceCoreWorkerRun(input: {
+  db: Database;
+  context: FinanceContext;
+  operatorEmail: string;
+  idempotencyKey: string;
+  workerRunId: string;
+  reason: string;
+  output: JsonObject;
+  evidence: JsonObject;
+}) {
+  const completion = await completeCoreWorkerRun({
+    operatorEmail: input.operatorEmail,
+    tenantSlug: input.context.worker.tenantSlug,
+    idempotencyKey: input.idempotencyKey,
+    worker: {
+      id: input.context.worker.id,
+      role: financeWorkerRole,
+    },
+    workerRunId: input.workerRunId,
+    state: "done",
+    reason: input.reason,
+    output: input.output,
+    costUsd: 0,
+    evidence: input.evidence,
+    db: input.db,
+  });
+
+  return persistCoreSettledFinanceOutput(
+    input.db,
+    input.workerRunId,
+    input.output,
+    objectValue(completion.budget),
+  );
 }
 
 function workerWhere(selector: FinanceWorkerSelector) {
@@ -1420,6 +1498,8 @@ async function replayedArFollowupDraft(
     workflowStepIds: getWorkflowStepIds(data),
     financeArFollowupViewId:
       optionalString(data.financeArFollowupViewId) ?? optionalString(output.financeArFollowupViewId) ?? null,
+    reservationId: optionalString(data.reservationId) ?? optionalString(output.reservationId) ?? null,
+    usageEventId: optionalString(data.usageEventId) ?? optionalString(output.usageEventId) ?? null,
     output,
     snapshot: await getFinanceWorkerSnapshot(db, {
       role: financeWorkerRole,
@@ -1453,6 +1533,8 @@ async function replayedCashForecastGenerate(
     workflowRunId: optionalString(data.workflowRunId) ?? optionalString(output.workflowRunId) ?? null,
     workflowStepIds: getWorkflowStepIds(data),
     financeCashViewId: optionalString(data.financeCashViewId) ?? optionalString(output.financeCashViewId) ?? null,
+    reservationId: optionalString(data.reservationId) ?? optionalString(output.reservationId) ?? null,
+    usageEventId: optionalString(data.usageEventId) ?? optionalString(output.usageEventId) ?? null,
     output,
     snapshot: await getFinanceWorkerSnapshot(db, {
       role: financeWorkerRole,
@@ -1494,6 +1576,8 @@ async function replayedPaymentDraftPrepare(
     workflowStepIds: getWorkflowStepIds(data),
     financePaymentViewId:
       optionalString(data.financePaymentViewId) ?? optionalString(output.financePaymentViewId) ?? null,
+    reservationId: optionalString(data.reservationId) ?? optionalString(output.reservationId) ?? null,
+    usageEventId: optionalString(data.usageEventId) ?? optionalString(output.usageEventId) ?? null,
     output,
     snapshot: await getFinanceWorkerSnapshot(db, {
       role: financeWorkerRole,
@@ -2577,10 +2661,66 @@ export async function draftFinanceArFollowup(input: {
     channel: refs.channel,
   });
   const now = new Date();
+  const coreRun = await startCoreWorkerRun({
+    operatorEmail: input.operatorEmail,
+    tenantSlug: context.worker.tenantSlug,
+    idempotencyKey: input.idempotencyKey,
+    worker: {
+      id: context.worker.id,
+      role: financeWorkerRole,
+    },
+    command: "ar_followup.draft",
+    mode: "simulation",
+    capabilityId: context.capabilityId,
+    connectionId: context.accountingConnectionId,
+    budgetAccountId: context.budgetAccountId,
+    units: arFollowupDraftUnits,
+    input: {
+      command: "ar_followup.draft",
+      inputHash,
+      config,
+      invoiceObjectId: refs.invoiceObject.id,
+      invoiceId: refs.invoiceRow.id,
+      customerObjectId: refs.customerObject?.id ?? null,
+      jobObjectId: refs.jobObject?.id ?? null,
+      sourceEvidenceIds: refs.sourceEvidenceIds,
+      tonePolicy: refs.tonePolicy,
+      channel: refs.channel,
+      paymentLink: "blocked",
+      externalSend: false,
+      moneyMovement: "blocked",
+    },
+    policy: {
+      externalExecution: "blocked",
+      externalMutation: false,
+      externalSend: false,
+      paymentLink: "blocked",
+      moneyMovement: "blocked",
+    },
+    evidence: {
+      command: "ar_followup.draft",
+      required: ["invoice_snapshot", "ar_followup_draft", "cash_packet"],
+      externalExecution: "blocked",
+      externalMutation: false,
+      externalSend: false,
+      paymentLink: "blocked",
+      moneyMovement: "blocked",
+    },
+    db,
+  });
+  const coreBudget = objectValue(coreRun.budget);
+  const coreReservationId = optionalString(coreBudget.reservationId);
+  if (!coreReservationId) {
+    throw new PlatformUnavailableError(
+      "worker_run_budget_reservation_missing",
+      "Core worker.run.start did not return a Finance budget reservation.",
+      409,
+    );
+  }
 
   const result = await db.transaction(async (tx) => {
     await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${financeSource}:${input.idempotencyKey}`}))`,
+      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${coreWorkerRunSource}:ar_followup.draft:${input.idempotencyKey}`}))`,
     );
 
     const [existingRun] = await tx
@@ -2589,25 +2729,35 @@ export async function draftFinanceArFollowup(input: {
       .where(
         and(
           eq(workerRuns.tenantId, context.worker.tenantId),
-          eq(workerRuns.source, financeSource),
-          eq(workerRuns.idempotencyKey, input.idempotencyKey),
+          eq(workerRuns.id, coreRun.workerRunId),
         ),
       )
       .limit(1);
 
-    if (existingRun) {
-      const existingInput = objectValue(objectValue(existingRun.data).input);
-      const existingHash = optionalString(existingInput.inputHash);
+    if (!existingRun) {
+      throw new PlatformUnavailableError(
+        "worker_run_missing",
+        "Core worker.run.start did not return a persisted Finance worker run.",
+        409,
+      );
+    }
 
-      if (existingHash && existingHash !== inputHash) {
-        throw new PlatformUnavailableError(
-          "worker_idempotency_conflict",
-          "A Finance AR follow-up draft already exists for this idempotency key with different input.",
-          409,
-        );
-      }
+    const existingInput = objectValue(objectValue(existingRun.data).input);
+    const existingRequest = objectValue(existingInput.request);
+    const existingHash = optionalString(existingRequest.inputHash) ?? optionalString(existingInput.inputHash);
 
-      return { replay: existingRun };
+    if (existingHash && existingHash !== inputHash) {
+      throw new PlatformUnavailableError(
+        "worker_idempotency_conflict",
+        "A Finance AR follow-up draft already exists for this idempotency key with different input.",
+        409,
+      );
+    }
+
+    const existingOutput = outputData(existingRun.data);
+
+    if (optionalString(existingOutput.arFollowupObjectId)) {
+      return { status: "replay" as const, replay: existingRun };
     }
 
     const [definition] = await tx
@@ -2761,26 +2911,7 @@ export async function draftFinanceArFollowup(input: {
       channel: refs.channel,
     } satisfies JsonObject;
 
-    const [workerRun] = await tx
-      .insert(workerRuns)
-      .values({
-        tenantId: context.worker.tenantId,
-        workerId: context.worker.id,
-        taskId: task.id,
-        capabilityId: context.capabilityId,
-        budgetAccountId: context.budgetAccountId,
-        source: financeSource,
-        idempotencyKey: input.idempotencyKey,
-        state: "running",
-        mode: "simulation",
-        data: {
-          input: runInput,
-          output: {},
-        },
-        startedAt: now,
-        updatedAt: now,
-      })
-      .returning({ id: workerRuns.id });
+    const workerRun = existingRun;
 
     const [workflowRun] = await tx
       .insert(workflowRuns)
@@ -2812,20 +2943,6 @@ export async function draftFinanceArFollowup(input: {
         updatedAt: now,
       })
       .returning({ id: workflowRuns.id });
-
-    const [reservation] = await tx
-      .insert(budgetReservations)
-      .values({
-        tenantId: context.worker.tenantId,
-        accountId: context.budgetAccountId,
-        taskId: task.id,
-        units: arFollowupDraftUnits,
-        state: "used",
-        expiresAt: new Date(now.getTime() + 15 * 60 * 1000),
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning({ id: budgetReservations.id });
 
     const [inference] = await tx
       .insert(inferences)
@@ -2867,29 +2984,6 @@ export async function draftFinanceArFollowup(input: {
         createdAt: now,
       })
       .returning({ id: inferences.id });
-
-    const [usage] = await tx
-      .insert(usageEvents)
-      .values({
-        tenantId: context.worker.tenantId,
-        accountId: context.budgetAccountId,
-        reservationId: reservation.id,
-        inferenceId: inference.id,
-        taskId: task.id,
-        capabilityId: context.capabilityId,
-        actorType: "worker",
-        actorId: context.worker.id,
-        units: arFollowupDraftUnits,
-        costUsd: "0.000000",
-        data: {
-          mode: "deterministic",
-          workerRunId: workerRun.id,
-          workflowRunId: workflowRun.id,
-          arFollowupObjectId: arFollowup.id,
-        },
-        createdAt: now,
-      })
-      .returning({ id: usageEvents.id });
 
     const [event] = await tx
       .insert(events)
@@ -3281,6 +3375,8 @@ export async function draftFinanceArFollowup(input: {
     });
 
     const output = {
+      command: "ar_followup.draft",
+      workerRunId: workerRun.id,
       arFollowupObjectId: arFollowup.id,
       invoiceObjectId: refs.invoiceObject.id,
       invoiceId: refs.invoiceRow.id,
@@ -3294,6 +3390,8 @@ export async function draftFinanceArFollowup(input: {
       workflowRunId: workflowRun.id,
       workflowStepIds,
       financeArFollowupViewId: view.id,
+      reservationId: coreReservationId,
+      inferenceId: inference.id,
       tonePolicy: refs.tonePolicy,
       channel: refs.channel,
       draft: refs.draft,
@@ -3313,11 +3411,16 @@ export async function draftFinanceArFollowup(input: {
     await tx
       .update(workerRuns)
       .set({
-        state: "done",
         eventId: event.id,
+        taskId: task.id,
         data: {
-          input: runInput,
+          ...objectValue(existingRun.data),
+          input: {
+            ...existingInput,
+            request: runInput,
+          },
           output,
+          businessEventId: event.id,
           eventId: event.id,
           taskId: task.id,
           arFollowupObjectId: arFollowup.id,
@@ -3331,11 +3434,9 @@ export async function draftFinanceArFollowup(input: {
           workflowRunId: workflowRun.id,
           workflowStepIds,
           financeArFollowupViewId: view.id,
-          reservationId: reservation.id,
+          reservationId: coreReservationId,
           inferenceId: inference.id,
-          usageEventId: usage.id,
         },
-        endedAt: now,
         updatedAt: now,
       })
       .where(eq(workerRuns.id, workerRun.id));
@@ -3353,7 +3454,7 @@ export async function draftFinanceArFollowup(input: {
       .where(eq(workers.id, context.worker.id));
 
     return {
-      replay: null,
+      status: "created" as const,
       workerRunId: workerRun.id,
       taskId: task.id,
       eventId: event.id,
@@ -3372,9 +3473,74 @@ export async function draftFinanceArFollowup(input: {
     };
   });
 
-  if (result.replay) {
-    return replayedArFollowupDraft(db, context, result.replay);
+  if (result.status === "replay") {
+    const replay = result.replay;
+    const replayData = objectValue(replay.data);
+    const replayOutput = outputData(replayData);
+    const replayCompletionBudget = objectValue(objectValue(replayData.completion).budget);
+
+    if (replay.state === "running") {
+      await settleFinanceCoreWorkerRun({
+        db,
+        context,
+        operatorEmail: input.operatorEmail,
+        idempotencyKey: input.idempotencyKey,
+        workerRunId: replay.id,
+        reason:
+          "Finance Operations Worker drafted an AR follow-up with external sends, payment links, and money movement blocked.",
+        output: replayOutput,
+        evidence: {
+          command: "ar_followup.draft",
+          eventId: optionalString(replayOutput.eventId),
+          evidenceId: optionalString(replayOutput.evidenceId),
+          draftEvidenceId: optionalString(replayOutput.draftEvidenceId),
+          packetId: optionalString(replayOutput.packetId),
+          documentId: optionalString(replayOutput.documentId),
+          approvalRequestId: optionalString(replayOutput.approvalRequestId),
+          workflowRunId: optionalString(replayOutput.workflowRunId),
+          inferenceId: optionalString(replayOutput.inferenceId),
+          externalExecution: "blocked",
+          externalMutation: false,
+          externalSend: false,
+          paymentLink: "blocked",
+          moneyMovement: "blocked",
+        },
+      });
+    } else {
+      await persistCoreSettledFinanceOutput(db, replay.id, replayOutput, replayCompletionBudget);
+    }
+
+    const [settledReplay] = await db.select().from(workerRuns).where(eq(workerRuns.id, replay.id)).limit(1);
+
+    return replayedArFollowupDraft(db, context, settledReplay ?? replay);
   }
+
+  const settledOutput = await settleFinanceCoreWorkerRun({
+    db,
+    context,
+    operatorEmail: input.operatorEmail,
+    idempotencyKey: input.idempotencyKey,
+    workerRunId: result.workerRunId,
+    reason:
+      "Finance Operations Worker drafted an AR follow-up with external sends, payment links, and money movement blocked.",
+    output: result.output,
+    evidence: {
+      command: "ar_followup.draft",
+      eventId: result.eventId,
+      evidenceId: result.evidenceId,
+      draftEvidenceId: result.draftEvidenceId,
+      packetId: result.packetId,
+      documentId: result.documentId,
+      approvalRequestId: result.approvalRequestId,
+      workflowRunId: result.workflowRunId,
+      inferenceId: optionalString(result.output.inferenceId),
+      externalExecution: "blocked",
+      externalMutation: false,
+      externalSend: false,
+      paymentLink: "blocked",
+      moneyMovement: "blocked",
+    },
+  });
 
   return {
     created: true,
@@ -3393,7 +3559,9 @@ export async function draftFinanceArFollowup(input: {
     workflowRunId: result.workflowRunId,
     workflowStepIds: result.workflowStepIds,
     financeArFollowupViewId: result.financeArFollowupViewId,
-    output: result.output,
+    reservationId: optionalString(settledOutput.reservationId) ?? null,
+    usageEventId: optionalString(settledOutput.usageEventId) ?? null,
+    output: settledOutput,
     snapshot: await getFinanceWorkerSnapshot(db, {
       role: financeWorkerRole,
       tenantSlug: context.worker.tenantSlug,
@@ -3438,10 +3606,63 @@ export async function generateFinanceCashForecast(input: {
     currency: refs.currency,
   });
   const now = new Date();
+  const coreRun = await startCoreWorkerRun({
+    operatorEmail: input.operatorEmail,
+    tenantSlug: context.worker.tenantSlug,
+    idempotencyKey: input.idempotencyKey,
+    worker: {
+      id: context.worker.id,
+      role: financeWorkerRole,
+    },
+    command: "cash_forecast.generate",
+    mode: "simulation",
+    capabilityId: context.capabilityId,
+    connectionId: context.accountingConnectionId,
+    budgetAccountId: context.budgetAccountId,
+    units: cashForecastGenerateUnits,
+    input: {
+      command: "cash_forecast.generate",
+      inputHash,
+      config,
+      window: { from: refs.window.from, to: refs.window.to },
+      accounts: refs.accounts,
+      sourceEvidenceIds: refs.sourceEvidenceIds,
+      startingBalanceCents: refs.startingBalanceCents,
+      expectedInflowCents: refs.expectedInflowCents,
+      expectedOutflowCents: refs.expectedOutflowCents,
+      currency: refs.currency,
+      externalExecution: "blocked",
+      moneyMovement: "blocked",
+    },
+    policy: {
+      externalExecution: "blocked",
+      externalMutation: false,
+      externalSend: false,
+      moneyMovement: "blocked",
+    },
+    evidence: {
+      command: "cash_forecast.generate",
+      required: ["account_snapshot", "cash_forecast", "cash_packet"],
+      externalExecution: "blocked",
+      externalMutation: false,
+      externalSend: false,
+      moneyMovement: "blocked",
+    },
+    db,
+  });
+  const coreBudget = objectValue(coreRun.budget);
+  const coreReservationId = optionalString(coreBudget.reservationId);
+  if (!coreReservationId) {
+    throw new PlatformUnavailableError(
+      "worker_run_budget_reservation_missing",
+      "Core worker.run.start did not return a Finance budget reservation.",
+      409,
+    );
+  }
 
   const result = await db.transaction(async (tx) => {
     await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${financeSource}:${input.idempotencyKey}`}))`,
+      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${coreWorkerRunSource}:cash_forecast.generate:${input.idempotencyKey}`}))`,
     );
 
     const [existingRun] = await tx
@@ -3450,25 +3671,35 @@ export async function generateFinanceCashForecast(input: {
       .where(
         and(
           eq(workerRuns.tenantId, context.worker.tenantId),
-          eq(workerRuns.source, financeSource),
-          eq(workerRuns.idempotencyKey, input.idempotencyKey),
+          eq(workerRuns.id, coreRun.workerRunId),
         ),
       )
       .limit(1);
 
-    if (existingRun) {
-      const existingInput = objectValue(objectValue(existingRun.data).input);
-      const existingHash = optionalString(existingInput.inputHash);
+    if (!existingRun) {
+      throw new PlatformUnavailableError(
+        "worker_run_missing",
+        "Core worker.run.start did not return a persisted Finance worker run.",
+        409,
+      );
+    }
 
-      if (existingHash && existingHash !== inputHash) {
-        throw new PlatformUnavailableError(
-          "worker_idempotency_conflict",
-          "A Finance cash forecast already exists for this idempotency key with different input.",
-          409,
-        );
-      }
+    const existingInput = objectValue(objectValue(existingRun.data).input);
+    const existingRequest = objectValue(existingInput.request);
+    const existingHash = optionalString(existingRequest.inputHash) ?? optionalString(existingInput.inputHash);
 
-      return { replay: existingRun };
+    if (existingHash && existingHash !== inputHash) {
+      throw new PlatformUnavailableError(
+        "worker_idempotency_conflict",
+        "A Finance cash forecast already exists for this idempotency key with different input.",
+        409,
+      );
+    }
+
+    const existingOutput = outputData(existingRun.data);
+
+    if (optionalString(existingOutput.cashForecastObjectId)) {
+      return { status: "replay" as const, replay: existingRun };
     }
 
     const [definition] = await tx
@@ -3608,27 +3839,7 @@ export async function generateFinanceCashForecast(input: {
       currency: refs.currency,
     } satisfies JsonObject;
 
-    const [workerRun] = await tx
-      .insert(workerRuns)
-      .values({
-        tenantId: context.worker.tenantId,
-        workerId: context.worker.id,
-        taskId: task.id,
-        capabilityId: context.capabilityId,
-        connectionId: context.accountingConnectionId,
-        budgetAccountId: context.budgetAccountId,
-        source: financeSource,
-        idempotencyKey: input.idempotencyKey,
-        state: "running",
-        mode: "simulation",
-        data: {
-          input: runInput,
-          output: {},
-        },
-        startedAt: now,
-        updatedAt: now,
-      })
-      .returning({ id: workerRuns.id });
+    const workerRun = existingRun;
 
     const [workflowRun] = await tx
       .insert(workflowRuns)
@@ -3659,20 +3870,6 @@ export async function generateFinanceCashForecast(input: {
         updatedAt: now,
       })
       .returning({ id: workflowRuns.id });
-
-    const [reservation] = await tx
-      .insert(budgetReservations)
-      .values({
-        tenantId: context.worker.tenantId,
-        accountId: context.budgetAccountId,
-        taskId: task.id,
-        units: cashForecastGenerateUnits,
-        state: "used",
-        expiresAt: new Date(now.getTime() + 15 * 60 * 1000),
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning({ id: budgetReservations.id });
 
     const [inference] = await tx
       .insert(inferences)
@@ -3714,29 +3911,6 @@ export async function generateFinanceCashForecast(input: {
         createdAt: now,
       })
       .returning({ id: inferences.id });
-
-    const [usage] = await tx
-      .insert(usageEvents)
-      .values({
-        tenantId: context.worker.tenantId,
-        accountId: context.budgetAccountId,
-        reservationId: reservation.id,
-        inferenceId: inference.id,
-        taskId: task.id,
-        capabilityId: context.capabilityId,
-        actorType: "worker",
-        actorId: context.worker.id,
-        units: cashForecastGenerateUnits,
-        costUsd: "0.000000",
-        data: {
-          mode: "deterministic",
-          workerRunId: workerRun.id,
-          workflowRunId: workflowRun.id,
-          cashForecastObjectId: cashForecast.id,
-        },
-        createdAt: now,
-      })
-      .returning({ id: usageEvents.id });
 
     const [event] = await tx
       .insert(events)
@@ -4130,6 +4304,8 @@ export async function generateFinanceCashForecast(input: {
     });
 
     const output = {
+      command: "cash_forecast.generate",
+      workerRunId: workerRun.id,
       cashForecastObjectId: cashForecast.id,
       approvalRequestId: approval.id,
       evidenceId: traceEvidence.id,
@@ -4139,6 +4315,8 @@ export async function generateFinanceCashForecast(input: {
       workflowRunId: workflowRun.id,
       workflowStepIds,
       financeCashViewId: view.id,
+      reservationId: coreReservationId,
+      inferenceId: inference.id,
       state: forecastState,
       window: { from: refs.window.from, to: refs.window.to },
       accounts: refs.accountRefs,
@@ -4160,11 +4338,16 @@ export async function generateFinanceCashForecast(input: {
     await tx
       .update(workerRuns)
       .set({
-        state: "done",
         eventId: event.id,
+        taskId: task.id,
         data: {
-          input: runInput,
+          ...objectValue(existingRun.data),
+          input: {
+            ...existingInput,
+            request: runInput,
+          },
           output,
+          businessEventId: event.id,
           eventId: event.id,
           taskId: task.id,
           cashForecastObjectId: cashForecast.id,
@@ -4176,11 +4359,9 @@ export async function generateFinanceCashForecast(input: {
           workflowRunId: workflowRun.id,
           workflowStepIds,
           financeCashViewId: view.id,
-          reservationId: reservation.id,
+          reservationId: coreReservationId,
           inferenceId: inference.id,
-          usageEventId: usage.id,
         },
-        endedAt: now,
         updatedAt: now,
       })
       .where(eq(workerRuns.id, workerRun.id));
@@ -4199,7 +4380,7 @@ export async function generateFinanceCashForecast(input: {
       .where(eq(workers.id, context.worker.id));
 
     return {
-      replay: null,
+      status: "created" as const,
       workerRunId: workerRun.id,
       taskId: task.id,
       eventId: event.id,
@@ -4216,9 +4397,72 @@ export async function generateFinanceCashForecast(input: {
     };
   });
 
-  if (result.replay) {
-    return replayedCashForecastGenerate(db, context, result.replay);
+  if (result.status === "replay") {
+    const replay = result.replay;
+    const replayData = objectValue(replay.data);
+    const replayOutput = outputData(replayData);
+    const replayCompletionBudget = objectValue(objectValue(replayData.completion).budget);
+
+    if (replay.state === "running") {
+      await settleFinanceCoreWorkerRun({
+        db,
+        context,
+        operatorEmail: input.operatorEmail,
+        idempotencyKey: input.idempotencyKey,
+        workerRunId: replay.id,
+        reason:
+          "Finance Operations Worker generated a cash forecast from scoped evidence with external execution and money movement blocked.",
+        output: replayOutput,
+        evidence: {
+          command: "cash_forecast.generate",
+          eventId: optionalString(replayOutput.eventId),
+          evidenceId: optionalString(replayOutput.evidenceId),
+          forecastEvidenceId: optionalString(replayOutput.forecastEvidenceId),
+          packetId: optionalString(replayOutput.packetId),
+          documentId: optionalString(replayOutput.documentId),
+          approvalRequestId: optionalString(replayOutput.approvalRequestId),
+          workflowRunId: optionalString(replayOutput.workflowRunId),
+          inferenceId: optionalString(replayOutput.inferenceId),
+          externalExecution: "blocked",
+          externalMutation: false,
+          externalSend: false,
+          moneyMovement: "blocked",
+        },
+      });
+    } else {
+      await persistCoreSettledFinanceOutput(db, replay.id, replayOutput, replayCompletionBudget);
+    }
+
+    const [settledReplay] = await db.select().from(workerRuns).where(eq(workerRuns.id, replay.id)).limit(1);
+
+    return replayedCashForecastGenerate(db, context, settledReplay ?? replay);
   }
+
+  const settledOutput = await settleFinanceCoreWorkerRun({
+    db,
+    context,
+    operatorEmail: input.operatorEmail,
+    idempotencyKey: input.idempotencyKey,
+    workerRunId: result.workerRunId,
+    reason:
+      "Finance Operations Worker generated a cash forecast from scoped evidence with external execution and money movement blocked.",
+    output: result.output,
+    evidence: {
+      command: "cash_forecast.generate",
+      eventId: result.eventId,
+      evidenceId: result.evidenceId,
+      forecastEvidenceId: result.forecastEvidenceId,
+      packetId: result.packetId,
+      documentId: result.documentId,
+      approvalRequestId: result.approvalRequestId,
+      workflowRunId: result.workflowRunId,
+      inferenceId: optionalString(result.output.inferenceId),
+      externalExecution: "blocked",
+      externalMutation: false,
+      externalSend: false,
+      moneyMovement: "blocked",
+    },
+  });
 
   return {
     created: true,
@@ -4235,7 +4479,9 @@ export async function generateFinanceCashForecast(input: {
     workflowRunId: result.workflowRunId,
     workflowStepIds: result.workflowStepIds,
     financeCashViewId: result.financeCashViewId,
-    output: result.output,
+    reservationId: optionalString(settledOutput.reservationId) ?? null,
+    usageEventId: optionalString(settledOutput.usageEventId) ?? null,
+    output: settledOutput,
     snapshot: await getFinanceWorkerSnapshot(db, {
       role: financeWorkerRole,
       tenantSlug: context.worker.tenantSlug,
@@ -4281,10 +4527,73 @@ export async function prepareFinancePaymentDraft(input: {
     sourceEvidenceIds: refs.sourceEvidenceIds,
   });
   const now = new Date();
+  const coreRun = await startCoreWorkerRun({
+    operatorEmail: input.operatorEmail,
+    tenantSlug: context.worker.tenantSlug,
+    idempotencyKey: input.idempotencyKey,
+    worker: {
+      id: context.worker.id,
+      role: financeWorkerRole,
+    },
+    command: "payment_draft.prepare",
+    mode: "simulation",
+    capabilityId: context.capabilityId,
+    connectionId: context.accountingConnectionId,
+    budgetAccountId: context.budgetAccountId,
+    units: paymentDraftPrepareUnits,
+    input: {
+      command: "payment_draft.prepare",
+      inputHash,
+      config,
+      billObjectId: refs.billObject?.id ?? null,
+      sourcePaymentObjectId: refs.sourcePaymentObject?.id ?? null,
+      sourcePaymentInstructionId: refs.sourcePaymentInstruction?.id ?? null,
+      sourcePaymentId: refs.sourcePaymentRow?.id ?? null,
+      amountCents: refs.amountCents,
+      currency: refs.currency,
+      method: refs.method,
+      sourceEvidenceIds: refs.sourceEvidenceIds,
+      dualControl: "required",
+      requiresDualControl: true,
+      externalExecution: "blocked",
+      paymentLink: "blocked",
+      moneyMovement: "blocked",
+    },
+    policy: {
+      externalExecution: "blocked",
+      externalMutation: false,
+      externalSend: false,
+      paymentLink: "blocked",
+      moneyMovement: "blocked",
+      dualControl: "required",
+      requiresDualControl: true,
+    },
+    evidence: {
+      command: "payment_draft.prepare",
+      required: ["payment_instruction", "dual_control_packet", "source_payment_or_bill"],
+      externalExecution: "blocked",
+      externalMutation: false,
+      externalSend: false,
+      paymentLink: "blocked",
+      moneyMovement: "blocked",
+      dualControl: "required",
+      requiresDualControl: true,
+    },
+    db,
+  });
+  const coreBudget = objectValue(coreRun.budget);
+  const coreReservationId = optionalString(coreBudget.reservationId);
+  if (!coreReservationId) {
+    throw new PlatformUnavailableError(
+      "worker_run_budget_reservation_missing",
+      "Core worker.run.start did not return a Finance budget reservation.",
+      409,
+    );
+  }
 
   const result = await db.transaction(async (tx) => {
     await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${financeSource}:${input.idempotencyKey}`}))`,
+      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${coreWorkerRunSource}:payment_draft.prepare:${input.idempotencyKey}`}))`,
     );
 
     const [existingRun] = await tx
@@ -4293,25 +4602,35 @@ export async function prepareFinancePaymentDraft(input: {
       .where(
         and(
           eq(workerRuns.tenantId, context.worker.tenantId),
-          eq(workerRuns.source, financeSource),
-          eq(workerRuns.idempotencyKey, input.idempotencyKey),
+          eq(workerRuns.id, coreRun.workerRunId),
         ),
       )
       .limit(1);
 
-    if (existingRun) {
-      const existingInput = objectValue(objectValue(existingRun.data).input);
-      const existingHash = optionalString(existingInput.inputHash);
+    if (!existingRun) {
+      throw new PlatformUnavailableError(
+        "worker_run_missing",
+        "Core worker.run.start did not return a persisted Finance worker run.",
+        409,
+      );
+    }
 
-      if (existingHash && existingHash !== inputHash) {
-        throw new PlatformUnavailableError(
-          "worker_idempotency_conflict",
-          "A Finance payment draft already exists for this idempotency key with different input.",
-          409,
-        );
-      }
+    const existingInput = objectValue(objectValue(existingRun.data).input);
+    const existingRequest = objectValue(existingInput.request);
+    const existingHash = optionalString(existingRequest.inputHash) ?? optionalString(existingInput.inputHash);
 
-      return { replay: existingRun };
+    if (existingHash && existingHash !== inputHash) {
+      throw new PlatformUnavailableError(
+        "worker_idempotency_conflict",
+        "A Finance payment draft already exists for this idempotency key with different input.",
+        409,
+      );
+    }
+
+    const existingOutput = outputData(existingRun.data);
+
+    if (optionalString(existingOutput.paymentObjectId)) {
+      return { status: "replay" as const, replay: existingRun };
     }
 
     const [definition] = await tx
@@ -4492,27 +4811,7 @@ export async function prepareFinancePaymentDraft(input: {
       method: refs.method,
     } satisfies JsonObject;
 
-    const [workerRun] = await tx
-      .insert(workerRuns)
-      .values({
-        tenantId: context.worker.tenantId,
-        workerId: context.worker.id,
-        taskId: task.id,
-        capabilityId: context.capabilityId,
-        connectionId: context.accountingConnectionId,
-        budgetAccountId: context.budgetAccountId,
-        source: financeSource,
-        idempotencyKey: input.idempotencyKey,
-        state: "running",
-        mode: "simulation",
-        data: {
-          input: runInput,
-          output: {},
-        },
-        startedAt: now,
-        updatedAt: now,
-      })
-      .returning({ id: workerRuns.id });
+    const workerRun = existingRun;
 
     const [workflowRun] = await tx
       .insert(workflowRuns)
@@ -4544,20 +4843,6 @@ export async function prepareFinancePaymentDraft(input: {
         updatedAt: now,
       })
       .returning({ id: workflowRuns.id });
-
-    const [reservation] = await tx
-      .insert(budgetReservations)
-      .values({
-        tenantId: context.worker.tenantId,
-        accountId: context.budgetAccountId,
-        taskId: task.id,
-        units: paymentDraftPrepareUnits,
-        state: "used",
-        expiresAt: new Date(now.getTime() + 15 * 60 * 1000),
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning({ id: budgetReservations.id });
 
     const [inference] = await tx
       .insert(inferences)
@@ -4602,30 +4887,6 @@ export async function prepareFinancePaymentDraft(input: {
         createdAt: now,
       })
       .returning({ id: inferences.id });
-
-    const [usage] = await tx
-      .insert(usageEvents)
-      .values({
-        tenantId: context.worker.tenantId,
-        accountId: context.budgetAccountId,
-        reservationId: reservation.id,
-        inferenceId: inference.id,
-        taskId: task.id,
-        capabilityId: context.capabilityId,
-        actorType: "worker",
-        actorId: context.worker.id,
-        units: paymentDraftPrepareUnits,
-        costUsd: "0.000000",
-        data: {
-          mode: "deterministic",
-          workerRunId: workerRun.id,
-          workflowRunId: workflowRun.id,
-          paymentObjectId: paymentObject.id,
-          paymentInstructionId: paymentInstruction.id,
-        },
-        createdAt: now,
-      })
-      .returning({ id: usageEvents.id });
 
     const [event] = await tx
       .insert(events)
@@ -5057,6 +5318,8 @@ export async function prepareFinancePaymentDraft(input: {
     });
 
     const output = {
+      command: "payment_draft.prepare",
+      workerRunId: workerRun.id,
       paymentObjectId: paymentObject.id,
       paymentId: payment.id,
       paymentInstructionId: paymentInstruction.id,
@@ -5071,6 +5334,8 @@ export async function prepareFinancePaymentDraft(input: {
       workflowRunId: workflowRun.id,
       workflowStepIds,
       financePaymentViewId: view.id,
+      reservationId: coreReservationId,
+      inferenceId: inference.id,
       state: draftState,
       payee: refs.payee,
       method: refs.method,
@@ -5091,11 +5356,16 @@ export async function prepareFinancePaymentDraft(input: {
     await tx
       .update(workerRuns)
       .set({
-        state: "done",
         eventId: event.id,
+        taskId: task.id,
         data: {
-          input: runInput,
+          ...objectValue(existingRun.data),
+          input: {
+            ...existingInput,
+            request: runInput,
+          },
           output,
+          businessEventId: event.id,
           eventId: event.id,
           taskId: task.id,
           paymentObjectId: paymentObject.id,
@@ -5112,11 +5382,9 @@ export async function prepareFinancePaymentDraft(input: {
           workflowRunId: workflowRun.id,
           workflowStepIds,
           financePaymentViewId: view.id,
-          reservationId: reservation.id,
+          reservationId: coreReservationId,
           inferenceId: inference.id,
-          usageEventId: usage.id,
         },
-        endedAt: now,
         updatedAt: now,
       })
       .where(eq(workerRuns.id, workerRun.id));
@@ -5135,7 +5403,7 @@ export async function prepareFinancePaymentDraft(input: {
       .where(eq(workers.id, context.worker.id));
 
     return {
-      replay: null,
+      status: "created" as const,
       workerRunId: workerRun.id,
       taskId: task.id,
       eventId: event.id,
@@ -5157,9 +5425,78 @@ export async function prepareFinancePaymentDraft(input: {
     };
   });
 
-  if (result.replay) {
-    return replayedPaymentDraftPrepare(db, context, result.replay);
+  if (result.status === "replay") {
+    const replay = result.replay;
+    const replayData = objectValue(replay.data);
+    const replayOutput = outputData(replayData);
+    const replayCompletionBudget = objectValue(objectValue(replayData.completion).budget);
+
+    if (replay.state === "running") {
+      await settleFinanceCoreWorkerRun({
+        db,
+        context,
+        operatorEmail: input.operatorEmail,
+        idempotencyKey: input.idempotencyKey,
+        workerRunId: replay.id,
+        reason:
+          "Finance Operations Worker prepared a payment draft for dual-control review with money movement blocked.",
+        output: replayOutput,
+        evidence: {
+          command: "payment_draft.prepare",
+          eventId: optionalString(replayOutput.eventId),
+          evidenceId: optionalString(replayOutput.evidenceId),
+          draftEvidenceId: optionalString(replayOutput.draftEvidenceId),
+          packetId: optionalString(replayOutput.packetId),
+          documentId: optionalString(replayOutput.documentId),
+          approvalRequestId: optionalString(replayOutput.approvalRequestId),
+          workflowRunId: optionalString(replayOutput.workflowRunId),
+          inferenceId: optionalString(replayOutput.inferenceId),
+          externalExecution: "blocked",
+          externalMutation: false,
+          externalSend: false,
+          paymentLink: "blocked",
+          moneyMovement: "blocked",
+          dualControl: "required",
+          requiresDualControl: true,
+        },
+      });
+    } else {
+      await persistCoreSettledFinanceOutput(db, replay.id, replayOutput, replayCompletionBudget);
+    }
+
+    const [settledReplay] = await db.select().from(workerRuns).where(eq(workerRuns.id, replay.id)).limit(1);
+
+    return replayedPaymentDraftPrepare(db, context, settledReplay ?? replay);
   }
+
+  const settledOutput = await settleFinanceCoreWorkerRun({
+    db,
+    context,
+    operatorEmail: input.operatorEmail,
+    idempotencyKey: input.idempotencyKey,
+    workerRunId: result.workerRunId,
+    reason:
+      "Finance Operations Worker prepared a payment draft for dual-control review with money movement blocked.",
+    output: result.output,
+    evidence: {
+      command: "payment_draft.prepare",
+      eventId: result.eventId,
+      evidenceId: result.evidenceId,
+      draftEvidenceId: result.draftEvidenceId,
+      packetId: result.packetId,
+      documentId: result.documentId,
+      approvalRequestId: result.approvalRequestId,
+      workflowRunId: result.workflowRunId,
+      inferenceId: optionalString(result.output.inferenceId),
+      externalExecution: "blocked",
+      externalMutation: false,
+      externalSend: false,
+      paymentLink: "blocked",
+      moneyMovement: "blocked",
+      dualControl: "required",
+      requiresDualControl: true,
+    },
+  });
 
   return {
     created: true,
@@ -5181,7 +5518,9 @@ export async function prepareFinancePaymentDraft(input: {
     workflowRunId: result.workflowRunId,
     workflowStepIds: result.workflowStepIds,
     financePaymentViewId: result.financePaymentViewId,
-    output: result.output,
+    reservationId: optionalString(settledOutput.reservationId) ?? null,
+    usageEventId: optionalString(settledOutput.usageEventId) ?? null,
+    output: settledOutput,
     snapshot: await getFinanceWorkerSnapshot(db, {
       role: financeWorkerRole,
       tenantSlug: context.worker.tenantSlug,

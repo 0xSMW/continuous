@@ -11610,6 +11610,30 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .from(workerRuns)
       .where(eq(workerRuns.id, arFollowupResult.workerRunId))
       .limit(1);
+    const arFollowupRunData = objectValue(arFollowupRun?.data);
+    const arFollowupCompletionBudget = objectValue(objectValue(arFollowupRunData.completion).budget);
+    const arFollowupReservationId = stringValue(arFollowupCompletionBudget.reservationId);
+    const arFollowupUsageEventId = stringValue(arFollowupCompletionBudget.usageEventId);
+    const [arFollowupReservation] = await db
+      .select()
+      .from(budgetReservations)
+      .where(eq(budgetReservations.id, arFollowupReservationId))
+      .limit(1);
+    const [arFollowupUsage] = await db
+      .select()
+      .from(usageEvents)
+      .where(eq(usageEvents.id, arFollowupUsageEventId))
+      .limit(1);
+    const [legacyArFollowupRunCount] = await db
+      .select({ value: count() })
+      .from(workerRuns)
+      .where(
+        and(
+          eq(workerRuns.tenantId, tenantId),
+          eq(workerRuns.source, "continuous.worker"),
+          eq(workerRuns.idempotencyKey, `ci-finance-ar-followup-${runId}`),
+        ),
+      );
     const [arFollowupObject] = await db
       .select()
       .from(objects)
@@ -11647,8 +11671,21 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(arFollowupOutput.moneyMovement).toBe("blocked");
     expect(arFollowupOutput.requiresApproval).toBe(true);
     expect(arFollowupOutput.invoiceId).toBe(financeResult.invoiceId);
-    expect(arFollowupRun?.source).toBe("continuous.worker");
+    expect(arFollowupOutput.command).toBe("ar_followup.draft");
+    expect(arFollowupOutput.workerRunId).toBe(arFollowupResult.workerRunId);
+    expect(arFollowupRun?.source).toBe("continuous.core.worker_runs");
     expect(arFollowupRun?.state).toBe("done");
+    expect(arFollowupRun?.taskId).toBe(arFollowupResult.taskId);
+    expect(arFollowupReservation?.state).toBe("used");
+    expect(arFollowupReservation?.taskId).toBe(arFollowupResult.taskId);
+    expect(arFollowupUsage?.units).toBe(2600);
+    expect(arFollowupUsage?.taskId).toBe(arFollowupResult.taskId);
+    expect(arFollowupUsage?.actorId).toBe(arFollowupRun?.workerId);
+    expect(Number(legacyArFollowupRunCount?.value ?? 0)).toBe(0);
+    expect(arFollowupResult.reservationId).toBe(arFollowupReservationId);
+    expect(arFollowupResult.usageEventId).toBe(arFollowupUsageEventId);
+    expect(arFollowupOutput.reservationId).toBe(arFollowupReservationId);
+    expect(arFollowupOutput.usageEventId).toBe(arFollowupUsageEventId);
     expect(arFollowupObject?.type).toBe("ar_followup");
     expect(arFollowupObject?.state).toBe("approval_required");
     expect(arFollowupApproval?.state).toBe("pending");
@@ -11689,6 +11726,8 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(arFollowupReplayResult.created).toBe(false);
     expect(arFollowupReplayResult.workerRunId).toBe(arFollowupResult.workerRunId);
     expect(arFollowupReplayResult.arFollowupObjectId).toBe(arFollowupResult.arFollowupObjectId);
+    expect(arFollowupReplayResult.reservationId).toBe(arFollowupResult.reservationId);
+    expect(arFollowupReplayResult.usageEventId).toBe(arFollowupResult.usageEventId);
 
     const cashForecastResponse = await executeWorkerCommand({
       command: "cash_forecast.generate",
@@ -11722,6 +11761,30 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .from(workerRuns)
       .where(eq(workerRuns.id, cashForecastResult.workerRunId))
       .limit(1);
+    const cashForecastRunData = objectValue(cashForecastRun?.data);
+    const cashForecastCompletionBudget = objectValue(objectValue(cashForecastRunData.completion).budget);
+    const cashForecastReservationId = stringValue(cashForecastCompletionBudget.reservationId);
+    const cashForecastUsageEventId = stringValue(cashForecastCompletionBudget.usageEventId);
+    const [cashForecastReservation] = await db
+      .select()
+      .from(budgetReservations)
+      .where(eq(budgetReservations.id, cashForecastReservationId))
+      .limit(1);
+    const [cashForecastUsage] = await db
+      .select()
+      .from(usageEvents)
+      .where(eq(usageEvents.id, cashForecastUsageEventId))
+      .limit(1);
+    const [legacyCashForecastRunCount] = await db
+      .select({ value: count() })
+      .from(workerRuns)
+      .where(
+        and(
+          eq(workerRuns.tenantId, tenantId),
+          eq(workerRuns.source, "continuous.worker"),
+          eq(workerRuns.idempotencyKey, `ci-finance-cash-forecast-${runId}`),
+        ),
+      );
     const [cashForecastObject] = await db
       .select()
       .from(objects)
@@ -11766,8 +11829,21 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(cashForecastOutput.expectedInflowCents).toBe(24900);
     expect(cashForecastOutput.expectedOutflowCents).toBe(336000);
     expect(cashForecastOutput.endingBalanceCents).toBe(188900);
-    expect(cashForecastRun?.source).toBe("continuous.worker");
+    expect(cashForecastOutput.command).toBe("cash_forecast.generate");
+    expect(cashForecastOutput.workerRunId).toBe(cashForecastResult.workerRunId);
+    expect(cashForecastRun?.source).toBe("continuous.core.worker_runs");
     expect(cashForecastRun?.state).toBe("done");
+    expect(cashForecastRun?.taskId).toBe(cashForecastResult.taskId);
+    expect(cashForecastReservation?.state).toBe("used");
+    expect(cashForecastReservation?.taskId).toBe(cashForecastResult.taskId);
+    expect(cashForecastUsage?.units).toBe(3100);
+    expect(cashForecastUsage?.taskId).toBe(cashForecastResult.taskId);
+    expect(cashForecastUsage?.actorId).toBe(cashForecastRun?.workerId);
+    expect(Number(legacyCashForecastRunCount?.value ?? 0)).toBe(0);
+    expect(cashForecastResult.reservationId).toBe(cashForecastReservationId);
+    expect(cashForecastResult.usageEventId).toBe(cashForecastUsageEventId);
+    expect(cashForecastOutput.reservationId).toBe(cashForecastReservationId);
+    expect(cashForecastOutput.usageEventId).toBe(cashForecastUsageEventId);
     expect(cashForecastObject?.type).toBe("cash_forecast");
     expect(cashForecastObject?.state).toBe("review_ready");
     expect(cashForecastWorkflow?.state).toBe("review_ready");
@@ -11812,6 +11888,8 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(cashForecastReplayResult.created).toBe(false);
     expect(cashForecastReplayResult.workerRunId).toBe(cashForecastResult.workerRunId);
     expect(cashForecastReplayResult.cashForecastObjectId).toBe(cashForecastResult.cashForecastObjectId);
+    expect(cashForecastReplayResult.reservationId).toBe(cashForecastResult.reservationId);
+    expect(cashForecastReplayResult.usageEventId).toBe(cashForecastResult.usageEventId);
 
     const paymentDraftResponse = await executeAppServerWorkerTool("continuous.worker.command", {
       command: "payment_draft.prepare",
@@ -11843,6 +11921,10 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .from(workerRuns)
       .where(eq(workerRuns.id, paymentDraftResult.workerRunId))
       .limit(1);
+    const paymentDraftRunData = objectValue(paymentDraftRun?.data);
+    const paymentDraftCompletionBudget = objectValue(objectValue(paymentDraftRunData.completion).budget);
+    const paymentDraftReservationId = stringValue(paymentDraftCompletionBudget.reservationId);
+    const paymentDraftUsageEventId = stringValue(paymentDraftCompletionBudget.usageEventId);
     const [paymentDraftObject] = await db
       .select()
       .from(objects)
@@ -11886,13 +11968,23 @@ maybeDescribe("Revenue Worker integration eval", () => {
     const [paymentDraftReservation] = await db
       .select()
       .from(budgetReservations)
-      .where(eq(budgetReservations.id, stringValue(objectValue(paymentDraftRun?.data).reservationId)))
+      .where(eq(budgetReservations.id, paymentDraftReservationId))
       .limit(1);
     const [paymentDraftUsage] = await db
       .select()
       .from(usageEvents)
-      .where(eq(usageEvents.id, stringValue(objectValue(paymentDraftRun?.data).usageEventId)))
+      .where(eq(usageEvents.id, paymentDraftUsageEventId))
       .limit(1);
+    const [legacyPaymentDraftRunCount] = await db
+      .select({ value: count() })
+      .from(workerRuns)
+      .where(
+        and(
+          eq(workerRuns.tenantId, tenantId),
+          eq(workerRuns.source, "continuous.worker"),
+          eq(workerRuns.idempotencyKey, `ci-finance-payment-draft-${runId}`),
+        ),
+      );
     const [paymentDraftAudit] = await db
       .select()
       .from(auditEvents)
@@ -11916,8 +12008,11 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(paymentDraftOutput.requiresApproval).toBe(true);
     expect(paymentDraftOutput.requiresDualControl).toBe(true);
     expect(paymentDraftOutput.paymentInstructionId).toBe(paymentDraftResult.paymentInstructionId);
-    expect(paymentDraftRun?.source).toBe("continuous.worker");
+    expect(paymentDraftOutput.command).toBe("payment_draft.prepare");
+    expect(paymentDraftOutput.workerRunId).toBe(paymentDraftResult.workerRunId);
+    expect(paymentDraftRun?.source).toBe("continuous.core.worker_runs");
     expect(paymentDraftRun?.state).toBe("done");
+    expect(paymentDraftRun?.taskId).toBe(paymentDraftResult.taskId);
     expect(paymentDraftObject?.type).toBe("payment");
     expect(paymentDraftObject?.state).toBe("dual_control_pending");
     expect(paymentDraftPayment?.state).toBe("dual_control_pending");
@@ -11936,7 +12031,16 @@ maybeDescribe("Revenue Worker integration eval", () => {
       paymentDraftResult.paymentInstructionId,
     );
     expect(paymentDraftReservation?.state).toBe("used");
+    expect(paymentDraftReservation?.taskId).toBe(paymentDraftResult.taskId);
     expect(paymentDraftUsage?.reservationId).toBe(paymentDraftReservation?.id);
+    expect(paymentDraftUsage?.units).toBe(3400);
+    expect(paymentDraftUsage?.taskId).toBe(paymentDraftResult.taskId);
+    expect(paymentDraftUsage?.actorId).toBe(paymentDraftRun?.workerId);
+    expect(Number(legacyPaymentDraftRunCount?.value ?? 0)).toBe(0);
+    expect(paymentDraftResult.reservationId).toBe(paymentDraftReservationId);
+    expect(paymentDraftResult.usageEventId).toBe(paymentDraftUsageEventId);
+    expect(paymentDraftOutput.reservationId).toBe(paymentDraftReservationId);
+    expect(paymentDraftOutput.usageEventId).toBe(paymentDraftUsageEventId);
     expect(objectValue(paymentDraftAudit?.data).moneyMovement).toBe("blocked");
     expect(
       paymentDraftResult.snapshot.paymentDrafts.some(
@@ -11973,6 +12077,8 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(paymentDraftReplayResult.workerRunId).toBe(paymentDraftResult.workerRunId);
     expect(paymentDraftReplayResult.paymentObjectId).toBe(paymentDraftResult.paymentObjectId);
     expect(paymentDraftReplayResult.paymentInstructionId).toBe(paymentDraftResult.paymentInstructionId);
+    expect(paymentDraftReplayResult.reservationId).toBe(paymentDraftResult.reservationId);
+    expect(paymentDraftReplayResult.usageEventId).toBe(paymentDraftResult.usageEventId);
 
     const exceptionResponse = await executeWorkerCommand({
       command: "exception.route",
