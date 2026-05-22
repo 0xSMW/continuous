@@ -67,9 +67,10 @@ codes, and expected consumer output before a consuming worker writes records.
 
 Before a planned worker becomes executable, add at least one fixture for its
 incoming handoff. Dispatch/Ops now has executable fixtures through `POST /worker`
-payloads with `command: "schedule.propose"` and
+payloads with `command: "schedule.propose"` plus Core worker-run settlement,
 `command: "customer_update.draft"` plus Core worker-run settlement, blocked
-`command: "closeout.prepare"`, and blocked `command: "exception.route"`. Finance now consumes
+`command: "closeout.prepare"`, and blocked `command: "exception.route"`.
+Finance now consumes
 `dispatch.closeout_to_finance` through `command: "invoice.prepare"` with Core
 worker-run source, terminal state, and budget settlement proof, consumes
 persisted invoice evidence through `command: "ar_followup.draft"`,
@@ -109,7 +110,7 @@ concessions, and promise mutation.
 | Worker | Required first fixture |
 |---|---|
 | Owner Chief-of-Staff | `revenue.lead_to_owner_review` approval packet with Revenue source evidence |
-| Dispatch/Ops | implemented: `revenue.quote_to_dispatch` approved quote with blocked adapter receipt produces a dry-run schedule proposal, blocked customer update draft, blocked closeout packet, and blocked exception route task |
+| Dispatch/Ops | implemented: `revenue.quote_to_dispatch` approved quote with blocked adapter receipt produces a dry-run schedule proposal, customer update draft with Core worker-run settlement, blocked closeout packet, and blocked exception route task |
 | Finance | implemented: `dispatch.closeout_to_finance` closeout packet with billable line summary produces a dry-run invoice draft; persisted invoice refs produce a blocked AR follow-up draft; and forecast window/account refs produce a blocked cash forecast, cash packet, owner approval request, and blocked money-movement posture |
 | Workforce | implemented: `owner.staffing_need_to_workforce` and direct workforce refs can feed `hire.packet.prepare` for workforce packets with restricted-document proof and payroll blockers; `payroll_input.prepare` produces a dry-run payroll-input packet and readiness view while payroll submission and money movement stay blocked |
 | Compliance | implemented: `workforce.payroll_to_compliance` payroll preview feeds `filing.prepare` through `config.sourceRefs`, producing a filing draft packet, approval view, and blocked submission/legal-advice posture |
