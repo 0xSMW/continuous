@@ -5,7 +5,16 @@ import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { db, pool } from "../db/client";
-import { auditEvents, evidence, obligations, objects, tasks, tenants } from "../db/schema";
+import {
+  auditEvents,
+  evidence,
+  filingRequirements,
+  obligations,
+  objects,
+  rulePacks,
+  tasks,
+  tenants,
+} from "../db/schema";
 import { scanObligations } from "./obligations";
 
 const runIntegration = Boolean(process.env.CI && process.env.DATABASE_URL);
@@ -15,8 +24,8 @@ const originalAppEnv = process.env.APP_ENV;
 const tenantSlug = "continuous-demo";
 const operatorEmail = "owner@continuoushq.com";
 const seedIds = {
-  rulePack: "55555555-5555-4555-8555-000000000008",
-  filingRequirement: "55555555-5555-4555-8555-000000000010",
+  rulePack: "55555555-5555-4555-8555-000000100008",
+  filingRequirement: "55555555-5555-4555-8555-000000100010",
 };
 
 type JsonRecord = Record<string, unknown>;
@@ -29,8 +38,63 @@ function arrayValue(value: unknown) {
   return Array.isArray(value) ? value : [];
 }
 
+async function ensureObligationTestSources() {
+  const rulePackEffectiveAt = new Date("2026-01-01T00:00:00.000Z");
+  const [tenant] = await db.select().from(tenants).where(eq(tenants.slug, tenantSlug)).limit(1);
+
+  if (!tenant) {
+    throw new Error("Seed tenant missing for obligation scan test sources.");
+  }
+
+  await db
+    .insert(rulePacks)
+    .values({
+      id: seedIds.rulePack,
+      key: "us.payroll.federal.obligation-test",
+      name: "US payroll federal obligation test",
+      domain: "payroll",
+      jurisdiction: "US",
+      version: "0.1.0",
+      sourceRefs: { test: "core_obligation_scan" },
+      rules: { filing_941: "test_only", deposits: "test_only" },
+      active: true,
+      effectiveAt: rulePackEffectiveAt,
+    })
+    .onConflictDoUpdate({
+      target: rulePacks.id,
+      set: {
+        active: true,
+        effectiveAt: rulePackEffectiveAt,
+        sourceRefs: { test: "core_obligation_scan" },
+        rules: { filing_941: "test_only", deposits: "test_only" },
+      },
+    });
+
+  await db
+    .insert(filingRequirements)
+    .values({
+      id: seedIds.filingRequirement,
+      tenantId: tenant.id,
+      legalEntityId: null,
+      rulePackId: seedIds.rulePack,
+      form: "TEST-941",
+      cadence: "quarterly",
+      agency: "IRS-Test",
+      state: "active",
+      data: { execution: "test_only" },
+    })
+    .onConflictDoUpdate({
+      target: filingRequirements.id,
+      set: {
+        rulePackId: seedIds.rulePack,
+        state: "active",
+        data: { execution: "test_only" },
+      },
+    });
+}
+
 maybeDescribe("Core obligation scan", () => {
-  beforeAll(() => {
+  beforeAll(async () => {
     process.env.APP_ENV = "test";
 
     execFileSync("bun", ["run", "db:migrate"], {
@@ -43,6 +107,7 @@ maybeDescribe("Core obligation scan", () => {
       env: process.env,
       stdio: "inherit",
     });
+    await ensureObligationTestSources();
   }, 120_000);
 
   afterAll(async () => {
