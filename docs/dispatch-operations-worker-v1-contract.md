@@ -54,8 +54,8 @@ inside `config` and use the shared `/worker` command envelope.
 | `view: "snapshot"` payload | `worker.view` | `worker.role`, `config` | None | Read-only | Blocked |
 | `schedule.propose` | `worker.command` | `config.jobId` or `config.sourceRefs`, plus `config.constraints` | Required | Appointment draft, adapter dry-run, approval request, Core worker-run lifecycle, and budget settlement | Dry-run |
 | `customer_update.draft` | `worker.command` | `config.jobId`, `config.updateKind` | Required | Draft message, evidence packet, approval request, Core worker-run lifecycle, and budget settlement | Blocked |
-| `closeout.prepare` | `worker.command` | `config.workOrderId`, optional keyed `config.sourceRefs` | Required | Closeout document, QA checklist, evidence packet, approval request, Finance handoff refs | Blocked |
-| `exception.route` | `worker.command` | `config.jobId`, `config.reason`, `config.severity`, optional keyed `config.sourceRefs` | Required | Blocked exception task, decision record, document, and evidence packet | Blocked |
+| `closeout.prepare` | `worker.command` | `config.workOrderId`, optional keyed `config.sourceRefs` | Required | Closeout document, QA checklist, evidence packet, approval request, Finance handoff refs, Core worker-run lifecycle, and budget settlement | Blocked |
+| `exception.route` | `worker.command` | `config.jobId`, `config.reason`, `config.severity`, optional keyed `config.sourceRefs` | Required | Blocked exception task, decision record, document, evidence packet, Core worker-run lifecycle, and budget settlement | Blocked |
 | `approval.decide` | `worker.command` | `config.approvalId`, `config.action`, optional `config.note` | Required | Approval/task/workflow evidence only | Blocked |
 
 ## Core Object Map
@@ -80,10 +80,11 @@ inside `config` and use the shared `/worker` command envelope.
 | `dispatch_exception` | `detected -> blocked -> operator_review` | Operator exception review | Keep external execution blocked and attach decision evidence |
 
 Retry policy: three adapter dry-run attempts, then `exception.route`.
-`schedule.propose` is a worker business command, but its run ledger is Core-owned:
-the runtime starts and completes `worker.run.*`, attaches schedule packet proof
-to the Core run row, and returns Core reservation and usage settlement ids in
-the command output.
+`schedule.propose`, `customer_update.draft`, `closeout.prepare`, and
+`exception.route` are worker business commands, but their run ledgers are
+Core-owned: the runtime starts and completes `worker.run.*`, attaches business
+packet proof to the Core run row, and returns Core reservation and usage
+settlement ids in the command output.
 
 ## Capabilities
 

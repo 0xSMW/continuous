@@ -63,13 +63,16 @@ The CI integration suite exercises `continuous.worker.command` on real
 Revenue `lead.read`, `run`, `lead.classify`, `response.draft`,
 `quote.prepare`, `payment_link.prepare`, and `continue` for both controlled-send
 receipt recording and blocked payment-link continuations. It also exercises
-Owner `brief.generate`, Dispatch `schedule.propose`, Finance
+Owner `brief.generate`, Dispatch `schedule.propose`, Dispatch
+`customer_update.draft`, Dispatch `closeout.prepare`, Dispatch
+`exception.route`, Finance
 `payment_draft.prepare`, and Compliance `filing.prepare` commands, proving the
 app-server boundary writes the same worker run, approval, evidence, budget,
 event, adapter dry-run, generated view, and workflow records as `/worker`.
-Dispatch schedule proposals, Dispatch customer updates, and Compliance filings
-also prove the Core worker-run row and Core budget settlement while external
-calendar writes, customer sends, submission, and legal advice remain blocked.
+Dispatch schedule proposals, customer updates, closeouts, exception routing,
+and Compliance filings also prove the Core worker-run row and Core budget
+settlement while external calendar writes, customer sends, invoice/payment
+execution, exception recovery, submission, and legal advice remain blocked.
 The Revenue payment-link command can be executed through
 `continuous.worker.command` or `worker:tool`, but it only prepares an internal
 packet through the Core worker-run lifecycle; live provider payment-link
@@ -99,7 +102,8 @@ family-specific app-server tool.
 Dispatch `customer_update.draft`,
 `closeout.prepare`, and `exception.route` are also schema-discoverable through
 the same registry-backed command list and keep customer-send, QA, Finance
-handoff, exception reason, severity, and related Core refs under `config`.
+handoff, exception reason, severity, and related Core refs under `config`, then
+settle budget through Core `worker.run.start` / `worker.run.complete`.
 Finance `invoice.prepare` uses the same envelope with job, closeout, customer,
 and evidence selectors under `config.sourceRefs`, prepares an invoice draft,
 cash packet, owner approval request, and accounting dry-run receipt, settles

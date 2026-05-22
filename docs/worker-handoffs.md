@@ -52,7 +52,7 @@ codes, and expected consumer output before a consuming worker writes records.
 |---|---|---|---|---|
 | `revenue.quote_to_pricing` | `revenue.quote.prepared`, quote line items and policy refs present, external send `blocked` | `worker.role=offer_pricing_operations`, `command=margin.review.prepare` | `handoff.quote_missing_lines`, `handoff.margin_policy_missing`, `handoff.discount_policy_missing`, `handoff.external_send_already_true`, `handoff.evidence_packet_missing` | Pricing review packet with margin verdict, discount approval request, quote-line policy refs, generated `price_policy` view, and Core worker-run budget settlement |
 | `revenue.quote_to_dispatch` | `revenue.quote.prepared`, approval `approved`, quote/job objects not externally sent | `worker.role=dispatch_operations`, `command=schedule.propose` | `handoff.approval_not_approved`, `handoff.quote_missing_policy`, `handoff.job_already_scheduled`, `handoff.external_send_already_true` | Appointment draft, conflict evidence, approval request, dry-run calendar receipt, and Core worker-run budget settlement |
-| `dispatch.closeout_to_finance` | `dispatch.closeout.prepared`, closeout `review_ready`, no unresolved critical exception task | `worker.role=finance_operations`, `command=invoice.prepare` | `handoff.closeout_missing_proof`, `handoff.billable_lines_missing`, `handoff.exception_open`, `handoff.customer_ref_missing` | Invoice draft, cash packet, accounting dry-run receipt, owner approval request |
+| `dispatch.closeout_to_finance` | `dispatch.closeout.prepared`, closeout `review_ready`, no unresolved critical exception task | `worker.role=finance_operations`, `command=invoice.prepare` | `handoff.closeout_missing_proof`, `handoff.billable_lines_missing`, `handoff.exception_open`, `handoff.customer_ref_missing` | Invoice draft, cash packet, accounting dry-run receipt, owner approval request, and Core worker-run budget settlement |
 | `finance.invoice_to_owner_review` | `finance.invoice.prepared` or `finance.cash_forecast.generated`, money movement `blocked` | `worker.role=owner_chief_of_staff`, `command=decision_queue.prepare` | `handoff.money_movement_not_blocked`, `handoff.cash_packet_missing`, `handoff.source_evidence_missing` | Owner decision proposal with cash/evidence refs and no external execution |
 | `owner.staffing_need_to_workforce` | `owner.decision.proposed` or capacity review packet with staffing need and budget posture | `worker.role=workforce_operations`, `command=hire.packet.prepare` or `command=payroll_input.prepare` | `handoff.owner_decision_missing`, `handoff.position_missing`, `handoff.budget_posture_missing`, `handoff.restricted_docs_uncontrolled` | Workforce packet, restricted-document proof, approval request, and payroll blocker visibility |
 | `workforce.payroll_to_compliance` | `workforce.payroll_input.prepared`, payroll preview `approved_blocked` or `preview` | `worker.role=compliance_operations`, `command=filing.prepare` | `handoff.payroll_state_invalid`, `handoff.tax_trace_missing`, `handoff.payment_instruction_unblocked` | Filing draft review packet with tax trace, source refs, and blocked submission/legal-advice posture |
@@ -68,8 +68,9 @@ codes, and expected consumer output before a consuming worker writes records.
 Before a planned worker becomes executable, add at least one fixture for its
 incoming handoff. Dispatch/Ops now has executable fixtures through `POST /worker`
 payloads with `command: "schedule.propose"` plus Core worker-run settlement,
-`command: "customer_update.draft"` plus Core worker-run settlement, blocked
-`command: "closeout.prepare"`, and blocked `command: "exception.route"`.
+`command: "customer_update.draft"` plus Core worker-run settlement,
+`command: "closeout.prepare"` plus Core worker-run settlement, and
+`command: "exception.route"` plus Core worker-run settlement.
 Finance now consumes
 `dispatch.closeout_to_finance` through `command: "invoice.prepare"` with Core
 worker-run source, terminal state, and budget settlement proof, consumes
@@ -110,7 +111,7 @@ concessions, and promise mutation.
 | Worker | Required first fixture |
 |---|---|
 | Owner Chief-of-Staff | `revenue.lead_to_owner_review` approval packet with Revenue source evidence |
-| Dispatch/Ops | implemented: `revenue.quote_to_dispatch` approved quote with blocked adapter receipt produces a dry-run schedule proposal, customer update draft with Core worker-run settlement, blocked closeout packet, and blocked exception route task |
+| Dispatch/Ops | implemented: `revenue.quote_to_dispatch` approved quote with blocked adapter receipt produces a dry-run schedule proposal, blocked customer update draft, blocked closeout packet, and blocked exception route task, all with Core worker-run settlement |
 | Finance | implemented: `dispatch.closeout_to_finance` closeout packet with billable line summary produces a dry-run invoice draft; persisted invoice refs produce a blocked AR follow-up draft; and forecast window/account refs produce a blocked cash forecast, cash packet, owner approval request, and blocked money-movement posture |
 | Workforce | implemented: `owner.staffing_need_to_workforce` and direct workforce refs can feed `hire.packet.prepare` for workforce packets with restricted-document proof and payroll blockers; `payroll_input.prepare` produces a dry-run payroll-input packet and readiness view while payroll submission and money movement stay blocked |
 | Compliance | implemented: `workforce.payroll_to_compliance` payroll preview feeds `filing.prepare` through `config.sourceRefs`, producing a filing draft packet, approval view, and blocked submission/legal-advice posture |

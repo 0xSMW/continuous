@@ -11279,6 +11279,34 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .from(workerRuns)
       .where(eq(workerRuns.id, closeoutResult.workerRunId))
       .limit(1);
+    const closeoutRunData = objectValue(closeoutRun?.data);
+    const closeoutCompletionBudget = objectValue(objectValue(closeoutRunData.completion).budget);
+    const [closeoutReservation] = await db
+      .select()
+      .from(budgetReservations)
+      .where(eq(budgetReservations.id, stringValue(closeoutOutput.budgetReservationId)))
+      .limit(1);
+    const [closeoutUsage] = await db
+      .select()
+      .from(usageEvents)
+      .where(eq(usageEvents.id, stringValue(closeoutOutput.usageEventId)))
+      .limit(1);
+    const [closeoutLocalRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(
+        and(
+          eq(workerRuns.tenantId, tenantId),
+          eq(workerRuns.source, "continuous.worker"),
+          eq(workerRuns.idempotencyKey, `ci-dispatch-closeout-${runId}`),
+        ),
+      )
+      .limit(1);
+    const [closeoutWorkflowRun] = await db
+      .select()
+      .from(workflowRuns)
+      .where(eq(workflowRuns.id, closeoutResult.workflowRunId ?? ""))
+      .limit(1);
     const [closeoutObject] = await db
       .select()
       .from(objects)
@@ -11304,15 +11332,34 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(closeoutResponse.worker.role).toBe("dispatch_operations");
     expect(closeoutResult.created).toBe(true);
     expect(closeoutResult.workflowStepIds).toHaveLength(4);
+    expect(closeoutOutput.command).toBe("closeout.prepare");
+    expect(closeoutOutput.workerRunId).toBe(closeoutResult.workerRunId);
     expect(closeoutOutput.externalExecution).toBe("blocked");
+    expect(closeoutOutput.externalMutation).toBe(false);
     expect(closeoutOutput.externalSend).toBe(false);
     expect(closeoutOutput.workOrderObjectId).toBe(workOrderObjectId);
     expect(closeoutOutput.closeoutObjectId).toBe(closeoutResult.closeoutObjectId);
     expect(closeoutOutput.invoiceReady).toBe(true);
     expect(stringList(closeoutOutput.blockers)).toHaveLength(0);
     expect(objectValue(closeoutOutput.financeHandoff).name).toBe("dispatch.closeout_to_finance");
-    expect(closeoutRun?.source).toBe("continuous.worker");
+    expect(closeoutRun?.source).toBe("continuous.core.worker_runs");
     expect(closeoutRun?.state).toBe("done");
+    expect(closeoutRun?.mode).toBe("simulation");
+    expect(objectValue(closeoutRunData.input).command).toBe("closeout.prepare");
+    expect(objectValue(closeoutRunData.output).command).toBe("closeout.prepare");
+    expect(objectValue(closeoutRunData.output).closeoutObjectId).toBe(closeoutResult.closeoutObjectId);
+    expect(objectValue(closeoutRunData.output).workflowRunId).toBe(closeoutResult.workflowRunId);
+    expect(objectValue(closeoutRunData.output).externalExecution).toBe("blocked");
+    expect(closeoutCompletionBudget.state).toBe("used");
+    expect(closeoutCompletionBudget.reservationId).toBe(closeoutOutput.budgetReservationId);
+    expect(closeoutCompletionBudget.usageEventId).toBe(closeoutOutput.usageEventId);
+    expect(closeoutReservation?.state).toBe("used");
+    expect(closeoutUsage?.reservationId).toBe(closeoutOutput.budgetReservationId);
+    expect(closeoutUsage?.taskId).toBe(closeoutResult.taskId);
+    expect(closeoutLocalRun).toBeUndefined();
+    expect(closeoutWorkflowRun?.state).toBe("approval_pending");
+    expect(objectValue(closeoutWorkflowRun?.data).workerRunId).toBe(closeoutResult.workerRunId);
+    expect(objectValue(closeoutWorkflowRun?.data).closeoutObjectId).toBe(closeoutResult.closeoutObjectId);
     expect(closeoutObject?.type).toBe("closeout");
     expect(closeoutObject?.state).toBe("review_ready");
     expect(objectValue(closeoutObject?.data).externalExecution).toBe("blocked");
@@ -11363,6 +11410,8 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(closeoutReplayResult.created).toBe(false);
     expect(closeoutReplayResult.workerRunId).toBe(closeoutResult.workerRunId);
     expect(closeoutReplayResult.closeoutObjectId).toBe(closeoutResult.closeoutObjectId);
+    expect(objectValue(closeoutReplayResult.output).budgetReservationId).toBe(closeoutOutput.budgetReservationId);
+    expect(objectValue(closeoutReplayResult.output).usageEventId).toBe(closeoutOutput.usageEventId);
 
     const financeResponse = await executeWorkerCommand({
       command: "invoice.prepare",
@@ -11956,6 +12005,29 @@ maybeDescribe("Revenue Worker integration eval", () => {
       .from(workerRuns)
       .where(eq(workerRuns.id, exceptionResult.workerRunId))
       .limit(1);
+    const exceptionRunData = objectValue(exceptionRun?.data);
+    const exceptionCompletionBudget = objectValue(objectValue(exceptionRunData.completion).budget);
+    const [exceptionReservation] = await db
+      .select()
+      .from(budgetReservations)
+      .where(eq(budgetReservations.id, stringValue(exceptionOutput.budgetReservationId)))
+      .limit(1);
+    const [exceptionUsage] = await db
+      .select()
+      .from(usageEvents)
+      .where(eq(usageEvents.id, stringValue(exceptionOutput.usageEventId)))
+      .limit(1);
+    const [exceptionLocalRun] = await db
+      .select()
+      .from(workerRuns)
+      .where(
+        and(
+          eq(workerRuns.tenantId, tenantId),
+          eq(workerRuns.source, "continuous.worker"),
+          eq(workerRuns.idempotencyKey, `ci-dispatch-exception-${runId}`),
+        ),
+      )
+      .limit(1);
     const [exceptionTask] = await db
       .select()
       .from(tasks)
@@ -11981,7 +12053,10 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(exceptionResponse.worker.role).toBe("dispatch_operations");
     expect(exceptionResult.created).toBe(true);
     expect(exceptionResult.workflowStepIds).toHaveLength(2);
+    expect(exceptionOutput.command).toBe("exception.route");
+    expect(exceptionOutput.workerRunId).toBe(exceptionResult.workerRunId);
     expect(exceptionOutput.externalExecution).toBe("blocked");
+    expect(exceptionOutput.externalMutation).toBe(false);
     expect(exceptionOutput.externalSend).toBe(false);
     expect(exceptionOutput.requiresOperatorReview).toBe(true);
     expect(exceptionOutput.jobObjectId).toBe(jobObjectId);
@@ -11991,8 +12066,21 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(exceptionOutput.severity).toBe("high");
     expect(exceptionOutput.taskId).toBe(exceptionResult.taskId);
     expect(exceptionOutput.decisionId).toBe(exceptionResult.decisionId);
-    expect(exceptionRun?.source).toBe("continuous.worker");
+    expect(exceptionRun?.source).toBe("continuous.core.worker_runs");
     expect(exceptionRun?.state).toBe("done");
+    expect(exceptionRun?.mode).toBe("simulation");
+    expect(objectValue(exceptionRunData.input).command).toBe("exception.route");
+    expect(objectValue(exceptionRunData.output).command).toBe("exception.route");
+    expect(objectValue(exceptionRunData.output).decisionId).toBe(exceptionResult.decisionId);
+    expect(objectValue(exceptionRunData.output).workflowRunId).toBe(exceptionResult.workflowRunId);
+    expect(objectValue(exceptionRunData.output).externalExecution).toBe("blocked");
+    expect(exceptionCompletionBudget.state).toBe("used");
+    expect(exceptionCompletionBudget.reservationId).toBe(exceptionOutput.budgetReservationId);
+    expect(exceptionCompletionBudget.usageEventId).toBe(exceptionOutput.usageEventId);
+    expect(exceptionReservation?.state).toBe("used");
+    expect(exceptionUsage?.reservationId).toBe(exceptionOutput.budgetReservationId);
+    expect(exceptionUsage?.taskId).toBe(exceptionResult.taskId);
+    expect(exceptionLocalRun).toBeUndefined();
     expect(exceptionTask?.state).toBe("blocked");
     expect(exceptionTask?.priority).toBe("high");
     expect(objectValue(exceptionTask?.outcome).status).toBe("dispatch_exception_routed");
@@ -12032,6 +12120,8 @@ maybeDescribe("Revenue Worker integration eval", () => {
     expect(exceptionReplayResult.workerRunId).toBe(exceptionResult.workerRunId);
     expect(exceptionReplayResult.taskId).toBe(exceptionResult.taskId);
     expect(exceptionReplayResult.decisionId).toBe(exceptionResult.decisionId);
+    expect(objectValue(exceptionReplayResult.output).budgetReservationId).toBe(exceptionOutput.budgetReservationId);
+    expect(objectValue(exceptionReplayResult.output).usageEventId).toBe(exceptionOutput.usageEventId);
   }, 120_000);
 
   it("prepares Compliance filings through the Core worker-run lifecycle and replays settled output", async () => {

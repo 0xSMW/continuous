@@ -1553,10 +1553,26 @@ jobs:
               -d "$DISPATCH_CLOSEOUT_PAYLOAD"
           )"
 
-          echo "$DISPATCH_CLOSEOUT_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,closeoutObjectId:.data.result.closeoutObjectId,approvalRequestId:.data.result.approvalRequestId,packetId:.data.result.packetId,viewId:.data.result.dispatchCloseoutViewId,financeHandoff:.data.result.output.financeHandoff.name,externalExecution:.data.result.output.externalExecution,externalSend:.data.result.output.externalSend}}'
+          echo "$DISPATCH_CLOSEOUT_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,workerRunId:.data.result.workerRunId,budgetReservationId:.data.result.output.budgetReservationId,usageEventId:.data.result.output.usageEventId,closeoutObjectId:.data.result.closeoutObjectId,approvalRequestId:.data.result.approvalRequestId,packetId:.data.result.packetId,viewId:.data.result.dispatchCloseoutViewId,financeHandoff:.data.result.output.financeHandoff.name,externalExecution:.data.result.output.externalExecution,externalMutation:.data.result.output.externalMutation,externalSend:.data.result.output.externalSend}}'
           echo "$DISPATCH_CLOSEOUT_RESPONSE" | /usr/bin/jq -e \
-            '.error == null and .data.command == "closeout.prepare" and .data.worker.role == "dispatch_operations" and (.data.result.closeoutObjectId | length > 0) and (.data.result.approvalRequestId | length > 0) and (.data.result.packetId | length > 0) and (.data.result.dispatchCloseoutViewId | length > 0) and .data.result.output.financeHandoff.name == "dispatch.closeout_to_finance" and .data.result.output.externalExecution == "blocked" and .data.result.output.externalSend == false' \
+            '.error == null and .data.command == "closeout.prepare" and .data.worker.role == "dispatch_operations" and .data.result.created == true and (.data.result.workerRunId | length > 0) and (.data.result.closeoutObjectId | length > 0) and (.data.result.approvalRequestId | length > 0) and (.data.result.packetId | length > 0) and (.data.result.dispatchCloseoutViewId | length > 0) and (.data.result.output.budgetReservationId | length > 0) and (.data.result.output.usageEventId | length > 0) and .data.result.output.command == "closeout.prepare" and .data.result.output.financeHandoff.name == "dispatch.closeout_to_finance" and .data.result.output.externalExecution == "blocked" and .data.result.output.externalMutation == false and .data.result.output.externalSend == false' \
             >/dev/null
+
+          DISPATCH_CLOSEOUT_WORKER_RUN_ID="$(echo "$DISPATCH_CLOSEOUT_RESPONSE" | /usr/bin/jq -r '.data.result.workerRunId')"
+          DISPATCH_CLOSEOUT_RESERVATION_ID="$(echo "$DISPATCH_CLOSEOUT_RESPONSE" | /usr/bin/jq -r '.data.result.output.budgetReservationId')"
+          DISPATCH_CLOSEOUT_USAGE_ID="$(echo "$DISPATCH_CLOSEOUT_RESPONSE" | /usr/bin/jq -r '.data.result.output.usageEventId')"
+          DISPATCH_CLOSEOUT_RUN_ROW="$(
+            psql_db -Atc "select coalesce(source,'') || '|' || coalesce(state::text,'') || '|' || coalesce(mode,'') || '|' || coalesce(data->'input'->>'command','') || '|' || coalesce(data->'output'->>'command','') || '|' || coalesce(data->'output'->>'externalExecution','') || '|' || coalesce(data->'output'->>'externalMutation','') || '|' || coalesce(data->'output'->>'externalSend','') || '|' || coalesce(data->'completion'->'budget'->>'state','') || '|' || coalesce(data->'completion'->'budget'->>'reservationId','') || '|' || coalesce(data->'completion'->'budget'->>'usageEventId','') from worker_runs where id = '$DISPATCH_CLOSEOUT_WORKER_RUN_ID'::uuid;"
+          )"
+          if [ "$DISPATCH_CLOSEOUT_RUN_ROW" != "continuous.core.worker_runs|done|simulation|closeout.prepare|closeout.prepare|blocked|false|false|used|$DISPATCH_CLOSEOUT_RESERVATION_ID|$DISPATCH_CLOSEOUT_USAGE_ID" ]; then
+            echo "Dispatch closeout worker run did not use the Core lifecycle: $DISPATCH_CLOSEOUT_RUN_ROW" >&2
+            exit 1
+          fi
+          DISPATCH_CLOSEOUT_LEGACY_RUN_COUNT="$(psql_db -Atc "select count(*) from worker_runs where source = 'continuous.worker' and idempotency_key = '$DISPATCH_CLOSEOUT_KEY';")"
+          if [ "$DISPATCH_CLOSEOUT_LEGACY_RUN_COUNT" != "0" ]; then
+            echo "Dispatch closeout smoke created a legacy worker run: $DISPATCH_CLOSEOUT_LEGACY_RUN_COUNT" >&2
+            exit 1
+          fi
 
           DISPATCH_CLOSEOUT_OBJECT_ID="$(echo "$DISPATCH_CLOSEOUT_RESPONSE" | /usr/bin/jq -r '.data.result.closeoutObjectId')"
           FINANCE_INVOICE_KEY="deploy-finance-invoice-smoke-$SMOKE_RUN_ID"
@@ -1692,10 +1708,26 @@ jobs:
               -d "$DISPATCH_EXCEPTION_PAYLOAD"
           )"
 
-          echo "$DISPATCH_EXCEPTION_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,taskId:.data.result.taskId,decisionId:.data.result.decisionId,packetId:.data.result.packetId,documentId:.data.result.documentId,workflowRunId:.data.result.workflowRunId,reason:.data.result.output.reason,severity:.data.result.output.severity,externalExecution:.data.result.output.externalExecution,externalSend:.data.result.output.externalSend,requiresOperatorReview:.data.result.output.requiresOperatorReview}}'
+          echo "$DISPATCH_EXCEPTION_RESPONSE" | /usr/bin/jq -c '{api,error,command:.data.command,result:{created:.data.result.created,workerRunId:.data.result.workerRunId,budgetReservationId:.data.result.output.budgetReservationId,usageEventId:.data.result.output.usageEventId,taskId:.data.result.taskId,decisionId:.data.result.decisionId,packetId:.data.result.packetId,documentId:.data.result.documentId,workflowRunId:.data.result.workflowRunId,reason:.data.result.output.reason,severity:.data.result.output.severity,externalExecution:.data.result.output.externalExecution,externalMutation:.data.result.output.externalMutation,externalSend:.data.result.output.externalSend,requiresOperatorReview:.data.result.output.requiresOperatorReview}}'
           echo "$DISPATCH_EXCEPTION_RESPONSE" | /usr/bin/jq -e \
-            '.error == null and .data.command == "exception.route" and .data.worker.role == "dispatch_operations" and (.data.result.taskId | length > 0) and (.data.result.decisionId | length > 0) and (.data.result.packetId | length > 0) and (.data.result.documentId | length > 0) and (.data.result.workflowRunId | length > 0) and .data.result.output.externalExecution == "blocked" and .data.result.output.externalSend == false and .data.result.output.requiresOperatorReview == true' \
+            '.error == null and .data.command == "exception.route" and .data.worker.role == "dispatch_operations" and .data.result.created == true and (.data.result.workerRunId | length > 0) and (.data.result.output.budgetReservationId | length > 0) and (.data.result.output.usageEventId | length > 0) and (.data.result.taskId | length > 0) and (.data.result.decisionId | length > 0) and (.data.result.packetId | length > 0) and (.data.result.documentId | length > 0) and (.data.result.workflowRunId | length > 0) and .data.result.output.command == "exception.route" and .data.result.output.externalExecution == "blocked" and .data.result.output.externalMutation == false and .data.result.output.externalSend == false and .data.result.output.requiresOperatorReview == true' \
             >/dev/null
+
+          DISPATCH_EXCEPTION_WORKER_RUN_ID="$(echo "$DISPATCH_EXCEPTION_RESPONSE" | /usr/bin/jq -r '.data.result.workerRunId')"
+          DISPATCH_EXCEPTION_RESERVATION_ID="$(echo "$DISPATCH_EXCEPTION_RESPONSE" | /usr/bin/jq -r '.data.result.output.budgetReservationId')"
+          DISPATCH_EXCEPTION_USAGE_ID="$(echo "$DISPATCH_EXCEPTION_RESPONSE" | /usr/bin/jq -r '.data.result.output.usageEventId')"
+          DISPATCH_EXCEPTION_RUN_ROW="$(
+            psql_db -Atc "select coalesce(source,'') || '|' || coalesce(state::text,'') || '|' || coalesce(mode,'') || '|' || coalesce(data->'input'->>'command','') || '|' || coalesce(data->'output'->>'command','') || '|' || coalesce(data->'output'->>'externalExecution','') || '|' || coalesce(data->'output'->>'externalMutation','') || '|' || coalesce(data->'output'->>'externalSend','') || '|' || coalesce(data->'completion'->'budget'->>'state','') || '|' || coalesce(data->'completion'->'budget'->>'reservationId','') || '|' || coalesce(data->'completion'->'budget'->>'usageEventId','') from worker_runs where id = '$DISPATCH_EXCEPTION_WORKER_RUN_ID'::uuid;"
+          )"
+          if [ "$DISPATCH_EXCEPTION_RUN_ROW" != "continuous.core.worker_runs|done|simulation|exception.route|exception.route|blocked|false|false|used|$DISPATCH_EXCEPTION_RESERVATION_ID|$DISPATCH_EXCEPTION_USAGE_ID" ]; then
+            echo "Dispatch exception worker run did not use the Core lifecycle: $DISPATCH_EXCEPTION_RUN_ROW" >&2
+            exit 1
+          fi
+          DISPATCH_EXCEPTION_LEGACY_RUN_COUNT="$(psql_db -Atc "select count(*) from worker_runs where source = 'continuous.worker' and idempotency_key = '$DISPATCH_EXCEPTION_KEY';")"
+          if [ "$DISPATCH_EXCEPTION_LEGACY_RUN_COUNT" != "0" ]; then
+            echo "Dispatch exception smoke created a legacy worker run: $DISPATCH_EXCEPTION_LEGACY_RUN_COUNT" >&2
+            exit 1
+          fi
 
           IDS="$(psql_db -At <<'SQL'
           with base as (

@@ -1291,7 +1291,7 @@ async function replayedCloseoutPrepare(
     idempotencyKey: run.idempotencyKey,
     workerRunId: run.id,
     taskId: run.taskId,
-    eventId: run.eventId ?? optionalString(data.eventId) ?? null,
+    eventId: optionalString(output.eventId) ?? optionalString(data.businessEventId) ?? run.eventId ?? optionalString(data.eventId) ?? null,
     closeoutObjectId: optionalString(output.closeoutObjectId) ?? null,
     approvalRequestId: optionalString(data.approvalRequestId) ?? optionalString(output.approvalRequestId) ?? null,
     evidenceId: optionalString(data.evidenceId) ?? optionalString(output.evidenceId) ?? null,
@@ -1324,7 +1324,7 @@ async function replayedExceptionRoute(
     idempotencyKey: run.idempotencyKey,
     workerRunId: run.id,
     taskId: run.taskId,
-    eventId: run.eventId ?? optionalString(data.eventId) ?? null,
+    eventId: optionalString(output.eventId) ?? optionalString(data.businessEventId) ?? run.eventId ?? optionalString(data.eventId) ?? null,
     decisionId: optionalString(data.decisionId) ?? optionalString(output.decisionId) ?? null,
     evidenceId: optionalString(data.evidenceId) ?? optionalString(output.evidenceId) ?? null,
     decisionEvidenceId:
@@ -3288,10 +3288,74 @@ export async function prepareDispatchCloseout(input: {
     closeoutState,
   });
   const now = new Date();
+  const coreRun = await startCoreWorkerRun({
+    operatorEmail: input.operatorEmail,
+    tenantSlug: context.worker.tenantSlug,
+    idempotencyKey: input.idempotencyKey,
+    worker: {
+      id: context.worker.id,
+      role: dispatchWorkerRole,
+    },
+    command: "closeout.prepare",
+    mode: "simulation",
+    capabilityId: context.capabilityId,
+    budgetAccountId: context.budgetAccountId,
+    units: closeoutPrepareUnits,
+    input: {
+      command: "closeout.prepare",
+      inputHash,
+      config,
+      sourceRefs: handoff.sourceRefs,
+      workOrderObjectId: handoff.workOrderObject.id,
+      jobObjectId: handoff.jobObject.id,
+      customerObjectId: handoff.customerObject?.id ?? null,
+      appointmentObjectId: handoff.appointmentObject?.id ?? null,
+      customerUpdateObjectId: handoff.customerUpdateObject?.id ?? null,
+      sourceEvidenceIds: handoff.sourceEvidenceIds,
+      closeoutState,
+      invoiceReady: quality.invoiceReady,
+      blockers: quality.blockers,
+    },
+    policy: {
+      ...objectValue(config.policy),
+      externalExecution: "blocked",
+      externalMutation: false,
+      externalSend: false,
+      customerSend: "blocked",
+      invoicePreparation: "blocked",
+      paymentExecution: "blocked",
+    },
+    evidence: {
+      command: "closeout.prepare",
+      workOrderObjectId: handoff.workOrderObject.id,
+      jobObjectId: handoff.jobObject.id,
+      customerObjectId: handoff.customerObject?.id ?? null,
+      appointmentObjectId: handoff.appointmentObject?.id ?? null,
+      customerUpdateObjectId: handoff.customerUpdateObject?.id ?? null,
+      sourceEvidenceIds: handoff.sourceEvidenceIds,
+      closeoutState,
+      invoiceReady: quality.invoiceReady,
+      blockers: quality.blockers,
+      externalExecution: "blocked",
+      externalMutation: false,
+      externalSend: false,
+    },
+    db,
+  });
+  const coreBudget = objectValue(coreRun.budget);
+  const coreReservationId = optionalString(coreBudget.reservationId);
+
+  if (!coreReservationId) {
+    throw new PlatformUnavailableError(
+      "worker_run_budget_reservation_missing",
+      "Core worker.run.start did not return a Dispatch closeout budget reservation.",
+      409,
+    );
+  }
 
   const result = await db.transaction(async (tx) => {
     await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${dispatchSource}:${input.idempotencyKey}`}))`,
+      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${coreWorkerRunSource}:dispatch:closeout:${input.idempotencyKey}`}))`,
     );
 
     const [existingRun] = await tx
@@ -3300,24 +3364,32 @@ export async function prepareDispatchCloseout(input: {
       .where(
         and(
           eq(workerRuns.tenantId, context.worker.tenantId),
-          eq(workerRuns.source, dispatchSource),
-          eq(workerRuns.idempotencyKey, input.idempotencyKey),
+          eq(workerRuns.id, coreRun.workerRunId),
         ),
       )
       .limit(1);
 
-    if (existingRun) {
-      const existingInput = objectValue(objectValue(existingRun.data).input);
-      const existingHash = optionalString(existingInput.inputHash);
+    if (!existingRun) {
+      throw new PlatformUnavailableError(
+        "worker_run_missing",
+        "Core worker.run.start did not return a persisted Dispatch closeout worker run.",
+        409,
+      );
+    }
 
-      if (existingHash && existingHash !== inputHash) {
-        throw new PlatformUnavailableError(
-          "worker_idempotency_conflict",
-          "A Dispatch closeout packet already exists for this idempotency key with different input.",
-          409,
-        );
-      }
+    const existingInput = objectValue(objectValue(existingRun.data).input);
+    const existingRequest = objectValue(existingInput.request);
+    const existingHash = optionalString(existingRequest.inputHash) ?? optionalString(existingInput.inputHash);
 
+    if (existingHash && existingHash !== inputHash) {
+      throw new PlatformUnavailableError(
+        "worker_idempotency_conflict",
+        "A Dispatch closeout packet already exists for this idempotency key with different input.",
+        409,
+      );
+    }
+
+    if (optionalString(outputData(existingRun.data).workerRunId)) {
       return { replay: existingRun };
     }
 
@@ -3367,34 +3439,19 @@ export async function prepareDispatchCloseout(input: {
       command: "closeout.prepare",
       inputHash,
       config,
+      sourceRefs: handoff.sourceRefs,
       workOrderObjectId: handoff.workOrderObject.id,
       jobObjectId: handoff.jobObject.id,
       customerObjectId: handoff.customerObject?.id ?? null,
       appointmentObjectId: handoff.appointmentObject?.id ?? null,
       customerUpdateObjectId: handoff.customerUpdateObject?.id ?? null,
       sourceEvidenceIds: handoff.sourceEvidenceIds,
+      closeoutState,
+      invoiceReady: quality.invoiceReady,
+      blockers: quality.blockers,
     } satisfies JsonObject;
 
-    const [workerRun] = await tx
-      .insert(workerRuns)
-      .values({
-        tenantId: context.worker.tenantId,
-        workerId: context.worker.id,
-        taskId: task.id,
-        capabilityId: context.capabilityId,
-        budgetAccountId: context.budgetAccountId,
-        source: dispatchSource,
-        idempotencyKey: input.idempotencyKey,
-        state: "running",
-        mode: "simulation",
-        data: {
-          input: runInput,
-          output: {},
-        },
-        startedAt: now,
-        updatedAt: now,
-      })
-      .returning({ id: workerRuns.id });
+    const workerRunId = coreRun.workerRunId;
 
     const closeoutData = {
       workOrderObjectId: handoff.workOrderObject.id,
@@ -3516,7 +3573,7 @@ export async function prepareDispatchCloseout(input: {
         state: "approval_pending",
         idempotencyKey: input.idempotencyKey,
         data: {
-          workerRunId: workerRun.id,
+          workerRunId,
           closeoutObjectId: closeout.id,
           workOrderObjectId: handoff.workOrderObject.id,
           jobObjectId: handoff.jobObject.id,
@@ -3541,20 +3598,6 @@ export async function prepareDispatchCloseout(input: {
         updatedAt: now,
       })
       .returning({ id: workflowRuns.id });
-
-    const [reservation] = await tx
-      .insert(budgetReservations)
-      .values({
-        tenantId: context.worker.tenantId,
-        accountId: context.budgetAccountId,
-        taskId: task.id,
-        units: closeoutPrepareUnits,
-        state: "used",
-        expiresAt: new Date(now.getTime() + 15 * 60 * 1000),
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning({ id: budgetReservations.id });
 
     const [inference] = await tx
       .insert(inferences)
@@ -3596,29 +3639,6 @@ export async function prepareDispatchCloseout(input: {
       })
       .returning({ id: inferences.id });
 
-    const [usage] = await tx
-      .insert(usageEvents)
-      .values({
-        tenantId: context.worker.tenantId,
-        accountId: context.budgetAccountId,
-        reservationId: reservation.id,
-        inferenceId: inference.id,
-        taskId: task.id,
-        capabilityId: context.capabilityId,
-        actorType: "worker",
-        actorId: context.worker.id,
-        units: closeoutPrepareUnits,
-        costUsd: "0.000000",
-        data: {
-          mode: "deterministic",
-          workerRunId: workerRun.id,
-          workflowRunId: workflowRun.id,
-          closeoutObjectId: closeout.id,
-        },
-        createdAt: now,
-      })
-      .returning({ id: usageEvents.id });
-
     const [event] = await tx
       .insert(events)
       .values({
@@ -3633,7 +3653,7 @@ export async function prepareDispatchCloseout(input: {
         capabilityId: context.capabilityId,
         idempotencyKey: input.idempotencyKey,
         data: {
-          workerRunId: workerRun.id,
+          workerRunId,
           workflowRunId: workflowRun.id,
           workOrderObjectId: handoff.workOrderObject.id,
           jobObjectId: handoff.jobObject.id,
@@ -3652,8 +3672,8 @@ export async function prepareDispatchCloseout(input: {
 
     await tx
       .update(workerRuns)
-      .set({ eventId: event.id, updatedAt: now })
-      .where(eq(workerRuns.id, workerRun.id));
+      .set({ eventId: event.id, taskId: task.id, updatedAt: now })
+      .where(eq(workerRuns.id, workerRunId));
 
     const [traceEvidence] = await tx
       .insert(evidence)
@@ -3771,7 +3791,7 @@ export async function prepareDispatchCloseout(input: {
       .values({
         tenantId: context.worker.tenantId,
         taskId: task.id,
-        workerRunId: workerRun.id,
+        workerRunId,
         workflowRunId: workflowRun.id,
         eventId: event.id,
         objectId: closeout.id,
@@ -3810,7 +3830,7 @@ export async function prepareDispatchCloseout(input: {
           externalExecution: "blocked",
         },
         data: {
-          workerRunId: workerRun.id,
+          workerRunId,
           workflowRunId: workflowRun.id,
           closeoutObjectId: closeout.id,
           financeHandoff: "dispatch.closeout_to_finance",
@@ -3938,7 +3958,7 @@ export async function prepareDispatchCloseout(input: {
       data: {
         latest: {
           approvalRequestId: approval.id,
-          workerRunId: workerRun.id,
+          workerRunId,
           workflowRunId: workflowRun.id,
           taskId: task.id,
           workOrderObjectId: handoff.workOrderObject.id,
@@ -4008,7 +4028,7 @@ export async function prepareDispatchCloseout(input: {
         key: viewKey,
         version: viewVersion,
         viewId: view.id,
-        workerRunId: workerRun.id,
+        workerRunId,
         workflowRunId: workflowRun.id,
       },
       occurredAt: now,
@@ -4023,9 +4043,9 @@ export async function prepareDispatchCloseout(input: {
       actorId: context.worker.id,
       actorRef: `worker:${context.worker.id}`,
       targetType: "worker_run",
-      targetId: workerRun.id,
+      targetId: workerRunId,
       taskId: task.id,
-      workerRunId: workerRun.id,
+      workerRunId,
       approvalRequestId: approval.id,
       eventId: event.id,
       objectId: closeout.id,
@@ -4044,6 +4064,10 @@ export async function prepareDispatchCloseout(input: {
     });
 
     const output = {
+      command: "closeout.prepare",
+      workerRunId,
+      taskId: task.id,
+      eventId: event.id,
       workOrderObjectId: handoff.workOrderObject.id,
       jobObjectId: handoff.jobObject.id,
       customerObjectId: handoff.customerObject?.id ?? null,
@@ -4059,6 +4083,10 @@ export async function prepareDispatchCloseout(input: {
       workflowRunId: workflowRun.id,
       workflowStepIds,
       dispatchCloseoutViewId: view.id,
+      budgetReservationId: coreReservationId,
+      reservationId: coreReservationId,
+      usageEventId: null,
+      inferenceId: inference.id,
       qaChecklist: quality.qaChecklist,
       billableLines,
       invoiceReady: quality.invoiceReady,
@@ -4079,11 +4107,16 @@ export async function prepareDispatchCloseout(input: {
     await tx
       .update(workerRuns)
       .set({
-        state: "done",
         eventId: event.id,
+        taskId: task.id,
         data: {
-          input: runInput,
+          ...objectValue(existingRun.data),
+          input: {
+            ...existingInput,
+            request: runInput,
+          },
           output,
+          businessEventId: event.id,
           eventId: event.id,
           taskId: task.id,
           closeoutObjectId: closeout.id,
@@ -4095,14 +4128,12 @@ export async function prepareDispatchCloseout(input: {
           workflowRunId: workflowRun.id,
           workflowStepIds,
           dispatchCloseoutViewId: view.id,
-          reservationId: reservation.id,
+          reservationId: coreReservationId,
           inferenceId: inference.id,
-          usageEventId: usage.id,
         },
-        endedAt: now,
         updatedAt: now,
       })
-      .where(eq(workerRuns.id, workerRun.id));
+      .where(eq(workerRuns.id, workerRunId));
 
     await tx
       .update(workers)
@@ -4118,7 +4149,7 @@ export async function prepareDispatchCloseout(input: {
 
     return {
       replay: null,
-      workerRunId: workerRun.id,
+      workerRunId,
       taskId: task.id,
       eventId: event.id,
       closeoutObjectId: closeout.id,
@@ -4134,9 +4165,60 @@ export async function prepareDispatchCloseout(input: {
     };
   });
 
+  const settleCloseoutCoreRun = async (workerRunId: string, output: JsonObject) => {
+    const completion = await completeCoreWorkerRun({
+      operatorEmail: input.operatorEmail,
+      tenantSlug: context.worker.tenantSlug,
+      idempotencyKey: input.idempotencyKey,
+      worker: {
+        id: context.worker.id,
+        role: dispatchWorkerRole,
+      },
+      workerRunId,
+      state: "done",
+      reason:
+        "Dispatch Operations Worker prepared a closeout packet with invoice preparation and external sends blocked.",
+      output,
+      costUsd: 0,
+      evidence: {
+        command: "closeout.prepare",
+        eventId: optionalString(output.eventId) ?? null,
+        evidenceId: optionalString(output.evidenceId) ?? null,
+        qaEvidenceId: optionalString(output.qaEvidenceId) ?? null,
+        packetId: optionalString(output.packetId) ?? null,
+        documentId: optionalString(output.documentId) ?? null,
+        approvalRequestId: optionalString(output.approvalRequestId) ?? null,
+        workflowRunId: optionalString(output.workflowRunId) ?? null,
+        dispatchCloseoutViewId: optionalString(output.dispatchCloseoutViewId) ?? null,
+        inferenceId: optionalString(output.inferenceId) ?? null,
+        financeHandoff: "dispatch.closeout_to_finance",
+        externalExecution: "blocked",
+        externalMutation: false,
+        externalSend: false,
+      },
+      db,
+    });
+
+    return persistSettledDispatchOutput(db, workerRunId, output, objectValue(completion.budget));
+  };
+
   if (result.replay) {
-    return replayedCloseoutPrepare(db, context, result.replay);
+    const replayData = objectValue(result.replay.data);
+    const replayOutput = outputData(replayData);
+    const replayCompletionBudget = objectValue(objectValue(replayData.completion).budget);
+
+    if (result.replay.state === "running" && optionalString(replayOutput.workerRunId)) {
+      await settleCloseoutCoreRun(coreRun.workerRunId, replayOutput);
+    } else {
+      await persistSettledDispatchOutput(db, coreRun.workerRunId, replayOutput, replayCompletionBudget);
+    }
+
+    const [settledReplay] = await db.select().from(workerRuns).where(eq(workerRuns.id, coreRun.workerRunId)).limit(1);
+
+    return replayedCloseoutPrepare(db, context, settledReplay ?? result.replay);
   }
+
+  const settledOutput = await settleCloseoutCoreRun(result.workerRunId, result.output);
 
   return {
     created: true,
@@ -4153,7 +4235,7 @@ export async function prepareDispatchCloseout(input: {
     workflowRunId: result.workflowRunId,
     workflowStepIds: result.workflowStepIds,
     dispatchCloseoutViewId: result.dispatchCloseoutViewId,
-    output: result.output,
+    output: settledOutput,
     snapshot: await getDispatchWorkerSnapshot(db, {
       role: dispatchWorkerRole,
       tenantSlug: context.worker.tenantSlug,
@@ -4198,10 +4280,72 @@ export async function routeDispatchException(input: {
   const now = new Date();
   const normalizedReason = route.reason.replace(/\s+/g, "_").toLowerCase();
   const title = `Route ${route.severity.severity} dispatch exception for ${route.jobObject.name}`;
+  const coreRun = await startCoreWorkerRun({
+    operatorEmail: input.operatorEmail,
+    tenantSlug: context.worker.tenantSlug,
+    idempotencyKey: input.idempotencyKey,
+    worker: {
+      id: context.worker.id,
+      role: dispatchWorkerRole,
+    },
+    command: "exception.route",
+    mode: "simulation",
+    capabilityId: context.capabilityId,
+    budgetAccountId: context.budgetAccountId,
+    units: exceptionRouteUnits,
+    input: {
+      command: "exception.route",
+      inputHash,
+      config,
+      sourceRefs: route.sourceRefs,
+      jobObjectId: route.jobObject.id,
+      customerObjectId: route.customerObject?.id ?? null,
+      workOrderObjectId: route.workOrderObject?.id ?? null,
+      appointmentObjectId: route.appointmentObject?.id ?? null,
+      closeoutObjectId: route.closeoutObject?.id ?? null,
+      sourceEvidenceIds: route.sourceEvidenceIds,
+      reason: route.reason,
+      severity: route.severity.severity,
+      routeKind: route.routeKind,
+    },
+    policy: {
+      ...objectValue(config.policy),
+      externalExecution: "blocked",
+      externalMutation: false,
+      externalSend: false,
+      customerSend: "blocked",
+    },
+    evidence: {
+      command: "exception.route",
+      jobObjectId: route.jobObject.id,
+      customerObjectId: route.customerObject?.id ?? null,
+      workOrderObjectId: route.workOrderObject?.id ?? null,
+      appointmentObjectId: route.appointmentObject?.id ?? null,
+      closeoutObjectId: route.closeoutObject?.id ?? null,
+      sourceEvidenceIds: route.sourceEvidenceIds,
+      reason: route.reason,
+      severity: route.severity.severity,
+      routeKind: route.routeKind,
+      externalExecution: "blocked",
+      externalMutation: false,
+      externalSend: false,
+    },
+    db,
+  });
+  const coreBudget = objectValue(coreRun.budget);
+  const coreReservationId = optionalString(coreBudget.reservationId);
+
+  if (!coreReservationId) {
+    throw new PlatformUnavailableError(
+      "worker_run_budget_reservation_missing",
+      "Core worker.run.start did not return a Dispatch exception route budget reservation.",
+      409,
+    );
+  }
 
   const result = await db.transaction(async (tx) => {
     await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${dispatchSource}:${input.idempotencyKey}`}))`,
+      sql`select pg_advisory_xact_lock(hashtext(${context.worker.tenantId}), hashtext(${`${coreWorkerRunSource}:dispatch:exception:${input.idempotencyKey}`}))`,
     );
 
     const [existingRun] = await tx
@@ -4210,24 +4354,32 @@ export async function routeDispatchException(input: {
       .where(
         and(
           eq(workerRuns.tenantId, context.worker.tenantId),
-          eq(workerRuns.source, dispatchSource),
-          eq(workerRuns.idempotencyKey, input.idempotencyKey),
+          eq(workerRuns.id, coreRun.workerRunId),
         ),
       )
       .limit(1);
 
-    if (existingRun) {
-      const existingInput = objectValue(objectValue(existingRun.data).input);
-      const existingHash = optionalString(existingInput.inputHash);
+    if (!existingRun) {
+      throw new PlatformUnavailableError(
+        "worker_run_missing",
+        "Core worker.run.start did not return a persisted Dispatch exception route worker run.",
+        409,
+      );
+    }
 
-      if (existingHash && existingHash !== inputHash) {
-        throw new PlatformUnavailableError(
-          "worker_idempotency_conflict",
-          "A Dispatch exception route already exists for this idempotency key with different input.",
-          409,
-        );
-      }
+    const existingInput = objectValue(objectValue(existingRun.data).input);
+    const existingRequest = objectValue(existingInput.request);
+    const existingHash = optionalString(existingRequest.inputHash) ?? optionalString(existingInput.inputHash);
 
+    if (existingHash && existingHash !== inputHash) {
+      throw new PlatformUnavailableError(
+        "worker_idempotency_conflict",
+        "A Dispatch exception route already exists for this idempotency key with different input.",
+        409,
+      );
+    }
+
+    if (optionalString(outputData(existingRun.data).workerRunId)) {
       return { replay: existingRun };
     }
 
@@ -4282,6 +4434,7 @@ export async function routeDispatchException(input: {
       command: "exception.route",
       inputHash,
       config,
+      sourceRefs: route.sourceRefs,
       jobObjectId: route.jobObject.id,
       customerObjectId: route.customerObject?.id ?? null,
       workOrderObjectId: route.workOrderObject?.id ?? null,
@@ -4290,28 +4443,10 @@ export async function routeDispatchException(input: {
       sourceEvidenceIds: route.sourceEvidenceIds,
       reason: route.reason,
       severity: route.severity.severity,
+      routeKind: route.routeKind,
     } satisfies JsonObject;
 
-    const [workerRun] = await tx
-      .insert(workerRuns)
-      .values({
-        tenantId: context.worker.tenantId,
-        workerId: context.worker.id,
-        taskId: task.id,
-        capabilityId: context.capabilityId,
-        budgetAccountId: context.budgetAccountId,
-        source: dispatchSource,
-        idempotencyKey: input.idempotencyKey,
-        state: "running",
-        mode: "simulation",
-        data: {
-          input: runInput,
-          output: {},
-        },
-        startedAt: now,
-        updatedAt: now,
-      })
-      .returning({ id: workerRuns.id });
+    const workerRunId = coreRun.workerRunId;
 
     const [workflowRun] = await tx
       .insert(workflowRuns)
@@ -4323,7 +4458,7 @@ export async function routeDispatchException(input: {
         state: "blocked",
         idempotencyKey: input.idempotencyKey,
         data: {
-          workerRunId: workerRun.id,
+          workerRunId,
           taskId: task.id,
           jobObjectId: route.jobObject.id,
           sourceRefs: route.sourceRefs,
@@ -4342,20 +4477,6 @@ export async function routeDispatchException(input: {
         updatedAt: now,
       })
       .returning({ id: workflowRuns.id });
-
-    const [reservation] = await tx
-      .insert(budgetReservations)
-      .values({
-        tenantId: context.worker.tenantId,
-        accountId: context.budgetAccountId,
-        taskId: task.id,
-        units: exceptionRouteUnits,
-        state: "used",
-        expiresAt: new Date(now.getTime() + 15 * 60 * 1000),
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning({ id: budgetReservations.id });
 
     const [inference] = await tx
       .insert(inferences)
@@ -4396,29 +4517,6 @@ export async function routeDispatchException(input: {
       })
       .returning({ id: inferences.id });
 
-    const [usage] = await tx
-      .insert(usageEvents)
-      .values({
-        tenantId: context.worker.tenantId,
-        accountId: context.budgetAccountId,
-        reservationId: reservation.id,
-        inferenceId: inference.id,
-        taskId: task.id,
-        capabilityId: context.capabilityId,
-        actorType: "worker",
-        actorId: context.worker.id,
-        units: exceptionRouteUnits,
-        costUsd: "0.000000",
-        data: {
-          mode: "deterministic",
-          workerRunId: workerRun.id,
-          workflowRunId: workflowRun.id,
-          routeKind: route.routeKind,
-        },
-        createdAt: now,
-      })
-      .returning({ id: usageEvents.id });
-
     const [event] = await tx
       .insert(events)
       .values({
@@ -4433,7 +4531,7 @@ export async function routeDispatchException(input: {
         capabilityId: context.capabilityId,
         idempotencyKey: input.idempotencyKey,
         data: {
-          workerRunId: workerRun.id,
+          workerRunId,
           workflowRunId: workflowRun.id,
           jobObjectId: route.jobObject.id,
           customerObjectId: route.customerObject?.id ?? null,
@@ -4455,8 +4553,8 @@ export async function routeDispatchException(input: {
 
     await tx
       .update(workerRuns)
-      .set({ eventId: event.id, updatedAt: now })
-      .where(eq(workerRuns.id, workerRun.id));
+      .set({ eventId: event.id, taskId: task.id, updatedAt: now })
+      .where(eq(workerRuns.id, workerRunId));
 
     const [decision] = await tx
       .insert(decisions)
@@ -4475,7 +4573,7 @@ export async function routeDispatchException(input: {
           route.notes ||
           `Route ${route.severity.severity} dispatch exception for operator review before external execution.`,
         data: {
-          workerRunId: workerRun.id,
+          workerRunId,
           jobObjectId: route.jobObject.id,
           reason: route.reason,
           severity: route.severity.severity,
@@ -4654,9 +4752,9 @@ export async function routeDispatchException(input: {
       actorId: context.worker.id,
       actorRef: `worker:${context.worker.id}`,
       targetType: "worker_run",
-      targetId: workerRun.id,
+      targetId: workerRunId,
       taskId: task.id,
-      workerRunId: workerRun.id,
+      workerRunId,
       eventId: event.id,
       objectId: route.jobObject.id,
       capabilityId: context.capabilityId,
@@ -4677,6 +4775,9 @@ export async function routeDispatchException(input: {
     });
 
     const output = {
+      command: "exception.route",
+      workerRunId,
+      eventId: event.id,
       jobObjectId: route.jobObject.id,
       customerObjectId: route.customerObject?.id ?? null,
       workOrderObjectId: route.workOrderObject?.id ?? null,
@@ -4690,6 +4791,10 @@ export async function routeDispatchException(input: {
       documentId: document.id,
       workflowRunId: workflowRun.id,
       workflowStepIds,
+      budgetReservationId: coreReservationId,
+      reservationId: coreReservationId,
+      usageEventId: null,
+      inferenceId: inference.id,
       reason: route.reason,
       severity: route.severity.severity,
       routeKind: route.routeKind,
@@ -4704,11 +4809,16 @@ export async function routeDispatchException(input: {
     await tx
       .update(workerRuns)
       .set({
-        state: "done",
         eventId: event.id,
+        taskId: task.id,
         data: {
-          input: runInput,
+          ...objectValue(existingRun.data),
+          input: {
+            ...existingInput,
+            request: runInput,
+          },
           output,
+          businessEventId: event.id,
           eventId: event.id,
           taskId: task.id,
           decisionId: decision.id,
@@ -4718,14 +4828,12 @@ export async function routeDispatchException(input: {
           documentId: document.id,
           workflowRunId: workflowRun.id,
           workflowStepIds,
-          reservationId: reservation.id,
+          reservationId: coreReservationId,
           inferenceId: inference.id,
-          usageEventId: usage.id,
         },
-        endedAt: now,
         updatedAt: now,
       })
-      .where(eq(workerRuns.id, workerRun.id));
+      .where(eq(workerRuns.id, workerRunId));
 
     await tx
       .update(workers)
@@ -4744,7 +4852,7 @@ export async function routeDispatchException(input: {
 
     return {
       replay: null,
-      workerRunId: workerRun.id,
+      workerRunId,
       taskId: task.id,
       eventId: event.id,
       decisionId: decision.id,
@@ -4758,9 +4866,58 @@ export async function routeDispatchException(input: {
     };
   });
 
+  const settleExceptionCoreRun = async (workerRunId: string, output: JsonObject) => {
+    const completion = await completeCoreWorkerRun({
+      operatorEmail: input.operatorEmail,
+      tenantSlug: context.worker.tenantSlug,
+      idempotencyKey: input.idempotencyKey,
+      worker: {
+        id: context.worker.id,
+        role: dispatchWorkerRole,
+      },
+      workerRunId,
+      state: "done",
+      reason: "Dispatch Operations Worker routed an exception for operator review with external execution blocked.",
+      output,
+      costUsd: 0,
+      evidence: {
+        command: "exception.route",
+        eventId: optionalString(output.eventId) ?? null,
+        evidenceId: optionalString(output.evidenceId) ?? null,
+        decisionEvidenceId: optionalString(output.decisionEvidenceId) ?? null,
+        packetId: optionalString(output.packetId) ?? null,
+        documentId: optionalString(output.documentId) ?? null,
+        decisionId: optionalString(output.decisionId) ?? null,
+        workflowRunId: optionalString(output.workflowRunId) ?? null,
+        inferenceId: optionalString(output.inferenceId) ?? null,
+        routeKind: optionalString(output.routeKind) ?? null,
+        externalExecution: "blocked",
+        externalMutation: false,
+        externalSend: false,
+      },
+      db,
+    });
+
+    return persistSettledDispatchOutput(db, workerRunId, output, objectValue(completion.budget));
+  };
+
   if (result.replay) {
-    return replayedExceptionRoute(db, context, result.replay);
+    const replayData = objectValue(result.replay.data);
+    const replayOutput = outputData(replayData);
+    const replayCompletionBudget = objectValue(objectValue(replayData.completion).budget);
+
+    if (result.replay.state === "running" && optionalString(replayOutput.workerRunId)) {
+      await settleExceptionCoreRun(coreRun.workerRunId, replayOutput);
+    } else {
+      await persistSettledDispatchOutput(db, coreRun.workerRunId, replayOutput, replayCompletionBudget);
+    }
+
+    const [settledReplay] = await db.select().from(workerRuns).where(eq(workerRuns.id, coreRun.workerRunId)).limit(1);
+
+    return replayedExceptionRoute(db, context, settledReplay ?? result.replay);
   }
+
+  const settledOutput = await settleExceptionCoreRun(result.workerRunId, result.output);
 
   return {
     created: true,
@@ -4775,7 +4932,7 @@ export async function routeDispatchException(input: {
     documentId: result.documentId,
     workflowRunId: result.workflowRunId,
     workflowStepIds: result.workflowStepIds,
-    output: result.output,
+    output: settledOutput,
     snapshot: await getDispatchWorkerSnapshot(db, {
       role: dispatchWorkerRole,
       tenantSlug: context.worker.tenantSlug,
