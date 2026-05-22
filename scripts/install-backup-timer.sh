@@ -51,6 +51,7 @@ umask 077
   printf 'APP_DIR=%q\n' "$APP_DIR"
   printf 'REMOTE_BACKUP_DIR=%q\n' "$REMOTE_BACKUP_DIR"
   printf 'RETENTION_DAYS=%q\n' "$RETENTION_DAYS"
+  printf 'READINESS_USER=%q\n' "$READINESS_USER"
   printf 'BACKUP_OBJECT_STORAGE_ENABLED=%q\n' "$BACKUP_OBJECT_STORAGE_ENABLED"
   printf 'BACKUP_S3_ENDPOINT=%q\n' "${BACKUP_S3_ENDPOINT:-}"
   printf 'BACKUP_S3_BUCKET=%q\n' "${BACKUP_S3_BUCKET:-}"
@@ -66,7 +67,7 @@ umask 077
 
 scp "${SSH_ARGS[@]}" "$env_file" "$REMOTE:/tmp/continuous-postgres-backup.env" >/dev/null
 ssh "${SSH_ARGS[@]}" "$REMOTE" \
-  "APP_DIR=$(quote "$APP_DIR") READINESS_USER=$(quote "$READINESS_USER") BACKUP_TIMER_ON_CALENDAR=$(quote "$BACKUP_TIMER_ON_CALENDAR") BACKUP_TIMER_RANDOMIZED_DELAY=$(quote "$BACKUP_TIMER_RANDOMIZED_DELAY") bash -s" <<'REMOTE_SCRIPT'
+  "APP_DIR=$(quote "$APP_DIR") REMOTE_BACKUP_DIR=$(quote "$REMOTE_BACKUP_DIR") READINESS_USER=$(quote "$READINESS_USER") BACKUP_TIMER_ON_CALENDAR=$(quote "$BACKUP_TIMER_ON_CALENDAR") BACKUP_TIMER_RANDOMIZED_DELAY=$(quote "$BACKUP_TIMER_RANDOMIZED_DELAY") bash -s" <<'REMOTE_SCRIPT'
 set -euo pipefail
 
 if [ ! -x "$APP_DIR/scripts/backup-db-on-host.sh" ]; then
@@ -83,6 +84,11 @@ if [ -n "$READINESS_USER" ]; then
   readiness_group="$(id -gn "$READINESS_USER")"
   install -m 0750 -o root -g "$readiness_group" -d /etc/continuous
   install -m 0640 -o root -g "$readiness_group" /tmp/continuous-postgres-backup.env /etc/continuous/postgres-backup.env
+  if [ -d "$REMOTE_BACKUP_DIR" ]; then
+    chgrp -R "$readiness_group" "$REMOTE_BACKUP_DIR"
+    find "$REMOTE_BACKUP_DIR" -type d -exec chmod 0750 {} +
+    find "$REMOTE_BACKUP_DIR" -type f \( -name '*.dump' -o -name '*.dump.sha256' \) -exec chmod 0640 {} +
+  fi
 else
   install -m 0700 -d /etc/continuous
   install -m 0600 /tmp/continuous-postgres-backup.env /etc/continuous/postgres-backup.env

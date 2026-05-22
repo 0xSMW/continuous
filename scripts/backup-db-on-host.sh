@@ -6,6 +6,7 @@ REMOTE_BACKUP_DIR="${REMOTE_BACKUP_DIR:-$APP_DIR/backups/postgres}"
 BACKUP_NAME="${BACKUP_NAME:-continuous-postgres-$(date -u +%Y%m%dT%H%M%SZ).dump}"
 RETENTION_DAYS="${RETENTION_DAYS:-14}"
 BACKUP_OBJECT_STORAGE_ENABLED="${BACKUP_OBJECT_STORAGE_ENABLED:-false}"
+READINESS_USER="${READINESS_USER:-}"
 
 if [[ "$BACKUP_NAME" != *.dump ]]; then
   BACKUP_NAME="$BACKUP_NAME.dump"
@@ -23,7 +24,22 @@ if ! [[ "$RETENTION_DAYS" =~ ^[0-9]+$ ]]; then
   exit 1
 fi
 
-install -m 0700 -d "$REMOTE_BACKUP_DIR"
+backup_file_mode=0600
+backup_group=""
+
+if [ -n "$READINESS_USER" ]; then
+  if ! id "$READINESS_USER" >/dev/null 2>&1; then
+    echo "READINESS_USER does not exist on the host: $READINESS_USER" >&2
+    exit 1
+  fi
+
+  backup_group="$(id -gn "$READINESS_USER")"
+  install -m 0750 -o root -g "$backup_group" -d "$REMOTE_BACKUP_DIR"
+  backup_file_mode=0640
+else
+  install -m 0700 -d "$REMOTE_BACKUP_DIR"
+fi
+
 backup_path="$REMOTE_BACKUP_DIR/$BACKUP_NAME"
 tmp_path="$REMOTE_BACKUP_DIR/.tmp-$BACKUP_NAME"
 
@@ -32,12 +48,18 @@ docker compose up -d db >/dev/null
 docker compose exec -T db sh -c 'until pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"; do sleep 1; done' </dev/null >/dev/null
 docker compose exec -T db sh -c 'pg_dump -Fc -U "$POSTGRES_USER" -d "$POSTGRES_DB"' </dev/null > "$tmp_path"
 docker compose exec -T db sh -c 'pg_restore --list' < "$tmp_path" >/dev/null
-chmod 600 "$tmp_path"
+chmod "$backup_file_mode" "$tmp_path"
+if [ -n "$backup_group" ]; then
+  chgrp "$backup_group" "$tmp_path"
+fi
 mv "$tmp_path" "$backup_path"
 
 hash="$(sha256sum "$backup_path" | awk '{print $1}')"
 printf '%s  %s\n' "$hash" "$BACKUP_NAME" > "$backup_path.sha256"
-chmod 600 "$backup_path.sha256"
+chmod "$backup_file_mode" "$backup_path.sha256"
+if [ -n "$backup_group" ]; then
+  chgrp "$backup_group" "$backup_path.sha256"
+fi
 
 if [ "$RETENTION_DAYS" -gt 0 ]; then
   find "$REMOTE_BACKUP_DIR" -type f \( -name '*.dump' -o -name '*.dump.sha256' \) -mtime "+$RETENTION_DAYS" -delete
