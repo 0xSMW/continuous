@@ -1,0 +1,1692 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Continuous — Humans, AI, and robots working together</title>
+  <meta name="description" content="The operating layer where every kind of worker — human, synthetic, or robotic — shares your goals, your governance, and your evidence trail." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="grain" aria-hidden="true"></div>
+  <div class="scanline" aria-hidden="true"></div>
+
+  <header class="nav">
+    <a class="logo" href="#">
+      <span class="logo-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="20" height="20">
+          <circle cx="12" cy="12" r="3" fill="currentColor"/>
+          <circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="2 2"/>
+          <circle cx="12" cy="12" r="11" fill="none" stroke="currentColor" stroke-width="0.5" stroke-dasharray="1 3"/>
+        </svg>
+      </span>
+      <span>continuous</span>
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="#manifesto">Thesis</a>
+      <a href="#families">Workers</a>
+      <a href="#flows">Flows</a>
+      <a href="#network">Network</a>
+      <a href="#platform">Platform</a>
+      <a href="#autonomy">Autonomy</a>
+      <a href="#verticals">Verticals</a>
+      <a href="#" class="external">Docs <span aria-hidden="true">↗</span></a>
+      <a href="#" class="external">GitHub <span aria-hidden="true">↗</span></a>
+    </nav>
+    <div class="nav-cta">
+      <a class="btn ghost" href="#">Sign in</a>
+      <a class="btn primary" href="#waitlist">Join waitlist</a>
+    </div>
+  </header>
+
+  <main>
+    <!-- ─────────────────────── HERO ─────────────────────── -->
+    <section class="hero">
+      <div class="hero-bg" aria-hidden="true">
+        <svg class="network" viewBox="0 0 1400 820" preserveAspectRatio="xMidYMid slice">
+          <defs>
+            <radialGradient id="halo" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.22"/>
+              <stop offset="55%" stop-color="#3b82f6" stop-opacity="0.04"/>
+              <stop offset="100%" stop-color="#3b82f6" stop-opacity="0"/>
+            </radialGradient>
+            <pattern id="dots" x="0" y="0" width="22" height="22" patternUnits="userSpaceOnUse">
+              <circle cx="1" cy="1" r="0.8" fill="#26272c"/>
+            </pattern>
+          </defs>
+          <rect width="100%" height="100%" fill="url(#dots)" opacity="0.5"/>
+          <circle cx="700" cy="410" r="380" fill="url(#halo)"/>
+          <g class="network-edges"></g>
+          <g class="network-flows"></g>
+          <g class="network-labels"></g>
+          <g class="network-nodes"></g>
+        </svg>
+      </div>
+
+      <div class="hero-inner">
+        <div class="hero-content">
+          <p class="eyebrow">
+            <span class="pulse-dot"></span>
+            <span>The operating layer for the next economy</span>
+          </p>
+
+          <h1 class="hero-title">
+            For the era where<br/>
+            every business runs on<br/>
+            <mark>humans, AI, and robots.</mark>
+          </h1>
+
+          <p class="hero-lede">
+            Continuous is the open substrate of the next economy —
+            where one owner gets the leverage of a team, every worker
+            shares the same goals, and every business runs on the same
+            rails.
+          </p>
+
+          <div class="cta-row">
+            <a class="btn primary lg" href="#waitlist">Join waitlist <span aria-hidden="true">→</span></a>
+            <a class="btn ghost lg" href="#">View on GitHub</a>
+          </div>
+
+          <div class="hero-meta">
+            <div><span class="mono">apache-2.0</span> open source</div>
+            <div class="dot-sep" aria-hidden="true">·</div>
+            <div><span class="mono">v0.1</span> early access</div>
+            <div class="dot-sep" aria-hidden="true">·</div>
+            <div><span class="mono">continuoushq.com</span></div>
+          </div>
+        </div>
+
+        <aside class="hero-stack" aria-label="Live worker preview">
+          <!-- Morphing worker card -->
+          <div class="hero-demo-card" id="demoCard">
+            <div class="hdc-head">
+              <span class="hdc-kind"><span class="mono">kind</span> = <span data-kind-label>synthetic</span></span>
+              <span class="hdc-state on">running</span>
+            </div>
+            <div class="hdc-body">
+              <span class="hdc-glyph" data-kind-glyph>◆</span>
+              <div>
+                <strong data-kind-name>Continuous Revenue Worker</strong>
+                <span class="muted mono" data-kind-id>worker:ai:revenue-ops-default</span>
+              </div>
+            </div>
+            <div class="hdc-meta">
+              <span class="mono muted">just now</span>
+              <span data-kind-action>drafted quote · $1,840 · Locke &amp; Key</span>
+            </div>
+          </div>
+
+          <!-- Approval card -->
+          <div class="hero-approval">
+            <header class="ha-head">
+              <span class="mono">// approval requested</span>
+              <span class="ha-state">
+                <span class="ha-state-dot"></span>
+                <span class="mono">waiting · marisol</span>
+              </span>
+            </header>
+            <div class="ha-body">
+              <div class="ha-row">
+                <span class="mono muted">capability</span>
+                <span class="ha-cap mono">quote.send</span>
+                <span class="ha-risk mono">med risk · policy gate</span>
+              </div>
+              <div class="ha-row">
+                <span class="mono muted">payload</span>
+                <strong>$1,840 → Locke &amp; Key Properties</strong>
+              </div>
+              <div class="ha-row">
+                <span class="mono muted">requested by</span>
+                <span class="mono">◆ revenue worker</span>
+                <span class="mono muted">· 4 evidence items</span>
+              </div>
+            </div>
+            <footer class="ha-actions">
+              <button type="button" class="ha-btn primary">Approve &amp; send</button>
+              <button type="button" class="ha-btn">Edit price</button>
+              <button type="button" class="ha-btn icon" aria-label="Decline">✕</button>
+            </footer>
+          </div>
+
+          <!-- Live event stream -->
+          <div class="hero-events">
+            <header class="he-head">
+              <span class="mono">// live task ledger</span>
+              <span class="he-tick"><span class="he-pulse"></span><span class="mono">streaming</span></span>
+            </header>
+            <div class="he-list" id="heroEvents"></div>
+          </div>
+        </aside>
+      </div>
+
+      <!-- 4-up preview tile row, pinned to bottom of hero viewport -->
+      <div class="hero-tiles">
+        <a class="tile" href="#workers" data-tile="workers">
+          <header class="tile-head"><span class="mono">// the workforce</span><span class="tile-state on"></span></header>
+          <div class="tile-art tile-workforce">
+            <div class="tw-row"><span class="tw-glyph human">●</span><span class="tw-name">Marisol</span><span class="mono muted">human</span></div>
+            <div class="tw-row"><span class="tw-glyph synth">◆</span><span class="tw-name">Revenue Worker</span><span class="mono muted">ai</span></div>
+            <div class="tw-row"><span class="tw-glyph robot">▣</span><span class="tw-name">Optimus Gen 4</span><span class="mono muted">robot</span></div>
+          </div>
+          <footer class="tile-foot">
+            <strong>3 workers</strong>
+            <span class="mono muted">on shift today</span>
+          </footer>
+        </a>
+
+        <a class="tile" href="#network" data-tile="ledger">
+          <header class="tile-head"><span class="mono">// task ledger</span><span class="tile-state on"></span></header>
+          <div class="tile-art tile-ledger">
+            <div class="tl-stream" id="heroLedgerStream"></div>
+          </div>
+          <footer class="tile-foot">
+            <strong><span data-counter="ledger">217</span> tasks</strong>
+            <span class="mono muted">today · streaming</span>
+          </footer>
+        </a>
+
+        <a class="tile" href="#network" data-tile="network">
+          <header class="tile-head"><span class="mono">// active network</span><span class="tile-state on"></span></header>
+          <div class="tile-art tile-network">
+            <svg viewBox="0 0 220 120" width="100%" height="100%" id="heroTileNetwork">
+              <g stroke="#2a2a2e" stroke-width="0.8" fill="none">
+                <line x1="110" y1="60" x2="30" y2="25" class="ttn-edge live"/>
+                <line x1="110" y1="60" x2="195" y2="22" class="ttn-edge live"/>
+                <line x1="110" y1="60" x2="195" y2="95" class="ttn-edge"/>
+                <line x1="110" y1="60" x2="25" y2="100" class="ttn-edge live"/>
+                <line x1="110" y1="60" x2="55" y2="60" class="ttn-edge"/>
+                <line x1="110" y1="60" x2="170" y2="60" class="ttn-edge"/>
+              </g>
+              <g class="ttn-flow"></g>
+              <circle cx="110" cy="60" r="4" fill="#3b82f6"/>
+              <circle cx="110" cy="60" r="9" fill="none" stroke="#3b82f6" stroke-opacity="0.4"/>
+              <circle cx="30" cy="25" r="2.5" fill="#8a8b90"/>
+              <circle cx="195" cy="22" r="2.5" fill="#8a8b90"/>
+              <circle cx="195" cy="95" r="2.5" fill="#8a8b90"/>
+              <circle cx="25" cy="100" r="2.5" fill="#8a8b90"/>
+              <circle cx="55" cy="60" r="2" fill="#55565b"/>
+              <circle cx="170" cy="60" r="2" fill="#55565b"/>
+            </svg>
+          </div>
+          <footer class="tile-foot">
+            <strong>9 entities</strong>
+            <span class="mono muted">connected</span>
+          </footer>
+        </a>
+
+        <a class="tile" href="#platform" data-tile="budgets">
+          <header class="tile-head"><span class="mono">// intel budget</span><span class="tile-state on"></span></header>
+          <div class="tile-art tile-budgets">
+            <div class="tb-bar"><span class="tb-label mono">revenue</span><div class="tb-track"><div class="tb-fill" data-w="74"></div></div></div>
+            <div class="tb-bar"><span class="tb-label mono">ops</span><div class="tb-track"><div class="tb-fill" data-w="41"></div></div></div>
+            <div class="tb-bar"><span class="tb-label mono">finance</span><div class="tb-track"><div class="tb-fill" data-w="28"></div></div></div>
+            <div class="tb-bar"><span class="tb-label mono">comply</span><div class="tb-track"><div class="tb-fill warn" data-w="92"></div></div></div>
+          </div>
+          <footer class="tile-foot">
+            <strong>23.5M / 50M</strong>
+            <span class="mono muted">intel units · jul</span>
+          </footer>
+        </a>
+      </div>
+    </section>
+
+    <!-- ─────────────── MANIFESTO ─────────────────────── -->
+    <section class="manifesto" id="manifesto">
+      <div class="section-bounds">
+        <div class="manifesto-inner">
+          <aside class="manifesto-era" aria-hidden="true">
+            <div class="era-line">
+              <span class="era-step done"><span class="mono">1850s</span> mass labor</span>
+              <span class="era-step done"><span class="mono">1980s</span> personal computers</span>
+              <span class="era-step done"><span class="mono">2010s</span> SaaS &amp; cloud</span>
+              <span class="era-step done"><span class="mono">2022</span> generative AI</span>
+              <span class="era-step now"><span class="mono">2026 —</span> agentic workforces</span>
+              <span class="era-step soon"><span class="mono">next</span> humanoid scale</span>
+            </div>
+          </aside>
+
+          <div class="manifesto-copy">
+            <p class="label">// the thesis</p>
+
+            <h2 class="manifesto-h">
+              The next era of work
+              <em>doesn't replace people.</em><br/>
+              It makes <mark>more businesses</mark> possible.
+            </h2>
+
+            <div class="manifesto-stanza">
+              <p>
+                For most of history a real business needed real people.
+                Then it needed software. Then it needed AI.
+              </p>
+              <p>
+                The next era needs <strong>a workforce</strong> —
+                of humans, AI, and robots — sharing the same goals,
+                the same governance, and the same evidence trail.
+              </p>
+            </div>
+
+            <div class="manifesto-stanza pillared">
+              <div class="pillar">
+                <span class="mono muted">// solo</span>
+                <strong>One operator</strong>
+                <p>becomes a team.</p>
+              </div>
+              <div class="pillar">
+                <span class="mono muted">// team</span>
+                <strong>A small team</strong>
+                <p>becomes a company.</p>
+              </div>
+              <div class="pillar">
+                <span class="mono muted">// company</span>
+                <strong>A small company</strong>
+                <p>becomes an industry.</p>
+              </div>
+            </div>
+
+            <div class="manifesto-stanza">
+              <p>
+                Continuous is the open operating layer underneath that economy —
+                a business graph, a task ledger, a capability registry, an AI gateway,
+                and an evidence layer that workers of every kind can act on, together.
+              </p>
+              <p class="manifesto-kicker">
+                <mark>This is the substrate.</mark> Bring your business in.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ───────────────── WORKERS THESIS ─────────────────── -->
+    <section class="workers-section" id="workers">
+      <div class="section-bounds">
+        <header class="section-head">
+          <p class="label">// the primitive</p>
+          <h2>Same <em>Worker.</em><br/>Three kinds of actor.</h2>
+          <p class="sub">
+            Mission, budget, capabilities, approvals, and evidence —
+            identical across humans, AI, and robots. The substrate
+            doesn't care who does the work, only that it gets done,
+            governed, and proven.
+          </p>
+        </header>
+
+        <div class="worker-trio">
+          <article class="worker-card" data-kind="human" tabindex="0">
+            <header class="wc-head">
+              <div class="wc-glyph" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.4">
+                  <circle cx="12" cy="8" r="3.2"/>
+                  <path d="M5 20c0-3.8 3.1-7 7-7s7 3.2 7 7"/>
+                </svg>
+              </div>
+              <div>
+                <div class="wc-kind"><span class="mono">kind</span> = human</div>
+                <h3>Marisol Rivera</h3>
+                <span class="wc-role mono muted">owner · pipe dreams plumbing &amp; heating</span>
+              </div>
+              <span class="wc-state on">on shift</span>
+            </header>
+
+            <dl class="wc-fields">
+              <div><dt>Mission</dt><dd>Decide what's worth doing, and what's worth approving.</dd></div>
+              <div><dt>Capabilities</dt><dd><span class="chip">approve.quote</span><span class="chip">authorize.payment</span><span class="chip">hire.contractor</span></dd></div>
+              <div><dt>Budget</dt><dd><span class="mono">∞</span> <span class="muted">no metered ceiling · payroll</span></dd></div>
+              <div><dt>Approvals</dt><dd>Owner of last resort. Reviewer on AI escalations.</dd></div>
+            </dl>
+
+            <div class="wc-stream" data-stream="human">
+              <header class="wcs-head"><span class="mono">// live activity</span><span class="wcs-tick mono muted">2s ago</span></header>
+              <div class="wcs-list">
+                <div class="wcs-row"><span class="mono">14:11</span> approved quote <span class="wcs-val">$1,840 · Locke &amp; Key</span></div>
+                <div class="wcs-row"><span class="mono">13:42</span> hired contractor <span class="wcs-val">Hammer Time Co · 2 days</span></div>
+                <div class="wcs-row"><span class="mono">12:18</span> reviewed safety log <span class="wcs-val">3 jobs · all clear</span></div>
+                <div class="wcs-row"><span class="mono">11:50</span> escalation from AI <span class="wcs-val">refund request · $420</span></div>
+              </div>
+            </div>
+
+            <footer class="wc-foot">
+              <span class="mono muted">worker:human:marisol-rivera-001</span>
+              <span class="mono">31<span class="muted"> decisions / wk</span></span>
+            </footer>
+          </article>
+
+          <article class="worker-card" data-kind="synthetic" tabindex="0">
+            <header class="wc-head">
+              <div class="wc-glyph" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.4">
+                  <polygon points="12,3 21,8 21,16 12,21 3,16 3,8"/>
+                  <circle cx="12" cy="12" r="3"/>
+                  <path d="M12 9v-2 M12 17v-2 M15 12h2 M7 12h2"/>
+                </svg>
+              </div>
+              <div>
+                <div class="wc-kind"><span class="mono">kind</span> = synthetic</div>
+                <h3>Revenue Worker</h3>
+                <span class="wc-role mono muted">continuous · packaged worker · v1.4</span>
+              </div>
+              <span class="wc-state on">running</span>
+            </header>
+
+            <dl class="wc-fields">
+              <div><dt>Mission</dt><dd>Turn inbound demand into scheduled, quoted, invoiced, and collected revenue.</dd></div>
+              <div><dt>Capabilities</dt><dd><span class="chip">lead.qualify</span><span class="chip">quote.prepare</span><span class="chip">invoice.prepare</span><span class="chip">+7</span></dd></div>
+              <div><dt>Budget</dt><dd><span class="mono">7.4M / 10M</span> <span class="muted">intel units · jul</span></dd></div>
+              <div><dt>Approvals</dt><dd>Owner approves quotes &gt; <span class="mono">$2,500</span>, discounts, refunds.</dd></div>
+            </dl>
+
+            <div class="wc-stream" data-stream="synth">
+              <header class="wcs-head"><span class="mono">// live activity</span><span class="wcs-tick mono muted">just now</span></header>
+              <div class="wcs-list">
+                <div class="wcs-row"><span class="mono">14:19</span> sent quote <span class="wcs-val">$1,840 · 7-day expiry</span></div>
+                <div class="wcs-row"><span class="mono">14:04</span> drafted quote <span class="wcs-val">leak repair · 2hr · urgent</span></div>
+                <div class="wcs-row"><span class="mono">14:02</span> classified lead <span class="wcs-val">Locke &amp; Key · hot</span></div>
+                <div class="wcs-row"><span class="mono">13:58</span> follow-up sent <span class="wcs-val">Mow Drama · invoice #4128</span></div>
+              </div>
+            </div>
+
+            <footer class="wc-foot">
+              <span class="mono muted">worker:ai:revenue-ops-default</span>
+              <span class="mono">214<span class="muted"> tasks today</span></span>
+            </footer>
+          </article>
+
+          <article class="worker-card" data-kind="robot" tabindex="0">
+            <header class="wc-head">
+              <div class="wc-glyph" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.4">
+                  <rect x="4" y="7" width="16" height="11" rx="2"/>
+                  <path d="M12 7V4 M9 4h6"/>
+                  <circle cx="9" cy="12" r="1" fill="currentColor"/>
+                  <circle cx="15" cy="12" r="1" fill="currentColor"/>
+                  <path d="M8 18v2 M16 18v2"/>
+                </svg>
+              </div>
+              <div>
+                <div class="wc-kind"><span class="mono">kind</span> = robot</div>
+                <h3>Optimus Gen 4</h3>
+                <span class="wc-role mono muted">humanoid worker · gen 4 fleet</span>
+              </div>
+              <span class="wc-state idle">idle · docked</span>
+            </header>
+
+            <dl class="wc-fields">
+              <div><dt>Mission</dt><dd>On-site physical work — inspections, deliveries, light installs, and assistance to human crews.</dd></div>
+              <div><dt>Capabilities</dt><dd><span class="chip">site.inspect</span><span class="chip">item.deliver</span><span class="chip">install.assist</span><span class="chip">+5</span></dd></div>
+              <div><dt>Budget</dt><dd><span class="mono">84 / 160 hrs</span> <span class="muted">deployable · jul</span></dd></div>
+              <div><dt>Approvals</dt><dd>Dispatcher schedules. Owner approves customer-facing site visits.</dd></div>
+            </dl>
+
+            <div class="wc-stream" data-stream="robot">
+              <header class="wcs-head"><span class="mono">// live activity</span><span class="wcs-tick mono muted">38m ago</span></header>
+              <div class="wcs-list">
+                <div class="wcs-row"><span class="mono">13:33</span> site inspection <span class="wcs-val">Hairy Pawter Vet · 14 photos</span></div>
+                <div class="wcs-row"><span class="mono">11:08</span> part delivered <span class="wcs-val">Hammer Time job · valve asy</span></div>
+                <div class="wcs-row"><span class="mono">09:12</span> install assist <span class="wcs-val">Locke &amp; Key · water heater</span></div>
+                <div class="wcs-row"><span class="mono">08:00</span> dock recharge <span class="wcs-val">92% · ready</span></div>
+              </div>
+            </div>
+
+            <footer class="wc-foot">
+              <span class="mono muted">worker:robot:optimus-gen-4</span>
+              <span class="mono">84<span class="muted"> on-site hours / mo</span></span>
+            </footer>
+          </article>
+        </div>
+
+        <p class="thesis-foot">
+          Same fields. Same ledger. Same governance.
+          <span class="muted">A worker is a worker — <code>kind</code> is metadata, not destiny.</span>
+        </p>
+      </div>
+    </section>
+
+    <!-- ─────────────── WORKER FAMILIES MAP ─────────────── -->
+    <section class="families" id="families">
+      <div class="section-bounds">
+        <header class="section-head">
+          <p class="label">// the eleven worker families</p>
+          <h2>Every job a business does,<br/><em>belongs to a family.</em></h2>
+          <p class="sub">
+            Continuous defines eleven MECE families of business work — from
+            owner attention to systems automation. Each family ships packaged
+            workers and is open for partners and customers to extend.
+          </p>
+        </header>
+
+        <div class="families-grid">
+          <article class="family hl" tabindex="0">
+            <header class="fam-head"><span class="fam-num mono">01</span><span class="fam-state mono">owner leverage</span></header>
+            <h3>Owner / General Mgmt</h3>
+            <p class="fam-mission">Allocate scarce attention, cash, capacity, and risk.</p>
+            <footer><span class="fam-worker mono">→ Owner Chief-of-Staff</span></footer>
+          </article>
+
+          <article class="family" tabindex="0">
+            <header class="fam-head"><span class="fam-num mono">02</span><span class="fam-state mono">pricing power</span></header>
+            <h3>Offer, Product &amp; Pricing</h3>
+            <p class="fam-mission">Turn capability into a profitable, sellable promise.</p>
+            <footer><span class="fam-worker mono">→ Offer &amp; Pricing Worker</span></footer>
+          </article>
+
+          <article class="family" tabindex="0">
+            <header class="fam-head"><span class="fam-num mono">03</span><span class="fam-state mono">demand engine</span></header>
+            <h3>Growth &amp; Brand</h3>
+            <p class="fam-mission">Create qualified demand at the front of the funnel.</p>
+            <footer><span class="fam-worker mono">→ Growth Worker</span></footer>
+          </article>
+
+          <article class="family hl primary" tabindex="0">
+            <header class="fam-head"><span class="fam-num mono">04</span><span class="fam-state mono">cash velocity</span></header>
+            <h3>Sales &amp; Revenue Capture</h3>
+            <p class="fam-mission">Convert interest into committed revenue.</p>
+            <footer><span class="fam-worker mono">→ Revenue Operations Worker</span></footer>
+          </article>
+
+          <article class="family hl" tabindex="0">
+            <header class="fam-head"><span class="fam-num mono">05</span><span class="fam-state mono">retention</span></header>
+            <h3>Customer Experience</h3>
+            <p class="fam-mission">Keep the promise before, during, and after delivery.</p>
+            <footer><span class="fam-worker mono">→ Customer Experience Worker</span></footer>
+          </article>
+
+          <article class="family hl" tabindex="0">
+            <header class="fam-head"><span class="fam-num mono">06</span><span class="fam-state mono">throughput</span></header>
+            <h3>Operations / Delivery</h3>
+            <p class="fam-mission">Fulfill work safely, profitably, and on time.</p>
+            <footer><span class="fam-worker mono">→ Operations Worker</span></footer>
+          </article>
+
+          <article class="family" tabindex="0">
+            <header class="fam-head"><span class="fam-num mono">07</span><span class="fam-state mono">input flow</span></header>
+            <h3>Supply, Assets &amp; Facilities</h3>
+            <p class="fam-mission">Ensure inputs and assets are available at the right time and cost.</p>
+            <footer><span class="fam-worker mono">→ Asset &amp; Supply Worker</span></footer>
+          </article>
+
+          <article class="family hl" tabindex="0">
+            <header class="fam-head"><span class="fam-num mono">08</span><span class="fam-state mono">human capacity</span></header>
+            <h3>Workforce &amp; HR</h3>
+            <p class="fam-mission">Acquire, schedule, retain, and de-risk human capacity.</p>
+            <footer><span class="fam-worker mono">→ Workforce Worker</span></footer>
+          </article>
+
+          <article class="family hl" tabindex="0">
+            <header class="fam-head"><span class="fam-num mono">09</span><span class="fam-state mono">cashflow</span></header>
+            <h3>Finance &amp; Admin</h3>
+            <p class="fam-mission">Keep cash visible, collectible, compliant, and usable.</p>
+            <footer><span class="fam-worker mono">→ Finance Worker</span></footer>
+          </article>
+
+          <article class="family hl" tabindex="0">
+            <header class="fam-head"><span class="fam-num mono">10</span><span class="fam-state mono">audit-ready</span></header>
+            <h3>Risk, Legal &amp; Compliance</h3>
+            <p class="fam-mission">Keep the business permitted, insured, contractually safe, audit-ready.</p>
+            <footer><span class="fam-worker mono">→ Compliance Worker</span></footer>
+          </article>
+
+          <article class="family" tabindex="0">
+            <header class="fam-head"><span class="fam-num mono">11</span><span class="fam-state mono">system clarity</span></header>
+            <h3>Data, Systems &amp; Automation</h3>
+            <p class="fam-mission">Make the business legible enough for agents to act.</p>
+            <footer><span class="fam-worker mono">→ Systems Worker</span></footer>
+          </article>
+
+          <article class="family open" tabindex="0">
+            <header class="fam-head"><span class="fam-num mono">+</span><span class="fam-state mono">open marketplace</span></header>
+            <h3>Build your own family</h3>
+            <p class="fam-mission">Vertical specialists. Partner workers. Custom labor. All on the same substrate.</p>
+            <footer><span class="fam-worker mono">→ SDK · adapters · rule packs</span></footer>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─────────────── UNIVERSAL FLOWS ─────────────────── -->
+    <section class="flows" id="flows">
+      <div class="section-bounds">
+        <header class="section-head">
+          <p class="label">// six universal business flows</p>
+          <h2>Every SMB runs<br/><em>the same six flows.</em></h2>
+          <p class="sub">
+            Across construction, professional services, healthcare, hospitality,
+            retail, and beyond — every business converts demand into delivery,
+            and obligation into compliance. Continuous makes these flows runnable
+            by workers of every kind.
+          </p>
+        </header>
+
+        <div class="flows-grid">
+          <article class="flow hl" tabindex="0">
+            <header class="flow-head">
+              <span class="flow-num mono">01 →</span>
+              <span class="flow-state mono">revenue captured</span>
+            </header>
+            <h3>Lead to cash</h3>
+            <p class="flow-jtbd">Turn demand into paid, profitable work.</p>
+            <div class="flow-workers">
+              <span class="chip">Revenue</span><span class="chip">Customer Experience</span><span class="chip">Finance</span>
+            </div>
+            <p class="flow-objects mono muted">lead · offer · quote · booking · invoice · payment · review</p>
+          </article>
+
+          <article class="flow" tabindex="0">
+            <header class="flow-head">
+              <span class="flow-num mono">02 →</span>
+              <span class="flow-state mono">margin held</span>
+            </header>
+            <h3>Promise to delivery</h3>
+            <p class="flow-jtbd">Deliver what was sold without margin leakage.</p>
+            <div class="flow-workers">
+              <span class="chip">Operations</span><span class="chip">Workforce</span><span class="chip">Asset &amp; Supply</span>
+            </div>
+            <p class="flow-objects mono muted">job · schedule · checklist · staff · asset · material · closeout</p>
+          </article>
+
+          <article class="flow" tabindex="0">
+            <header class="flow-head">
+              <span class="flow-num mono">03 →</span>
+              <span class="flow-state mono">production yield</span>
+            </header>
+            <h3>Input to output</h3>
+            <p class="flow-jtbd">Convert inventory, labor, assets, and vendors into sellable output.</p>
+            <div class="flow-workers">
+              <span class="chip">Supply</span><span class="chip">Operations</span><span class="chip">Finance</span>
+            </div>
+            <p class="flow-objects mono muted">vendor · inventory · purchase order · work order · production run</p>
+          </article>
+
+          <article class="flow" tabindex="0">
+            <header class="flow-head">
+              <span class="flow-num mono">04 →</span>
+              <span class="flow-state mono">ready capacity</span>
+            </header>
+            <h3>Hire to capacity</h3>
+            <p class="flow-jtbd">Turn people into reliable delivery capacity.</p>
+            <div class="flow-workers">
+              <span class="chip">Workforce</span><span class="chip">Compliance</span><span class="chip">Finance</span>
+            </div>
+            <p class="flow-objects mono muted">candidate · worker · credential · schedule · training · payroll input</p>
+          </article>
+
+          <article class="flow hl" tabindex="0">
+            <header class="flow-head">
+              <span class="flow-num mono">05 →</span>
+              <span class="flow-state mono">zero lapses</span>
+            </header>
+            <h3>Obligation to compliance</h3>
+            <p class="flow-jtbd">Keep licenses, filings, insurance, contracts, tax, safety, and records current.</p>
+            <div class="flow-workers">
+              <span class="chip">Compliance</span><span class="chip">Finance</span><span class="chip">Workforce</span>
+            </div>
+            <p class="flow-objects mono muted">obligation · rule · deadline · document · filing · receipt · evidence</p>
+          </article>
+
+          <article class="flow" tabindex="0">
+            <header class="flow-head">
+              <span class="flow-num mono">06 →</span>
+              <span class="flow-state mono">owner clarity</span>
+            </header>
+            <h3>Data to decision</h3>
+            <p class="flow-jtbd">Give the owner a current operating picture — and the next best decision.</p>
+            <div class="flow-workers">
+              <span class="chip">Chief-of-Staff</span><span class="chip">Systems</span>
+            </div>
+            <p class="flow-objects mono muted">kpi · anomaly · forecast · task · recommendation · decision</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ────────── CROSS-COMPANY SCENE ──────────────────── -->
+    <section class="scene" id="network">
+      <div class="section-bounds">
+        <header class="section-head">
+          <p class="label">// cross-company work</p>
+          <h2>Your business isn't a silo.<br/><em>Neither</em> is the operating layer.</h2>
+          <p class="sub">
+            When a quote leaves your business, it arrives at someone else's
+            as an obligation. When they pay, you reconcile. The same primitives —
+            Worker, Task, Approval, Evidence — appear on <strong>both sides</strong>
+            of every economic interaction.
+          </p>
+        </header>
+
+        <div class="scene-stage">
+          <div class="scene-tabs" role="tablist">
+            <button class="tab active" role="tab" data-scene="lead-to-cash">Lead to cash</button>
+            <button class="tab" role="tab" data-scene="delivery">Promise to delivery</button>
+            <button class="tab" role="tab" data-scene="compliance">Compliance handshake</button>
+            <button class="tab" role="tab" data-scene="hire">Hire to capacity</button>
+            <button class="tab" role="tab" data-scene="payroll">Payroll run</button>
+            <button class="tab" role="tab" data-scene="close">Month-end close</button>
+            <div class="scene-controls">
+              <button class="scene-btn" id="sceneBack" title="Back one step">←</button>
+              <button class="scene-btn play" id="scenePlay" title="Play / pause">⏸</button>
+              <button class="scene-btn" id="sceneFwd" title="Forward one step">→</button>
+            </div>
+          </div>
+
+          <div class="scene-frames">
+          <div class="scene-frame active" data-scene-id="lead-to-cash">
+            <article class="company company-a">
+              <header class="company-head">
+                <div>
+                  <div class="company-name">
+                    <span class="mono muted">entity</span>
+                    <strong>Pipe Dreams Plumbing &amp; Heating</strong>
+                  </div>
+                  <span class="company-tag mono muted">service smb · 4 employees · seattle, wa</span>
+                </div>
+                <div class="company-badge"><span class="mw-state on"></span><span class="mono">running</span></div>
+              </header>
+              <div class="company-workers">
+                <div class="mini-worker human" tabindex="0" data-worker="marisol">
+                  <span class="mw-glyph" aria-hidden="true">●</span>
+                  <div>
+                    <strong>Marisol</strong>
+                    <span class="muted mono">human · owner</span>
+                  </div>
+                  <span class="mw-state on" title="active"></span>
+                </div>
+                <div class="mini-worker synthetic" tabindex="0" data-worker="revenue">
+                  <span class="mw-glyph" aria-hidden="true">◆</span>
+                  <div>
+                    <strong>Revenue Worker</strong>
+                    <span class="muted mono">synthetic · ai</span>
+                  </div>
+                  <span class="mw-state on" title="running"></span>
+                </div>
+                <div class="mini-worker robot" tabindex="0" data-worker="sprocket">
+                  <span class="mw-glyph" aria-hidden="true">▣</span>
+                  <div>
+                    <strong>Optimus Gen 4</strong>
+                    <span class="muted mono">robot · field</span>
+                  </div>
+                  <span class="mw-state idle" title="idle"></span>
+                </div>
+              </div>
+              <div class="company-ledger" data-side="a">
+                <div class="company-ledger-head mono muted">// task ledger</div>
+                <div class="ledger-row" data-step="1"><span class="mono">14:02</span> lead.received <span class="ledger-actor">→ Revenue Worker</span></div>
+                <div class="ledger-row" data-step="2"><span class="mono">14:02</span> lead.classified <span class="muted">leak repair · urgent</span></div>
+                <div class="ledger-row" data-step="3"><span class="mono">14:04</span> quote.drafted <span class="muted">$1,840</span></div>
+                <div class="ledger-row" data-step="4"><span class="mono">14:05</span> approval.requested <span class="ledger-actor">→ Marisol</span></div>
+                <div class="ledger-row" data-step="5"><span class="mono">14:11</span> approval.granted <span class="muted">human · marisol</span></div>
+                <div class="ledger-row" data-step="6"><span class="mono">14:11</span> quote.sent <span class="ledger-actor">→ Locke &amp; Key</span></div>
+                <div class="ledger-row" data-step="9"><span class="mono">14:19</span> payment.received <span class="muted">$920 deposit</span></div>
+                <div class="ledger-row" data-step="11"><span class="mono">15:42</span> invoice.sent <span class="ledger-actor">→ Locke &amp; Key</span></div>
+              </div>
+            </article>
+
+            <div class="scene-channel" aria-hidden="true">
+              <svg viewBox="0 0 220 600" preserveAspectRatio="none">
+                <defs>
+                  <linearGradient id="channelGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="#3b82f6" stop-opacity="0"/>
+                    <stop offset="50%" stop-color="#3b82f6" stop-opacity="0.6"/>
+                    <stop offset="100%" stop-color="#3b82f6" stop-opacity="0"/>
+                  </linearGradient>
+                </defs>
+                <line x1="110" y1="0" x2="110" y2="600" stroke="#1e1e21" stroke-width="1" stroke-dasharray="2 4"/>
+                <line x1="110" y1="0" x2="110" y2="600" stroke="url(#channelGrad)" stroke-width="2" class="channel-pulse"/>
+                <g class="scene-payloads"></g>
+              </svg>
+
+              <ul class="channel-events">
+                <li data-step="1" data-dir="in"><span class="mono">→</span> lead.received <span class="ev-payload">customer, message · via gmail</span></li>
+                <li data-step="6" data-dir="out"><span class="mono">→</span> quote.delivered <span class="ev-payload">$1,840 · expires 7d</span></li>
+                <li data-step="9" data-dir="in"><span class="mono">←</span> payment.received <span class="ev-payload">$920 deposit · stripe</span></li>
+                <li data-step="11" data-dir="out"><span class="mono">→</span> invoice.sent <span class="ev-payload">$920 balance · net 7</span></li>
+              </ul>
+
+              <div class="channel-step">
+                <span class="mono muted">step</span>
+                <strong>1 / 11</strong>
+                <span class="mono muted">lead arrives</span>
+              </div>
+            </div>
+
+            <article class="company company-b">
+              <header class="company-head">
+                <div>
+                  <div class="company-name">
+                    <span class="mono muted">entity</span>
+                    <strong>Locke &amp; Key Properties</strong>
+                  </div>
+                  <span class="company-tag mono muted">customer · 120 units · portland, or</span>
+                </div>
+                <div class="company-badge"><span class="mw-state on"></span><span class="mono">running</span></div>
+              </header>
+              <div class="company-workers">
+                <div class="mini-worker human" tabindex="0">
+                  <span class="mw-glyph" aria-hidden="true">●</span>
+                  <div>
+                    <strong>Jordan</strong>
+                    <span class="muted mono">human · ops manager</span>
+                  </div>
+                  <span class="mw-state on" title="active"></span>
+                </div>
+                <div class="mini-worker synthetic" tabindex="0">
+                  <span class="mw-glyph" aria-hidden="true">◆</span>
+                  <div>
+                    <strong>Procurement Worker</strong>
+                    <span class="muted mono">synthetic · ai</span>
+                  </div>
+                  <span class="mw-state on" title="running"></span>
+                </div>
+                <div class="mini-worker synthetic" tabindex="0">
+                  <span class="mw-glyph" aria-hidden="true">◆</span>
+                  <div>
+                    <strong>Finance Worker</strong>
+                    <span class="muted mono">synthetic · ai</span>
+                  </div>
+                  <span class="mw-state on" title="running"></span>
+                </div>
+              </div>
+              <div class="company-ledger" data-side="b">
+                <div class="company-ledger-head mono muted">// task ledger</div>
+                <div class="ledger-row" data-step="6"><span class="mono">14:11</span> obligation.received <span class="ledger-actor">→ Procurement</span></div>
+                <div class="ledger-row" data-step="7"><span class="mono">14:13</span> vendor.matched <span class="muted">Pipe Dreams Plumbing</span></div>
+                <div class="ledger-row" data-step="8"><span class="mono">14:14</span> approval.requested <span class="ledger-actor">→ Jordan</span></div>
+                <div class="ledger-row" data-step="9"><span class="mono">14:19</span> deposit.paid <span class="muted">$920 · stripe</span></div>
+                <div class="ledger-row" data-step="10"><span class="mono">14:19</span> commitment.opened <span class="muted">job by fri</span></div>
+                <div class="ledger-row" data-step="11"><span class="mono">15:42</span> invoice.received <span class="ledger-actor">→ Finance Worker</span></div>
+              </div>
+            </article>
+          </div>
+
+          <!-- ─── Scene 2: Promise to delivery (Pipe Dreams ⇄ Pipe Whisperer Supply) ─── -->
+          <div class="scene-frame" data-scene-id="delivery">
+            <article class="company company-a">
+              <header class="company-head">
+                <div>
+                  <div class="company-name">
+                    <span class="mono muted">entity</span>
+                    <strong>Pipe Dreams Plumbing &amp; Heating</strong>
+                  </div>
+                  <span class="company-tag mono muted">service smb · 4 employees · seattle, wa</span>
+                </div>
+                <div class="company-badge"><span class="mw-state on"></span><span class="mono">running</span></div>
+              </header>
+              <div class="company-workers">
+                <div class="mini-worker human" tabindex="0"><span class="mw-glyph" aria-hidden="true">●</span><div><strong>Marisol</strong><span class="muted mono">human · owner</span></div><span class="mw-state on" title="active"></span></div>
+                <div class="mini-worker synthetic" tabindex="0"><span class="mw-glyph" aria-hidden="true">◆</span><div><strong>Ops Worker</strong><span class="muted mono">synthetic · ai</span></div><span class="mw-state on" title="running"></span></div>
+                <div class="mini-worker robot" tabindex="0"><span class="mw-glyph" aria-hidden="true">▣</span><div><strong>Optimus Gen 4</strong><span class="muted mono">robot · field</span></div><span class="mw-state on" title="dispatched"></span></div>
+              </div>
+              <div class="company-ledger" data-side="a">
+                <div class="company-ledger-head mono muted">// task ledger</div>
+                <div class="ledger-row" data-step="1"><span class="mono">14:02</span> job.booked <span class="muted">Locke &amp; Key install</span></div>
+                <div class="ledger-row" data-step="2"><span class="mono">14:03</span> materials.checked <span class="muted">2 parts needed</span></div>
+                <div class="ledger-row" data-step="3"><span class="mono">14:04</span> stock.shortage <span class="muted">valve asy + connector</span></div>
+                <div class="ledger-row" data-step="4"><span class="mono">14:05</span> po.drafted <span class="muted">$342</span></div>
+                <div class="ledger-row" data-step="5"><span class="mono">14:06</span> approval.requested <span class="ledger-actor">→ Marisol</span></div>
+                <div class="ledger-row" data-step="6"><span class="mono">14:10</span> po.sent <span class="ledger-actor">→ Pipe Whisperer</span></div>
+                <div class="ledger-row" data-step="9"><span class="mono">16:30</span> parts.received <span class="ledger-actor">→ Optimus Gen 4</span></div>
+                <div class="ledger-row" data-step="10"><span class="mono">09:00</span> crew.dispatched <span class="muted">→ Locke &amp; Key site</span></div>
+                <div class="ledger-row" data-step="11"><span class="mono">11:24</span> install.complete <span class="muted">14 photos · closeout</span></div>
+              </div>
+            </article>
+
+            <div class="scene-channel" aria-hidden="true">
+              <svg viewBox="0 0 220 600" preserveAspectRatio="none">
+                <line x1="110" y1="0" x2="110" y2="600" stroke="#1e1e21" stroke-width="1" stroke-dasharray="2 4"/>
+                <line x1="110" y1="0" x2="110" y2="600" stroke="url(#channelGrad)" stroke-width="2" class="channel-pulse"/>
+                <g class="scene-payloads"></g>
+              </svg>
+              <ul class="channel-events">
+                <li data-step="6"><span class="mono">→</span> po.send <span class="ev-payload">$342 · valve asy + connector</span></li>
+                <li data-step="7" data-dir="in"><span class="mono">←</span> order.confirmed <span class="ev-payload">ships today · ETA tomorrow 10am</span></li>
+                <li data-step="8" data-dir="in"><span class="mono">←</span> parts.shipped <span class="ev-payload">tracking #PW-39281</span></li>
+                <li data-step="9"><span class="mono">→</span> delivery.received <span class="ev-payload">all parts on hand</span></li>
+                <li data-step="11"><span class="mono">→</span> closeout.sent <span class="ev-payload">14 photos · job complete</span></li>
+              </ul>
+              <div class="channel-step">
+                <span class="mono muted">step</span>
+                <strong>1 / 11</strong>
+                <span class="mono muted">job booked</span>
+              </div>
+            </div>
+
+            <article class="company company-b">
+              <header class="company-head">
+                <div>
+                  <div class="company-name">
+                    <span class="mono muted">entity</span>
+                    <strong>The Pipe Whisperer Supply Co</strong>
+                  </div>
+                  <span class="company-tag mono muted">vendor · plumbing parts · seattle, wa</span>
+                </div>
+                <div class="company-badge"><span class="mw-state on"></span><span class="mono">running</span></div>
+              </header>
+              <div class="company-workers">
+                <div class="mini-worker human" tabindex="0"><span class="mw-glyph" aria-hidden="true">●</span><div><strong>Hank</strong><span class="muted mono">human · owner</span></div><span class="mw-state on" title="active"></span></div>
+                <div class="mini-worker synthetic" tabindex="0"><span class="mw-glyph" aria-hidden="true">◆</span><div><strong>Inventory Worker</strong><span class="muted mono">synthetic · ai</span></div><span class="mw-state on" title="running"></span></div>
+                <div class="mini-worker synthetic" tabindex="0"><span class="mw-glyph" aria-hidden="true">◆</span><div><strong>Dispatch Worker</strong><span class="muted mono">synthetic · ai</span></div><span class="mw-state on" title="running"></span></div>
+              </div>
+              <div class="company-ledger" data-side="b">
+                <div class="company-ledger-head mono muted">// task ledger</div>
+                <div class="ledger-row" data-step="6"><span class="mono">14:10</span> po.received <span class="ledger-actor">→ Inventory Worker</span></div>
+                <div class="ledger-row" data-step="7"><span class="mono">14:11</span> inventory.matched <span class="muted">2 / 2 in stock</span></div>
+                <div class="ledger-row" data-step="7"><span class="mono">14:12</span> approval.requested <span class="ledger-actor">→ Hank</span></div>
+                <div class="ledger-row" data-step="8"><span class="mono">14:15</span> approval.granted <span class="muted">human · hank</span></div>
+                <div class="ledger-row" data-step="8"><span class="mono">15:42</span> shipped <span class="muted">tracking #PW-39281</span></div>
+                <div class="ledger-row" data-step="9"><span class="mono">16:30</span> delivery.confirmed <span class="ledger-actor">→ Pipe Dreams</span></div>
+              </div>
+            </article>
+          </div>
+
+          <!-- ─── Scene 3: Compliance handshake (Pipe Dreams ⇄ Cascade Mutual Insurance) ─── -->
+          <div class="scene-frame" data-scene-id="compliance">
+            <article class="company company-a">
+              <header class="company-head">
+                <div>
+                  <div class="company-name">
+                    <span class="mono muted">entity</span>
+                    <strong>Pipe Dreams Plumbing &amp; Heating</strong>
+                  </div>
+                  <span class="company-tag mono muted">service smb · 4 employees · seattle, wa</span>
+                </div>
+                <div class="company-badge"><span class="mw-state on"></span><span class="mono">running</span></div>
+              </header>
+              <div class="company-workers">
+                <div class="mini-worker human" tabindex="0"><span class="mw-glyph" aria-hidden="true">●</span><div><strong>Marisol</strong><span class="muted mono">human · owner</span></div><span class="mw-state on" title="active"></span></div>
+                <div class="mini-worker synthetic" tabindex="0"><span class="mw-glyph" aria-hidden="true">◆</span><div><strong>Compliance Worker</strong><span class="muted mono">synthetic · ai</span></div><span class="mw-state on" title="running"></span></div>
+                <div class="mini-worker synthetic" tabindex="0"><span class="mw-glyph" aria-hidden="true">◆</span><div><strong>Revenue Worker</strong><span class="muted mono">synthetic · ai</span></div><span class="mw-state on" title="running"></span></div>
+              </div>
+              <div class="company-ledger" data-side="a">
+                <div class="company-ledger-head mono muted">// task ledger</div>
+                <div class="ledger-row" data-step="1"><span class="mono">09:14</span> coi.requested <span class="muted">from Locke &amp; Key</span></div>
+                <div class="ledger-row" data-step="2"><span class="mono">09:14</span> request.classified <span class="muted">additional insured</span></div>
+                <div class="ledger-row" data-step="3"><span class="mono">09:15</span> evidence.required <span class="muted">GL + WC + AI endorsement</span></div>
+                <div class="ledger-row" data-step="4"><span class="mono">09:15</span> packet.drafted <span class="muted">3 docs</span></div>
+                <div class="ledger-row" data-step="5"><span class="mono">09:16</span> approval.requested <span class="ledger-actor">→ Marisol</span></div>
+                <div class="ledger-row" data-step="6"><span class="mono">09:22</span> request.sent <span class="ledger-actor">→ Cascade Mutual</span></div>
+                <div class="ledger-row" data-step="9"><span class="mono">10:45</span> coi.received <span class="ledger-actor">→ from Cascade</span></div>
+                <div class="ledger-row" data-step="10"><span class="mono">10:46</span> validation.complete <span class="muted">all required</span></div>
+                <div class="ledger-row" data-step="11"><span class="mono">10:46</span> coi.forwarded <span class="ledger-actor">→ Locke &amp; Key</span></div>
+              </div>
+            </article>
+
+            <div class="scene-channel" aria-hidden="true">
+              <svg viewBox="0 0 220 600" preserveAspectRatio="none">
+                <line x1="110" y1="0" x2="110" y2="600" stroke="#1e1e21" stroke-width="1" stroke-dasharray="2 4"/>
+                <line x1="110" y1="0" x2="110" y2="600" stroke="url(#channelGrad)" stroke-width="2" class="channel-pulse"/>
+                <g class="scene-payloads"></g>
+              </svg>
+              <ul class="channel-events">
+                <li data-step="6"><span class="mono">→</span> coi.request <span class="ev-payload">additional insured · Locke &amp; Key</span></li>
+                <li data-step="7" data-dir="in"><span class="mono">←</span> intake.ack <span class="ev-payload">client matched · policy #CM-44129</span></li>
+                <li data-step="8"><span class="mono">→</span> endorsement.specs <span class="ev-payload">contract terms · Q3 2026</span></li>
+                <li data-step="9" data-dir="in"><span class="mono">←</span> coi.delivered <span class="ev-payload">doc #COI-88-pdh · signed</span></li>
+                <li data-step="11"><span class="mono">→</span> coi.forwarded <span class="ev-payload">to Locke &amp; Key · with proof</span></li>
+              </ul>
+              <div class="channel-step">
+                <span class="mono muted">step</span>
+                <strong>1 / 11</strong>
+                <span class="mono muted">coi requested</span>
+              </div>
+            </div>
+
+            <article class="company company-b">
+              <header class="company-head">
+                <div>
+                  <div class="company-name">
+                    <span class="mono muted">entity</span>
+                    <strong>Cascade Mutual Insurance</strong>
+                  </div>
+                  <span class="company-tag mono muted">carrier · commercial liability · spokane, wa</span>
+                </div>
+                <div class="company-badge"><span class="mw-state on"></span><span class="mono">running</span></div>
+              </header>
+              <div class="company-workers">
+                <div class="mini-worker human" tabindex="0"><span class="mw-glyph" aria-hidden="true">●</span><div><strong>Pat</strong><span class="muted mono">human · broker</span></div><span class="mw-state on" title="active"></span></div>
+                <div class="mini-worker synthetic" tabindex="0"><span class="mw-glyph" aria-hidden="true">◆</span><div><strong>Intake Worker</strong><span class="muted mono">synthetic · ai</span></div><span class="mw-state on" title="running"></span></div>
+                <div class="mini-worker synthetic" tabindex="0"><span class="mw-glyph" aria-hidden="true">◆</span><div><strong>Issuance Worker</strong><span class="muted mono">synthetic · ai</span></div><span class="mw-state on" title="running"></span></div>
+              </div>
+              <div class="company-ledger" data-side="b">
+                <div class="company-ledger-head mono muted">// task ledger</div>
+                <div class="ledger-row" data-step="6"><span class="mono">09:22</span> coi.request.received <span class="ledger-actor">→ Intake Worker</span></div>
+                <div class="ledger-row" data-step="7"><span class="mono">09:23</span> client.matched <span class="muted">#CM-44129</span></div>
+                <div class="ledger-row" data-step="7"><span class="mono">09:24</span> coverage.verified <span class="muted">GL + WC current</span></div>
+                <div class="ledger-row" data-step="8"><span class="mono">09:25</span> ai.review <span class="ledger-actor">→ Pat</span></div>
+                <div class="ledger-row" data-step="8"><span class="mono">10:38</span> approval.granted <span class="muted">human · pat</span></div>
+                <div class="ledger-row" data-step="9"><span class="mono">10:42</span> coi.generated <span class="muted">doc #COI-88-pdh</span></div>
+                <div class="ledger-row" data-step="9"><span class="mono">10:45</span> coi.delivered <span class="ledger-actor">→ Pipe Dreams</span></div>
+              </div>
+            </article>
+          </div>
+
+          <!-- ─── Scene 4: Hire to capacity (Pipe Dreams ⇄ Hammer Time Construction) ─── -->
+          <div class="scene-frame" data-scene-id="hire">
+            <article class="company company-a">
+              <header class="company-head">
+                <div>
+                  <div class="company-name">
+                    <span class="mono muted">entity</span>
+                    <strong>Pipe Dreams Plumbing &amp; Heating</strong>
+                  </div>
+                  <span class="company-tag mono muted">service smb · 4 employees · seattle, wa</span>
+                </div>
+                <div class="company-badge"><span class="mw-state on"></span><span class="mono">running</span></div>
+              </header>
+              <div class="company-workers">
+                <div class="mini-worker human" tabindex="0"><span class="mw-glyph" aria-hidden="true">●</span><div><strong>Marisol</strong><span class="muted mono">human · owner</span></div><span class="mw-state on" title="active"></span></div>
+                <div class="mini-worker synthetic" tabindex="0"><span class="mw-glyph" aria-hidden="true">◆</span><div><strong>Workforce Worker</strong><span class="muted mono">synthetic · ai</span></div><span class="mw-state on" title="running"></span></div>
+                <div class="mini-worker synthetic" tabindex="0"><span class="mw-glyph" aria-hidden="true">◆</span><div><strong>Compliance Worker</strong><span class="muted mono">synthetic · ai</span></div><span class="mw-state on" title="running"></span></div>
+              </div>
+              <div class="company-ledger" data-side="a">
+                <div class="company-ledger-head mono muted">// task ledger</div>
+                <div class="ledger-row" data-step="1"><span class="mono">08:30</span> capacity.shortfall <span class="muted">3-day install</span></div>
+                <div class="ledger-row" data-step="2"><span class="mono">08:31</span> vendor.matched <span class="muted">Hammer Time · preferred</span></div>
+                <div class="ledger-row" data-step="3"><span class="mono">08:32</span> engagement.drafted <span class="muted">$4,800 · 3d</span></div>
+                <div class="ledger-row" data-step="4"><span class="mono">08:32</span> compliance.requirements <span class="muted">COI + license</span></div>
+                <div class="ledger-row" data-step="5"><span class="mono">08:33</span> approval.requested <span class="ledger-actor">→ Marisol</span></div>
+                <div class="ledger-row" data-step="6"><span class="mono">08:48</span> sow.sent <span class="ledger-actor">→ Hammer Time</span></div>
+                <div class="ledger-row" data-step="9"><span class="mono">09:30</span> docs.received <span class="muted">COI + WA #88-1234</span></div>
+                <div class="ledger-row" data-step="10"><span class="mono">09:30</span> compliance.validates <span class="muted">all current</span></div>
+                <div class="ledger-row" data-step="11"><span class="mono">09:31</span> commitment.opened <span class="muted">work starts mon</span></div>
+              </div>
+            </article>
+
+            <div class="scene-channel" aria-hidden="true">
+              <svg viewBox="0 0 220 600" preserveAspectRatio="none">
+                <line x1="110" y1="0" x2="110" y2="600" stroke="#1e1e21" stroke-width="1" stroke-dasharray="2 4"/>
+                <line x1="110" y1="0" x2="110" y2="600" stroke="url(#channelGrad)" stroke-width="2" class="channel-pulse"/>
+                <g class="scene-payloads"></g>
+              </svg>
+              <ul class="channel-events">
+                <li data-step="6"><span class="mono">→</span> sow.send <span class="ev-payload">3-day · $4,800 · plumbing assist</span></li>
+                <li data-step="7" data-dir="in"><span class="mono">←</span> engagement.accepted <span class="ev-payload">Tony approves · ready</span></li>
+                <li data-step="8"><span class="mono">→</span> compliance.requirements <span class="ev-payload">COI + WA license required</span></li>
+                <li data-step="9" data-dir="in"><span class="mono">←</span> docs.delivered <span class="ev-payload">COI + WA #88-1234 · current</span></li>
+                <li data-step="11"><span class="mono">→</span> commitment.confirmed <span class="ev-payload">work starts mon · synced calendars</span></li>
+              </ul>
+              <div class="channel-step">
+                <span class="mono muted">step</span>
+                <strong>1 / 11</strong>
+                <span class="mono muted">capacity shortfall</span>
+              </div>
+            </div>
+
+            <article class="company company-b">
+              <header class="company-head">
+                <div>
+                  <div class="company-name">
+                    <span class="mono muted">entity</span>
+                    <strong>Hammer Time Construction</strong>
+                  </div>
+                  <span class="company-tag mono muted">subcontractor · general &amp; rough-in · tacoma, wa</span>
+                </div>
+                <div class="company-badge"><span class="mw-state on"></span><span class="mono">running</span></div>
+              </header>
+              <div class="company-workers">
+                <div class="mini-worker human" tabindex="0"><span class="mw-glyph" aria-hidden="true">●</span><div><strong>Tony</strong><span class="muted mono">human · owner</span></div><span class="mw-state on" title="active"></span></div>
+                <div class="mini-worker synthetic" tabindex="0"><span class="mw-glyph" aria-hidden="true">◆</span><div><strong>Revenue Worker</strong><span class="muted mono">synthetic · ai</span></div><span class="mw-state on" title="running"></span></div>
+                <div class="mini-worker synthetic" tabindex="0"><span class="mw-glyph" aria-hidden="true">◆</span><div><strong>Compliance Worker</strong><span class="muted mono">synthetic · ai</span></div><span class="mw-state on" title="running"></span></div>
+              </div>
+              <div class="company-ledger" data-side="b">
+                <div class="company-ledger-head mono muted">// task ledger</div>
+                <div class="ledger-row" data-step="6"><span class="mono">08:48</span> sow.received <span class="ledger-actor">→ Revenue Worker</span></div>
+                <div class="ledger-row" data-step="7"><span class="mono">08:49</span> sow.classified <span class="muted">subcontract from Pipe Dreams</span></div>
+                <div class="ledger-row" data-step="7"><span class="mono">08:50</span> approval.requested <span class="ledger-actor">→ Tony</span></div>
+                <div class="ledger-row" data-step="8"><span class="mono">09:18</span> approval.granted <span class="muted">human · tony</span></div>
+                <div class="ledger-row" data-step="8"><span class="mono">09:18</span> commitment.opened <span class="muted">$4,800 · 3d</span></div>
+                <div class="ledger-row" data-step="9"><span class="mono">09:20</span> docs.assembled <span class="muted">COI + WA license</span></div>
+                <div class="ledger-row" data-step="9"><span class="mono">09:20</span> docs.sent <span class="ledger-actor">→ Pipe Dreams</span></div>
+              </div>
+            </article>
+          </div>
+
+          <!-- ─── Scene 5: Payroll run (Pipe Dreams ⇄ Cascade National Bank) ─── -->
+          <div class="scene-frame" data-scene-id="payroll">
+            <article class="company company-a">
+              <header class="company-head">
+                <div>
+                  <div class="company-name">
+                    <span class="mono muted">entity</span>
+                    <strong>Pipe Dreams Plumbing &amp; Heating</strong>
+                  </div>
+                  <span class="company-tag mono muted">service smb · 4 employees · biweekly payroll</span>
+                </div>
+                <div class="company-badge"><span class="mw-state on"></span><span class="mono">running</span></div>
+              </header>
+              <div class="company-workers">
+                <div class="mini-worker human" tabindex="0"><span class="mw-glyph" aria-hidden="true">●</span><div><strong>Marisol</strong><span class="muted mono">human · primary signer</span></div><span class="mw-state on"></span></div>
+                <div class="mini-worker synthetic" tabindex="0"><span class="mw-glyph" aria-hidden="true">◆</span><div><strong>Finance Worker</strong><span class="muted mono">synthetic · ai</span></div><span class="mw-state on"></span></div>
+                <div class="mini-worker synthetic" tabindex="0"><span class="mw-glyph" aria-hidden="true">◆</span><div><strong>Workforce Worker</strong><span class="muted mono">synthetic · ai</span></div><span class="mw-state on"></span></div>
+              </div>
+              <div class="company-ledger" data-side="a">
+                <div class="company-ledger-head mono muted">// task ledger</div>
+                <div class="ledger-row" data-step="1"><span class="mono">06:00</span> payroll.preview <span class="muted">biweekly pp03</span></div>
+                <div class="ledger-row" data-step="2"><span class="mono">06:01</span> time.locked <span class="muted">4 employees · 312 hrs</span></div>
+                <div class="ledger-row" data-step="3"><span class="mono">06:02</span> calc.complete <span class="muted">$14,840 gross · $11,920 net</span></div>
+                <div class="ledger-row" data-step="4"><span class="mono">06:03</span> blockers.check <span class="muted">all clear</span></div>
+                <div class="ledger-row" data-step="5"><span class="mono">06:04</span> approval.requested <span class="ledger-actor">→ Marisol</span></div>
+                <div class="ledger-row" data-step="6"><span class="mono">08:12</span> marisol.approves <span class="muted">dual control · primary signer</span></div>
+                <div class="ledger-row" data-step="7"><span class="mono">08:13</span> ach.batch.sent <span class="ledger-actor">→ Cascade Bank</span></div>
+                <div class="ledger-row" data-step="9"><span class="mono">08:18</span> funding.confirmed <span class="muted">settles t+1</span></div>
+                <div class="ledger-row" data-step="10"><span class="mono">08:19</span> paystubs.published <span class="muted">→ employee portal</span></div>
+                <div class="ledger-row" data-step="11"><span class="mono">10:42</span> settlement.posted <span class="muted">gl reconciled</span></div>
+              </div>
+            </article>
+
+            <div class="scene-channel" aria-hidden="true">
+              <svg viewBox="0 0 220 600" preserveAspectRatio="none">
+                <line x1="110" y1="0" x2="110" y2="600" stroke="#1e1e21" stroke-width="1" stroke-dasharray="2 4"/>
+                <line x1="110" y1="0" x2="110" y2="600" stroke="url(#channelGrad)" stroke-width="2" class="channel-pulse"/>
+                <g class="scene-payloads"></g>
+              </svg>
+              <ul class="channel-events">
+                <li data-step="7" data-dir="out"><span class="mono">→</span> ach.batch.send <span class="ev-payload">$11,920 · 4 entries · routing 325081401</span></li>
+                <li data-step="9" data-dir="in"><span class="mono">←</span> funding.confirmed <span class="ev-payload">file accepted · settles t+1</span></li>
+                <li data-step="11" data-dir="in"><span class="mono">←</span> settlement.posted <span class="ev-payload">$11,920 funded · gl posted</span></li>
+              </ul>
+              <div class="channel-step">
+                <span class="mono muted">step</span>
+                <strong>1 / 11</strong>
+                <span class="mono muted">payroll preview</span>
+              </div>
+            </div>
+
+            <article class="company company-b">
+              <header class="company-head">
+                <div>
+                  <div class="company-name">
+                    <span class="mono muted">entity</span>
+                    <strong>Cascade National Bank</strong>
+                  </div>
+                  <span class="company-tag mono muted">payment rail · ach + wire · seattle, wa</span>
+                </div>
+                <div class="company-badge"><span class="mw-state on"></span><span class="mono">running</span></div>
+              </header>
+              <div class="company-workers">
+                <div class="mini-worker synthetic" tabindex="0"><span class="mw-glyph" aria-hidden="true">◆</span><div><strong>ACH Processor</strong><span class="muted mono">synthetic · ai</span></div><span class="mw-state on"></span></div>
+                <div class="mini-worker synthetic" tabindex="0"><span class="mw-glyph" aria-hidden="true">◆</span><div><strong>Compliance Reviewer</strong><span class="muted mono">synthetic · ofac/nacha</span></div><span class="mw-state on"></span></div>
+                <div class="mini-worker synthetic" tabindex="0"><span class="mw-glyph" aria-hidden="true">◆</span><div><strong>Settlement Worker</strong><span class="muted mono">synthetic · ai</span></div><span class="mw-state on"></span></div>
+              </div>
+              <div class="company-ledger" data-side="b">
+                <div class="company-ledger-head mono muted">// task ledger</div>
+                <div class="ledger-row" data-step="7"><span class="mono">08:13</span> batch.received <span class="ledger-actor">→ ACH Processor</span></div>
+                <div class="ledger-row" data-step="8"><span class="mono">08:14</span> compliance.review <span class="muted">ofac + nacha · clean</span></div>
+                <div class="ledger-row" data-step="9"><span class="mono">08:18</span> file.accepted <span class="muted">funding scheduled</span></div>
+                <div class="ledger-row" data-step="10"><span class="mono">08:18</span> funding.notice <span class="ledger-actor">→ Pipe Dreams</span></div>
+                <div class="ledger-row" data-step="11"><span class="mono">10:42</span> settlement.complete <span class="muted">4 of 4 funded</span></div>
+              </div>
+            </article>
+          </div>
+
+          <!-- ─── Scene 6: Month-end close (Numbers McGee CPA ⇄ Pipe Dreams) ─── -->
+          <div class="scene-frame" data-scene-id="close">
+            <article class="company company-a">
+              <header class="company-head">
+                <div>
+                  <div class="company-name">
+                    <span class="mono muted">entity</span>
+                    <strong>Numbers McGee CPA</strong>
+                  </div>
+                  <span class="company-tag mono muted">operator firm · 30 client books · austin, tx</span>
+                </div>
+                <div class="company-badge"><span class="mw-state on"></span><span class="mono">running</span></div>
+              </header>
+              <div class="company-workers">
+                <div class="mini-worker human" tabindex="0"><span class="mw-glyph" aria-hidden="true">●</span><div><strong>Pam McGee</strong><span class="muted mono">human · owner</span></div><span class="mw-state on"></span></div>
+                <div class="mini-worker synthetic" tabindex="0"><span class="mw-glyph" aria-hidden="true">◆</span><div><strong>Books Worker</strong><span class="muted mono">synthetic · ai</span></div><span class="mw-state on"></span></div>
+                <div class="mini-worker synthetic" tabindex="0"><span class="mw-glyph" aria-hidden="true">◆</span><div><strong>Compliance Worker</strong><span class="muted mono">synthetic · ai</span></div><span class="mw-state on"></span></div>
+              </div>
+              <div class="company-ledger" data-side="a">
+                <div class="company-ledger-head mono muted">// task ledger · q3 close cycle</div>
+                <div class="ledger-row" data-step="1"><span class="mono">06:00</span> close.initiated <span class="muted">30 clients · q3</span></div>
+                <div class="ledger-row" data-step="2"><span class="mono">06:01</span> books.synced <span class="ledger-actor">← Pipe Dreams · 1 of 30</span></div>
+                <div class="ledger-row" data-step="3"><span class="mono">06:14</span> anomaly.detected <span class="muted">payroll variance · $1,240</span></div>
+                <div class="ledger-row" data-step="4"><span class="mono">06:15</span> evidence.requested <span class="muted">paystub + journal trace</span></div>
+                <div class="ledger-row" data-step="5"><span class="mono">06:16</span> approval.requested <span class="ledger-actor">→ Pam</span></div>
+                <div class="ledger-row" data-step="6"><span class="mono">07:08</span> query.sent <span class="ledger-actor">→ Pipe Dreams</span></div>
+                <div class="ledger-row" data-step="9"><span class="mono">09:42</span> evidence.received <span class="ledger-actor">← Pipe Dreams</span></div>
+                <div class="ledger-row" data-step="10"><span class="mono">09:44</span> reconciliation.complete <span class="muted">variance resolved</span></div>
+                <div class="ledger-row" data-step="11"><span class="mono">10:18</span> close.delivered <span class="ledger-actor">→ Pipe Dreams</span></div>
+              </div>
+            </article>
+
+            <div class="scene-channel" aria-hidden="true">
+              <svg viewBox="0 0 220 600" preserveAspectRatio="none">
+                <line x1="110" y1="0" x2="110" y2="600" stroke="#1e1e21" stroke-width="1" stroke-dasharray="2 4"/>
+                <line x1="110" y1="0" x2="110" y2="600" stroke="url(#channelGrad)" stroke-width="2" class="channel-pulse"/>
+                <g class="scene-payloads"></g>
+              </svg>
+              <ul class="channel-events">
+                <li data-step="2" data-dir="in"><span class="mono">←</span> qb.sync <span class="ev-payload">trial balance + payroll journal</span></li>
+                <li data-step="6" data-dir="out"><span class="mono">→</span> query.send <span class="ev-payload">explain payroll variance · $1,240</span></li>
+                <li data-step="9" data-dir="in"><span class="mono">←</span> evidence.delivered <span class="ev-payload">paystub trace · q3 retro</span></li>
+                <li data-step="11" data-dir="out"><span class="mono">→</span> close.delivered <span class="ev-payload">q3 close + $4,820 tax estimate</span></li>
+              </ul>
+              <div class="channel-step">
+                <span class="mono muted">step</span>
+                <strong>1 / 11</strong>
+                <span class="mono muted">close initiated</span>
+              </div>
+            </div>
+
+            <article class="company company-b">
+              <header class="company-head">
+                <div>
+                  <div class="company-name">
+                    <span class="mono muted">entity</span>
+                    <strong>Pipe Dreams Plumbing &amp; Heating</strong>
+                  </div>
+                  <span class="company-tag mono muted">client · 1 of 30 books at numbers mcgee</span>
+                </div>
+                <div class="company-badge"><span class="mw-state on"></span><span class="mono">running</span></div>
+              </header>
+              <div class="company-workers">
+                <div class="mini-worker human" tabindex="0"><span class="mw-glyph" aria-hidden="true">●</span><div><strong>Marisol</strong><span class="muted mono">human · owner</span></div><span class="mw-state on"></span></div>
+                <div class="mini-worker synthetic" tabindex="0"><span class="mw-glyph" aria-hidden="true">◆</span><div><strong>Finance Worker</strong><span class="muted mono">synthetic · ai</span></div><span class="mw-state on"></span></div>
+                <div class="mini-worker synthetic" tabindex="0"><span class="mw-glyph" aria-hidden="true">◆</span><div><strong>Compliance Worker</strong><span class="muted mono">synthetic · ai</span></div><span class="mw-state on"></span></div>
+              </div>
+              <div class="company-ledger" data-side="b">
+                <div class="company-ledger-head mono muted">// task ledger</div>
+                <div class="ledger-row" data-step="2"><span class="mono">06:01</span> books.pushed <span class="ledger-actor">→ Numbers McGee</span></div>
+                <div class="ledger-row" data-step="6"><span class="mono">07:08</span> query.received <span class="ledger-actor">→ Finance Worker</span></div>
+                <div class="ledger-row" data-step="7"><span class="mono">07:11</span> evidence.assembled <span class="muted">paystub + retro entries</span></div>
+                <div class="ledger-row" data-step="8"><span class="mono">09:30</span> marisol.confirms <span class="muted">variance was q2 retro</span></div>
+                <div class="ledger-row" data-step="9"><span class="mono">09:42</span> evidence.sent <span class="ledger-actor">→ Numbers McGee</span></div>
+                <div class="ledger-row" data-step="11"><span class="mono">10:18</span> close.received <span class="muted">q3 closed · tax planned</span></div>
+              </div>
+            </article>
+          </div>
+          </div><!-- /.scene-frames -->
+
+          <p class="scene-foot">
+            <span class="mono muted">// both ledgers are real, separate, and isomorphic. neither party sees the other's internals — only the artifacts they're entitled to.</span>
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ──────────────── PLATFORM 4-WALL ─────────────────── -->
+    <section class="platform" id="platform">
+      <div class="section-bounds">
+        <header class="section-head">
+          <p class="label">// the platform</p>
+          <h2>One substrate.<br/>Every worker. Every interaction.</h2>
+          <p class="sub">
+            The same primitives carry the work whether a person sends it,
+            an AI prepares it, or a robot completes it — and whether it
+            stays inside your business or crosses to another.
+          </p>
+        </header>
+
+        <div class="quadrants">
+          <article class="quad" tabindex="0">
+            <header class="quad-head">
+              <span class="mono">// business graph</span>
+              <span class="mono muted">31 objects · 240k records</span>
+            </header>
+            <div class="quad-art quad-graph">
+              <svg viewBox="0 0 360 200" width="100%" height="100%">
+                <g stroke="#26272c" stroke-width="1" fill="none">
+                  <line x1="180" y1="50" x2="80" y2="120"/>
+                  <line x1="180" y1="50" x2="280" y2="120"/>
+                  <line x1="80" y1="120" x2="140" y2="170"/>
+                  <line x1="280" y1="120" x2="220" y2="170"/>
+                  <line x1="80" y1="120" x2="280" y2="120"/>
+                  <line x1="180" y1="50" x2="180" y2="170"/>
+                </g>
+                <g class="graph-nodes">
+                  <g transform="translate(180 50)" class="gn-root"><rect x="-40" y="-13" width="80" height="26" rx="4"/><text y="5" text-anchor="middle" font-family="JetBrains Mono" font-size="11" fill="#f5f5f5">Entity</text></g>
+                  <g transform="translate(80 120)"><rect x="-38" y="-13" width="76" height="26" rx="4"/><text y="5" text-anchor="middle" font-family="JetBrains Mono" font-size="11" fill="#bbb">Worker</text></g>
+                  <g transform="translate(280 120)"><rect x="-44" y="-13" width="88" height="26" rx="4"/><text y="5" text-anchor="middle" font-family="JetBrains Mono" font-size="11" fill="#bbb">Customer</text></g>
+                  <g transform="translate(140 170)"><rect x="-34" y="-13" width="68" height="26" rx="4"/><text y="5" text-anchor="middle" font-family="JetBrains Mono" font-size="11" fill="#bbb">Task</text></g>
+                  <g transform="translate(220 170)"><rect x="-38" y="-13" width="76" height="26" rx="4"/><text y="5" text-anchor="middle" font-family="JetBrains Mono" font-size="11" fill="#bbb">Invoice</text></g>
+                  <g transform="translate(180 170)" class="gn-pulse"><circle r="3" fill="#3b82f6"/></g>
+                </g>
+              </svg>
+            </div>
+            <h3>Business graph</h3>
+            <p>Customers, workers, jobs, offers, invoices, and obligations as one canonical graph — shared memory for every actor.</p>
+          </article>
+
+          <article class="quad" tabindex="0">
+            <header class="quad-head">
+              <span class="mono">// capability registry</span>
+              <span class="mono muted">147 capabilities · 12 risk-tiered</span>
+            </header>
+            <div class="quad-art quad-capabilities">
+              <ul class="cap-list">
+                <li><span class="cap-risk low"></span><span class="cap-name mono">lead.qualify</span><span class="cap-meta mono">low · auto</span></li>
+                <li><span class="cap-risk low"></span><span class="cap-name mono">quote.prepare</span><span class="cap-meta mono">low · auto</span></li>
+                <li class="hl"><span class="cap-risk med"></span><span class="cap-name mono">quote.send</span><span class="cap-meta mono">med · policy</span></li>
+                <li><span class="cap-risk med"></span><span class="cap-name mono">discount.apply</span><span class="cap-meta mono">med · approval</span></li>
+                <li class="hl"><span class="cap-risk high"></span><span class="cap-name mono">payment.charge</span><span class="cap-meta mono">high · dual ctrl</span></li>
+                <li><span class="cap-risk high"></span><span class="cap-name mono">filing.submit</span><span class="cap-meta mono">high · regulated</span></li>
+                <li><span class="cap-risk low"></span><span class="cap-name mono">site.scan</span><span class="cap-meta mono">low · robot only</span></li>
+              </ul>
+            </div>
+            <h3>Capability registry</h3>
+            <p>Typed, risk-scored, approval-aware action contracts. Workers don't get credentials — they get permissions, with policy in front of every side effect.</p>
+          </article>
+
+          <article class="quad" tabindex="0">
+            <header class="quad-head">
+              <span class="mono">// intelligence budgets</span>
+              <span class="mono muted">jul 2026 · pool 50M units</span>
+            </header>
+            <div class="quad-art quad-budgets">
+              <div class="budget-bar">
+                <div class="bb-row"><span class="bb-label">Revenue Worker</span><div class="bb-track"><div class="bb-fill" data-target="74"></div></div><span class="mono bb-val">7.4M</span></div>
+                <div class="bb-row"><span class="bb-label">Ops Worker</span><div class="bb-track"><div class="bb-fill" data-target="41"></div></div><span class="mono bb-val">4.1M</span></div>
+                <div class="bb-row"><span class="bb-label">Finance Worker</span><div class="bb-track"><div class="bb-fill" data-target="28"></div></div><span class="mono bb-val">2.8M</span></div>
+                <div class="bb-row"><span class="bb-label">Compliance</span><div class="bb-track"><div class="bb-fill warn" data-target="92"></div></div><span class="mono bb-val">9.2M</span></div>
+                <div class="bb-row"><span class="bb-label">Owner CoS</span><div class="bb-track"><div class="bb-fill" data-target="18"></div></div><span class="mono bb-val">1.8M</span></div>
+              </div>
+              <div class="budget-foot mono"><span class="dotted-warn"></span><span class="muted">compliance near cap — owner approval queued</span></div>
+            </div>
+            <h3>Intelligence budgets</h3>
+            <p>Meter and attribute every model call. Each worker, workflow, and customer has a wallet — overspend doesn't surprise you, it asks for approval.</p>
+          </article>
+
+          <article class="quad" tabindex="0">
+            <header class="quad-head">
+              <span class="mono">// evidence layer</span>
+              <span class="mono muted">98.6% with proof · 0 fabricated</span>
+            </header>
+            <div class="quad-art quad-evidence">
+              <div class="evidence-trail">
+                <div class="ev-step"><span class="ev-icon mono">⊕</span><div><strong>customer message</strong><span class="muted mono">snapshot · 14:02:11</span></div></div>
+                <div class="ev-step"><span class="ev-icon mono">▣</span><div><strong>draft response</strong><span class="muted mono">ai · revenue worker</span></div></div>
+                <div class="ev-step hl"><span class="ev-icon mono">✓</span><div><strong>owner approval</strong><span class="muted mono">human · marisol · 14:11</span></div></div>
+                <div class="ev-step"><span class="ev-icon mono">→</span><div><strong>message sent</strong><span class="muted mono">receipt · 14:11:48</span></div></div>
+                <div class="ev-step"><span class="ev-icon mono">$</span><div><strong>deposit collected</strong><span class="muted mono">stripe · ch_3p9hAk</span></div></div>
+              </div>
+            </div>
+            <h3>Evidence layer</h3>
+            <p>Every action — drafted, approved, sent, paid — captures a receipt, snapshot, and authority chain. Nothing happens without proof.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ──────────── AUTONOMY LEVELS ────────────────────── -->
+    <section class="autonomy" id="autonomy">
+      <div class="section-bounds">
+        <header class="section-head">
+          <p class="label">// worker autonomy levels · L0 → L7</p>
+          <h2>Workers don't suddenly act on their own.<br/><em>They earn it, level by level.</em></h2>
+          <p class="sub">
+            Continuous defines eight autonomy levels — from advisory observation
+            to autonomous execution — and three trust tiers across them: advisory,
+            cooperative, autonomous. You decide where each worker operates and
+            what crosses the human approval line.
+          </p>
+        </header>
+
+        <div class="autonomy-scale">
+          <div class="autonomy-bar">
+            <div class="ab-track">
+              <div class="ab-fill" data-target="38"></div>
+            </div>
+            <div class="ab-markers">
+              <span class="ab-mark mono">advisory · L0 – L2</span>
+              <span class="ab-mark next mono">cooperative · L3 – L5</span>
+              <span class="ab-mark future mono">autonomous · L6 – L7</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="levels-grid">
+          <article class="level" tabindex="0" data-level="0">
+            <header><span class="lev-num mono">L0</span><span class="lev-state mono on">observes</span></header>
+            <h4>Observe</h4>
+            <p>Read scoped data and produce summaries.</p>
+            <span class="lev-example mono muted">e.g. read the inbox, summarize new leads</span>
+          </article>
+          <article class="level" tabindex="0" data-level="1">
+            <header><span class="lev-num mono">L1</span><span class="lev-state mono on">drafts</span></header>
+            <h4>Draft</h4>
+            <p>Draft responses, quotes, tasks, invoices, recommendations.</p>
+            <span class="lev-example mono muted">e.g. draft a $1,840 quote for review</span>
+          </article>
+          <article class="level" tabindex="0" data-level="2">
+            <header><span class="lev-num mono">L2</span><span class="lev-state mono on">internal</span></header>
+            <h4>Internal action</h4>
+            <p>Create internal tasks, update internal records, prepare artifacts.</p>
+            <span class="lev-example mono muted">e.g. open follow-up tasks, log activity</span>
+          </article>
+          <article class="level hl" tabindex="0" data-level="3">
+            <header><span class="lev-num mono">L3</span><span class="lev-state mono next">external</span></header>
+            <h4>External comm</h4>
+            <p>Send approved-template emails/SMS and update external systems under policy.</p>
+            <span class="lev-example mono muted">e.g. send the approved quote to the customer</span>
+          </article>
+          <article class="level" tabindex="0" data-level="4">
+            <header><span class="lev-num mono">L4</span><span class="lev-state mono next">prepares</span></header>
+            <h4>Transaction prep</h4>
+            <p>Prepare payments, filings, contracts, refunds, payroll — but never execute.</p>
+            <span class="lev-example mono muted">e.g. assemble a payroll run for approval</span>
+          </article>
+          <article class="level" tabindex="0" data-level="5">
+            <header><span class="lev-num mono">L5</span><span class="lev-state mono next">approved</span></header>
+            <h4>Approved execution</h4>
+            <p>Execute specific external actions after a human approval crosses the line.</p>
+            <span class="lev-example mono muted">e.g. charge a deposit on owner approval</span>
+          </article>
+          <article class="level" tabindex="0" data-level="6">
+            <header><span class="lev-num mono">L6</span><span class="lev-state mono future">bounded</span></header>
+            <h4>Autonomous</h4>
+            <p>Execute low-risk bounded actions without case-by-case approval.</p>
+            <span class="lev-example mono muted">e.g. send a reminder on day 7 of an unpaid invoice</span>
+          </article>
+          <article class="level" tabindex="0" data-level="7">
+            <header><span class="lev-num mono">L7</span><span class="lev-state mono future">expert</span></header>
+            <h4>Managed expert</h4>
+            <p>Operate with a human specialist, accountant, legal, or operator review network behind every move.</p>
+            <span class="lev-example mono muted">e.g. file a 941 with managed CPA review</span>
+          </article>
+        </div>
+
+        <p class="autonomy-foot mono muted">
+          // every level above L2 sits behind typed capabilities, approval policies, intelligence budgets, and the evidence layer.
+        </p>
+      </div>
+    </section>
+
+    <!-- ──────────────── WORKER CATALOG ──────────────────── -->
+    <section class="catalog" id="catalog">
+      <div class="section-bounds">
+        <header class="section-head">
+          <p class="label">// the first six packaged workers</p>
+          <h2>Six packaged workers.<br/><em>One open substrate.</em></h2>
+          <p class="sub">
+            The first six packaged workers ship with Continuous v1 — covering
+            half the worker families on day one. Each is a packaged identity
+            with mission, capabilities, intelligence budget, approval policy,
+            and KPIs. Hire one — or hire the team.
+          </p>
+        </header>
+
+        <div class="catalog-grid">
+          <article class="catalog-card hl" tabindex="0">
+            <div class="cat-icon">◆</div>
+            <span class="cat-tag mono">// revenue family</span>
+            <h3>Revenue Worker</h3>
+            <p class="cat-mission">Turns inbound demand into scheduled, quoted, invoiced, and collected revenue.</p>
+            <ul class="cat-kpis mono">
+              <li>leads answered <strong>+340%</strong></li>
+              <li>quote time <strong>−87%</strong></li>
+              <li>deposit rate <strong>+58%</strong></li>
+            </ul>
+            <footer class="cat-foot mono muted">e.g. Pipe Dreams Plumbing &amp; Heating</footer>
+          </article>
+
+          <article class="catalog-card" tabindex="0">
+            <div class="cat-icon">◆</div>
+            <span class="cat-tag mono">// operations family</span>
+            <h3>Ops Worker</h3>
+            <p class="cat-mission">Schedules jobs, routes crews, updates customers, closes out work.</p>
+            <ul class="cat-kpis mono">
+              <li>on-time rate <strong>+22%</strong></li>
+              <li>closeout proof <strong>100%</strong></li>
+              <li>customer pings <strong>+4×</strong></li>
+            </ul>
+            <footer class="cat-foot mono muted">e.g. Hammer Time Construction</footer>
+          </article>
+
+          <article class="catalog-card" tabindex="0">
+            <div class="cat-icon">◆</div>
+            <span class="cat-tag mono">// finance family</span>
+            <h3>Finance Worker</h3>
+            <p class="cat-mission">Invoices, collects, codes expenses, reconciles, forecasts cash.</p>
+            <ul class="cat-kpis mono">
+              <li>days sales out <strong>−14d</strong></li>
+              <li>uncoded expenses <strong>−96%</strong></li>
+              <li>cash visibility <strong>daily</strong></li>
+            </ul>
+            <footer class="cat-foot mono muted">e.g. Numbers McGee CPA's clients</footer>
+          </article>
+
+          <article class="catalog-card" tabindex="0">
+            <div class="cat-icon">◆</div>
+            <span class="cat-tag mono">// workforce family</span>
+            <h3>Workforce Worker</h3>
+            <p class="cat-mission">Hires, onboards, tracks credentials, schedules, and gets payroll-ready.</p>
+            <ul class="cat-kpis mono">
+              <li>onboarding time <strong>−68%</strong></li>
+              <li>credential lapses <strong>0</strong></li>
+              <li>payroll-ready <strong>day 1</strong></li>
+            </ul>
+            <footer class="cat-foot mono muted">e.g. Sweat Equity Gym</footer>
+          </article>
+
+          <article class="catalog-card" tabindex="0">
+            <div class="cat-icon">◆</div>
+            <span class="cat-tag mono">// compliance family</span>
+            <h3>Compliance Worker</h3>
+            <p class="cat-mission">Tracks licenses, insurance, permits, contracts, filings, and evidence binders.</p>
+            <ul class="cat-kpis mono">
+              <li>missed deadlines <strong>0</strong></li>
+              <li>audit prep <strong>−14d</strong></li>
+              <li>evidence complete <strong>99.8%</strong></li>
+            </ul>
+            <footer class="cat-foot mono muted">e.g. Hairy Pawter Pet Hospital</footer>
+          </article>
+
+          <article class="catalog-card" tabindex="0">
+            <div class="cat-icon">◆</div>
+            <span class="cat-tag mono">// chief-of-staff family</span>
+            <h3>Owner Chief-of-Staff</h3>
+            <p class="cat-mission">Daily owner brief, anomaly detection, decision queue, cross-worker routing.</p>
+            <ul class="cat-kpis mono">
+              <li>owner inbox <strong>−81%</strong></li>
+              <li>decisions surfaced <strong>daily</strong></li>
+              <li>blind spots <strong>0</strong></li>
+            </ul>
+            <footer class="cat-foot mono muted">e.g. Doughnut Disturb Bakery</footer>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ──────────────── VERTICAL PACKS ─────────────────── -->
+    <section class="verticals" id="verticals">
+      <div class="section-bounds">
+        <header class="section-head">
+          <p class="label">// vertical packs</p>
+          <h2>Every vertical, <em>its own pack of workers.</em></h2>
+          <p class="sub">
+            Continuous Core is horizontal. Continuous Workers become credible
+            through vertical packs — industry vocabulary, workflows, objects,
+            templates, rules, and KPIs. Eight packs ship in the first 18 months.
+          </p>
+        </header>
+
+        <div class="verticals-grid">
+          <article class="vertical hl" tabindex="0">
+            <header class="vert-head"><span class="mono">vertical · field &amp; home</span></header>
+            <h3>Construction &amp; home services</h3>
+            <p class="vert-example mono">e.g. Pipe Dreams Plumbing · Hammer Time Construction</p>
+            <div class="vert-section">
+              <span class="vsec-label mono muted">workers</span>
+              <span class="chip">Revenue</span><span class="chip">Dispatch</span><span class="chip">Change-Order</span><span class="chip">Collections</span>
+            </div>
+            <div class="vert-section">
+              <span class="vsec-label mono muted">workflows</span>
+              <span class="mono muted">estimates · crews · change orders · permits · materials · closeout</span>
+            </div>
+          </article>
+
+          <article class="vertical hl" tabindex="0">
+            <header class="vert-head"><span class="mono">vertical · expert delivery</span></header>
+            <h3>Professional services</h3>
+            <p class="vert-example mono">e.g. Numbers McGee CPA · expert firms</p>
+            <div class="vert-section">
+              <span class="vsec-label mono muted">workers</span>
+              <span class="chip">Revenue</span><span class="chip">Knowledge Delivery</span><span class="chip">Billing</span><span class="chip">Compliance</span>
+            </div>
+            <div class="vert-section">
+              <span class="vsec-label mono muted">workflows</span>
+              <span class="mono muted">proposals · retainers · intake · SOWs · time &amp; billing · renewals</span>
+            </div>
+          </article>
+
+          <article class="vertical" tabindex="0">
+            <header class="vert-head"><span class="mono">vertical · property mgmt</span></header>
+            <h3>Real estate &amp; property mgmt</h3>
+            <p class="vert-example mono">e.g. Locke &amp; Key Properties</p>
+            <div class="vert-section">
+              <span class="vsec-label mono muted">workers</span>
+              <span class="chip">Revenue</span><span class="chip">Maintenance</span><span class="chip">Tenant</span><span class="chip">Finance</span>
+            </div>
+            <div class="vert-section">
+              <span class="vsec-label mono muted">workflows</span>
+              <span class="mono muted">listings · showings · tenant comms · maintenance · leases · rent</span>
+            </div>
+          </article>
+
+          <article class="vertical" tabindex="0">
+            <header class="vert-head"><span class="mono">vertical · guest &amp; demand</span></header>
+            <h3>Hospitality &amp; food</h3>
+            <p class="vert-example mono">e.g. Doughnut Disturb Bakery · Slice Slice Baby Pizza</p>
+            <div class="vert-section">
+              <span class="vsec-label mono muted">workers</span>
+              <span class="chip">Guest Experience</span><span class="chip">Staffing</span><span class="chip">Demand</span>
+            </div>
+            <div class="vert-section">
+              <span class="vsec-label mono muted">workflows</span>
+              <span class="mono muted">reservations · reviews · staffing · menus · daypart demand</span>
+            </div>
+          </article>
+
+          <article class="vertical" tabindex="0">
+            <header class="vert-head"><span class="mono">vertical · regulated care</span></header>
+            <h3>Health-adjacent services</h3>
+            <p class="vert-example mono">e.g. Hairy Pawter Pet Hospital</p>
+            <div class="vert-section">
+              <span class="vsec-label mono muted">workers</span>
+              <span class="chip">Intake</span><span class="chip">Recall</span><span class="chip">Eligibility</span><span class="chip">Compliance QA</span>
+            </div>
+            <div class="vert-section">
+              <span class="vsec-label mono muted">workflows</span>
+              <span class="mono muted">intake · reminders · eligibility · documentation · privacy</span>
+            </div>
+          </article>
+
+          <article class="vertical" tabindex="0">
+            <header class="vert-head"><span class="mono">vertical · membership</span></header>
+            <h3>Fitness &amp; membership</h3>
+            <p class="vert-example mono">e.g. Sweat Equity Gym</p>
+            <div class="vert-section">
+              <span class="vsec-label mono muted">workers</span>
+              <span class="chip">Revenue</span><span class="chip">Scheduling</span><span class="chip">Workforce</span><span class="chip">Retention</span>
+            </div>
+            <div class="vert-section">
+              <span class="vsec-label mono muted">workflows</span>
+              <span class="mono muted">onboarding · class booking · membership · retention · staffing</span>
+            </div>
+          </article>
+
+          <article class="vertical" tabindex="0">
+            <header class="vert-head"><span class="mono">vertical · routes &amp; fleet</span></header>
+            <h3>Field service &amp; transport</h3>
+            <p class="vert-example mono">e.g. Mow Drama · The Pipe Whisperer Supply</p>
+            <div class="vert-section">
+              <span class="vsec-label mono muted">workers</span>
+              <span class="chip">Dispatch</span><span class="chip">Asset Utilization</span><span class="chip">Maintenance</span><span class="chip">Safety</span>
+            </div>
+            <div class="vert-section">
+              <span class="vsec-label mono muted">workflows</span>
+              <span class="mono muted">routes · driver docs · safety · maintenance · billing</span>
+            </div>
+          </article>
+
+          <article class="vertical open" tabindex="0">
+            <header class="vert-head"><span class="mono">vertical · your domain</span></header>
+            <h3>Build your own vertical pack</h3>
+            <p class="vert-example mono">open SDK · published in the marketplace</p>
+            <div class="vert-section">
+              <span class="vsec-label mono muted">includes</span>
+              <span class="mono muted">objects · workers · workflows · rules · views · KPIs · templates</span>
+            </div>
+            <div class="vert-section">
+              <span class="vsec-label mono muted">distribution</span>
+              <span class="mono muted">private to your firm, or published for revenue share</span>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ──────────────── CLOSING ────────────────────────── -->
+    <section class="closing" id="waitlist">
+      <div class="closing-inner">
+        <p class="label">// bring your business in early</p>
+        <h2>
+          The next economy<br/>
+          runs on <mark>humans, AI,<br/>and robots —</mark><br/>
+          on the same goals.
+        </h2>
+        <p class="sub">
+          We're onboarding a small group of service businesses, operator
+          firms, and developers to co-build the first Continuous workers
+          and the first vertical packs. Bring your business in early —
+          help us shape the operating layer of the next economy.
+        </p>
+        <form class="waitlist" onsubmit="event.preventDefault(); this.classList.add('sent');">
+          <input type="email" required placeholder="you@yourbusiness.com" aria-label="Your email" />
+          <button class="btn primary lg" type="submit">Request access <span aria-hidden="true">→</span></button>
+        </form>
+        <p class="waitlist-foot muted mono">// no spam · early access only · prototype is public</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-foot">
+    <div class="section-bounds">
+      <div class="foot-cols">
+        <div class="foot-brand">
+          <span class="logo-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="18" height="18">
+              <circle cx="12" cy="12" r="3" fill="currentColor"/>
+              <circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="2 2"/>
+            </svg>
+          </span>
+          <strong>continuous</strong>
+          <p class="muted">The operating layer for humans, AI, and robots working together.</p>
+        </div>
+        <div class="foot-col">
+          <h4>Product</h4>
+          <a href="#">Platform</a>
+          <a href="#">Workers</a>
+          <a href="#">Pricing</a>
+          <a href="#">Changelog</a>
+        </div>
+        <div class="foot-col">
+          <h4>Build</h4>
+          <a href="#">Docs</a>
+          <a href="#">GitHub</a>
+          <a href="#">SDK</a>
+          <a href="#">Strategy</a>
+        </div>
+        <div class="foot-col">
+          <h4>Company</h4>
+          <a href="#">About</a>
+          <a href="#">Contact</a>
+          <a href="#">Security</a>
+          <a href="#">Apache-2.0</a>
+        </div>
+      </div>
+      <div class="foot-meta">
+        <span class="mono muted">continuoushq.com · v0.1 prototype · 2026</span>
+        <span class="mono muted">made with care in seattle &amp; new york</span>
+      </div>
+    </div>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>
